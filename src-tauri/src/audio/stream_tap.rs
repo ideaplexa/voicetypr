@@ -27,7 +27,12 @@ pub struct StreamTapRt {
 
 pub trait StreamTapSink: Send {
     fn send_frame(&mut self, samples: &[i16]);
-    fn finalize(&mut self) -> Option<String>;
+    /// `dropped_frames` is the tap's RT-side drop count for this recording (pool
+    /// exhaustion / full queue). Preview-only sinks may ignore it; a sink whose
+    /// final text is result-AUTHORITATIVE (Soniox, plan 043b) must treat any drop
+    /// as authority-invalidating — the stream saw incomplete audio, so the
+    /// complete-WAV fallback path owns the pasted result.
+    fn finalize(&mut self, dropped_frames: u64) -> Option<String>;
     fn cancel(&mut self);
 }
 
@@ -40,9 +45,9 @@ fn cancel_sink(sink: &mut Option<Box<dyn StreamTapSink>>) {
     }
 }
 
-fn finalize_sink(sink: &mut Option<Box<dyn StreamTapSink>>) {
+fn finalize_sink(sink: &mut Option<Box<dyn StreamTapSink>>, dropped_frames: u64) {
     if let Some(sink) = sink.as_mut() {
-        let _ = sink.finalize();
+        let _ = sink.finalize(dropped_frames);
     }
 }
 
@@ -262,7 +267,7 @@ where
                 if stale_seen || cancelled_seen || !finalize_flag.load(Ordering::SeqCst) {
                     cancel_sink(&mut sink);
                 } else {
-                    finalize_sink(&mut sink);
+                    finalize_sink(&mut sink, dropped.load(Ordering::Relaxed));
                 }
                 break;
             }
@@ -275,7 +280,7 @@ where
                     break;
                 }
                 if finalize_flag.load(Ordering::SeqCst) {
-                    finalize_sink(&mut sink);
+                    finalize_sink(&mut sink, dropped.load(Ordering::Relaxed));
                     break;
                 }
                 continue;
@@ -326,7 +331,7 @@ where
                 let _ = pool_tx.send(chunk);
             }
             StreamTapMsg::Finalize => {
-                finalize_sink(&mut sink);
+                finalize_sink(&mut sink, dropped.load(Ordering::Relaxed));
                 break;
             }
             StreamTapMsg::Cancel => {
@@ -383,7 +388,7 @@ mod tests {
     impl StreamTapSink for CountingSink {
         fn send_frame(&mut self, _samples: &[i16]) {}
 
-        fn finalize(&mut self) -> Option<String> {
+        fn finalize(&mut self, _dropped_frames: u64) -> Option<String> {
             self.finalized.fetch_add(1, Ordering::SeqCst);
             Some(String::new())
         }

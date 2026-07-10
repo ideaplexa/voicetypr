@@ -8,8 +8,8 @@
 //! sends the JSON config frame (with the API key in the BODY — never logged),
 //! streams raw `pcm_s16le` binary frames, folds token responses into
 //! committed/tentative preview text, and on finalize drains late finals until the
-//! server reports `finished` or a hard timeout fires (then the caller falls back to
-//! the authoritative REST-on-WAV path).
+//! server reports `finished` or a hard timeout fires (then REST-on-WAV is the
+//! FALLBACK path; the WS final is authoritative when it succeeds with non-empty text).
 
 use std::time::Duration;
 
@@ -28,7 +28,7 @@ const RT_ENDPOINT: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 /// Realtime model, pairs with the async REST `stt-async-v5`.
 const RT_MODEL: &str = "stt-rt-v5";
 /// Hard cap on draining late finals after an empty-frame finalize; on expiry the
-/// caller uses the authoritative REST-on-WAV result instead.
+/// caller falls back to REST-on-WAV (the WS final is authoritative on success).
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Soniox drops idle sockets after ~20s; keepalive well under that.
 const KEEPALIVE_EVERY: Duration = Duration::from_secs(10);
@@ -206,8 +206,11 @@ async fn run_task<F>(
                     let _ = write.send(Message::binary(Vec::<u8>::new())).await;
                 }
                 Some(Control::Cancel) | None => {
+                    // Cancelled: the result must never read as a completed transcript
+                    // (authority would paste a truncated prefix), so resolve Err even
+                    // though no caller normally awaits it after cancel.
                     let _ = write.send(Message::Close(None)).await;
-                    finish(&mut final_slot, Ok(folder.committed().to_string()));
+                    finish(&mut final_slot, Err(SttError::Network));
                     return;
                 }
             },
@@ -229,7 +232,14 @@ async fn run_task<F>(
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => {
-                    finish(&mut final_slot, Ok(folder.committed().to_string()));
+                    // Server closed WITHOUT `finished:true` (that path returns above):
+                    // the stream is incomplete — committed may be a truncated prefix.
+                    // Err(Network) so REST-on-WAV owns the authoritative result
+                    // (Codex 043b finding).
+                    log::warn!(
+                        "Soniox RT socket closed before `finished`; treating stream as incomplete"
+                    );
+                    finish(&mut final_slot, Err(SttError::Network));
                     return;
                 }
                 // Ping/Pong/Binary/Frame from the server: ignore.
@@ -282,8 +292,7 @@ mod tests {
             language_hints: vec![],
             context: None,
         };
-        let parsed: serde_json::Value =
-            serde_json::from_str(&build_config_frame(&config)).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&build_config_frame(&config)).unwrap();
         assert!(parsed.get("language_hints").is_none());
         assert_eq!(parsed["num_channels"], 2);
     }
@@ -291,7 +300,10 @@ mod tests {
     #[test]
     fn samples_encode_as_little_endian_s16() {
         // 1 == 0x0001 -> [0x01, 0x00]; -1 == 0xFFFF -> [0xFF, 0xFF]; 256 -> [0x00, 0x01].
-        assert_eq!(samples_to_le_bytes(&[1, -1, 256]), vec![1, 0, 255, 255, 0, 1]);
+        assert_eq!(
+            samples_to_le_bytes(&[1, -1, 256]),
+            vec![1, 0, 255, 255, 0, 1]
+        );
         assert!(samples_to_le_bytes(&[]).is_empty());
     }
 

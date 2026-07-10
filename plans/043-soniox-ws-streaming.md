@@ -214,3 +214,31 @@ timeout→fallback + gate generalization + Parakeet-unchanged) + `pnpm typecheck
 **The live WS handshake needs the owner's Soniox key in secure storage → MANUAL smoke only.**
 Billing: RT bills full stream duration incl. keepalive idle; WS-authoritative + REST-fallback
 avoids double-bill on the happy path but pays both on WS error. Opt-in (live_preview + Soniox).
+
+---
+
+## Outcome — Phase 2 (result-authority, plan 043b)
+
+**Shipped.** The Soniox realtime WS stream's final text is now the AUTHORITATIVE pasted
+result (single bill on the happy path), with REST-on-WAV demoted to fallback-on-failure.
+
+Mechanism: a `tokio::sync::oneshot` side-channel (`SONIOX_WS_FINAL` in `commands/audio.rs`)
+bridges the detached stream-tap worker (which resolves the oneshot when its WS finalize
+completes, up to 3s) to the already-async transcription task (`take_soniox_ws_final`,
+bounded 4s). `StreamTapSink::finalize()`'s discarded return value and the recorder's
+100ms tap-join-then-detach are untouched — the side-channel threads around them.
+
+- **Result-authority** = WS-final when non-empty; REST-on-WAV runs only when the WS path
+  produced no usable text (no slot, generation mismatch, error, empty, timeout, cancel).
+- **Dev gate removed**: `soniox_streaming_preview_enabled()` /
+  `VOICETYPR_SONIOX_STREAMING_PREVIEW` deleted; `for_engine(Soniox)` returns `SONIOX`
+  unconditionally. The Live-preview toggle now ships for Soniox users with no env var.
+- **Billing**: single stream on the happy path; double-bills (WS + REST) ONLY on WS
+  failure.
+- **Parakeet/Whisper stances unchanged**: batch stays authoritative; only Soniox +
+  `TranscriptionTask::Transcribe` takes WS authority (translate tasks never do — WS config
+  doesn't translate).
+- Non-soniox engines and soniox-without-live-preview: zero behavior change.
+- **Verification**: unit tests for `take_soniox_ws_final` (matching gen, mismatch+clear,
+  error, whitespace, dropped-sender-quick); capability truth-table updated. Live WS
+  handshake remains a MANUAL founder smoke.

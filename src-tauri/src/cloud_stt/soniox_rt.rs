@@ -1,7 +1,8 @@
 //! Soniox realtime (WebSocket) STT response mapping — plan 043 (S-MAP + S-ERR).
 //!
-//! Pure, socket-free logic for the `stt-rt` streaming engine, wired into nothing
-//! yet. The future `SonioxStreamSink` (slices C-WS/C-BRIDGE/C-ROUTE) drives this.
+//! Pure, socket-free logic for the `stt-rt` streaming engine, driven by
+//! `SonioxPreviewStreamSink` (C-WS/C-BRIDGE/C-ROUTE). The WS final is the
+//! authoritative pasted result (plan 043b); REST-on-WAV is the fallback path.
 //! The live WS handshake stays a MANUAL smoke (needs a Soniox key in secure store).
 //!
 //! Key difference from the REST path (`soniox.rs:230-241`): realtime tokens carry
@@ -155,8 +156,14 @@ mod tests {
         assert_eq!(p3.committed, "Hello world my friend!");
 
         // Monotonic-by-construction: every committed is a byte prefix of the next.
-        assert!(StreamSessionGate::assert_committed_monotonic(&p1.committed, &p2.committed));
-        assert!(StreamSessionGate::assert_committed_monotonic(&p2.committed, &p3.committed));
+        assert!(StreamSessionGate::assert_committed_monotonic(
+            &p1.committed,
+            &p2.committed
+        ));
+        assert!(StreamSessionGate::assert_committed_monotonic(
+            &p2.committed,
+            &p3.committed
+        ));
 
         // Revisions are strictly monotonic per-response.
         assert_eq!(p1.revision, 1);
@@ -211,7 +218,10 @@ mod tests {
         // join would collapse to a single space. Contrast proves no insertion.
         let p2 = folder.ingest(&response(vec![token("  indented", true)]));
         assert_eq!(p2.committed, "Hello world!  indented");
-        assert!(StreamSessionGate::assert_committed_monotonic(&p.committed, &p2.committed));
+        assert!(StreamSessionGate::assert_committed_monotonic(
+            &p.committed,
+            &p2.committed
+        ));
     }
 
     #[test]

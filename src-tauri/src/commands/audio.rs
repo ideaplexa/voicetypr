@@ -5,6 +5,7 @@ use crate::ai::error::{user_facing_message, AiProviderError};
 use crate::audio::recorder::AudioRecorder;
 use crate::audio::silence_detector::SilenceDetectorEvent;
 use crate::audio::stream_tap::{StreamTapSink, StreamTapSinkFactory};
+use crate::cloud_stt::common::SttError;
 use crate::commands::settings::{
     get_settings, normalize_final_text_language, normalize_speech_language_for_model,
     normalize_transcription_task, recording_retention_days_from_store, resolve_pill_indicator_mode,
@@ -74,6 +75,19 @@ static MEDIA_CONTROLLER: Lazy<MediaPauseController> = Lazy::new(MediaPauseContro
 /// capture (stop/spawn) and check (deliver) linearizable.
 static RECORDING_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// Generation-keyed handoff of the Soniox WS-final text from the (detached)
+/// stream-tap worker to the transcription task. The tap worker resolves the oneshot
+/// when its WS finalize completes; the transcription task awaits it
+/// ([`take_soniox_ws_final`]) to take WS authority before falling back to REST-on-WAV.
+/// A map, NOT a single slot (Codex 043b finding): a delayed older task must only ever
+/// remove ITS OWN generation's entry — never consume-and-discard a newer recording's
+/// receiver. Older entries are pruned when a new recording registers (generations are
+/// monotonic, so anything older is stale and its delivery is discarded anyway).
+type SonioxWsFinalMap =
+    std::collections::HashMap<u64, tokio::sync::oneshot::Receiver<Result<String, SttError>>>;
+static SONIOX_WS_FINAL: Lazy<Mutex<SonioxWsFinalMap>> =
+    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
 struct ParakeetPreviewStreamSink {
     app: AppHandle,
     handle: ParakeetStreamHandle,
@@ -100,7 +114,8 @@ impl StreamTapSink for ParakeetPreviewStreamSink {
         }
     }
 
-    fn finalize(&mut self) -> Option<String> {
+    // Preview only (batch is authoritative), so RT frame drops don't matter here.
+    fn finalize(&mut self, _dropped_frames: u64) -> Option<String> {
         match tauri::async_runtime::block_on(self.handle.finalize()) {
             Ok(text) => {
                 log_performance(
@@ -317,8 +332,9 @@ impl StreamTapSink for WhisperPreviewStreamSink {
         self.handle.send_chunk(samples);
     }
 
-    fn finalize(&mut self) -> Option<String> {
-        // Preview only: the authoritative pasted text stays the batch decode at stop.
+    // Preview only: the authoritative pasted text stays the batch decode at stop,
+    // so RT frame drops don't matter here.
+    fn finalize(&mut self, _dropped_frames: u64) -> Option<String> {
         match self.handle.finalize() {
             Some(text) => {
                 self.emit(TranscriptionStreamEvent::Final {
@@ -388,7 +404,8 @@ fn build_whisper_stream_sink_factory(
                 .await
                 .get_model_path(&model_name)?;
             let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app_for_stream);
-            let cache_state = app_for_stream.state::<AsyncMutex<crate::whisper::cache::TranscriberCache>>();
+            let cache_state =
+                app_for_stream.state::<AsyncMutex<crate::whisper::cache::TranscriberCache>>();
             let mut cache = cache_state.lock().await;
             // Peek only — NEVER load the model on the recorder thread. A miss means the
             // model isn't warm yet, so we skip preview this recording (best effort).
@@ -440,15 +457,19 @@ fn build_whisper_stream_sink_factory(
 
 /// Live-preview sink for Soniox realtime WebSocket streaming (plan 043). Mirrors the
 /// Whisper sink; `Partial`s come from the WS task's callback, this handles Final/Cancel.
-/// PREVIEW ONLY for now — the authoritative pasted text is still the REST-on-WAV result,
-/// so this double-bills until result-authority (WS-final) lands. Smoke-testable; not yet
-/// ship-ready.
+/// The WS final is the AUTHORITATIVE pasted result (plan 043b): `finalize()` resolves a
+/// oneshot ([`SONIOX_WS_FINAL`]) that the transcription task awaits
+/// ([`take_soniox_ws_final`]) before falling back to REST-on-WAV. REST runs only on WS
+/// failure/empty/gap — so the happy path bills a single stream, not a double bill.
 struct SonioxPreviewStreamSink {
     app: AppHandle,
     handle: crate::cloud_stt::soniox_ws::SonioxStreamHandle,
     session_id: u64,
     revision: Arc<AtomicU64>,
     gate: Arc<Mutex<StreamSessionGate>>,
+    /// Resolved when the WS finalize completes (on the detached tap worker); the
+    /// transcription task awaits it ([`take_soniox_ws_final`]) to take WS authority.
+    final_tx: Option<tokio::sync::oneshot::Sender<Result<String, SttError>>>,
 }
 
 impl SonioxPreviewStreamSink {
@@ -468,7 +489,7 @@ impl StreamTapSink for SonioxPreviewStreamSink {
         }
     }
 
-    fn finalize(&mut self) -> Option<String> {
+    fn finalize(&mut self, dropped_frames: u64) -> Option<String> {
         match tauri::async_runtime::block_on(self.handle.finalize()) {
             Ok(text) => {
                 self.emit(TranscriptionStreamEvent::Final {
@@ -476,16 +497,35 @@ impl StreamTapSink for SonioxPreviewStreamSink {
                     revision: self.next_revision(),
                     text: text.clone(),
                 });
+                // Hand WS authority to the transcription task. The receiver is
+                // single-use; resolving after it was already consumed is a no-op.
+                // Dropped RT frames invalidate authority (Codex 043b finding): the
+                // stream saw incomplete audio, so the complete-WAV REST fallback owns
+                // the pasted result. The Final above stays — it's cosmetic preview,
+                // same stance as Whisper's decode-ahead final vs its batch decode.
+                if let Some(tx) = self.final_tx.take() {
+                    if dropped_frames > 0 {
+                        log::warn!(
+                            "Soniox WS authority invalidated: {dropped_frames} RT frames dropped; falling back to REST-on-WAV"
+                        );
+                        let _ = tx.send(Err(SttError::Network));
+                    } else {
+                        let _ = tx.send(Ok(text.clone()));
+                    }
+                }
                 Some(text)
             }
             Err(error) => {
-                // WS failed: emit Error; the executor's REST-on-WAV is the authoritative result.
+                // WS failed: emit Error; the transcription task falls back to REST-on-WAV.
                 self.emit(TranscriptionStreamEvent::Error {
                     session_id: self.session_id,
                     revision: self.next_revision(),
                     error: format!("{error:?}"),
                 });
                 log::warn!("Soniox stream finalize failed: {error:?}");
+                if let Some(tx) = self.final_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
                 None
             }
         }
@@ -493,6 +533,9 @@ impl StreamTapSink for SonioxPreviewStreamSink {
 
     fn cancel(&mut self) {
         self.handle.cancel();
+        // Drop the sender so a waiting receiver resolves immediately (oneshot close)
+        // instead of waiting for the finalize/timeout path.
+        self.final_tx.take();
         self.emit(TranscriptionStreamEvent::Cancelled {
             session_id: self.session_id,
             revision: self.next_revision(),
@@ -500,8 +543,9 @@ impl StreamTapSink for SonioxPreviewStreamSink {
     }
 }
 
-/// Build a Soniox realtime WS preview sink factory. None unless the engine is Soniox in
-/// live-preview mode with an API key in secure storage.
+/// Build a Soniox realtime WS sink factory. None unless the engine is Soniox in
+/// live-preview mode with an API key in secure storage. The WS final is authoritative;
+/// REST-on-WAV runs only as fallback (plan 043b).
 fn build_soniox_stream_sink_factory(
     app: &AppHandle,
     config: &RecordingConfig,
@@ -514,19 +558,30 @@ fn build_soniox_stream_sink_factory(
         || !streaming_engine_enabled
         || !live_preview_mode
         || config.current_engine != "soniox"
-        // Preview-only + double-bills until result-authority; dev/smoke opt-in only.
-        || !crate::transcription::stream::soniox_streaming_preview_enabled()
     {
         return None;
     }
 
     // No key -> no streaming preview (the REST path surfaces the missing-key error).
-    let api_key = crate::secure_store::secure_get(
-        app,
-        crate::cloud_stt::CloudProvider::Soniox.key_name(),
-    )
-    .ok()
-    .flatten()?;
+    let api_key =
+        crate::secure_store::secure_get(app, crate::cloud_stt::CloudProvider::Soniox.key_name())
+            .ok()
+            .flatten()?;
+
+    // Register the WS-final side-channel: the (detached) tap worker resolves this
+    // oneshot when the WS finalize completes, and the transcription task awaits it
+    // ([`take_soniox_ws_final`]) to take WS authority before falling back to REST.
+    let (final_tx, final_rx) = tokio::sync::oneshot::channel();
+    {
+        let mut map = SONIOX_WS_FINAL.lock().unwrap();
+        // Prune stale generations (strictly older — their tasks fall back to REST,
+        // whose delivery is generation-gated anyway) so the map stays bounded.
+        map.retain(|&generation, _| generation >= recording_generation);
+        map.insert(recording_generation, final_rx);
+    }
+    // The factory is `Fn` (callable per-recording), so wrap the single-use sender in
+    // a Mutex<Option> — taken once when the sink is built.
+    let final_tx = Mutex::new(Some(final_tx));
 
     let app = app.clone();
     let language = {
@@ -592,6 +647,7 @@ fn build_soniox_stream_sink_factory(
             session_id: recording_generation,
             revision,
             gate,
+            final_tx: final_tx.lock().unwrap().take(),
         }) as Box<dyn StreamTapSink>)
     }))
 }
@@ -612,6 +668,39 @@ pub(crate) fn current_recording_generation() -> u64 {
 /// current — i.e. a newer recording started while this result was in flight.
 pub(crate) fn recording_generation_is_stale(captured: u64) -> bool {
     captured != current_recording_generation()
+}
+
+/// Take the Soniox WS-final receiver for `generation` (if one was registered) and
+/// await it, bounded by 4s (covers the sink's 3s WS drain + scheduling slack). Returns
+/// the authoritative text only when the WS path produced non-empty text; every other
+/// outcome (no entry, WS error, empty text, timeout) returns `None` so the caller
+/// falls back to REST-on-WAV.
+///
+/// Removes ONLY this generation's entry — a delayed older task can never
+/// consume-and-discard a newer recording's receiver (Codex 043b finding); pruning of
+/// stale generations happens at registration instead.
+async fn take_soniox_ws_final(generation: u64) -> Option<String> {
+    let rx = SONIOX_WS_FINAL.lock().unwrap().remove(&generation)?;
+    match tokio::time::timeout(std::time::Duration::from_secs(4), rx).await {
+        Ok(Ok(Ok(text))) if !text.trim().is_empty() => Some(text),
+        Ok(Ok(Ok(_))) => {
+            log::info!("Soniox WS final was empty; falling back to REST-on-WAV");
+            None
+        }
+        Ok(Ok(Err(error))) => {
+            log::info!("Soniox WS final errored ({error:?}); falling back to REST-on-WAV");
+            None
+        }
+        Ok(Err(_)) => {
+            // Sender dropped (cancel path) — resolves immediately, no 4s wait.
+            log::info!("Soniox WS final sender dropped; falling back to REST-on-WAV");
+            None
+        }
+        Err(_) => {
+            log::warn!("Soniox WS final timed out (4s); falling back to REST-on-WAV");
+            None
+        }
+    }
 }
 
 /// Audio file owned by the currently in-flight transcription task, keyed by
@@ -3049,6 +3138,87 @@ mod tests {
             "spawned history task must recheck cancellation at the write site"
         );
     }
+    // ── Soniox WS-final authority (plan 043b) ──────────────────────────────
+    // All tests below touch the global SONIOX_WS_FINAL map, so they serialize and
+    // use disjoint generation keys as belt-and-braces.
+    static SONIOX_WS_FINAL_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn insert_ws_final(
+        generation: u64,
+        rx: tokio::sync::oneshot::Receiver<Result<String, crate::cloud_stt::common::SttError>>,
+    ) {
+        super::SONIOX_WS_FINAL
+            .lock()
+            .unwrap()
+            .insert(generation, rx);
+    }
+
+    #[tokio::test]
+    async fn ws_final_returns_text_on_matching_generation() {
+        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok("hello".to_string()));
+        insert_ws_final(42, rx);
+        let result = super::take_soniox_ws_final(42).await;
+        assert_eq!(result.as_deref(), Some("hello"));
+        // Entry consumed by take.
+        assert!(!super::SONIOX_WS_FINAL.lock().unwrap().contains_key(&42));
+    }
+
+    #[tokio::test]
+    async fn ws_final_mismatched_take_never_consumes_another_generations_entry() {
+        // Codex 043b finding: a delayed OLDER task must not consume-and-discard a
+        // NEWER recording's receiver. take(200) leaves generation 100's entry alone.
+        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        insert_ws_final(100, rx);
+        assert_eq!(super::take_soniox_ws_final(200).await, None);
+        assert!(
+            super::SONIOX_WS_FINAL.lock().unwrap().contains_key(&100),
+            "generation 100's receiver must survive a mismatched take"
+        );
+        // And generation 100 can still take its own WS final afterwards.
+        let _ = tx.send(Ok("still mine".to_string()));
+        assert_eq!(
+            super::take_soniox_ws_final(100).await.as_deref(),
+            Some("still mine")
+        );
+    }
+
+    #[tokio::test]
+    async fn ws_final_none_on_error_result() {
+        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Err(crate::cloud_stt::common::SttError::Network));
+        insert_ws_final(7, rx);
+        assert_eq!(super::take_soniox_ws_final(7).await, None);
+    }
+
+    #[tokio::test]
+    async fn ws_final_none_on_whitespace_only_text() {
+        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok("   ".to_string()));
+        insert_ws_final(9, rx);
+        assert_eq!(super::take_soniox_ws_final(9).await, None);
+    }
+
+    #[tokio::test]
+    async fn ws_final_none_quickly_when_sender_dropped() {
+        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        insert_ws_final(11, rx);
+        drop(tx);
+        let start = std::time::Instant::now();
+        let result = super::take_soniox_ws_final(11).await;
+        let elapsed = start.elapsed();
+        assert_eq!(result, None);
+        // oneshot close resolves immediately — must NOT wait the full 4s timeout.
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "ws_final took {elapsed:?} on dropped sender; expected near-instant"
+        );
+    }
 }
 
 /// Play a system sound to confirm recording start (macOS only)
@@ -4308,8 +4478,10 @@ pub async fn start_recording(
         // OWN factory so its behavior is byte-identical even though its capability row is
         // dormant-FINAL_ONLY (the reconciliation trap); Whisper adds decode-ahead. The
         // streaming_* flags already encode live-preview mode from settings.
-        let streaming_engine_supported =
-            matches!(config.current_engine.as_str(), "parakeet" | "whisper" | "soniox");
+        let streaming_engine_supported = matches!(
+            config.current_engine.as_str(),
+            "parakeet" | "whisper" | "soniox"
+        );
         let streaming_tap_enabled = streaming_tap_enabled && streaming_engine_supported;
         let streaming_engine_enabled = streaming_engine_enabled && streaming_engine_supported;
         let cancellation_flag = app_state.should_cancel_recording.clone();
@@ -5222,8 +5394,11 @@ pub async fn stop_recording(
                         );
                         let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
                         let out_path = parent_dir.join(format!("normalized_{}.wav", ts));
-                        if let Err(e) =
-                            crate::audio::decode::normalize_to_wav_async(audio_path.to_path_buf(), out_path.to_path_buf()).await
+                        if let Err(e) = crate::audio::decode::normalize_to_wav_async(
+                            audio_path.to_path_buf(),
+                            out_path.to_path_buf(),
+                        )
+                        .await
                         {
                             log::error!("Audio normalization (decode) failed: {}", e);
                             update_recording_state(
@@ -5401,6 +5576,38 @@ pub async fn stop_recording(
 
         let transcription_result: Result<TranscriptionResult, TranscriptionFailure> =
             match &engine_selection_for_task {
+                // Soniox WS-final is the AUTHORITATIVE result when live preview ran AND
+                // this is a plain transcribe (the WS config never translates). On any WS
+                // gap (no slot, generation mismatch, error, empty text, timeout) the task
+                // falls through to REST-on-WAV below — the only path that double-bills,
+                // and only on WS failure.
+                ActiveEngineSelection::Cloud {
+                    provider: crate::cloud_stt::CloudProvider::Soniox,
+                    ..
+                } if transcription_job_for_task.task
+                    == crate::transcription::TranscriptionTask::Transcribe =>
+                {
+                    if let Some(text) = take_soniox_ws_final(task_generation).await {
+                        log::info!(
+                            "Soniox WS-final authoritative ({} chars); REST skipped",
+                            text.chars().count()
+                        );
+                        Ok(TranscriptionResult::new(&transcription_job_for_task, text))
+                    } else {
+                        match build_desktop_transcription_request(
+                            &app_for_task,
+                            &engine_selection_for_task,
+                            &transcription_job_for_task,
+                            language_for_task.clone(),
+                            audio_path_clone.clone(),
+                        ) {
+                            Ok(request) => transcribe_with_app(&app_for_task, request)
+                                .await
+                                .map_err(desktop_failure_from_transcription_error),
+                            Err(failure) => Err(failure),
+                        }
+                    }
+                }
                 // Local + cloud run through the shared transcription executor (plan
                 // 020 Stage 2): it owns normalization, the interactive watchdog /
                 // shared cancel flag, Whisper retry, and the cloud network timeout.
@@ -6789,9 +6996,12 @@ async fn transcribe_audio_file_impl(
         let normalized_file = NormalizedTempFile::new({
             let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
             let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
-            crate::audio::decode::normalize_to_wav_async(wav_path.to_path_buf(), out_path.to_path_buf())
-                .await
-                .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
+            crate::audio::decode::normalize_to_wav_async(
+                wav_path.to_path_buf(),
+                out_path.to_path_buf(),
+            )
+            .await
+            .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
             out_path
         });
         log::info!("[UPLOAD] Normalized WAV at {:?}", normalized_file.path());
