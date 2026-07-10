@@ -100,7 +100,16 @@ impl EngineStreamCapabilities {
     };
     pub const OPENAI: Self = Self::FINAL_ONLY;
     pub const GROQ: Self = Self::FINAL_ONLY;
-    pub const DEEPGRAM: Self = Self::FINAL_ONLY;
+    // Deepgram realtime WebSocket (plan 044): committed prefix + tentative tail +
+    // native endpointing (speech_final). Result-authoritative: WS-final is the
+    // pasted text, REST-on-WAV runs only as fallback. No model download.
+    pub const DEEPGRAM: Self = Self {
+        supports_streaming: true,
+        supports_committed_prefix: true,
+        supports_tentative_tail: true,
+        supports_endpointing: true,
+        final_only: false,
+    };
     pub const COHERE: Self = Self::FINAL_ONLY;
     pub const REMOTE: Self = Self::FINAL_ONLY;
 
@@ -341,7 +350,8 @@ mod tests {
     fn capability_shape_for_every_current_engine() {
         // Whisper streams via decode-ahead (plan 032, no endpointing). Soniox realtime
         // streaming (plan 043) is result-authoritative (plan 043b): WS-final is the
-        // pasted text; REST-on-WAV runs only as fallback. The rest are final-only.
+        // pasted text; REST-on-WAV runs only as fallback. Deepgram realtime streaming
+        // (plan 044) mirrors Soniox's stance. The rest are final-only.
         assert_eq!(
             EngineStreamCapabilities::for_engine(ProviderEngine::Whisper),
             EngineStreamCapabilities {
@@ -362,12 +372,21 @@ mod tests {
                 final_only: false,
             },
         );
+        assert_eq!(
+            EngineStreamCapabilities::for_engine(ProviderEngine::Deepgram),
+            EngineStreamCapabilities {
+                supports_streaming: true,
+                supports_committed_prefix: true,
+                supports_tentative_tail: true,
+                supports_endpointing: true,
+                final_only: false,
+            },
+        );
 
         let final_only_engines = [
             ProviderEngine::Parakeet,
             ProviderEngine::Openai,
             ProviderEngine::Groq,
-            ProviderEngine::Deepgram,
             ProviderEngine::Cohere,
             ProviderEngine::Remote,
         ];

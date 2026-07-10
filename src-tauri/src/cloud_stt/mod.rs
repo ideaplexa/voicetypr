@@ -18,6 +18,8 @@ mod soniox;
 // in commands::audio (plan 043).
 pub(crate) mod soniox_rt;
 pub(crate) mod soniox_ws;
+pub(crate) mod deepgram_rt;
+pub(crate) mod deepgram_ws;
 
 use crate::transcription::TranscriptionWord;
 use std::path::Path;

@@ -132,15 +132,6 @@ fn build_config_frame(config: &SonioxStreamConfig) -> String {
     payload.to_string()
 }
 
-/// Little-endian 16-bit PCM bytes for `pcm_s16le`.
-fn samples_to_le_bytes(samples: &[i16]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(samples.len() * 2);
-    for sample in samples {
-        out.extend_from_slice(&sample.to_le_bytes());
-    }
-    out
-}
-
 /// Resolve the oneshot exactly once.
 fn finish(
     slot: &mut Option<oneshot::Sender<Result<String, SttError>>>,
@@ -191,7 +182,7 @@ async fn run_task<F>(
             control = control_rx.recv() => match control {
                 Some(Control::Chunk(samples)) => {
                     if write
-                        .send(Message::binary(samples_to_le_bytes(&samples)))
+                        .send(Message::binary(crate::cloud_stt::common::samples_to_le_bytes(&samples)))
                         .await
                         .is_err()
                     {
@@ -295,16 +286,6 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&build_config_frame(&config)).unwrap();
         assert!(parsed.get("language_hints").is_none());
         assert_eq!(parsed["num_channels"], 2);
-    }
-
-    #[test]
-    fn samples_encode_as_little_endian_s16() {
-        // 1 == 0x0001 -> [0x01, 0x00]; -1 == 0xFFFF -> [0xFF, 0xFF]; 256 -> [0x00, 0x01].
-        assert_eq!(
-            samples_to_le_bytes(&[1, -1, 256]),
-            vec![1, 0, 255, 255, 0, 1]
-        );
-        assert!(samples_to_le_bytes(&[]).is_empty());
     }
 
     #[test]

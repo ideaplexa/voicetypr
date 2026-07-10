@@ -331,6 +331,16 @@ pub(super) async fn openai_compatible_transcribe(
     .await
 }
 
+/// Little-endian 16-bit PCM bytes for `pcm_s16le` / `linear16` audio frames.
+/// Shared by Soniox RT and Deepgram RT WebSocket streaming.
+pub(super) fn samples_to_le_bytes(samples: &[i16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 2);
+    for sample in samples {
+        out.extend_from_slice(&sample.to_le_bytes());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{get_validate, openai_compatible_transcribe, warm_origin, AuthScheme, SttError};
@@ -794,5 +804,15 @@ mod tests {
             .await;
         warm_origin(&server.uri()).await;
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn samples_encode_as_little_endian_s16() {
+        // 1 == 0x0001 -> [0x01, 0x00]; -1 == 0xFFFF -> [0xFF, 0xFF]; 256 -> [0x00, 0x01].
+        assert_eq!(
+            super::samples_to_le_bytes(&[1, -1, 256]),
+            vec![1, 0, 255, 255, 0, 1]
+        );
+        assert!(super::samples_to_le_bytes(&[]).is_empty());
     }
 }

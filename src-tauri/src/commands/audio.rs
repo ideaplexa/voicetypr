@@ -75,17 +75,17 @@ static MEDIA_CONTROLLER: Lazy<MediaPauseController> = Lazy::new(MediaPauseContro
 /// capture (stop/spawn) and check (deliver) linearizable.
 static RECORDING_GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Generation-keyed handoff of the Soniox WS-final text from the (detached)
+/// Generation-keyed handoff of the cloud WS-final text from the (detached)
 /// stream-tap worker to the transcription task. The tap worker resolves the oneshot
 /// when its WS finalize completes; the transcription task awaits it
-/// ([`take_soniox_ws_final`]) to take WS authority before falling back to REST-on-WAV.
+/// ([`take_cloud_ws_final`]) to take WS authority before falling back to REST-on-WAV.
 /// A map, NOT a single slot (Codex 043b finding): a delayed older task must only ever
 /// remove ITS OWN generation's entry — never consume-and-discard a newer recording's
 /// receiver. Older entries are pruned when a new recording registers (generations are
 /// monotonic, so anything older is stale and its delivery is discarded anyway).
-type SonioxWsFinalMap =
+type CloudWsFinalMap =
     std::collections::HashMap<u64, tokio::sync::oneshot::Receiver<Result<String, SttError>>>;
-static SONIOX_WS_FINAL: Lazy<Mutex<SonioxWsFinalMap>> =
+static CLOUD_WS_FINAL: Lazy<Mutex<CloudWsFinalMap>> =
     Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 struct ParakeetPreviewStreamSink {
@@ -458,8 +458,8 @@ fn build_whisper_stream_sink_factory(
 /// Live-preview sink for Soniox realtime WebSocket streaming (plan 043). Mirrors the
 /// Whisper sink; `Partial`s come from the WS task's callback, this handles Final/Cancel.
 /// The WS final is the AUTHORITATIVE pasted result (plan 043b): `finalize()` resolves a
-/// oneshot ([`SONIOX_WS_FINAL`]) that the transcription task awaits
-/// ([`take_soniox_ws_final`]) before falling back to REST-on-WAV. REST runs only on WS
+/// oneshot ([`CLOUD_WS_FINAL`]) that the transcription task awaits
+/// ([`take_cloud_ws_final`]) before falling back to REST-on-WAV. REST runs only on WS
 /// failure/empty/gap — so the happy path bills a single stream, not a double bill.
 struct SonioxPreviewStreamSink {
     app: AppHandle,
@@ -468,7 +468,7 @@ struct SonioxPreviewStreamSink {
     revision: Arc<AtomicU64>,
     gate: Arc<Mutex<StreamSessionGate>>,
     /// Resolved when the WS finalize completes (on the detached tap worker); the
-    /// transcription task awaits it ([`take_soniox_ws_final`]) to take WS authority.
+    /// transcription task awaits it ([`take_cloud_ws_final`]) to take WS authority.
     final_tx: Option<tokio::sync::oneshot::Sender<Result<String, SttError>>>,
 }
 
@@ -570,10 +570,10 @@ fn build_soniox_stream_sink_factory(
 
     // Register the WS-final side-channel: the (detached) tap worker resolves this
     // oneshot when the WS finalize completes, and the transcription task awaits it
-    // ([`take_soniox_ws_final`]) to take WS authority before falling back to REST.
+    // ([`take_cloud_ws_final`]) to take WS authority before falling back to REST.
     let (final_tx, final_rx) = tokio::sync::oneshot::channel();
     {
-        let mut map = SONIOX_WS_FINAL.lock().unwrap();
+        let mut map = CLOUD_WS_FINAL.lock().unwrap();
         // Prune stale generations (strictly older — their tasks fall back to REST,
         // whose delivery is generation-gated anyway) so the map stays bounded.
         map.retain(|&generation, _| generation >= recording_generation);
@@ -652,6 +652,192 @@ fn build_soniox_stream_sink_factory(
     }))
 }
 
+/// Live-preview sink for Deepgram realtime WebSocket streaming (plan 044). Mirrors
+/// the Soniox sink byte-for-byte in shape — Partials from the WS callback; this
+/// handles Final/Cancel. The WS final is the AUTHORITATIVE pasted result: `finalize()`
+/// resolves a oneshot ([`CLOUD_WS_FINAL`]) that the transcription task awaits
+/// ([`take_cloud_ws_final`]) before falling back to REST-on-WAV.
+struct DeepgramPreviewStreamSink {
+    app: AppHandle,
+    handle: crate::cloud_stt::deepgram_ws::DeepgramStreamHandle,
+    session_id: u64,
+    revision: Arc<AtomicU64>,
+    gate: Arc<Mutex<StreamSessionGate>>,
+    /// Resolved when the WS finalize completes (on the detached tap worker); the
+    /// transcription task awaits it ([`take_cloud_ws_final`]) to take WS authority.
+    final_tx: Option<tokio::sync::oneshot::Sender<Result<String, SttError>>>,
+}
+
+impl DeepgramPreviewStreamSink {
+    fn next_revision(&self) -> u64 {
+        self.revision.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    }
+
+    fn emit(&self, event: TranscriptionStreamEvent) {
+        emit_stream_event(&self.app, &self.gate, event);
+    }
+}
+
+impl StreamTapSink for DeepgramPreviewStreamSink {
+    fn send_frame(&mut self, samples: &[i16]) {
+        if let Err(error) = self.handle.send_chunk(samples) {
+            log::warn!("Failed to enqueue Deepgram stream audio chunk: {error:?}");
+        }
+    }
+
+    fn finalize(&mut self, dropped_frames: u64) -> Option<String> {
+        match tauri::async_runtime::block_on(self.handle.finalize()) {
+            Ok(text) => {
+                self.emit(TranscriptionStreamEvent::Final {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    text: text.clone(),
+                });
+                // Hand WS authority to the transcription task. Dropped RT frames
+                // invalidate authority (same stance as Soniox): the stream saw
+                // incomplete audio, so the complete-WAV REST fallback owns the result.
+                if let Some(tx) = self.final_tx.take() {
+                    if dropped_frames > 0 {
+                        log::warn!(
+                            "Deepgram WS authority invalidated: {dropped_frames} RT frames dropped; falling back to REST-on-WAV"
+                        );
+                        let _ = tx.send(Err(SttError::Network));
+                    } else {
+                        let _ = tx.send(Ok(text.clone()));
+                    }
+                }
+                Some(text)
+            }
+            Err(error) => {
+                self.emit(TranscriptionStreamEvent::Error {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    error: format!("{error:?}"),
+                });
+                log::warn!("Deepgram stream finalize failed: {error:?}");
+                if let Some(tx) = self.final_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                None
+            }
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.handle.cancel();
+        self.final_tx.take();
+        self.emit(TranscriptionStreamEvent::Cancelled {
+            session_id: self.session_id,
+            revision: self.next_revision(),
+        });
+    }
+}
+
+/// Build a Deepgram realtime WS sink factory. None unless the engine is Deepgram in
+/// live-preview mode with an API key in secure storage. The WS final is
+/// authoritative; REST-on-WAV runs only as fallback (plan 044).
+fn build_deepgram_stream_sink_factory(
+    app: &AppHandle,
+    config: &RecordingConfig,
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    recording_generation: u64,
+) -> Option<StreamTapSinkFactory> {
+    if !streaming_tap_enabled
+        || !streaming_engine_enabled
+        || !live_preview_mode
+        || config.current_engine != "deepgram"
+    {
+        return None;
+    }
+
+    // No key -> no streaming preview (the REST path surfaces the missing-key error).
+    let api_key =
+        crate::secure_store::secure_get(app, crate::cloud_stt::CloudProvider::Deepgram.key_name())
+            .ok()
+            .flatten()?;
+
+    // Register the WS-final side-channel (same engine-agnostic mechanism as Soniox).
+    let (final_tx, final_rx) = tokio::sync::oneshot::channel();
+    {
+        let mut map = CLOUD_WS_FINAL.lock().unwrap();
+        map.retain(|&generation, _| generation >= recording_generation);
+        map.insert(recording_generation, final_rx);
+    }
+    let final_tx = Mutex::new(Some(final_tx));
+
+    let app = app.clone();
+    let language = {
+        let trimmed = config.speech_language.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+
+    Some(Arc::new(move |sample_rate, channels| {
+        let app_for_stream = app.clone();
+        let api_key = api_key.clone();
+        let language = language.clone();
+        let gate = Arc::new(Mutex::new(StreamSessionGate::new(recording_generation)));
+        let revision = Arc::new(AtomicU64::new(0));
+
+        // Deepgram keyterms (custom vocab) from writing settings — best effort,
+        // same load-settings pattern the Soniox factory uses for its context.
+        let keyterms = match crate::writing::load_writing_settings(&app_for_stream) {
+            Ok(settings) => {
+                crate::writing::compile_deepgram_keyterms(&settings, language.as_deref())
+            }
+            Err(_) => Vec::new(),
+        };
+
+        let callback_app = app_for_stream.clone();
+        let callback_gate = gate.clone();
+        let callback_revision = revision.clone();
+        let on_partial = move |partial: crate::cloud_stt::deepgram_rt::DeepgramRtPartial| {
+            let event = TranscriptionStreamEvent::Partial {
+                session_id: recording_generation,
+                revision: callback_revision.fetch_add(1, AtomicOrdering::SeqCst) + 1,
+                committed: partial.committed,
+                tentative: partial.tentative,
+            };
+            emit_stream_event(&callback_app, &callback_gate, event);
+        };
+
+        let handle = crate::cloud_stt::deepgram_ws::open(
+            crate::cloud_stt::deepgram_ws::DeepgramStreamConfig {
+                api_key,
+                sample_rate,
+                channels,
+                language,
+                keyterms,
+            },
+            on_partial,
+        );
+
+        emit_stream_event(
+            &app,
+            &gate,
+            TranscriptionStreamEvent::Started {
+                session_id: recording_generation,
+                engine: "deepgram".to_string(),
+                revision: 0,
+            },
+        );
+
+        Some(Box::new(DeepgramPreviewStreamSink {
+            app: app.clone(),
+            handle,
+            session_id: recording_generation,
+            revision,
+            gate,
+            final_tx: final_tx.lock().unwrap().take(),
+        }) as Box<dyn StreamTapSink>)
+    }))
+}
+
 /// Open a new recording generation. Called at the top of `start_recording`
 /// before `Starting` is published, so every stop/cancel and spawned
 /// transcription task within this attempt observes the same generation.
@@ -670,34 +856,35 @@ pub(crate) fn recording_generation_is_stale(captured: u64) -> bool {
     captured != current_recording_generation()
 }
 
-/// Take the Soniox WS-final receiver for `generation` (if one was registered) and
+/// Take the cloud WS-final receiver for `generation` (if one was registered) and
 /// await it, bounded by 4s (covers the sink's 3s WS drain + scheduling slack). Returns
 /// the authoritative text only when the WS path produced non-empty text; every other
 /// outcome (no entry, WS error, empty text, timeout) returns `None` so the caller
-/// falls back to REST-on-WAV.
+/// falls back to REST-on-WAV. Engine-agnostic: Soniox and Deepgram both register
+/// their WS-final here (at most ONE cloud WS factory registers per recording).
 ///
 /// Removes ONLY this generation's entry — a delayed older task can never
 /// consume-and-discard a newer recording's receiver (Codex 043b finding); pruning of
 /// stale generations happens at registration instead.
-async fn take_soniox_ws_final(generation: u64) -> Option<String> {
-    let rx = SONIOX_WS_FINAL.lock().unwrap().remove(&generation)?;
+async fn take_cloud_ws_final(generation: u64) -> Option<String> {
+    let rx = CLOUD_WS_FINAL.lock().unwrap().remove(&generation)?;
     match tokio::time::timeout(std::time::Duration::from_secs(4), rx).await {
         Ok(Ok(Ok(text))) if !text.trim().is_empty() => Some(text),
         Ok(Ok(Ok(_))) => {
-            log::info!("Soniox WS final was empty; falling back to REST-on-WAV");
+            log::info!("Cloud WS final was empty; falling back to REST-on-WAV");
             None
         }
         Ok(Ok(Err(error))) => {
-            log::info!("Soniox WS final errored ({error:?}); falling back to REST-on-WAV");
+            log::info!("Cloud WS final errored ({error:?}); falling back to REST-on-WAV");
             None
         }
         Ok(Err(_)) => {
             // Sender dropped (cancel path) — resolves immediately, no 4s wait.
-            log::info!("Soniox WS final sender dropped; falling back to REST-on-WAV");
+            log::info!("Cloud WS final sender dropped; falling back to REST-on-WAV");
             None
         }
         Err(_) => {
-            log::warn!("Soniox WS final timed out (4s); falling back to REST-on-WAV");
+            log::warn!("Cloud WS final timed out (4s); falling back to REST-on-WAV");
             None
         }
     }
@@ -3138,79 +3325,76 @@ mod tests {
             "spawned history task must recheck cancellation at the write site"
         );
     }
-    // ── Soniox WS-final authority (plan 043b) ──────────────────────────────
-    // All tests below touch the global SONIOX_WS_FINAL map, so they serialize and
+    // ── Cloud WS-final authority (plans 043b + 044) ──────────────────────
+    // All tests below touch the global CLOUD_WS_FINAL map, so they serialize and
     // use disjoint generation keys as belt-and-braces.
-    static SONIOX_WS_FINAL_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static CLOUD_WS_FINAL_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn insert_ws_final(
         generation: u64,
         rx: tokio::sync::oneshot::Receiver<Result<String, crate::cloud_stt::common::SttError>>,
     ) {
-        super::SONIOX_WS_FINAL
-            .lock()
-            .unwrap()
-            .insert(generation, rx);
+        super::CLOUD_WS_FINAL.lock().unwrap().insert(generation, rx);
     }
 
     #[tokio::test]
     async fn ws_final_returns_text_on_matching_generation() {
-        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = tx.send(Ok("hello".to_string()));
         insert_ws_final(42, rx);
-        let result = super::take_soniox_ws_final(42).await;
+        let result = super::take_cloud_ws_final(42).await;
         assert_eq!(result.as_deref(), Some("hello"));
         // Entry consumed by take.
-        assert!(!super::SONIOX_WS_FINAL.lock().unwrap().contains_key(&42));
+        assert!(!super::CLOUD_WS_FINAL.lock().unwrap().contains_key(&42));
     }
 
     #[tokio::test]
     async fn ws_final_mismatched_take_never_consumes_another_generations_entry() {
         // Codex 043b finding: a delayed OLDER task must not consume-and-discard a
         // NEWER recording's receiver. take(200) leaves generation 100's entry alone.
-        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         insert_ws_final(100, rx);
-        assert_eq!(super::take_soniox_ws_final(200).await, None);
+        assert_eq!(super::take_cloud_ws_final(200).await, None);
         assert!(
-            super::SONIOX_WS_FINAL.lock().unwrap().contains_key(&100),
+            super::CLOUD_WS_FINAL.lock().unwrap().contains_key(&100),
             "generation 100's receiver must survive a mismatched take"
         );
         // And generation 100 can still take its own WS final afterwards.
         let _ = tx.send(Ok("still mine".to_string()));
         assert_eq!(
-            super::take_soniox_ws_final(100).await.as_deref(),
+            super::take_cloud_ws_final(100).await.as_deref(),
             Some("still mine")
         );
     }
 
     #[tokio::test]
     async fn ws_final_none_on_error_result() {
-        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = tx.send(Err(crate::cloud_stt::common::SttError::Network));
         insert_ws_final(7, rx);
-        assert_eq!(super::take_soniox_ws_final(7).await, None);
+        assert_eq!(super::take_cloud_ws_final(7).await, None);
     }
 
     #[tokio::test]
     async fn ws_final_none_on_whitespace_only_text() {
-        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = tx.send(Ok("   ".to_string()));
         insert_ws_final(9, rx);
-        assert_eq!(super::take_soniox_ws_final(9).await, None);
+        assert_eq!(super::take_cloud_ws_final(9).await, None);
     }
 
     #[tokio::test]
     async fn ws_final_none_quickly_when_sender_dropped() {
-        let _guard = SONIOX_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel();
         insert_ws_final(11, rx);
         drop(tx);
         let start = std::time::Instant::now();
-        let result = super::take_soniox_ws_final(11).await;
+        let result = super::take_cloud_ws_final(11).await;
         let elapsed = start.elapsed();
         assert_eq!(result, None);
         // oneshot close resolves immediately — must NOT wait the full 4s timeout.
@@ -4480,7 +4664,7 @@ pub async fn start_recording(
         // streaming_* flags already encode live-preview mode from settings.
         let streaming_engine_supported = matches!(
             config.current_engine.as_str(),
-            "parakeet" | "whisper" | "soniox"
+            "parakeet" | "whisper" | "soniox" | "deepgram"
         );
         let streaming_tap_enabled = streaming_tap_enabled && streaming_engine_supported;
         let streaming_engine_enabled = streaming_engine_enabled && streaming_engine_supported;
@@ -4505,6 +4689,14 @@ pub async fn start_recording(
                 recording_generation,
             ),
             "soniox" => build_soniox_stream_sink_factory(
+                &app,
+                &config,
+                streaming_tap_enabled,
+                streaming_engine_enabled,
+                live_preview_mode,
+                recording_generation,
+            ),
+            "deepgram" => build_deepgram_stream_sink_factory(
                 &app,
                 &config,
                 streaming_tap_enabled,
@@ -5576,20 +5768,24 @@ pub async fn stop_recording(
 
         let transcription_result: Result<TranscriptionResult, TranscriptionFailure> =
             match &engine_selection_for_task {
-                // Soniox WS-final is the AUTHORITATIVE result when live preview ran AND
-                // this is a plain transcribe (the WS config never translates). On any WS
-                // gap (no slot, generation mismatch, error, empty text, timeout) the task
-                // falls through to REST-on-WAV below — the only path that double-bills,
-                // and only on WS failure.
+                // Cloud WS-final authority (plans 043b + 044): the cloud WS final is
+                // the AUTHORITATIVE result when live preview ran AND this is a plain
+                // transcribe (the WS config never translates). On any WS gap (no slot,
+                // generation mismatch, error, empty text, timeout) the task falls
+                // through to REST-on-WAV below — the only path that double-bills,
+                // and only on WS failure. Engine-agnostic: Soniox and Deepgram both
+                // register via CLOUD_WS_FINAL.
                 ActiveEngineSelection::Cloud {
-                    provider: crate::cloud_stt::CloudProvider::Soniox,
+                    provider:
+                        crate::cloud_stt::CloudProvider::Soniox
+                        | crate::cloud_stt::CloudProvider::Deepgram,
                     ..
                 } if transcription_job_for_task.task
                     == crate::transcription::TranscriptionTask::Transcribe =>
                 {
-                    if let Some(text) = take_soniox_ws_final(task_generation).await {
+                    if let Some(text) = take_cloud_ws_final(task_generation).await {
                         log::info!(
-                            "Soniox WS-final authoritative ({} chars); REST skipped",
+                            "Cloud WS-final authoritative ({} chars); REST skipped",
                             text.chars().count()
                         );
                         Ok(TranscriptionResult::new(&transcription_job_for_task, text))
