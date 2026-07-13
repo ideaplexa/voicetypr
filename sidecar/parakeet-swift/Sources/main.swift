@@ -42,6 +42,51 @@ func log(_ message: String) {
     fflush(stderr)
 }
 
+/// Blocking `readLine()` on a dedicated thread so the MainActor event loop can yield to
+/// drain tasks. The stream is `.bufferingOldest(64)`: at most 64 raw command lines are
+/// queued ahead of the consumer. The default unbounded AsyncStream would let a stalled
+/// consumer (e.g. a long inference) accumulate unbounded command memory; the cap bounds it.
+///
+/// Because `.bufferingOldest` drops the NEW element when full, the producer applies
+/// backpressure: on `.dropped` it sleeps briefly and re-yields the SAME line until the
+/// consumer makes room (`.enqueued`). This preserves every line in FIFO order — a
+/// `finalize_stream`/`cancel_stream` line can NEVER be dropped, since those terminal
+/// commands must reach the consumer to end the session; dropping them would hang the
+/// host. `readLine()` itself is naturally blocking, so the backpressure sleep only adds
+/// latency (no busy spin under throughput) and is bounded by the consumer. On
+/// `.terminated` the producer exits so a torn-down consumer releases the thread.
+enum ProtocolStdin {
+    static let maxCommandBacklog = 64
+
+    static func lineStream() -> AsyncStream<String> {
+        AsyncStream<String>(bufferingPolicy: .bufferingOldest(maxCommandBacklog)) { continuation in
+            let thread = Thread {
+                while let line = readLine() {
+                    while true {
+                        switch continuation.yield(line) {
+                        case .enqueued:
+                            break
+                        case .dropped:
+                            Thread.sleep(forTimeInterval: 0.002)
+                            continue
+                        case .terminated:
+                            return
+                        @unknown default:
+                            Thread.sleep(forTimeInterval: 0.002)
+                            continue
+                        }
+                        break
+                    }
+                }
+                continuation.finish()
+            }
+            thread.name = "parakeet-protocol-stdin"
+            thread.start()
+        }
+    }
+}
+
+
 // Get system architecture info
 func getArchitectureInfo() -> String {
     #if arch(arm64)
@@ -249,6 +294,7 @@ final class ActiveStreamSession {
     enum Engine {
         case slidingWindow(SlidingWindowAsrManager)
         case eou(StreamingEouAsrManager)
+        case decodeAhead(DecodeAheadAsrSession)
     }
 
     let engine: Engine
@@ -258,12 +304,619 @@ final class ActiveStreamSession {
     var forwarder: Task<Void, Never>?
     var committedPrefix = ""
     var latestPartial = ""
+    /// Bounded ingress for decode_ahead: FIFO PCM buffers, one drain task, overflow dropped.
+    private static let decodeAheadMaxPendingBuffers = 32
+    var decodeAheadPendingBuffers: [AVAudioPCMBuffer] = []
+    var decodeAheadDrainTask: Task<Void, Never>?
+    var decodeAheadNoMoreInput = false
 
     init(engine: Engine, sampleRate: Double, channels: Int, encoder: JSONEncoder) {
         self.engine = engine
         self.sampleRate = sampleRate
         self.channels = channels
         self.encoder = encoder
+    }
+
+    func enqueueDecodeAheadChunk(_ buffer: AVAudioPCMBuffer, decodeSession: DecodeAheadAsrSession) {
+        guard !decodeAheadNoMoreInput else {
+            log("⚠️ decode_ahead: ignoring audio_chunk after no-more-input")
+            return
+        }
+        if decodeAheadPendingBuffers.count >= Self.decodeAheadMaxPendingBuffers {
+            decodeAheadPendingBuffers.removeFirst()
+            log("⚠️ decode_ahead: dropped oldest pending audio chunk (bounded queue)")
+        }
+        decodeAheadPendingBuffers.append(buffer)
+        ensureDecodeAheadDrain(decodeSession: decodeSession)
+    }
+
+    private func ensureDecodeAheadDrain(decodeSession: DecodeAheadAsrSession) {
+        guard !decodeAheadNoMoreInput, !decodeAheadPendingBuffers.isEmpty else { return }
+        if decodeAheadDrainTask != nil {
+            return
+        }
+        decodeAheadDrainTask = Task { @MainActor in
+            defer {
+                self.decodeAheadDrainTask = nil
+                if !self.decodeAheadNoMoreInput, !self.decodeAheadPendingBuffers.isEmpty {
+                    self.ensureDecodeAheadDrain(decodeSession: decodeSession)
+                }
+            }
+            await self.runDecodeAheadDrain(decodeSession: decodeSession)
+        }
+    }
+
+    private func runDecodeAheadDrain(decodeSession: DecodeAheadAsrSession) async {
+        while !Task.isCancelled, !decodeAheadNoMoreInput {
+            guard !decodeAheadPendingBuffers.isEmpty else {
+                return
+            }
+            let chunk = decodeAheadPendingBuffers.removeFirst()
+            await decodeSession.ingestSamples(chunk)
+            if Task.isCancelled { return }
+            await decodeSession.runLiveDecodeIfNeeded()
+            if Task.isCancelled { return }
+        }
+    }
+
+    func finalizeDecodeAhead(_ decodeSession: DecodeAheadAsrSession) async -> String {
+        decodeAheadNoMoreInput = true
+        if let drain = decodeAheadDrainTask {
+            await drain.value
+        }
+        while !decodeAheadPendingBuffers.isEmpty {
+            let chunk = decodeAheadPendingBuffers.removeFirst()
+            await decodeSession.ingestSamples(chunk)
+            await decodeSession.runLiveDecodeIfNeeded()
+        }
+        decodeAheadDrainTask = nil
+        return await decodeSession.finalize()
+    }
+
+    /// Prompt cancel: do not await drain; clear queue and invalidate in-flight decode immediately.
+    func cancelDecodeAheadImmediately(_ decodeSession: DecodeAheadAsrSession) async {
+        decodeAheadDrainTask?.cancel()
+        decodeAheadPendingBuffers.removeAll()
+        decodeAheadNoMoreInput = true
+        decodeAheadDrainTask = nil
+        await decodeSession.cancel()
+    }
+}
+
+/// Decode-ahead live-preview ASR session (plan 051, Phase 1): a faithful Swift port of
+/// `whisper/decode_ahead.rs::DecodeAheadBuffer` fused with its driver. A growing
+/// `samples` buffer plus a `head` index; each decode re-runs `AsrManager.transcribe` on
+/// the whole un-committed window (fresh decoder state — no KV reuse), then commits only
+/// by token timestamp so boundary-cut words stay revisable. This is the decode-ahead
+/// fix for FluidAudio's SlidingWindow engine permanently baking each chunk's tokens at
+/// decode time.
+///
+/// Ingress is bounded on `ActiveStreamSession` (FIFO, one drain task). `audio_chunk` enqueues
+/// and returns; cancel clears the queue and bumps `emissionGeneration` without waiting on drain.
+/// Finalize sets no-more-input, awaits the drain task, then eos-finalizes. Emissions are
+/// generation-gated. Routed via `writeProtocolLine` (dup'd fd).
+actor DecodeAheadAsrSession {
+    // MARK: - Configuration (16 kHz mono f32; mirrors decode_ahead.rs `Config`)
+
+    /// Sample rate assumed throughout (16 kHz mono f32).
+    private static let sampleRate = 16_000
+    /// Minimum un-decoded samples before a decode is worth running (~1 s). Below this,
+    /// `shouldDecode` short-circuits to false (unless `eos`).
+    private static let minSamples = 16_000
+    /// Re-decode once the window has grown this many samples since the last attempt (~1 s).
+    private static let incrSamples = 16_000
+    /// Hard cap: force a decode (committing ALL tokens) once the window reaches this
+    /// (14 s — the model input is fixed 15 s; leave 1 s slack so each pass is a single
+    /// coherent decode rather than an internally-chunked one).
+    private static let maxWindowSamples = 224_000
+    /// Tokens whose end falls within this many seconds of the window tail stay tentative
+    /// (revisable). On eos/finalize, ALL tokens are committed regardless of margin.
+    private static let tailMarginSeconds = 1.5
+    /// Maximum backoff shift: `incrSamples * 2^N`, capped at `2^4 = 16×`.
+    private static let maxBackoffShift = 4
+    /// Bumped on `cancel()`; decode passes capture the value at start and suppress emission
+    /// when it no longer matches (stale partial after cancel).
+    private var emissionGeneration: UInt64 = 0
+
+    private struct DecodeAheadDecodeResult {
+        enum Outcome {
+            case failure
+            case success(timings: [TokenTiming], text: String, modelReturnedTimings: Bool)
+        }
+        let outcome: Outcome
+    }
+
+    // MARK: - State (faithful port of DecodeAheadBuffer field structure)
+
+    private var samples: [Float] = []
+    /// Start of the un-committed window; rebased to 0 by `maybeCompact` after compaction.
+    private var head = 0
+    private var committed = ""
+    /// Window-length threshold at/after which the next decode is allowed. Compared
+    /// against the un-committed window LENGTH (a length, not an absolute index).
+    private var nextInferAtLen: Int
+    /// Consecutive decodes that committed nothing; drives exponential backoff.
+    private var noProgressRuns = 0
+    /// Single shared resampler (stateless): input is device-rate → 16 k mono f32.
+    private let converter = AudioConverter()
+    /// Weak ref to the app-wide loaded AsrManager (kept alive by the global
+    /// `asrManager`); unload is blocked while a stream is active, so this is never
+    /// released mid-stream in practice.
+    private weak var manager: AsrManager?
+    private let decoderLayers: Int
+    private let encoder: JSONEncoder
+
+    init(manager: AsrManager, decoderLayers: Int, encoder: JSONEncoder) {
+        self.manager = manager
+        self.decoderLayers = decoderLayers
+        self.encoder = encoder
+        self.nextInferAtLen = Self.minSamples
+    }
+
+    // MARK: - Driver (fused with the pure buffer)
+
+    /// Append resampled samples only (drain task); decode is separate so ingress stays bounded.
+    func ingestSamples(_ buffer: AVAudioPCMBuffer) async {
+        guard let resampled = try? converter.resampleBuffer(buffer), !resampled.isEmpty else {
+            log("⚠️ decode_ahead: failed to resample audio chunk; skipping")
+            return
+        }
+        samples.append(contentsOf: resampled)
+    }
+
+    /// One live preview decode when `shouldDecode` permits (called from the drain task).
+    func runLiveDecodeIfNeeded() async {
+        guard !Task.isCancelled else { return }
+        guard shouldDecode(eos: false), let manager = manager else {
+            return
+        }
+        let passGeneration = emissionGeneration
+        let window = currentWindow()
+        let decodeResult = await Self.decode(manager: manager, window: window, decoderLayers: decoderLayers)
+        if Task.isCancelled || emissionGeneration != passGeneration {
+            return
+        }
+        applyDecodePass(
+            decodeResult: decodeResult,
+            eos: false,
+            decodedWindowLen: window.count,
+            passGeneration: passGeneration,
+            emitPartials: true
+        )
+    }
+
+    func appendChunk(_ buffer: AVAudioPCMBuffer) async {
+        await ingestSamples(buffer)
+        await runLiveDecodeIfNeeded()
+    }
+
+    /// Drain ALL remaining audio with eos passes (commit everything), returning the
+    /// full committed transcript. A LOOP, not a single pass (Codex 051 finding): one
+    /// capped decode covers at most `maxWindowSamples`, so a recording whose tail
+    /// extends past the cap — e.g. after long silence pinned the window — needs
+    /// repeated passes.
+    ///
+    /// Consumption is tracked as a LENGTH, never as pre-pass absolute indices
+    /// (Codex 051 round-2 finding): `ingest` may compact-and-rebase the buffer
+    /// internally, so `preHead + window.count` arithmetic against the rebased array
+    /// would overshoot and silently discard un-decoded audio. The remaining length is
+    /// well-defined in every coordinate system: after a pass that decoded
+    /// `window.count` samples and committed every token in them, the remaining length
+    /// must be exactly `availableBefore - window.count` (the un-tokenized remainder of
+    /// the window is silence). A decode failure aborts the drain — better to return
+    /// the committed-so-far text than to consume audio that was never decoded. No
+    /// partial emission — the caller sends `stream_final`, which replaces any stale
+    /// tentative in the pill.
+    func finalize() async -> String {
+        finalizeDrain: while let manager = manager {
+            let availableBefore = samples.count - head
+            if availableBefore <= 0 {
+                break finalizeDrain
+            }
+            let window = currentWindow()
+            let decodeResult = await Self.decode(
+                manager: manager, window: window, decoderLayers: decoderLayers)
+            if Task.isCancelled { break finalizeDrain }
+            switch decodeResult.outcome {
+            case .failure:
+                break finalizeDrain
+            case .success(let timings, let text, let modelReturnedTimings):
+                if timings.isEmpty, !text.isEmpty, !modelReturnedTimings {
+                    committed += detokenizeNormalizedText(text, leadingContent: !committed.isEmpty)
+                    let targetRemaining = availableBefore - window.count
+                    let currentRemaining = samples.count - head
+                    if currentRemaining > targetRemaining {
+                        head += currentRemaining - targetRemaining
+                    }
+                    maybeCompact()
+                    if targetRemaining <= 0 {
+                        break finalizeDrain
+                    }
+                    continue finalizeDrain
+                }
+                _ = ingest(
+                    timings: timings,
+                    eos: true,
+                    decodedWindowLen: window.count,
+                    fallbackText: text,
+                    modelReturnedTimings: modelReturnedTimings
+                )
+                let targetRemaining = availableBefore - window.count
+                let currentRemaining = samples.count - head
+                if currentRemaining > targetRemaining {
+                    head += currentRemaining - targetRemaining
+                }
+                maybeCompact()
+                if targetRemaining <= 0 {
+                    break finalizeDrain
+                }
+            }
+        }
+        return committed
+    }
+
+    /// Drop all state; bump generation so in-flight decode passes suppress emission.
+    func cancel() async {
+        emissionGeneration &+= 1
+        samples.removeAll()
+        head = 0
+        committed = ""
+        noProgressRuns = 0
+        nextInferAtLen = Self.minSamples
+    }
+
+    private func applyDecodePass(
+        decodeResult: DecodeAheadDecodeResult,
+        eos: Bool,
+        decodedWindowLen: Int,
+        passGeneration: UInt64,
+        emitPartials: Bool
+    ) {
+        switch decodeResult.outcome {
+        case .failure:
+            return
+        case .success(let timings, let text, let modelReturnedTimings):
+            let (grew, tentative) = ingest(
+                timings: timings,
+                eos: eos,
+                decodedWindowLen: decodedWindowLen,
+                fallbackText: text,
+                modelReturnedTimings: modelReturnedTimings
+            )
+            guard emitPartials, emissionGeneration == passGeneration else { return }
+            emit(grewCommitted: grew, tentative: tentative)
+        }
+    }
+
+    // MARK: - Pure buffer logic (port of DecodeAheadBuffer)
+
+    /// Decide whether to decode now (port of `DecodeAheadBuffer::should_decode`).
+    /// - Skip while `!eos && window < minSamples` (not enough audio yet).
+    /// - Force when `eos` or `window >= maxWindowSamples`.
+    /// - Otherwise decode once the window reaches `nextInferAtLen`.
+    private func shouldDecode(eos: Bool) -> Bool {
+        let len = samples.count - head
+        if !eos && len < Self.minSamples {
+            return false
+        }
+        if eos || len >= Self.maxWindowSamples {
+            return true
+        }
+        return len >= nextInferAtLen
+    }
+
+    /// The un-decoded tail `samples[head...]`, capped at `maxWindowSamples`.
+    private func currentWindow() -> [Float] {
+        let available = samples.count - head
+        if available > Self.maxWindowSamples {
+            log("⚠️ decode_ahead: window \(available) exceeds max \(Self.maxWindowSamples); capping (compaction should have bounded this)")
+        }
+        let take = min(available, Self.maxWindowSamples)
+        return Array(samples[head..<(head + take)])
+    }
+
+    /// Absorb a fresh decode's token timings and produce the preview partial.
+    ///
+    /// Commit rule (token-timing adaptation of the Rust segment rule, hardened by the
+    /// 2026-07-10 bench): a naive `endTime <= windowSeconds - tailMargin` cut commits
+    /// MID-WORD ("transcri Egyptian", "Whiskey change" for "risky chain") because head
+    /// then advances into the middle of a word and the next decode starts on half a
+    /// word. Whisper never hit this because its segments end at natural pauses — so we
+    /// recreate that: the cut may only fall where (a) the NEXT token starts a new word
+    /// (leading SentencePiece `▁` or FluidAudio 0.15.5 normalized leading space) AND (b)
+    /// there is an inter-token silence gap of at least `pauseGapSeconds`. Head then
+    /// advances to MID-GAP, so the next window starts in silence, never mid-phoneme.
+    /// When the window hits `maxWindowSamples` the gap requirement is dropped (word
+    /// boundary alone) to guarantee forward progress; on eos ALL tokens are committed
+    /// (nothing follows). `tentative` is the detok of everything after the cut and stays
+    /// fully revisable.
+    private static let pauseGapSeconds = 0.15
+
+    private func ingest(
+        timings: [TokenTiming],
+        eos: Bool,
+        decodedWindowLen: Int,
+        fallbackText: String,
+        modelReturnedTimings: Bool
+    ) -> (grew: Bool, tentative: String) {
+        // `maxWindowSamples` — the un-committed tail can exceed it while decodes lag.
+        // The commit threshold must therefore come from the decoded length, not the
+        // full remaining length (a too-high threshold would silently stop commits).
+        let windowSeconds = Double(decodedWindowLen) / Double(Self.sampleRate)
+        let atMaxWindow = samples.count - head >= Self.maxWindowSamples
+        let threshold = windowSeconds - Self.tailMarginSeconds
+
+        // Find the cut: the last margin-eligible index where the boundary is safe.
+        // eos commits everything; atMaxWindow accepts a bare word boundary; otherwise
+        if eos, timings.isEmpty, !fallbackText.isEmpty {
+            committed += detokenizeNormalizedText(fallbackText, leadingContent: !committed.isEmpty)
+            return (true, "")
+        }
+        // require word boundary + pause gap.
+        var cutIndex = -1 // commit timings[0...cutIndex]
+        var advanceSeconds = 0.0
+        if eos {
+            cutIndex = timings.count - 1
+            advanceSeconds = timings.last.map(\.endTime) ?? 0.0
+        } else {
+            for i in timings.indices {
+                guard timings[i].endTime <= threshold else { break }
+                guard i + 1 < timings.count else {
+                    // Margin-eligible with NO following token: the tail margin is
+                    // trailing silence, so cutting at endTime is safe.
+                    cutIndex = i
+                    advanceSeconds = timings[i].endTime
+                    continue
+                }
+                let next = timings[i + 1]
+                guard Self.tokenStartsNewWord(next.token) else { continue }
+                let gap = next.startTime - timings[i].endTime
+                if gap >= Self.pauseGapSeconds {
+                    cutIndex = i
+                    // Advance to mid-gap: the next window starts in silence.
+                    advanceSeconds = timings[i].endTime + gap / 2.0
+                } else if atMaxWindow {
+                    // Forced progress at the window cap: word boundary alone.
+                    cutIndex = i
+                    advanceSeconds = timings[i].endTime
+                }
+            }
+        }
+
+        let committedTimings = cutIndex >= 0 ? Array(timings[...cutIndex]) : []
+        let tentativeTimings = Array(timings[(cutIndex + 1)...])
+
+        let grew = !committedTimings.isEmpty
+        if grew {
+            appendCommitted(committedTimings.map(\.token))
+            let advanceSamples = Int((advanceSeconds * Double(Self.sampleRate)).rounded())
+            let maxAdvance = samples.count - head // never advance past the end
+            head += min(max(advanceSamples, 0), maxAdvance)
+        } else if !eos && atMaxWindow && timings.isEmpty && fallbackText.isEmpty {
+            let retain = Int(Self.tailMarginSeconds * Double(Self.sampleRate))
+            let consume = max(min(decodedWindowLen, samples.count - head) - retain, 0)
+            head += consume
+        } else if !eos && atMaxWindow && timings.isEmpty && !fallbackText.isEmpty && !modelReturnedTimings {
+            committed += detokenizeNormalizedText(fallbackText, leadingContent: !committed.isEmpty)
+            let consume = min(decodedWindowLen, samples.count - head)
+            head += consume
+            noProgressRuns = 0
+            nextInferAtLen = (samples.count - head) + Self.incrSamples
+            maybeCompact()
+            return (true, "")
+        } else if !eos && timings.isEmpty && !fallbackText.isEmpty && !modelReturnedTimings {
+            noProgressRuns = 0
+            let step = Self.incrSamples
+            nextInferAtLen = (samples.count - head) + step
+            maybeCompact()
+            let tentative = detokenizeNormalizedText(fallbackText, leadingContent: !committed.isEmpty)
+            return (false, tentative)
+        }
+
+        // Backoff + next-infer schedule, relative to the post-advance window length.
+        // For PREVIEW, a growing tentative is progress too (2026-07-10 bench: keying
+        // backoff on committed-growth alone starved the pill to 2-3 updates per clip,
+        // because pause-gated commits are rare in continuous speech). Back off only on
+        // true silence: a decode that produced NO tokens at all.
+        let madeProgress = grew || !timings.isEmpty
+        noProgressRuns = madeProgress ? 0 : noProgressRuns + 1
+        let shift = min(noProgressRuns, Self.maxBackoffShift)
+        let step = madeProgress ? Self.incrSamples : Self.incrSamples << shift
+        nextInferAtLen = (samples.count - head) + step
+
+        maybeCompact()
+
+        let tentative = detokenize(tentativeTimings.map(\.token), leadingContent: !committed.isEmpty)
+        return (grew, tentative)
+    }
+
+    /// Reclaim consumed samples once ≥1 s has been committed-and-skipped OR the head has
+    /// passed the halfway mark. Bounds memory for long recordings. Drains
+    /// `samples[..<head]` and resets `head` to 0; does NOT change the window length, so
+    /// `nextInferAtLen` needs no adjustment.
+    private func maybeCompact() {
+        if head >= Self.sampleRate || head > samples.count / 2 {
+            samples.removeFirst(head)
+            head = 0
+            // REGRESSION GUARD (plan 051): do NOT adjust `nextInferAtLen` here. It is
+            // relative to the un-committed window LENGTH, which compaction leaves
+            // unchanged; rebasing it after draining would collapse the grow-gap and
+            // trigger premature re-decode thrash right after every compaction. Mirrors
+            // the GLM-caught fix in whisper/decode_ahead.rs::maybe_compact.
+        }
+    }
+
+    /// FluidAudio 0.15.5 may normalize word starts as leading ASCII space or SentencePiece `▁`.
+    private static func tokenStartsNewWord(_ token: String) -> Bool {
+        token.hasPrefix("\u{2581}") || token.hasPrefix(" ")
+    }
+
+    private func appendCommitted(_ pieces: [String]) {
+        committed += detokenize(pieces, leadingContent: !committed.isEmpty)
+    }
+
+    /// Detokenize SentencePiece pieces or a normalized fallback string: word starts are
+    /// `▁` or a leading space; subword pieces glue without a separator.
+    private func detokenize(_ pieces: [String], leadingContent: Bool) -> String {
+        var result = ""
+        var hasContent = leadingContent
+        for piece in pieces {
+            if piece.isEmpty || piece == "<blank>" || piece == "<pad>" {
+                continue
+            }
+            if Self.tokenStartsNewWord(piece) {
+                let rest: String
+                if piece.hasPrefix("\u{2581}") {
+                    rest = String(piece.dropFirst())
+                } else {
+                    rest = String(piece.dropFirst()).trimmingCharacters(in: .whitespaces)
+                }
+                if rest.isEmpty {
+                    if hasContent { result += " " }
+                } else {
+                    if hasContent { result += " " }
+                    result += rest
+                    hasContent = true
+                }
+            } else {
+                result += piece
+                hasContent = true
+            }
+        }
+        return result
+    }
+
+    private func detokenizeNormalizedText(_ text: String, leadingContent: Bool) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if leadingContent, !trimmed.hasPrefix(" ") {
+            return " " + trimmed
+        }
+        return trimmed
+    }
+
+    // MARK: - Emission
+
+    /// Emit the protocol partials after a decode pass. `is_confirmed: true` carries the
+    /// FULL cumulative committed string (byte-prefix monotonic); `is_confirmed: false`
+    /// carries ONLY the tentative tail (replaced wholesale each time, even when empty,
+    /// to clear the pill's stale tail). Routed via `writeProtocolLine` (dup'd fd), so it
+    /// is immune to the native-stdout redirect around the decode itself.
+    private func emit(grewCommitted: Bool, tentative: String) {
+        if grewCommitted {
+            ParakeetSidecar.sendResponse(
+                StreamPartialResponse(text: committed, isConfirmed: true, confidence: 1.0),
+                encoder: encoder
+            )
+        }
+        ParakeetSidecar.sendResponse(
+            StreamPartialResponse(text: tentative, isConfirmed: false, confidence: 0.0),
+            encoder: encoder
+        )
+    }
+
+    // MARK: - Decode (isolated to the main actor for the native-stdout redirect)
+
+    /// Run one fresh coherent decode of `window`, returning text plus timings. `failure`
+    /// is distinct from successful empty timings (silence). Missing `tokenTimings` with
+    /// nonempty `text` is reported via `modelReturnedTimings: false` for preview fallback.
+    @MainActor
+    private static func decode(
+        manager: AsrManager,
+        window: [Float],
+        decoderLayers: Int
+    ) async -> DecodeAheadDecodeResult {
+        var state = TdtDecoderState.make(decoderLayers: decoderLayers)
+        do {
+            let result = try await withLibraryStdoutRedirected {
+                try await manager.transcribe(window, decoderState: &state)
+            }
+            let text = result.text
+            if let timings = result.tokenTimings {
+                return DecodeAheadDecodeResult(
+                    outcome: .success(timings: timings, text: text, modelReturnedTimings: true)
+                )
+            }
+            return DecodeAheadDecodeResult(
+                outcome: .success(timings: [], text: text, modelReturnedTimings: false)
+            )
+        } catch {
+            log("⚠️ decode_ahead: transcribe failed: \(error.localizedDescription)")
+            return DecodeAheadDecodeResult(outcome: .failure)
+        }
+    }
+}
+
+/// Deterministic token-normalization checks for Main (`swift run ParakeetSidecar --decode-ahead-token-harness`).
+enum DecodeAheadTokenNormalizationHarness {
+    private static func detokenizePieces(_ pieces: [String], leadingContent: Bool) -> String {
+        var result = ""
+        var hasContent = leadingContent
+        for piece in pieces {
+            if piece.isEmpty || piece == "<blank>" || piece == "<pad>" {
+                continue
+            }
+            let wordStart = piece.hasPrefix("\u{2581}") || piece.hasPrefix(" ")
+            if wordStart {
+                let rest: String
+                if piece.hasPrefix("\u{2581}") {
+                    rest = String(piece.dropFirst())
+                } else {
+                    rest = String(piece.dropFirst()).trimmingCharacters(in: .whitespaces)
+                }
+                if rest.isEmpty {
+                    if hasContent { result += " " }
+                } else {
+                    if hasContent { result += " " }
+                    result += rest
+                    hasContent = true
+                }
+            } else {
+                result += piece
+                hasContent = true
+            }
+        }
+        return result
+    }
+
+    static func run() {
+        var failures = 0
+        func check(_ name: String, _ ok: Bool) {
+            if ok {
+                fputs("PASS \(name)\n", stderr)
+            } else {
+                fputs("FAIL \(name)\n", stderr)
+                failures += 1
+            }
+        }
+
+        check(
+            "sentencepiece_word_boundary",
+            detokenizePieces(["\u{2581}Hello", "\u{2581}world"], leadingContent: false) == "Hello world"
+        )
+        check(
+            "normalized_leading_space_word_boundary",
+            detokenizePieces([" Hello", " world"], leadingContent: false) == "Hello world"
+        )
+        check(
+            "subword_glue",
+            detokenizePieces(["trans", "cript"], leadingContent: false) == "transcript"
+        )
+        check(
+            "word_start_detection_space",
+            " world".hasPrefix(" ") || " world".hasPrefix("\u{2581}")
+        )
+        check(
+            "word_start_detection_sentencepiece",
+            "\u{2581}word".hasPrefix("\u{2581}")
+        )
+
+        if failures == 0 {
+            fputs("decode_ahead_token_harness: ok\n", stderr)
+            exit(0)
+        }
+        fputs("decode_ahead_token_harness: \(failures) failure(s)\n", stderr)
+        exit(1)
     }
 }
 
@@ -273,6 +926,11 @@ final class ActiveStreamSession {
 struct ParakeetSidecar {
     static func main() async {
         logSystemInfo()
+
+        if CommandLine.arguments.contains("--decode-ahead-token-harness") {
+            DecodeAheadTokenNormalizationHarness.run()
+            return
+        }
 
         // Set up JSON encoder
         // IMPORTANT: Do NOT use .prettyPrinted - Rust parses line-by-line
@@ -292,7 +950,7 @@ struct ParakeetSidecar {
     }
 
     static func runEventLoop(encoder: JSONEncoder) async {
-        while let line = readLine() {
+        for await line in ProtocolStdin.lineStream() {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
@@ -449,7 +1107,7 @@ struct ParakeetSidecar {
 
         do {
             let models: AsrModels
-            let progressHandler: DownloadUtils.ProgressHandler = { progress in
+            let progressHandler: ProgressHandler = { progress in
                 sendProgress(progress, encoder: encoder)
             }
 
@@ -908,7 +1566,7 @@ struct ParakeetSidecar {
         }
         do {
             let manager = StreamingEouAsrManager(chunkSize: chunkSize)
-            let progressHandler: DownloadUtils.ProgressHandler = { progress in
+            let progressHandler: ProgressHandler = { progress in
                 sendProgress(progress, encoder: encoder)
             }
             guard let rootDirectory = eouModelsRootDirectory() else {
@@ -1060,8 +1718,24 @@ struct ParakeetSidecar {
                 activeStreamSession = session
                 sendResponse(StreamStartedResponse(), encoder: encoder)
 
+            case "decode_ahead":
+                guard let sharedManager = asrManager else {
+                    sendError("model_not_loaded", message: "Parakeet engine is not initialized for decode_ahead streaming", encoder: encoder)
+                    return
+                }
+                let decoderLayers = await sharedManager.decoderLayerCount
+                let session = DecodeAheadAsrSession(manager: sharedManager, decoderLayers: decoderLayers, encoder: encoder)
+                let activeSession = ActiveStreamSession(
+                    engine: .decodeAhead(session),
+                    sampleRate: sampleRate,
+                    channels: channels,
+                    encoder: encoder
+                )
+                activeStreamSession = activeSession
+                sendResponse(StreamStartedResponse(), encoder: encoder)
+
             default:
-                sendError("invalid_stream_engine", message: "engine must be \"sliding_window\" or \"eou\"", encoder: encoder)
+                sendError("invalid_stream_engine", message: "engine must be \"sliding_window\", \"eou\", or \"decode_ahead\"", encoder: encoder)
             }
         } catch {
             sendError("stream_start_failed", message: "Failed to start stream: \(error.localizedDescription)", encoder: encoder)
@@ -1107,6 +1781,8 @@ struct ParakeetSidecar {
             } catch {
                 sendError("stream_chunk_failed", message: "Failed to process stream chunk: \(error.localizedDescription)", encoder: encoder)
             }
+        case .decodeAhead(let decodeSession):
+            session.enqueueDecodeAheadChunk(buffer, decodeSession: decodeSession)
         }
         // Fire-and-forget command: no response on success.
     }
@@ -1129,6 +1805,8 @@ struct ParakeetSidecar {
                 finalText = try await withLibraryStdoutRedirected {
                     try await manager.finish()
                 }
+            case .decodeAhead(let decodeSession):
+                finalText = await session.finalizeDecodeAhead(decodeSession)
             }
             session.forwarder?.cancel()
             sendResponse(StreamFinalResponse(text: finalText), encoder: encoder)
@@ -1147,13 +1825,17 @@ struct ParakeetSidecar {
         }
         activeStreamSession = nil
         do {
-            try await withLibraryStdoutRedirected {
-                switch session.engine {
-                case .slidingWindow(let manager):
+            switch session.engine {
+            case .slidingWindow(let manager):
+                try await withLibraryStdoutRedirected {
                     await manager.cancel()
-                case .eou(let manager):
+                }
+            case .eou(let manager):
+                try await withLibraryStdoutRedirected {
                     await manager.reset()
                 }
+            case .decodeAhead(let decodeSession):
+                await session.cancelDecodeAheadImmediately(decodeSession)
             }
         } catch {
             log("⚠️ Stream cancel cleanup failed: \(error.localizedDescription)")
@@ -1388,7 +2070,7 @@ struct ParakeetSidecar {
         sendResponse(ErrorResponse(code: code, message: message), encoder: encoder)
     }
 
-    nonisolated static func sendProgress(_ progress: DownloadUtils.DownloadProgress, encoder: JSONEncoder) {
+    nonisolated static func sendProgress(_ progress: DownloadProgress, encoder: JSONEncoder) {
         let phase: String
         switch progress.phase {
         case .listing:

@@ -163,6 +163,11 @@ impl ParakeetCommand {
 pub enum ParakeetStreamEngine {
     SlidingWindow,
     Eou,
+    /// Decode-ahead live-preview engine (plan 051, Phase 1): fresh coherent decode of
+    /// the whole un-committed window on a ~1s cadence, committing only by token
+    /// timestamp so boundary-cut words stay revisable. Phase-1 / bench-only: the
+    /// capability flip that selects it lives in Phase 2.
+    DecodeAhead,
 }
 
 fn default_stream_engine() -> ParakeetStreamEngine {
@@ -195,6 +200,26 @@ impl ParakeetStreamConfig {
         Self {
             hypothesis_chunk_seconds: 0.5,
             ..Self::streaming()
+        }
+    }
+
+    /// Live-preview window geometry (task #19). FluidAudio's sliding-window loop
+    /// only processes once `chunk + right_context` audio has accumulated and then
+    /// advances by `chunk` — the default 11s+2s geometry means the FIRST update
+    /// lands at 13s, which is why the 042 bench saw partials only at the end (its
+    /// `hypothesis_chunk_seconds` "quick feedback" knob is defined upstream but
+    /// never consulted by the loop). Shrinking the geometry turns the SAME loop
+    /// into a ~1s-cadence decode-ahead: first update at ~1.5s, window
+    /// left+chunk+right = 4+1+0.5 = 5.5s (fits the model's fixed 15s input).
+    /// Preview-only quality: the pasted text stays the batch decode at stop.
+    pub fn preview_geometry() -> Self {
+        Self {
+            chunk_seconds: 1.0,
+            hypothesis_chunk_seconds: 0.5,
+            left_context_seconds: 4.0,
+            right_context_seconds: 0.5,
+            min_context_for_confirmation: 10.0,
+            confirmation_threshold: 0.80,
         }
     }
 }

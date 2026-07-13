@@ -85,9 +85,18 @@ impl EngineStreamCapabilities {
         supports_endpointing: false,
         final_only: false,
     };
-    // Dormant until upstream FluidAudio EOU produces non-empty transcripts again.
-    // See plans/042-eou-streaming-live-preview.md for the 2026-07-02 evidence.
-    pub const PARAKEET: Self = Self::FINAL_ONLY;
+    // Local Parakeet streams via the sidecar decode-ahead engine (plan 051): a
+    // committed prefix + tentative tail on a ~1s cadence with pause-aligned commits,
+    // no endpointing, no extra model download. Native EOU stays dormant until
+    // upstream FluidAudio produces non-empty transcripts again (retested still
+    // broken on 0.15.5, 2026-07-10; original evidence plans/042, 2026-07-02).
+    pub const PARAKEET: Self = Self {
+        supports_streaming: true,
+        supports_committed_prefix: true,
+        supports_tentative_tail: true,
+        supports_endpointing: false,
+        final_only: false,
+    };
     // Soniox realtime WebSocket (plan 043): committed prefix + tentative tail + native
     // endpoint detection. Result-authoritative (plan 043b): WS-final is the pasted text,
     // REST-on-WAV runs only as fallback. No model download.
@@ -348,20 +357,24 @@ mod tests {
 
     #[test]
     fn capability_shape_for_every_current_engine() {
-        // Whisper streams via decode-ahead (plan 032, no endpointing). Soniox realtime
+        // Whisper streams via decode-ahead (plan 032, no endpointing); Parakeet via
+        // the sidecar decode-ahead engine (plan 051, same shape). Soniox realtime
         // streaming (plan 043) is result-authoritative (plan 043b): WS-final is the
         // pasted text; REST-on-WAV runs only as fallback. Deepgram realtime streaming
         // (plan 044) mirrors Soniox's stance. The rest are final-only.
-        assert_eq!(
-            EngineStreamCapabilities::for_engine(ProviderEngine::Whisper),
-            EngineStreamCapabilities {
-                supports_streaming: true,
-                supports_committed_prefix: true,
-                supports_tentative_tail: true,
-                supports_endpointing: false,
-                final_only: false,
-            },
-        );
+        for local_decode_ahead in [ProviderEngine::Whisper, ProviderEngine::Parakeet] {
+            assert_eq!(
+                EngineStreamCapabilities::for_engine(local_decode_ahead),
+                EngineStreamCapabilities {
+                    supports_streaming: true,
+                    supports_committed_prefix: true,
+                    supports_tentative_tail: true,
+                    supports_endpointing: false,
+                    final_only: false,
+                },
+                "{local_decode_ahead:?}"
+            );
+        }
         assert_eq!(
             EngineStreamCapabilities::for_engine(ProviderEngine::Soniox),
             EngineStreamCapabilities {
@@ -384,7 +397,6 @@ mod tests {
         );
 
         let final_only_engines = [
-            ProviderEngine::Parakeet,
             ProviderEngine::Openai,
             ProviderEngine::Groq,
             ProviderEngine::Cohere,

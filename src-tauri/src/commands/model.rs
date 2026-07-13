@@ -27,6 +27,8 @@ use tauri_plugin_store::StoreExt;
 type ActiveDownloadsState<'a> = State<'a, Arc<StdMutex<HashMap<String, Arc<AtomicBool>>>>>;
 const DEFAULT_EOU_CHUNK_MS: u16 = 320;
 const EOU_MODEL_ID: &str = "parakeet-eou-live-preview";
+// Used again when Parakeet's native EOU activation returns (upstream broken; plans 042/051).
+#[allow(dead_code)]
 const EOU_MODEL_SIZE_BYTES: u64 = 250 * 1024 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -163,54 +165,14 @@ pub async fn activate_live_preview(
     let provider_engine = provider_engine_from_settings(&active_engine);
     let capabilities = EngineStreamCapabilities::for_engine(provider_engine);
     if !capabilities.supports_streaming {
-        return Err(
-            "Live preview requires a streaming-capable engine (local Whisper).".to_string(),
-        );
+        return Err("Live preview requires a streaming-capable engine.".to_string());
     }
 
-    // Parakeet needs its EOU model downloaded + warmed first; Whisper decode-ahead uses
-    // the already-loaded transcription model, so it enables instantly with no download.
-    if provider_engine == ProviderEngine::Parakeet {
-        let status = parakeet_manager
-            .eou_model_status(&app, DEFAULT_EOU_CHUNK_MS)
-            .await
-            .map_err(|error| error.to_string())?;
-        if !status.downloaded {
-            let app_for_progress = app.clone();
-            parakeet_manager
-                .download_eou_model(
-                    &app,
-                    DEFAULT_EOU_CHUNK_MS,
-                    move |downloaded, total, phase| {
-                        let progress = if total == 0 {
-                            0.0
-                        } else {
-                            (downloaded as f64 / total as f64) * 100.0
-                        };
-                        let _ = emit_to_all(
-                            &app_for_progress,
-                            "download-progress",
-                            json!({
-                                "model": EOU_MODEL_ID,
-                                "engine": "parakeet",
-                                "downloaded": downloaded,
-                                "total": total.max(EOU_MODEL_SIZE_BYTES),
-                                "progress": progress,
-                                "requestId": null,
-                                "phase": phase.as_deref(),
-                            }),
-                        );
-                    },
-                )
-                .await?;
-        }
-
-        parakeet_manager
-            .warmup_eou(&app, DEFAULT_EOU_CHUNK_MS)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-
+    // Every streaming engine now enables instantly: Whisper and Parakeet decode-ahead
+    // (plans 032/051) reuse the already-loaded transcription model, and the cloud WS
+    // engines need only their API key. The Parakeet EOU download+warmup that used to
+    // live here returns when upstream FluidAudio fixes EOU (empty transcripts,
+    // retested broken on 0.15.5 — plans/042 + 051).
     persist_transcription_mode(&app, TRANSCRIPTION_MODE_LIVE_PREVIEW)?;
     get_active_stream_capabilities(app, parakeet_manager).await
 }

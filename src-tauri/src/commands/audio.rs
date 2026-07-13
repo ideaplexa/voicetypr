@@ -169,6 +169,24 @@ fn emit_stream_event(
     }
 }
 
+/// Pure eligibility gate for [`build_parakeet_stream_sink_factory`], extracted so
+/// the regular-mode-with-dev-flags regression — the missing `!live_preview_mode`
+/// guard that let SlidingWindow produce a garbled preview — is unit-testable
+/// without an `AppHandle<Wry>`. Mirrors the inline guards on the Whisper/Soniox/
+/// Deepgram factories (all include `live_preview_mode`).
+fn parakeet_preview_sink_eligible(
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    config: &RecordingConfig,
+) -> bool {
+    streaming_tap_enabled
+        && streaming_engine_enabled
+        && live_preview_mode
+        && config.current_engine == "parakeet"
+        && !config.current_model.is_empty()
+}
+
 fn build_parakeet_stream_sink_factory(
     app: &AppHandle,
     config: &RecordingConfig,
@@ -177,11 +195,12 @@ fn build_parakeet_stream_sink_factory(
     live_preview_mode: bool,
     recording_generation: u64,
 ) -> Option<StreamTapSinkFactory> {
-    if !streaming_tap_enabled
-        || !streaming_engine_enabled
-        || config.current_engine != "parakeet"
-        || config.current_model.is_empty()
-    {
+    if !parakeet_preview_sink_eligible(
+        streaming_tap_enabled,
+        streaming_engine_enabled,
+        live_preview_mode,
+        config,
+    ) {
         return None;
     }
 
@@ -204,8 +223,15 @@ fn build_parakeet_stream_sink_factory(
         let callback_first_partial_logged = first_partial_logged.clone();
         let callback_first_confirmed_logged = first_confirmed_logged.clone();
 
+        // Live preview rides the decode-ahead engine (plan 051): fresh coherent
+        // decode of the un-committed window on a ~1s cadence, pause-aligned
+        // commits. Bench 2026-07-10: first partial <1s, ~1/s cadence, word-perfect
+        // text — while upstream EOU still decodes real speech to empty transcripts
+        // (retested broken on FluidAudio 0.15.5) and SlidingWindow bakes chunk
+        // tokens permanently (garbled preview). EOU slots back in here when
+        // upstream actually fixes it.
         let stream_engine = if live_preview_mode {
-            ParakeetStreamEngine::Eou
+            ParakeetStreamEngine::DecodeAhead
         } else {
             ParakeetStreamEngine::SlidingWindow
         };
@@ -2136,18 +2162,20 @@ fn transcription_task_header_value(task: crate::transcription::TranscriptionTask
 mod tests {
     use super::{
         ai_failure_category, ai_failure_notice, ai_failure_payload, begin_recording_generation,
-        build_failed_transcription_row, build_remote_server_error_payload,
-        build_remote_transcription_result, build_remote_upload_transcription_request,
-        build_transcription_job, build_translation_failed_history_metadata,
-        build_writing_history_metadata, classify_local_failure, emit_recording_too_short_feedback,
-        finalize_in_flight_audio, is_ai_auth_error, is_non_speech_transcript, persist_if_current,
-        plan_desktop_writing_success, recording_license_state, remote_server_error_pill_message,
-        set_in_flight_transcription_audio, should_hide_pill_when_idle, silence_event_runs_in_state,
-        silence_timeout_disposition, stop_should_reset_to_idle,
-        sync_retranscription_failure_metadata, take_in_flight_transcription_audio,
-        toast_clear_is_current, LocalFailureKind, NormalizedTempFile, PillToastEventPayload,
-        RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard,
-        TranscriptionFailure, TranscriptionStatus,
+        build_failed_transcription_row,
+        build_remote_server_error_payload, build_remote_transcription_result,
+        build_remote_upload_transcription_request, build_transcription_job,
+        build_translation_failed_history_metadata, build_writing_history_metadata,
+        classify_local_failure, emit_recording_too_short_feedback, finalize_in_flight_audio,
+        is_ai_auth_error, is_non_speech_transcript, parakeet_preview_sink_eligible,
+        persist_if_current, plan_desktop_writing_success,
+        recording_license_state, remote_server_error_pill_message, set_in_flight_transcription_audio,
+        should_hide_pill_when_idle, silence_event_runs_in_state, silence_timeout_disposition,
+        stop_should_reset_to_idle, sync_retranscription_failure_metadata,
+        take_in_flight_transcription_audio, toast_clear_is_current, LocalFailureKind,
+        NormalizedTempFile, PillToastEventPayload, RecordingConfig, RecordingLicenseState,
+        SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard, TranscriptionFailure,
+        TranscriptionStatus,
     };
     use crate::cloud_stt::CloudProvider;
     use crate::commands::license::CachedLicense;
@@ -3402,6 +3430,78 @@ mod tests {
             elapsed < std::time::Duration::from_secs(2),
             "ws_final took {elapsed:?} on dropped sender; expected near-instant"
         );
+    }
+    /// Build a minimal RecordingConfig pinned to the Parakeet engine with a
+    /// non-empty model. Only the guard-relevant fields matter; the rest are
+    /// inert defaults.
+    fn parakeet_recording_config() -> RecordingConfig {
+        RecordingConfig {
+            show_pill_widget: true,
+            pill_indicator_mode: "when_recording".to_string(),
+            ai_enabled: false,
+            ai_provider: String::new(),
+            ai_model: String::new(),
+            current_model: "parakeet-rtc-1.6b".to_string(),
+            current_engine: "parakeet".to_string(),
+            speech_language: "en".to_string(),
+            transcription_task: "transcribe".to_string(),
+            final_text_language: "en".to_string(),
+            show_recording_status: true,
+            loaded_at: std::time::Instant::now(),
+        }
+    }
+
+    /// Regression: persistent dev flags (`streaming_tap_enabled` +
+    /// `streaming_engine_enabled` in settings) make the tap/engine booleans
+    /// `true` even in regular mode — `start_recording` computes them as
+    /// `live_preview_mode || dev_*_enabled`. The Whisper/Soniox/Deepgram
+    /// factories all guard with `!live_preview_mode`, but the Parakeet factory
+    /// historically omitted it. Without that guard, regular mode falls through
+    /// to `SlidingWindow`, which permanently bakes chunk tokens into a garbled
+    /// live preview. The guard must return `None` so no Parakeet preview sink is
+    /// built in regular mode, while still building one in live-preview mode.
+    #[test]
+    fn parakeet_stream_sink_factory_skips_regular_mode_with_dev_flags() {
+        let config = parakeet_recording_config();
+
+        // Regular mode: dev flags ON, live preview OFF → must be ineligible.
+        // This is the regression: `start_recording` computes the tap/engine
+        // booleans as `live_preview_mode || dev_*_enabled`, so persistent dev
+        // flags make them `true` even outside live-preview. Without the
+        // `live_preview_mode` term in the guard, the factory would proceed and
+        // select SlidingWindow — which bakes chunk tokens permanently into a
+        // garbled preview. This assertion fails without the fix.
+        assert!(
+            !parakeet_preview_sink_eligible(true, true, false, &config),
+            "Parakeet preview must be ineligible in regular mode even with dev flags"
+        );
+
+        // Live-preview mode: same dev flags, live preview ON → eligible
+        // (decode-ahead preview path preserved).
+        assert!(
+            parakeet_preview_sink_eligible(true, true, true, &config),
+            "Parakeet preview must be eligible in live-preview mode"
+        );
+
+        // Guard still honors the other terms regardless of live-preview mode.
+        assert!(
+            !parakeet_preview_sink_eligible(true, true, true, &empty_model_config()),
+            "Parakeet preview must be ineligible when no model is loaded"
+        );
+        let mut wrong_engine = parakeet_recording_config();
+        wrong_engine.current_engine = "whisper".to_string();
+        assert!(
+            !parakeet_preview_sink_eligible(true, true, true, &wrong_engine),
+            "Parakeet preview must be ineligible for a non-parakeet engine"
+        );
+    }
+
+    /// RecordingConfig with an empty model — exercises the `!model.is_empty()`
+    /// arm of the guard independently.
+    fn empty_model_config() -> RecordingConfig {
+        let mut config = parakeet_recording_config();
+        config.current_model = String::new();
+        config
     }
 }
 

@@ -438,6 +438,9 @@ impl ParakeetManager {
         }
     }
 
+    // Unused since decode-ahead replaced EOU for live preview (plan 051); returns
+    // with the EOU activation path when upstream FluidAudio fixes empty transcripts.
+    #[allow(dead_code)]
     pub async fn warmup_eou(&self, app: &AppHandle, chunk_ms: u16) -> Result<(), ParakeetError> {
         match self
             .send_command(app, &ParakeetCommand::WarmupEou { chunk_ms })

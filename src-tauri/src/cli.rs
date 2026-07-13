@@ -161,6 +161,9 @@ struct StreamBenchArgs {
     /// Use .streaming with hypothesisChunkSeconds tuned to 0.5.
     #[arg(long)]
     tuned_hypothesis_500ms: bool,
+    /// Use the live-preview window geometry (1s chunk / 0.5s right context).
+    #[arg(long)]
+    preview_geometry: bool,
 }
 
 pub fn maybe_run_from_env_with_context(
@@ -579,13 +582,16 @@ async fn run_stream_bench(
     let engine = match args.engine.as_str() {
         "sliding_window" => ParakeetStreamEngine::SlidingWindow,
         "eou" => ParakeetStreamEngine::Eou,
+        "decode_ahead" => ParakeetStreamEngine::DecodeAhead,
         other => return Err(format!("Unsupported stream engine: {other}").into()),
     };
     if matches!(engine, ParakeetStreamEngine::Eou) && !matches!(args.chunk_ms, 160 | 320 | 1280) {
         return Err("--chunk-ms must be 160, 320, or 1280 for --engine eou".into());
     }
 
-    let config = if args.tuned_hypothesis_500ms {
+    let config = if args.preview_geometry {
+        ParakeetStreamConfig::preview_geometry()
+    } else if args.tuned_hypothesis_500ms {
         ParakeetStreamConfig::tuned_hypothesis_500ms()
     } else {
         ParakeetStreamConfig::streaming()
@@ -673,7 +679,7 @@ async fn run_stream_bench(
         "file": args.file,
         "engine": args.engine,
         "chunk_ms": if matches!(engine, ParakeetStreamEngine::Eou) { Some(args.chunk_ms) } else { None },
-        "config": if args.tuned_hypothesis_500ms { "tuned_hypothesis_500ms" } else { "streaming" },
+        "config": if args.preview_geometry { "preview_geometry" } else if args.tuned_hypothesis_500ms { "tuned_hypothesis_500ms" } else { "streaming" },
         "sample_rate": spec.sample_rate,
         "channels": spec.channels,
         "duration_ms": duration_ms,
