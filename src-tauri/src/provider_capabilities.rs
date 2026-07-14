@@ -66,7 +66,7 @@ impl ProviderEngine {
                 shareable_remote: true,
                 supports_initial_prompt: false,
                 supports_structured_terms: false,
-                supports_vocabulary_terms: true,
+                supports_vocabulary_terms: false,
                 supports_translate_task: false,
             },
             Self::Soniox => ProviderCapabilities {
@@ -180,7 +180,7 @@ mod tests {
                 shareable_remote: true,
                 supports_initial_prompt: false,
                 supports_structured_terms: false,
-                supports_vocabulary_terms: true,
+                supports_vocabulary_terms: false,
                 supports_translate_task: false,
             }
         );
@@ -295,10 +295,7 @@ mod tests {
             .copied()
             .filter(|engine| engine.capabilities().supports_vocabulary_terms)
             .collect();
-        assert_eq!(
-            vocabulary_terms_engines,
-            vec![ProviderEngine::Parakeet, ProviderEngine::Deepgram]
-        );
+        assert_eq!(vocabulary_terms_engines, vec![ProviderEngine::Deepgram]);
 
         let translate_task_engines: Vec<_> = engines
             .iter()

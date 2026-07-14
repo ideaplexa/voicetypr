@@ -47,7 +47,9 @@ vi.mock("@/components/ApiKeyModal", () => ({
 }));
 
 vi.mock("@/components/LanguageSelection", () => ({
-  LanguageSelection: () => <div data-testid="language-selection" />,
+  LanguageSelection: ({ supportedLanguages }: { supportedLanguages?: readonly string[] }) => (
+    <div data-testid="language-selection">{supportedLanguages?.join(",")}</div>
+  ),
 }));
 
 vi.mock("@/components/ModelCard", () => ({
@@ -75,6 +77,7 @@ const parakeetModel: ModelInfo = {
   size: 1200,
   url: "",
   sha256: "",
+  supported_languages: ["en", "ja", "vi"],
 };
 
 const baseProps = {
@@ -157,14 +160,16 @@ describe("ModelsSection live preview mode", () => {
     renderSection();
 
     expect(await screen.findByText("Transcription mode")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Live preview (English)" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Live preview" })).toBeInTheDocument();
+    expect(screen.getByText("en,ja,vi")).toBeInTheDocument();
+    expect(screen.queryByText(/English-only for now/i)).not.toBeInTheDocument();
   });
 
   it("activates live preview through the rollback-safe backend command", async () => {
     mockCapabilities = makeCapabilities(true);
     renderSection();
 
-    await userEvent.click(await screen.findByRole("radio", { name: "Live preview (English)" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(mocks.invoke).toHaveBeenCalledWith("activate_live_preview", undefined);
@@ -179,7 +184,7 @@ describe("ModelsSection live preview mode", () => {
     activateLivePreviewError = new Error("warmup failed");
     renderSection();
 
-    await userEvent.click(await screen.findByRole("radio", { name: "Live preview (English)" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("warmup failed");

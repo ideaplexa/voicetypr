@@ -132,20 +132,6 @@ func logSystemInfo() {
 }
 
 
-struct IncomingVocabularyTerm: Decodable {
-    let text: String
-    let aliases: [String]
-
-    private enum CodingKeys: String, CodingKey {
-        case text, aliases
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        text = try container.decode(String.self, forKey: .text)
-        aliases = try container.decodeIfPresent([String].self, forKey: .aliases) ?? []
-    }
-}
 
 struct OkResponse: Encodable {
     let type: String = "ok"
@@ -190,8 +176,6 @@ struct StatusResponse: Encodable {
     let modelPath: String? = nil
     let precision: String? = nil
     let attention: String? = nil
-    let customVocabularySupported: Bool = true
-    let customVocabularyReady: Bool = ctcVocabularyReady()
 }
 
 struct ProgressResponse: Encodable {
@@ -270,6 +254,39 @@ enum SupportedModelVersion: String, CaseIterable {
         modelIdentifier
     }
 }
+enum SupportedModel: Hashable {
+    case tdt(SupportedModelVersion)
+    case unified640
+    case nemotronMultilingual1120
+
+    var modelIdentifier: String {
+        switch self {
+        case .tdt(let version): return version.modelIdentifier
+        case .unified640: return "parakeet-unified-640ms"
+        case .nemotronMultilingual1120: return "nemotron-multilingual-1120ms"
+        }
+    }
+
+    var wireVersion: String {
+        switch self {
+        case .tdt(let version): return version.rawValue
+        case .unified640: return "unified_640"
+        case .nemotronMultilingual1120: return "nemotron_multilingual_1120"
+        }
+    }
+
+    func supportsStreamEngine(_ engine: String) -> Bool {
+        switch self {
+        case .tdt:
+            return engine == "sliding_window" || engine == "eou" || engine == "decode_ahead"
+        case .unified640:
+            return engine == "unified_english"
+        case .nemotronMultilingual1120:
+            return engine == "nemotron_multilingual"
+        }
+    }
+}
+
 
 // Global ASR manager state
 @MainActor var asrManager: AsrManager?
@@ -277,17 +294,11 @@ enum SupportedModelVersion: String, CaseIterable {
 @MainActor var isModelLoaded = false
 @MainActor var loadedModelVersion: SupportedModelVersion?
 @MainActor var downloadedVersions = Set<SupportedModelVersion>()
-@MainActor var cachedCtcModels: CtcModels?
-@MainActor var cachedCtcTokenizer: CtcTokenizer?
+@MainActor var loadedModel: SupportedModel?
+@MainActor var unifiedManager: StreamingUnifiedAsrManager?
+@MainActor var nemotronMultilingualManager: StreamingNemotronMultilingualAsrManager?
 @MainActor var cachedEouManagers: [Int: StreamingEouAsrManager] = [:]
 
-func ctcVocabularyReady() -> Bool {
-    let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
-    let tokenizerURL = directory.appendingPathComponent("tokenizer.json")
-    return CtcModels.modelsExist(at: directory)
-        && FileManager.default.fileExists(atPath: tokenizerURL.path)
-}
-@MainActor var cachedCtcSpotter: CtcKeywordSpotter?
 
 @MainActor
 final class ActiveStreamSession {
@@ -295,6 +306,8 @@ final class ActiveStreamSession {
         case slidingWindow(SlidingWindowAsrManager)
         case eou(StreamingEouAsrManager)
         case decodeAhead(DecodeAheadAsrSession)
+        case unified(StreamingUnifiedAsrManager)
+        case nemotronMultilingual(StreamingNemotronMultilingualAsrManager)
     }
 
     let engine: Engine
@@ -942,7 +955,7 @@ struct ParakeetSidecar {
             // Direct file mode for testing
             let audioPath = CommandLine.arguments[1]
             await loadModel(version: .v3, forceDownload: false, emitStatus: false, encoder: encoder)
-            await transcribeFile(audioPath, language: nil, translateToEnglish: false, customVocabulary: [], encoder: encoder)
+            await transcribeFile(audioPath, language: nil, translateToEnglish: false, encoder: encoder)
         } else {
             // JSON communication mode for Tauri
             await runEventLoop(encoder: encoder)
@@ -973,40 +986,36 @@ struct ParakeetSidecar {
 
                 switch commandType {
                 case "load_model", "download_model":
-                    guard let version = parseModelVersion(json["model_version"]) else {
-                        sendError("invalid_model_version", message: "model_version must be \"v2\" or \"v3\"", encoder: encoder)
+                    guard let model = parseSupportedModel(
+                        modelId: json["model_id"],
+                        modelVersion: json["model_version"]
+                    ) else {
+                        sendError("invalid_model", message: "Unsupported Parakeet model", encoder: encoder)
                         continue
                     }
-                    let forceDownload: Bool
-                    if let explicit = json["force_download"] as? Bool {
-                        forceDownload = explicit
-                    } else {
-                        forceDownload = (json["type"] as? String) == "download_model"
-                    }
-                    await loadModel(version: version, forceDownload: forceDownload, encoder: encoder)
+                    let forceDownload = (json["force_download"] as? Bool)
+                        ?? ((json["type"] as? String) == "download_model")
+                    await loadSelectedModel(model, forceDownload: forceDownload, encoder: encoder)
 
                 case "unload_model":
                     await unloadModel()
                     sendResponse(StatusResponse(loadedModel: nil, modelVersion: nil), encoder: encoder)
 
                 case "delete_model":
-                    guard let version = parseModelVersion(json["model_version"]) else {
-                        sendError("invalid_model_version", message: "model_version must be \"v2\" or \"v3\"", encoder: encoder)
+                    guard let model = parseSupportedModel(
+                        modelId: json["model_id"],
+                        modelVersion: json["model_version"]
+                    ) else {
+                        sendError("invalid_model", message: "Unsupported Parakeet model", encoder: encoder)
                         continue
                     }
-                    deleteModelFiles(for: version)
-                    if loadedModelVersion == version {
-                        await unloadModel()
-                    }
-                    sendResponse(StatusResponse(loadedModel: loadedModelVersion?.modelIdentifier, modelVersion: loadedModelVersion?.rawValue), encoder: encoder)
+                    await deleteSelectedModel(model, encoder: encoder)
 
                 case "transcribe":
                     if let audioPath = json["audio_path"] as? String {
-                        // Extract optional parameters from Rust backend
                         let language = json["language"] as? String
                         let translateToEnglish = json["translate_to_english"] as? Bool ?? false
-                        let customVocabulary = decodeCustomVocabulary(from: data)
-                        await transcribeFile(audioPath, language: language, translateToEnglish: translateToEnglish, customVocabulary: customVocabulary, encoder: encoder)
+                        await transcribeFile(audioPath, language: language, translateToEnglish: translateToEnglish, encoder: encoder)
                     } else {
                         sendError("missing_audio_path", message: "audio_path is required", encoder: encoder)
                     }
@@ -1015,8 +1024,6 @@ struct ParakeetSidecar {
                 case "warmup":
                     await warmup(encoder: encoder)
 
-                case "download_ctc_models":
-                    await downloadCtcModels(encoder: encoder)
 
                 case "eou_model_status":
                     let chunkMs = json["chunk_ms"] as? Int ?? 320
@@ -1052,8 +1059,8 @@ struct ParakeetSidecar {
                 case "status":
                     sendResponse(
                         StatusResponse(
-                            loadedModel: loadedModelVersion?.modelIdentifier,
-                            modelVersion: loadedModelVersion?.rawValue
+                            loadedModel: loadedModel?.modelIdentifier,
+                            modelVersion: loadedModel?.wireVersion
                         ),
                         encoder: encoder
                     )
@@ -1071,6 +1078,199 @@ struct ParakeetSidecar {
             } catch {
                 sendError("parse_error", message: "Failed to parse JSON: \(error)", encoder: encoder)
             }
+        }
+    }
+
+    static func loadSelectedModel(
+        _ model: SupportedModel,
+        forceDownload: Bool,
+        encoder: JSONEncoder
+    ) async {
+        if loadedModel == model, !forceDownload {
+            sendResponse(
+                StatusResponse(loadedModel: model.modelIdentifier, modelVersion: model.wireVersion),
+                encoder: encoder
+            )
+            return
+        }
+
+        await unloadModel()
+        switch model {
+        case .tdt(let version):
+            await loadModel(
+                version: version,
+                forceDownload: forceDownload,
+                emitStatus: false,
+                encoder: encoder
+            )
+            guard isModelLoaded else { return }
+        case .unified640:
+            do {
+                let manager = StreamingUnifiedAsrManager(
+                    configuration: nil,
+                    config: UnifiedConfig(leftFrames: 70, chunkFrames: 7, rightFrames: 1),
+                    encoderPrecision: .int8
+                )
+                if forceDownload {
+                    deleteNativeModelFiles(for: model)
+                    try await withLibraryStdoutRedirected {
+                        try await manager.loadModels(
+                            progressHandler: { progress in sendProgress(progress, encoder: encoder) }
+                        )
+                    }
+                } else {
+                    try await withLibraryStdoutRedirected {
+                        try await manager.loadModels(from: nativeModelDirectory(for: model))
+                    }
+                }
+                unifiedManager = manager
+                isModelLoaded = true
+            } catch {
+                sendError(
+                    "model_load_error",
+                    message: "Failed to load Parakeet Unified: \(error.localizedDescription)",
+                    encoder: encoder
+                )
+                return
+            }
+        case .nemotronMultilingual1120:
+            do {
+                let manager = StreamingNemotronMultilingualAsrManager()
+                let directory: URL
+                if forceDownload {
+                    deleteNativeModelFiles(for: model)
+                    directory = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                        languageCode: "multilingual",
+                        chunkMs: 1120,
+                        progressHandler: { progress in sendProgress(progress, encoder: encoder) }
+                    )
+                } else {
+                    directory = nativeModelDirectory(for: model)
+                }
+                try await withLibraryStdoutRedirected {
+                    try await manager.loadModels(from: directory)
+                }
+                nemotronMultilingualManager = manager
+                isModelLoaded = true
+            } catch {
+                sendError(
+                    "model_load_error",
+                    message: "Failed to load Nemotron Multilingual: \(error.localizedDescription)",
+                    encoder: encoder
+                )
+                return
+            }
+        }
+
+        loadedModel = model
+        sendResponse(
+            StatusResponse(loadedModel: model.modelIdentifier, modelVersion: model.wireVersion),
+            encoder: encoder
+        )
+    }
+
+    static func deleteSelectedModel(_ model: SupportedModel, encoder: JSONEncoder) async {
+        if loadedModel == model {
+            await unloadModel()
+        }
+        switch model {
+        case .tdt(let version):
+            deleteModelFiles(for: version)
+        case .unified640, .nemotronMultilingual1120:
+            deleteNativeModelFiles(for: model)
+        }
+        sendResponse(
+            StatusResponse(
+                loadedModel: loadedModel?.modelIdentifier,
+                modelVersion: loadedModel?.wireVersion
+            ),
+            encoder: encoder
+        )
+    }
+
+    // VoiceTypr stores bare ISO-639 codes; the native bundle uses regional
+    // prompt_dictionary keys for these languages.
+    static func nemotronLanguageHint(_ language: String?) -> String {
+        switch language?.lowercased() {
+        case "af": return "af-ZA"
+        case "am": return "am-ET"
+        case "az": return "az-AZ"
+        case "bn": return "bn-IN"
+        case "fa": return "fa-IR"
+        case "gu": return "gu-IN"
+        case "ha": return "ha-NG"
+        case "haw": return "haw-US"
+        case "he": return "he-IL"
+        case "hy": return "hy-AM"
+        case "id": return "id-ID"
+        case "ja": return "ja-JP"
+        case "ka": return "ka-GE"
+        case "km": return "km-KH"
+        case "kn": return "kn-IN"
+        case "ln": return "ln-CD"
+        case "mi": return "mi-NZ"
+        case "ml": return "ml-IN"
+        case "mr": return "mr-IN"
+        case "ms": return "ms-MY"
+        case "mt": return "mt-MT"
+        case "ne": return "ne-NP"
+        case "si": return "si-LK"
+        case "so": return "so-SO"
+        case "sw": return "sw-KE"
+        case "ta": return "ta-IN"
+        case "te": return "te-IN"
+        case "tg": return "tg-TJ"
+        case "th": return "th-TH"
+        case "ur": return "ur-PK"
+        case "uz": return "uz-UZ"
+        case "vi": return "vi-VN"
+        case "yo": return "yo-NG"
+        case "zh": return "zh-CN"
+        case .some(let code): return code
+        case nil: return "auto"
+        }
+    }
+
+    static func voiceTyprLanguageCode(_ language: String?) -> String? {
+        guard let language,
+              let bareCode = language.split(
+                maxSplits: 1,
+                whereSeparator: { $0 == "-" || $0 == "_" }
+              ).first else {
+            return nil
+        }
+        return bareCode.lowercased()
+    }
+
+    static func nativeModelDirectory(for model: SupportedModel) -> URL {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/FluidAudio/Models")
+        switch model {
+        case .unified640:
+            return root.appendingPathComponent("parakeet-unified-en-0.6b", isDirectory: true)
+        case .nemotronMultilingual1120:
+            return root.appendingPathComponent(
+                "nemotron-multilingual/multilingual/1120ms",
+                isDirectory: true
+            )
+        case .tdt:
+            return root
+        }
+    }
+
+    static func deleteNativeModelFiles(for model: SupportedModel) {
+        switch model {
+        case .unified640:
+            try? FileManager.default.removeItem(
+                at: nativeModelDirectory(for: model)
+                    .appendingPathComponent(
+                        "parakeet_unified_encoder_streaming_70_7_1_int8.mlmodelc"
+                    )
+            )
+        case .nemotronMultilingual1120:
+            try? FileManager.default.removeItem(at: nativeModelDirectory(for: model))
+        case .tdt:
+            return
         }
     }
 
@@ -1159,6 +1359,7 @@ struct ParakeetSidecar {
 
             isModelLoaded = true
             loadedModelVersion = version
+            loadedModel = .tdt(version)
             log("✅ Model load complete: \(version.modelIdentifier)")
             if emitStatus {
                 sendResponse(StatusResponse(loadedModel: version.modelIdentifier, modelVersion: version.rawValue), encoder: encoder)
@@ -1178,10 +1379,19 @@ struct ParakeetSidecar {
             await cancelStream(encoder: JSONEncoder(), emitResponse: false)
         }
         await asrManager?.cleanup()
+        await unifiedManager?.cleanup()
+        await nemotronMultilingualManager?.cleanup()
+        for manager in cachedEouManagers.values {
+            await manager.cleanup()
+        }
+        cachedEouManagers.removeAll()
         asrManager = nil
         loadedAsrModels = nil
+        unifiedManager = nil
+        nemotronMultilingualManager = nil
         isModelLoaded = false
         loadedModelVersion = nil
+        loadedModel = nil
     }
 
     static func deleteModelFiles(for version: SupportedModelVersion) {
@@ -1214,82 +1424,92 @@ struct ParakeetSidecar {
         downloadedVersions.remove(version)
     }
 
-    static func transcribeFile(_ audioPath: String, language: String? = nil, translateToEnglish: Bool = false, customVocabulary: [IncomingVocabularyTerm] = [], encoder: JSONEncoder) async {
-        log("───────────────────────────────────────────────────────")
-        log("🎤 TRANSCRIBE REQUEST")
-        log("───────────────────────────────────────────────────────")
-        log("📄 Audio path: \(audioPath)")
-        log("🌐 Language: \(language ?? "auto-detect")")
-        log("🔄 Translate to English: \(translateToEnglish)")
-        log("📦 Loaded model: \(loadedModelVersion?.modelIdentifier ?? "none")")
-        log("📐 Running on: \(getArchitectureInfo())")
-
-        // Check if model is loaded - DO NOT auto-download
-        guard isModelLoaded else {
-            log("❌ No model loaded!")
-            sendError("model_not_loaded", message: "Parakeet model not loaded. Please download it first from Settings.", encoder: encoder)
+    static func transcribeFile(
+        _ audioPath: String,
+        language: String? = nil,
+        translateToEnglish: Bool = false,
+        encoder: JSONEncoder
+    ) async {
+        guard isModelLoaded, let selectedModel = loadedModel else {
+            sendError(
+                "model_not_loaded",
+                message: "Parakeet model not loaded. Please download it first from Settings.",
+                encoder: encoder
+            )
             return
         }
-
-        let fileURL = URL(fileURLWithPath: audioPath)
-
-        // Check if file exists
         guard FileManager.default.fileExists(atPath: audioPath) else {
-            log("❌ Audio file not found: \(audioPath)")
             sendError("file_not_found", message: "Audio file not found: \(audioPath)", encoder: encoder)
             return
         }
 
-        // Log file info
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: audioPath) {
-            let size = attrs[.size] as? Int64 ?? 0
-            log("📊 File size: \(size) bytes (\(size / 1024) KB)")
-        }
-
-        guard let manager = asrManager else {
-            log("❌ AsrManager is nil even though isModelLoaded=true!")
-            sendError("model_not_loaded", message: "Parakeet engine is not initialized", encoder: encoder)
-            return
-        }
-
+        let fileURL = URL(fileURLWithPath: audioPath)
         do {
-            log("🎙️ Starting transcription...")
-            let startTime = Date()
+            let finalText: String
+            let duration: Float
+            let transcriptLanguage: String?
+            switch selectedModel {
+            case .tdt:
+                guard let manager = asrManager else { throw ASRError.notInitialized }
+                var decoderState = TdtDecoderState.make(
+                    decoderLayers: await manager.decoderLayerCount
+                )
+                let result = try await withLibraryStdoutRedirected {
+                    try await manager.transcribe(fileURL, decoderState: &decoderState)
+                }
+                finalText = result.text
+                duration = Float(result.duration)
+                transcriptLanguage = language
 
-            // Transcribe the audio file (returns ASRResult)
-            var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            let result = try await withLibraryStdoutRedirected {
-                try await manager.transcribe(fileURL, decoderState: &decoderState)
+            case .unified640:
+                guard let manager = unifiedManager else { throw ASRError.notInitialized }
+                let samples = try AudioConverter().resampleAudioFile(fileURL)
+                guard let buffer = makeFloatPcmBuffer(samples) else {
+                    throw ASRError.invalidAudioData
+                }
+                try await manager.reset()
+                await manager.setPartialTranscriptCallback { _ in }
+                try await manager.appendAudio(buffer)
+                try await manager.processBufferedAudio()
+                finalText = try await manager.finish()
+                duration = Float(samples.count) / 16_000
+                transcriptLanguage = "en"
+
+            case .nemotronMultilingual1120:
+                guard let manager = nemotronMultilingualManager else {
+                    throw ASRError.notInitialized
+                }
+                let samples = try AudioConverter().resampleAudioFile(fileURL)
+                await manager.reset()
+                await manager.setLanguage(nemotronLanguageHint(language))
+                await manager.setPartialCallback { _ in }
+                _ = try await manager.process(samples: samples)
+                finalText = try await manager.finish()
+                duration = Float(samples.count) / 16_000
+                transcriptLanguage = voiceTyprLanguageCode(
+                    await manager.detectedLanguage()
+                ) ?? language
             }
 
-            let elapsed = Date().timeIntervalSince(startTime)
-            log("✅ Transcription complete in \(String(format: "%.2f", elapsed))s")
-            log("📝 Result text length: \(result.text.count) chars")
-            log("⏱️ Audio duration: \(result.duration)s")
-
-            let finalText = await rescoreTranscriptIfPossible(
-                result: result,
-                audioURL: fileURL,
-                customVocabulary: customVocabulary
+            if translateToEnglish {
+                log("⚠️ Parakeet translation is not supported; returning transcription")
+            }
+            sendResponse(
+                TranscriptionResponse(
+                    text: finalText,
+                    segments: [],
+                    language: transcriptLanguage,
+                    duration: duration
+                ),
+                encoder: encoder
             )
-
-            // Send transcription response
-            let response = TranscriptionResponse(
-                text: finalText,
-                segments: [],
-                language: language,
-                duration: Float(result.duration)
-            )
-            sendResponse(response, encoder: encoder)
         } catch {
-            log("❌ TRANSCRIPTION FAILED")
-            log("❌ Error type: \(type(of: error))")
-            log("❌ Error details: \(error)")
-            log("❌ Localized: \(error.localizedDescription)")
-            // Send error response instead of transcription with error
-            sendError("transcription_failed", message: "Transcription failed: \(error.localizedDescription)", encoder: encoder)
+            sendError(
+                "transcription_failed",
+                message: "Transcription failed: \(error.localizedDescription)",
+                encoder: encoder
+            )
         }
-        log("───────────────────────────────────────────────────────")
     }
 
     static func warmup(encoder: JSONEncoder) async {
@@ -1315,17 +1535,36 @@ struct ParakeetSidecar {
             return
         }
 
-        guard let manager = asrManager else {
-            finish(warmed: false, error: "Parakeet engine is not initialized")
-            return
-        }
-
         do {
-            let fileURL = try writeWarmupSilenceWav()
-            warmupURL = fileURL
-            var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            _ = try await withLibraryStdoutRedirected {
-                try await manager.transcribe(fileURL, decoderState: &decoderState)
+            switch loadedModel {
+            case .tdt:
+                guard let manager = asrManager else { throw ASRError.notInitialized }
+                let fileURL = try writeWarmupSilenceWav()
+                warmupURL = fileURL
+                var decoderState = TdtDecoderState.make(
+                    decoderLayers: await manager.decoderLayerCount
+                )
+                _ = try await withLibraryStdoutRedirected {
+                    try await manager.transcribe(fileURL, decoderState: &decoderState)
+                }
+            case .unified640:
+                guard let manager = unifiedManager,
+                      let buffer = makeFloatPcmBuffer(Array(repeating: 0, count: 16_000))
+                else { throw ASRError.notInitialized }
+                try await manager.reset()
+                try await manager.appendAudio(buffer)
+                try await manager.processBufferedAudio()
+                _ = try await manager.finish()
+            case .nemotronMultilingual1120:
+                guard let manager = nemotronMultilingualManager,
+                      let buffer = makeFloatPcmBuffer(Array(repeating: 0, count: 16_000))
+                else { throw ASRError.notInitialized }
+                await manager.reset()
+                await manager.setLanguage("auto")
+                _ = try await manager.process(audioBuffer: buffer)
+                _ = try await manager.finish()
+            case nil:
+                throw ASRError.notInitialized
             }
             finish(warmed: true)
         } catch {
@@ -1388,7 +1627,7 @@ struct ParakeetSidecar {
 
     static func isHeavyCommandBlockedDuringStream(_ commandType: String?) -> Bool {
         switch commandType {
-        case "load_model", "download_model", "unload_model", "delete_model", "transcribe", "download_ctc_models", "download_eou_model", "warmup", "warmup_eou", "diarize", "start_stream":
+        case "load_model", "download_model", "unload_model", "delete_model", "transcribe", "download_eou_model", "warmup", "warmup_eou", "diarize", "start_stream":
             return true
         default:
             return false
@@ -1618,20 +1857,17 @@ struct ParakeetSidecar {
             sendError("stream_busy", message: "A Parakeet stream is already active", encoder: encoder)
             return
         }
-        guard isModelLoaded, let models = loadedAsrModels else {
+        guard isModelLoaded, let selectedModel = loadedModel else {
             sendError("model_not_loaded", message: "Parakeet model must be loaded before streaming", encoder: encoder)
             return
         }
-        if let requestedVersion = parseModelVersion(command["model_version"]),
-           let loadedVersion = loadedModelVersion,
-           requestedVersion != loadedVersion {
-            sendError("model_mismatch", message: "Loaded model is \(loadedVersion.rawValue), requested \(requestedVersion.rawValue)", encoder: encoder)
-            return
-        }
         if let requestedModel = command["model_id"] as? String,
-           let loadedModel = loadedModelVersion?.modelIdentifier,
-           requestedModel != loadedModel {
-            sendError("model_mismatch", message: "Loaded model is \(loadedModel), requested \(requestedModel)", encoder: encoder)
+           requestedModel != selectedModel.modelIdentifier {
+            sendError(
+                "model_mismatch",
+                message: "Loaded model is \(selectedModel.modelIdentifier), requested \(requestedModel)",
+                encoder: encoder
+            )
             return
         }
 
@@ -1643,6 +1879,14 @@ struct ParakeetSidecar {
         }
 
         let engine = (command["engine"] as? String) ?? "sliding_window"
+        guard selectedModel.supportsStreamEngine(engine) else {
+            sendError(
+                "stream_engine_mismatch",
+                message: "Stream engine \(engine) is incompatible with \(selectedModel.modelIdentifier)",
+                encoder: encoder
+            )
+            return
+        }
 
         do {
             switch engine {
@@ -1692,6 +1936,10 @@ struct ParakeetSidecar {
                 sendResponse(StreamStartedResponse(), encoder: encoder)
 
             case "sliding_window":
+                guard let models = loadedAsrModels else {
+                    sendError("model_not_loaded", message: "TDT models are not loaded", encoder: encoder)
+                    return
+                }
                 let manager = SlidingWindowAsrManager(config: streamingConfig(from: command))
                 try await withLibraryStdoutRedirected {
                     try await manager.loadModels(models)
@@ -1734,8 +1982,51 @@ struct ParakeetSidecar {
                 activeStreamSession = activeSession
                 sendResponse(StreamStartedResponse(), encoder: encoder)
 
+            case "unified_english":
+                guard let manager = unifiedManager else {
+                    sendError("model_not_loaded", message: "Parakeet Unified is not loaded", encoder: encoder)
+                    return
+                }
+                try await manager.reset()
+                await manager.setPartialTranscriptCallback { transcript in
+                    sendResponse(
+                        StreamPartialResponse(text: transcript, isConfirmed: false, confidence: 0.0),
+                        encoder: encoder
+                    )
+                }
+                activeStreamSession = ActiveStreamSession(
+                    engine: .unified(manager),
+                    sampleRate: sampleRate,
+                    channels: channels,
+                    encoder: encoder
+                )
+                sendResponse(StreamStartedResponse(), encoder: encoder)
+
+            case "nemotron_multilingual":
+                guard let manager = nemotronMultilingualManager else {
+                    sendError("model_not_loaded", message: "Nemotron Multilingual is not loaded", encoder: encoder)
+                    return
+                }
+                await manager.reset()
+                // Streaming preview auto-detects language; the authoritative batch
+                // final still receives the user's selected language hint.
+                await manager.setLanguage("auto")
+                await manager.setPartialCallback { transcript in
+                    sendResponse(
+                        StreamPartialResponse(text: transcript, isConfirmed: false, confidence: 0.0),
+                        encoder: encoder
+                    )
+                }
+                activeStreamSession = ActiveStreamSession(
+                    engine: .nemotronMultilingual(manager),
+                    sampleRate: sampleRate,
+                    channels: channels,
+                    encoder: encoder
+                )
+                sendResponse(StreamStartedResponse(), encoder: encoder)
+
             default:
-                sendError("invalid_stream_engine", message: "engine must be \"sliding_window\", \"eou\", or \"decode_ahead\"", encoder: encoder)
+                sendError("invalid_stream_engine", message: "Unsupported stream engine", encoder: encoder)
             }
         } catch {
             sendError("stream_start_failed", message: "Failed to start stream: \(error.localizedDescription)", encoder: encoder)
@@ -1783,6 +2074,19 @@ struct ParakeetSidecar {
             }
         case .decodeAhead(let decodeSession):
             session.enqueueDecodeAheadChunk(buffer, decodeSession: decodeSession)
+        case .unified(let manager):
+            do {
+                try await manager.appendAudio(buffer)
+                try await manager.processBufferedAudio()
+            } catch {
+                sendError("stream_chunk_failed", message: "Failed to process Unified stream chunk: \(error.localizedDescription)", encoder: encoder)
+            }
+        case .nemotronMultilingual(let manager):
+            do {
+                _ = try await manager.process(audioBuffer: buffer)
+            } catch {
+                sendError("stream_chunk_failed", message: "Failed to process Nemotron stream chunk: \(error.localizedDescription)", encoder: encoder)
+            }
         }
         // Fire-and-forget command: no response on success.
     }
@@ -1807,6 +2111,10 @@ struct ParakeetSidecar {
                 }
             case .decodeAhead(let decodeSession):
                 finalText = await session.finalizeDecodeAhead(decodeSession)
+            case .unified(let manager):
+                finalText = try await manager.finish()
+            case .nemotronMultilingual(let manager):
+                finalText = try await manager.finish()
             }
             session.forwarder?.cancel()
             sendResponse(StreamFinalResponse(text: finalText), encoder: encoder)
@@ -1836,6 +2144,10 @@ struct ParakeetSidecar {
                 }
             case .decodeAhead(let decodeSession):
                 await session.cancelDecodeAheadImmediately(decodeSession)
+            case .unified(let manager):
+                try await manager.reset()
+            case .nemotronMultilingual(let manager):
+                await manager.reset()
             }
         } catch {
             log("⚠️ Stream cancel cleanup failed: \(error.localizedDescription)")
@@ -1885,139 +2197,28 @@ struct ParakeetSidecar {
         return buffer
     }
 
-    static func downloadCtcModels(encoder: JSONEncoder) async {
-        log("───────────────────────────────────────────────────────")
-        log("📥 DOWNLOAD CTC MODELS REQUEST")
-        log("───────────────────────────────────────────────────────")
-
-        do {
-            sendResponse(ProgressResponse(progress: 0.0, phase: "downloading ctc models"), encoder: encoder)
-            try await CtcModels.download(variant: .ctc110m)
-
-            guard ctcVocabularyReady() else {
-                sendError("ctc_model_download_failed", message: "CTC model download completed but required files are missing", encoder: encoder)
-                return
-            }
-
-            cachedCtcModels = nil
-            cachedCtcTokenizer = nil
-            cachedCtcSpotter = nil
-            sendResponse(ProgressResponse(progress: 1.0, phase: "ctc models ready"), encoder: encoder)
-            sendResponse(OkResponse(command: "download_ctc_models"), encoder: encoder)
-        } catch {
-            log("❌ CTC MODEL DOWNLOAD FAILED")
-            log("❌ Error type: \(type(of: error))")
-            log("❌ Error details: \(error)")
-            log("❌ Localized: \(error.localizedDescription)")
-            sendError("ctc_model_download_failed", message: "Failed to download CTC models: \(error.localizedDescription)", encoder: encoder)
+    static func makeFloatPcmBuffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+        guard !samples.isEmpty,
+              let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 16_000,
+                channels: 1,
+                interleaved: false
+              ),
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+              ),
+              let channel = buffer.floatChannelData?[0] else {
+            return nil
         }
-
-        log("───────────────────────────────────────────────────────")
+        samples.withUnsafeBufferPointer { source in
+            channel.update(from: source.baseAddress!, count: samples.count)
+        }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        return buffer
     }
 
-    static func rescoreTranscriptIfPossible(
-        result: ASRResult,
-        audioURL: URL,
-        customVocabulary: [IncomingVocabularyTerm]
-    ) async -> String {
-        guard !customVocabulary.isEmpty else {
-            return result.text
-        }
-
-        guard ctcVocabularyReady() else {
-            log("ℹ️ Custom vocabulary skipped: CTC models not ready")
-            return result.text
-        }
-
-        let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
-
-        guard let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty else {
-            log("ℹ️ Custom vocabulary skipped: token timings unavailable")
-            return result.text
-        }
-
-        do {
-            let tokenizer = try await cachedOrLoadCtcTokenizer(from: directory)
-            let terms = customVocabulary.compactMap { term -> CustomVocabularyTerm? in
-                let tokenIds = tokenizer.encode(term.text)
-                guard !tokenIds.isEmpty else { return nil }
-                return CustomVocabularyTerm(
-                    text: term.text,
-                    aliases: term.aliases.isEmpty ? nil : term.aliases,
-                    tokenIds: nil,
-                    ctcTokenIds: tokenIds
-                )
-            }
-
-            guard !terms.isEmpty else {
-                log("ℹ️ Custom vocabulary skipped: no tokenizable terms")
-                return result.text
-            }
-
-            let vocabulary = CustomVocabularyContext(terms: terms, minTermLength: 3)
-            let models = try await cachedOrLoadCtcModels(from: directory)
-            let spotter = cachedOrCreateCtcSpotter(models: models)
-            let samples = try AudioConverter().resampleAudioFile(audioURL)
-            let spot = try await spotter.spotKeywordsWithLogProbs(
-                audioSamples: samples,
-                customVocabulary: vocabulary
-            )
-            // Term values must never be logged. FluidAudio exposes no runtime logger level;
-            // shipped sidecars are built in release so VocabularyRescorer DEBUG logs stay compiled out.
-            let rescorer = try await VocabularyRescorer.create(
-                spotter: spotter,
-                vocabulary: vocabulary,
-                ctcModelDirectory: directory
-            )
-            let output = rescorer.ctcTokenRescore(
-                transcript: result.text,
-                tokenTimings: tokenTimings,
-                logProbs: spot.logProbs,
-                frameDuration: spot.frameDuration
-            )
-
-            if output.wasModified {
-                log("✅ Custom vocabulary applied")
-                return output.text
-            }
-
-            log("ℹ️ Custom vocabulary produced no transcript changes")
-            return result.text
-        } catch {
-            log("⚠️ Custom vocabulary rescore failed; returning original transcript. Error type: \(type(of: error))")
-            return result.text
-        }
-    }
-
-    static func cachedOrLoadCtcModels(from directory: URL) async throws -> CtcModels {
-        if let models = cachedCtcModels {
-            return models
-        }
-
-        let models = try await CtcModels.load(from: directory, variant: .ctc110m)
-        cachedCtcModels = models
-        return models
-    }
-
-    static func cachedOrLoadCtcTokenizer(from directory: URL) async throws -> CtcTokenizer {
-        if let tokenizer = cachedCtcTokenizer {
-            return tokenizer
-        }
-
-        let tokenizer = try await CtcTokenizer.load(from: directory)
-        cachedCtcTokenizer = tokenizer
-        return tokenizer
-    }
-
-    static func cachedOrCreateCtcSpotter(models: CtcModels) -> CtcKeywordSpotter {
-        if let spotter = cachedCtcSpotter {
-            return spotter
-        }
-
-        let spotter = CtcKeywordSpotter(models: models, blankId: models.vocabulary.count)
-        cachedCtcSpotter = spotter
-        return spotter
-    }
 
     nonisolated static func diarizeFile(_ audioPath: String, encoder: JSONEncoder) async {
         log("───────────────────────────────────────────────────────")
@@ -2091,16 +2292,14 @@ struct ParakeetSidecar {
     }
 
 
-    static func decodeCustomVocabulary(from data: Data) -> [IncomingVocabularyTerm] {
-        struct TranscribeCommand: Decodable {
-            let custom_vocabulary: [IncomingVocabularyTerm]?
-        }
-
-        do {
-            return try JSONDecoder().decode(TranscribeCommand.self, from: data).custom_vocabulary ?? []
-        } catch {
-            log("⚠️ Custom vocabulary ignored: command vocabulary payload could not be decoded")
-            return []
+    static func parseSupportedModel(modelId: Any?, modelVersion: Any?) -> SupportedModel? {
+        switch (modelId as? String)?.lowercased() {
+        case "parakeet-unified-640ms":
+            return .unified640
+        case "nemotron-multilingual-1120ms":
+            return .nemotronMultilingual1120
+        default:
+            return parseModelVersion(modelVersion).map(SupportedModel.tdt)
         }
     }
 

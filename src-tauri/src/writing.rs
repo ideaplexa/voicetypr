@@ -14,7 +14,6 @@ use crate::commands::settings::{
     normalize_final_text_language, normalize_transcription_task,
     FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
 };
-use crate::parakeet::messages::ParakeetVocabularyTerm;
 use crate::transcription::TranscriptionResult;
 use crate::whisper::languages::validate_language;
 
@@ -1389,9 +1388,6 @@ fn strip_control_chars(value: &str) -> String {
     value.chars().filter(|ch| !ch.is_control()).collect()
 }
 
-fn clean_parakeet_vocabulary_value(value: &str) -> String {
-    strip_control_chars(value.trim()).trim().to_string()
-}
 /// Sanitizes a single term destined for the AI reference list: strips control
 /// characters (including newlines/tabs, so a term cannot smuggle a separate
 /// instruction line) and collapses internal whitespace into single spaces.
@@ -1410,52 +1406,6 @@ fn sanitize_ai_context_term(value: &str) -> String {
         }
     }
     result.trim().to_string()
-}
-
-pub fn compile_parakeet_custom_vocabulary(
-    settings: &WritingSettings,
-    transcript_language: Option<&str>,
-) -> Vec<ParakeetVocabularyTerm> {
-    let mut terms: Vec<ParakeetVocabularyTerm> = Vec::new();
-
-    for word in settings.custom_words.iter().filter(|word| {
-        word.enabled && language_scope_matches(word.language.as_deref(), transcript_language)
-    }) {
-        let phrase = clean_parakeet_vocabulary_value(&word.phrase);
-        if phrase.chars().count() < 3 {
-            continue;
-        }
-
-        let spoken_form = word
-            .spoken_form
-            .as_deref()
-            .map(clean_parakeet_vocabulary_value)
-            .filter(|spoken| !spoken.is_empty() && !spoken.eq_ignore_ascii_case(&phrase));
-
-        if let Some(existing) = terms
-            .iter_mut()
-            .find(|term| term.text.eq_ignore_ascii_case(&phrase))
-        {
-            if let Some(spoken_form) = spoken_form {
-                if !existing
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(&spoken_form))
-                {
-                    existing.aliases.push(spoken_form);
-                }
-            }
-            continue;
-        }
-
-        let aliases = spoken_form.into_iter().collect();
-        terms.push(ParakeetVocabularyTerm {
-            text: phrase,
-            aliases,
-        });
-    }
-
-    terms
 }
 
 /// Maximum number of `keyterm` query-param values Deepgram Nova-3 accepts in a
@@ -2100,127 +2050,6 @@ mod tests {
             language: language.map(str::to_string),
             enabled,
         }
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_includes_enabled_words_only() {
-        let settings = WritingSettings {
-            custom_words: vec![
-                custom_word("Voicetypr", Some("voice typer"), Some("en"), true),
-                custom_word("DisabledTerm", Some("disabled term"), Some("en"), false),
-            ],
-            ..WritingSettings::default()
-        };
-
-        let terms = compile_parakeet_custom_vocabulary(&settings, Some("en"));
-        assert_eq!(terms.len(), 1);
-        assert_eq!(terms[0].text, "Voicetypr");
-        assert_eq!(terms[0].aliases, vec!["voice typer"]);
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_honors_language_scope() {
-        let settings = WritingSettings {
-            custom_words: vec![
-                custom_word("Voicetypr", None, Some("en"), true),
-                custom_word("TermeFrançais", None, Some("fr"), true),
-                custom_word("GlobalTerm", None, None, true),
-            ],
-            ..WritingSettings::default()
-        };
-
-        let terms = compile_parakeet_custom_vocabulary(&settings, Some("en"));
-        let texts: Vec<&str> = terms.iter().map(|term| term.text.as_str()).collect();
-        assert_eq!(texts, vec!["Voicetypr", "GlobalTerm"]);
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_drops_short_or_empty_phrases() {
-        let settings = WritingSettings {
-            custom_words: vec![
-                custom_word("AI", Some("artificial intelligence"), Some("en"), true),
-                custom_word("  ", Some("blank"), Some("en"), true),
-                custom_word("Tauri", None, Some("en"), true),
-            ],
-            ..WritingSettings::default()
-        };
-
-        let terms = compile_parakeet_custom_vocabulary(&settings, Some("en"));
-        assert_eq!(terms.len(), 1);
-        assert_eq!(terms[0].text, "Tauri");
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_alias_rules() {
-        let settings = WritingSettings {
-            custom_words: vec![
-                custom_word("React", Some("react"), Some("en"), true),
-                custom_word("Voicetypr", Some(" voice typer "), Some("en"), true),
-                custom_word("Tauri", Some("   "), Some("en"), true),
-            ],
-            ..WritingSettings::default()
-        };
-
-        let terms = compile_parakeet_custom_vocabulary(&settings, Some("en"));
-        assert!(terms[0].aliases.is_empty());
-        assert_eq!(terms[1].aliases, vec!["voice typer"]);
-        assert!(terms[2].aliases.is_empty());
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_dedupes_terms_and_aliases() {
-        let settings = WritingSettings {
-            custom_words: vec![
-                custom_word("Voicetypr", Some("voice typer"), Some("en"), true),
-                custom_word("voicetypr", Some("voice type her"), Some("en"), true),
-                custom_word("Voicetypr", Some("VOICE TYPER"), Some("en"), true),
-            ],
-            ..WritingSettings::default()
-        };
-
-        let terms = compile_parakeet_custom_vocabulary(&settings, Some("en"));
-        assert_eq!(terms.len(), 1);
-        assert_eq!(terms[0].text, "Voicetypr");
-        assert_eq!(terms[0].aliases, vec!["voice typer", "voice type her"]);
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_strips_control_chars() {
-        let settings = WritingSettings {
-            custom_words: vec![custom_word(
-                " Voice\0typr\n ",
-                Some("voice\ttyp\0er"),
-                Some("en"),
-                true,
-            )],
-            ..WritingSettings::default()
-        };
-
-        let terms = compile_parakeet_custom_vocabulary(&settings, Some("en"));
-        assert_eq!(terms[0].text, "Voicetypr");
-        assert_eq!(terms[0].aliases, vec!["voicetyper"]);
-    }
-
-    #[test]
-    fn test_compile_parakeet_custom_vocabulary_empty_without_custom_words() {
-        let settings = WritingSettings {
-            replacements: vec![TextReplacementRule {
-                from: "voice typer".to_string(),
-                to: "Voicetypr".to_string(),
-                language: Some("en".to_string()),
-                enabled: true,
-            }],
-            snippets: vec![Snippet {
-                trigger: "sig".to_string(),
-                body: "Signature".to_string(),
-                language: Some("en".to_string()),
-                enabled: true,
-                preserve_literal: true,
-            }],
-            ..WritingSettings::default()
-        };
-
-        assert!(compile_parakeet_custom_vocabulary(&settings, Some("en")).is_empty());
     }
 
     #[test]

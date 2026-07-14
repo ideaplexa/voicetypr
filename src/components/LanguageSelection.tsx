@@ -128,9 +128,10 @@ interface LanguageSelectionProps {
   className?: string
   engine?: SpeechModelEngine
   englishOnly?: boolean
+  supportedLanguages?: readonly string[]
 }
 
-export function LanguageSelection({ value, onValueChange, className, engine = 'whisper', englishOnly = false }: LanguageSelectionProps) {
+export function LanguageSelection({ value, onValueChange, className, engine = 'whisper', englishOnly = false, supportedLanguages }: LanguageSelectionProps) {
   const [open, setOpen] = React.useState(false)
 
   // Parakeet v3 supports 25 European languages
@@ -152,6 +153,9 @@ export function LanguageSelection({ value, onValueChange, className, engine = 'w
     if (englishOnly) {
       return languages.filter(l => l.value === 'en')
     }
+    if (supportedLanguages) {
+      return languages.filter(l => supportedLanguages.includes(l.value))
+    }
     if (engine === 'parakeet') {
       return languages.filter(l => parakeetAllowed.has(l.value))
     }
@@ -162,7 +166,7 @@ export function LanguageSelection({ value, onValueChange, className, engine = 'w
       return languages.filter(l => cohereAllowed.has(l.value))
     }
     return languages
-  }, [engine, parakeetAllowed, sonioxAllowed, cohereAllowed, englishOnly])
+  }, [engine, parakeetAllowed, sonioxAllowed, cohereAllowed, englishOnly, supportedLanguages])
   
   return (
     <Popover open={open} onOpenChange={setOpen}>

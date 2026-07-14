@@ -77,18 +77,16 @@ export function ModelsTab() {
       onRepair={repairModel}
       onSelect={async (modelName) => {
         if (!settings) return;
-        const engine = sortedModels.find(([name]) => name === modelName)?.[1]?.engine ?? 'whisper';
+        const selectedModel = sortedModels.find(([name]) => name === modelName)?.[1];
+        const engine = selectedModel?.engine ?? 'whisper';
         const previousSpeechLanguage = settings.speech_language;
-        const parakeetSupportedLanguages = new Set([
-          'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'et', 'fi', 'fr', 'hr', 'hu',
-          'it', 'lt', 'lv', 'mt', 'nl', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'uk',
-        ]);
+        const supportedLanguages = selectedModel?.supported_languages;
         const requiresSpeechLanguageReset =
           (engine === 'whisper' && /\.en$/i.test(modelName) && previousSpeechLanguage !== 'en') ||
           (engine === 'parakeet' &&
-            ((modelName.includes('-v2') && previousSpeechLanguage !== 'en') ||
-              (!modelName.includes('-v2') &&
-                !parakeetSupportedLanguages.has(previousSpeechLanguage))));
+            supportedLanguages !== undefined &&
+            supportedLanguages !== null &&
+            !supportedLanguages.includes(previousSpeechLanguage));
 
         await saveSettings({
           current_model: modelName,

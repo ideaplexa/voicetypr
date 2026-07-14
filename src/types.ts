@@ -30,6 +30,7 @@ interface BaseModelInfo {
   size?: number;
   url?: string;
   sha256?: string;
+  supported_languages?: string[] | null;
 }
 
 export interface LocalModelInfo extends BaseModelInfo {

@@ -8,7 +8,7 @@ use tauri_plugin_store::StoreExt;
 
 use crate::commands::settings::read_whisper_speed_mode;
 use crate::parakeet::manager::ParakeetManager;
-use crate::parakeet::messages::{ParakeetSegment, ParakeetVocabularyTerm};
+use crate::parakeet::messages::ParakeetSegment;
 use crate::remote::settings::RemoteSettings;
 use crate::transcription::TranscriptionSegment;
 use crate::whisper::cache::TranscriberCache;
@@ -52,21 +52,6 @@ pub(crate) fn parakeet_segments_to_transcription_segments(
             speaker_id: None,
         })
         .collect()
-}
-
-pub(crate) fn compile_parakeet_custom_vocabulary_for_transcription(
-    app: &AppHandle,
-    language: Option<&str>,
-) -> Vec<ParakeetVocabularyTerm> {
-    let Ok(settings) = crate::writing::load_writing_settings(app) else {
-        return Vec::new();
-    };
-
-    if settings.custom_words.is_empty() {
-        return Vec::new();
-    }
-
-    crate::writing::compile_parakeet_custom_vocabulary(&settings, language)
 }
 
 #[cfg(target_os = "windows")]

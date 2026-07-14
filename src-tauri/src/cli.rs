@@ -152,8 +152,8 @@ struct StreamBenchArgs {
     /// Parakeet model to use; defaults to the app's selected model.
     #[arg(long)]
     model: Option<String>,
-    /// Streaming engine to benchmark: sliding_window or eou.
-    #[arg(long, default_value = "sliding_window")]
+    /// Streaming engine to benchmark; auto selects the production engine for the model.
+    #[arg(long, default_value = "auto")]
     engine: String,
     /// EOU chunk size in milliseconds: 160, 320, or 1280.
     #[arg(long, default_value_t = 320)]
@@ -552,6 +552,25 @@ struct StreamBenchState {
     confirmed_partials: u64,
 }
 
+fn resolve_stream_bench_engine(
+    model: &str,
+    requested_engine: &str,
+) -> Result<ParakeetStreamEngine, String> {
+    match requested_engine {
+        "auto" => match model {
+            "parakeet-unified-640ms" => Ok(ParakeetStreamEngine::UnifiedEnglish),
+            "nemotron-multilingual-1120ms" => Ok(ParakeetStreamEngine::NemotronMultilingual),
+            _ => Ok(ParakeetStreamEngine::DecodeAhead),
+        },
+        "sliding_window" => Ok(ParakeetStreamEngine::SlidingWindow),
+        "eou" => Ok(ParakeetStreamEngine::Eou),
+        "decode_ahead" => Ok(ParakeetStreamEngine::DecodeAhead),
+        "unified_english" => Ok(ParakeetStreamEngine::UnifiedEnglish),
+        "nemotron_multilingual" => Ok(ParakeetStreamEngine::NemotronMultilingual),
+        other => Err(format!("Unsupported stream engine: {other}")),
+    }
+}
+
 async fn run_stream_bench(
     app: &tauri::AppHandle,
     args: StreamBenchArgs,
@@ -579,12 +598,7 @@ async fn run_stream_bench(
     let total_frames = samples.len() / usize::from(spec.channels);
     let duration_ms = ((total_frames as f64 / f64::from(spec.sample_rate)) * 1000.0).round() as u64;
 
-    let engine = match args.engine.as_str() {
-        "sliding_window" => ParakeetStreamEngine::SlidingWindow,
-        "eou" => ParakeetStreamEngine::Eou,
-        "decode_ahead" => ParakeetStreamEngine::DecodeAhead,
-        other => return Err(format!("Unsupported stream engine: {other}").into()),
-    };
+    let engine = resolve_stream_bench_engine(&model, &args.engine)?;
     if matches!(engine, ParakeetStreamEngine::Eou) && !matches!(args.chunk_ms, 160 | 320 | 1280) {
         return Err("--chunk-ms must be 160, 320, or 1280 for --engine eou".into());
     }
@@ -886,6 +900,21 @@ fn format_availability(snap: &crate::RecognitionAvailabilitySnapshot) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stream_bench_auto_selects_native_model_engines() {
+        assert_eq!(
+            resolve_stream_bench_engine("parakeet-unified-640ms", "auto").unwrap(),
+            ParakeetStreamEngine::UnifiedEnglish
+        );
+        assert_eq!(
+            resolve_stream_bench_engine("nemotron-multilingual-1120ms", "auto").unwrap(),
+            ParakeetStreamEngine::NemotronMultilingual
+        );
+        assert_eq!(
+            resolve_stream_bench_engine("parakeet-tdt-0.6b-v3", "auto").unwrap(),
+            ParakeetStreamEngine::DecodeAhead
+        );
+    }
 
     #[test]
     fn parse_server_requires_port() {

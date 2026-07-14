@@ -11,11 +11,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::error::ParakeetError;
 use super::messages::{
     ParakeetCommand, ParakeetResponse, ParakeetStreamConfig, ParakeetStreamEngine,
-    ParakeetVocabularyTerm,
 };
-use super::models::{ParakeetModelDefinition, AVAILABLE_MODELS};
 #[cfg(target_os = "macos")]
 use super::models::get_available_models;
+use super::models::{ParakeetModelDefinition, ParakeetModelKind, AVAILABLE_MODELS};
 use super::sidecar::{
     ParakeetClient, ParakeetStreamHandle, ParakeetStreamOpenRequest, ParakeetStreamPartial,
 };
@@ -33,6 +32,7 @@ pub struct ParakeetModelStatus {
     pub accuracy_score: u8,
     pub recommended: bool,
     pub engine: String,
+    pub supported_languages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,36 +42,7 @@ pub struct ParakeetEouModelStatus {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ParakeetTranscriptionOptions {
-    pub language: Option<String>,
-    pub translate: bool,
-    pub custom_vocabulary: Vec<ParakeetVocabularyTerm>,
-    pub cancel_flag: Option<Arc<AtomicBool>>,
-}
-
 const EOU_MODEL_SIZE_BYTES: u64 = 250 * 1024 * 1024;
-
-impl ParakeetTranscriptionOptions {
-    pub fn new(
-        language: Option<String>,
-        translate: bool,
-        cancel_flag: Option<Arc<AtomicBool>>,
-    ) -> Self {
-        Self {
-            language,
-            translate,
-            custom_vocabulary: Vec::new(),
-            cancel_flag,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ParakeetVocabularyStatus {
-    pub supported: bool,
-    pub ready: bool,
-}
 
 pub struct ParakeetManager {
     client: ParakeetClient,
@@ -104,7 +75,7 @@ const PARAKEET_UNAVAILABLE_EVENT: &str = "parakeet-unavailable";
 
 fn fluid_audio_model_dir(home: &Path, definition: &ParakeetModelDefinition) -> PathBuf {
     home.join("Library/Application Support/FluidAudio/Models")
-        .join(definition.id)
+        .join(definition.cache_subdir)
 }
 
 fn model_files_complete(model_dir: &Path, definition: &ParakeetModelDefinition) -> bool {
@@ -173,10 +144,11 @@ impl ParakeetManager {
     }
 
     fn model_version_for(definition: &ParakeetModelDefinition) -> &'static str {
-        if definition.id.ends_with("-v2") {
-            "v2"
-        } else {
-            "v3"
+        match definition.kind {
+            ParakeetModelKind::TdtV2 => "v2",
+            ParakeetModelKind::TdtV3 => "v3",
+            ParakeetModelKind::UnifiedEnglish640 => "unified_640",
+            ParakeetModelKind::NemotronMultilingual1120 => "nemotron_multilingual_1120",
         }
     }
 
@@ -214,6 +186,11 @@ impl ParakeetManager {
                     accuracy_score: definition.accuracy_score,
                     recommended: definition.recommended,
                     engine: "parakeet".to_string(),
+                    supported_languages: definition
+                        .languages
+                        .iter()
+                        .map(|language| (*language).to_string())
+                        .collect(),
                 })
                 .collect()
         }
@@ -520,6 +497,12 @@ impl ParakeetManager {
                 "Unknown Parakeet model: {model_name}"
             )));
         };
+        if !self.is_model_downloaded(definition) {
+            return Err(ParakeetError::SidecarError {
+                code: "model_not_downloaded".to_string(),
+                message: format!("Parakeet model is not downloaded: {model_name}"),
+            });
+        }
 
         let version = Self::model_version_for(definition);
         let command = ParakeetCommand::LoadModel {
@@ -588,34 +571,6 @@ impl ParakeetManager {
         result
     }
 
-    pub fn vocabulary_status_from_response(
-        response: &ParakeetResponse,
-    ) -> Option<ParakeetVocabularyStatus> {
-        match response {
-            ParakeetResponse::Status {
-                custom_vocabulary_supported,
-                custom_vocabulary_ready,
-                ..
-            } => Some(ParakeetVocabularyStatus {
-                supported: *custom_vocabulary_supported,
-                ready: *custom_vocabulary_ready,
-            }),
-            _ => None,
-        }
-    }
-
-    pub async fn status(&self, app: &AppHandle) -> Result<ParakeetResponse, ParakeetError> {
-        self.send_command(app, &ParakeetCommand::Status {}).await
-    }
-
-    pub async fn download_ctc_models(
-        &self,
-        app: &AppHandle,
-    ) -> Result<ParakeetResponse, ParakeetError> {
-        self.send_command(app, &ParakeetCommand::DownloadCtcModels {})
-            .await
-    }
-
     pub async fn warmup(&self, app: &AppHandle) -> Result<Option<u64>, ParakeetError> {
         if self.real_transcription_busy(app) {
             log::info!("Skipping Parakeet warmup because recording/transcription is active");
@@ -666,40 +621,22 @@ impl ParakeetManager {
         translate: bool,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<ParakeetResponse, ParakeetError> {
-        self.transcribe_with_custom_vocabulary(
-            app,
-            model_name,
-            audio_path,
-            ParakeetTranscriptionOptions::new(language, translate, cancel_flag),
-        )
-        .await
-    }
-
-    pub async fn transcribe_with_custom_vocabulary(
-        &self,
-        app: &AppHandle,
-        model_name: &str,
-        audio_path: PathBuf,
-        options: ParakeetTranscriptionOptions,
-    ) -> Result<ParakeetResponse, ParakeetError> {
         let _active_guard = self.mark_real_transcription_active();
         let inference_start = Instant::now();
         let command = ParakeetCommand::Transcribe {
             audio_path: audio_path.to_string_lossy().to_string(),
-            language: options.language,
-            translate_to_english: options.translate,
+            language,
+            translate_to_english: translate,
             prompt: None,
             use_word_timestamps: Some(true),
             chunk_duration: None,
             overlap_duration: None,
             attention: None,
             local_attention_context: None,
-            custom_vocabulary: (!options.custom_vocabulary.is_empty())
-                .then_some(options.custom_vocabulary),
         };
 
         let result = self
-            .send_command_with_progress_and_cancel(app, &command, options.cancel_flag, |_, _| {})
+            .send_command_with_progress_and_cancel(app, &command, cancel_flag, |_, _| {})
             .await;
         if matches!(result, Ok(ParakeetResponse::Transcription { .. })) {
             let elapsed_ms = inference_start.elapsed().as_millis() as u64;
@@ -803,7 +740,7 @@ impl ParakeetManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{fluid_audio_model_dir, model_files_complete};
+    use super::{fluid_audio_model_dir, model_files_complete, ParakeetManager};
     use crate::parakeet::models::AVAILABLE_MODELS;
     use std::fs;
     use tempfile::TempDir;
@@ -811,14 +748,15 @@ mod tests {
     #[test]
     fn fluid_audio_model_dir_matches_fluidaudio_cache_shape() {
         let temp = TempDir::new().expect("temp dir");
-        let definition = &AVAILABLE_MODELS[0];
 
-        assert_eq!(
-            fluid_audio_model_dir(temp.path(), definition),
-            temp.path()
-                .join("Library/Application Support/FluidAudio/Models")
-                .join(definition.id)
-        );
+        for definition in AVAILABLE_MODELS.iter() {
+            assert_eq!(
+                fluid_audio_model_dir(temp.path(), definition),
+                temp.path()
+                    .join("Library/Application Support/FluidAudio/Models")
+                    .join(definition.cache_subdir)
+            );
+        }
     }
 
     #[test]
@@ -849,5 +787,23 @@ mod tests {
         }
 
         assert!(model_files_complete(&model_dir, definition));
+    }
+
+    #[test]
+    fn native_models_use_distinct_sidecar_versions() {
+        let unified = AVAILABLE_MODELS
+            .iter()
+            .find(|model| model.id == "parakeet-unified-640ms")
+            .expect("Unified model");
+        assert_eq!(ParakeetManager::model_version_for(unified), "unified_640");
+
+        let multilingual = AVAILABLE_MODELS
+            .iter()
+            .find(|model| model.id == "nemotron-multilingual-1120ms")
+            .expect("Nemotron model");
+        assert_eq!(
+            ParakeetManager::model_version_for(multilingual),
+            "nemotron_multilingual_1120"
+        );
     }
 }

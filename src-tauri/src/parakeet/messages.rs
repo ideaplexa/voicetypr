@@ -6,13 +6,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ParakeetVocabularyTerm {
-    pub text: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ParakeetCommand {
     LoadModel {
@@ -57,14 +50,11 @@ pub enum ParakeetCommand {
         attention: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         local_attention_context: Option<i32>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        custom_vocabulary: Option<Vec<ParakeetVocabularyTerm>>,
     },
     Diarize {
         audio_path: String,
     },
     Status {},
-    DownloadCtcModels {},
     Warmup {},
     EouModelStatus {
         chunk_ms: u16,
@@ -117,7 +107,6 @@ impl ParakeetCommand {
             Self::Transcribe { .. } => "transcribe",
             Self::Diarize { .. } => "diarize",
             Self::Status { .. } => "status",
-            Self::DownloadCtcModels { .. } => "download_ctc_models",
             Self::Warmup { .. } => "warmup",
             Self::EouModelStatus { .. } => "eou_model_status",
             Self::DownloadEouModel { .. } => "download_eou_model",
@@ -140,9 +129,7 @@ impl ParakeetCommand {
             Self::Transcribe { audio_path, .. } | Self::Diarize { audio_path } => {
                 transcribe_timeout_secs(audio_path)
             }
-            Self::DownloadCtcModels { .. } | Self::DownloadEouModel { .. } => {
-                DOWNLOAD_MODEL_TIMEOUT_SECS
-            }
+            Self::DownloadEouModel { .. } => DOWNLOAD_MODEL_TIMEOUT_SECS,
             Self::Warmup { .. } => WARMUP_TIMEOUT_SECS,
             Self::WarmupEou { .. } => WARMUP_TIMEOUT_SECS,
             Self::Status { .. }
@@ -168,6 +155,8 @@ pub enum ParakeetStreamEngine {
     /// timestamp so boundary-cut words stay revisable. Phase-1 / bench-only: the
     /// capability flip that selects it lives in Phase 2.
     DecodeAhead,
+    UnifiedEnglish,
+    NemotronMultilingual,
 }
 
 fn default_stream_engine() -> ParakeetStreamEngine {
@@ -288,10 +277,6 @@ pub enum ParakeetResponse {
         model_path: Option<String>,
         precision: Option<String>,
         attention: Option<String>,
-        #[serde(default)]
-        custom_vocabulary_supported: bool,
-        #[serde(default)]
-        custom_vocabulary_ready: bool,
     },
     #[serde(rename_all = "camelCase")]
     Progress {
@@ -366,70 +351,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transcribe_command_serializes_custom_vocabulary_when_present() {
-        let command = ParakeetCommand::Transcribe {
-            audio_path: "/tmp/audio.wav".to_string(),
-            language: Some("en".to_string()),
-            translate_to_english: false,
-            prompt: None,
-            use_word_timestamps: Some(true),
-            chunk_duration: None,
-            overlap_duration: None,
-            attention: None,
-            local_attention_context: None,
-            custom_vocabulary: Some(vec![
-                ParakeetVocabularyTerm {
-                    text: "Voicetypr".to_string(),
-                    aliases: vec!["voice typer".to_string()],
-                },
-                ParakeetVocabularyTerm {
-                    text: "Tauri".to_string(),
-                    aliases: Vec::new(),
-                },
-            ]),
-        };
-
-        let value = serde_json::to_value(command).unwrap();
-        assert_eq!(value["type"], "transcribe");
-        assert_eq!(value["custom_vocabulary"][0]["text"], "Voicetypr");
-        assert_eq!(value["custom_vocabulary"][0]["aliases"][0], "voice typer");
-        assert!(value["custom_vocabulary"][1].get("aliases").is_none());
-    }
-
-    #[test]
-    fn transcribe_command_omits_empty_custom_vocabulary() {
-        let command = ParakeetCommand::Transcribe {
-            audio_path: "/tmp/audio.wav".to_string(),
-            language: None,
-            translate_to_english: false,
-            prompt: None,
-            use_word_timestamps: Some(true),
-            chunk_duration: None,
-            overlap_duration: None,
-            attention: None,
-            local_attention_context: None,
-            custom_vocabulary: None,
-        };
-
-        let value = serde_json::to_value(command).unwrap();
-        assert!(value.get("custom_vocabulary").is_none());
-    }
-
-    #[test]
-    fn ctc_download_command_serializes_snake_case_type() {
-        let value = serde_json::to_value(ParakeetCommand::DownloadCtcModels {}).unwrap();
-        assert_eq!(value["type"], "download_ctc_models");
-    }
-
-    #[test]
     fn request_timeout_secs_restores_per_command_bounds() {
         assert_eq!(
             ParakeetCommand::Status {}.request_timeout_secs(),
             SHORT_REQUEST_TIMEOUT_SECS
-        );
-        assert_eq!(
-            ParakeetCommand::DownloadCtcModels {}.request_timeout_secs(),
-            DOWNLOAD_MODEL_TIMEOUT_SECS
         );
         assert_eq!(
             ParakeetCommand::LoadModel {
@@ -476,7 +401,6 @@ mod tests {
                 overlap_duration: None,
                 attention: None,
                 local_attention_context: None,
-                custom_vocabulary: None,
             }
             .request_timeout_secs(),
             TRANSCRIBE_TIMEOUT_SECS
@@ -484,52 +408,14 @@ mod tests {
     }
 
     #[test]
-    fn status_response_defaults_custom_vocabulary_flags() {
-        let response: ParakeetResponse = serde_json::from_value(serde_json::json!({
-            "type": "status",
-            "loadedModel": null,
-            "modelPath": null,
-            "precision": null,
-            "attention": null
-        }))
-        .unwrap();
-
-        match response {
-            ParakeetResponse::Status {
-                custom_vocabulary_supported,
-                custom_vocabulary_ready,
-                ..
-            } => {
-                assert!(!custom_vocabulary_supported);
-                assert!(!custom_vocabulary_ready);
-            }
-            other => panic!("unexpected response: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn status_response_decodes_custom_vocabulary_flags() {
-        let response: ParakeetResponse = serde_json::from_value(serde_json::json!({
-            "type": "status",
-            "loadedModel": null,
-            "modelPath": null,
-            "precision": null,
-            "attention": null,
-            "customVocabularySupported": true,
-            "customVocabularyReady": true
-        }))
-        .unwrap();
-
-        match response {
-            ParakeetResponse::Status {
-                custom_vocabulary_supported,
-                custom_vocabulary_ready,
-                ..
-            } => {
-                assert!(custom_vocabulary_supported);
-                assert!(custom_vocabulary_ready);
-            }
-            other => panic!("unexpected response: {:?}", other),
-        }
+    fn native_stream_engines_use_sidecar_wire_names() {
+        assert_eq!(
+            serde_json::to_value(ParakeetStreamEngine::UnifiedEnglish).unwrap(),
+            "unified_english"
+        );
+        assert_eq!(
+            serde_json::to_value(ParakeetStreamEngine::NemotronMultilingual).unwrap(),
+            "nemotron_multilingual"
+        );
     }
 }

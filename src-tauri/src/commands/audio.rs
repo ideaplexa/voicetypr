@@ -187,6 +187,14 @@ fn parakeet_preview_sink_eligible(
         && !config.current_model.is_empty()
 }
 
+fn parakeet_stream_engine_for_model(model_name: &str) -> ParakeetStreamEngine {
+    match model_name {
+        "parakeet-unified-640ms" => ParakeetStreamEngine::UnifiedEnglish,
+        "nemotron-multilingual-1120ms" => ParakeetStreamEngine::NemotronMultilingual,
+        _ => ParakeetStreamEngine::DecodeAhead,
+    }
+}
+
 fn build_parakeet_stream_sink_factory(
     app: &AppHandle,
     config: &RecordingConfig,
@@ -223,18 +231,10 @@ fn build_parakeet_stream_sink_factory(
         let callback_first_partial_logged = first_partial_logged.clone();
         let callback_first_confirmed_logged = first_confirmed_logged.clone();
 
-        // Live preview rides the decode-ahead engine (plan 051): fresh coherent
-        // decode of the un-committed window on a ~1s cadence, pause-aligned
-        // commits. Bench 2026-07-10: first partial <1s, ~1/s cadence, word-perfect
-        // text — while upstream EOU still decodes real speech to empty transcripts
-        // (retested broken on FluidAudio 0.15.5) and SlidingWindow bakes chunk
-        // tokens permanently (garbled preview). EOU slots back in here when
-        // upstream actually fixes it.
-        let stream_engine = if live_preview_mode {
-            ParakeetStreamEngine::DecodeAhead
-        } else {
-            ParakeetStreamEngine::SlidingWindow
-        };
+        // TDT uses decode-ahead because FluidAudio's EOU path is still unreliable.
+        // Native streaming models use their own stateful managers and built-in
+        // punctuation/capitalization.
+        let stream_engine = parakeet_stream_engine_for_model(&model_name_for_stream);
         let opened = tauri::async_runtime::block_on(async move {
             let parakeet_manager = app_for_stream.state::<ParakeetManager>();
             parakeet_manager
@@ -2162,20 +2162,19 @@ fn transcription_task_header_value(task: crate::transcription::TranscriptionTask
 mod tests {
     use super::{
         ai_failure_category, ai_failure_notice, ai_failure_payload, begin_recording_generation,
-        build_failed_transcription_row,
-        build_remote_server_error_payload, build_remote_transcription_result,
-        build_remote_upload_transcription_request, build_transcription_job,
-        build_translation_failed_history_metadata, build_writing_history_metadata,
-        classify_local_failure, emit_recording_too_short_feedback, finalize_in_flight_audio,
-        is_ai_auth_error, is_non_speech_transcript, parakeet_preview_sink_eligible,
-        persist_if_current, plan_desktop_writing_success,
-        recording_license_state, remote_server_error_pill_message, set_in_flight_transcription_audio,
-        should_hide_pill_when_idle, silence_event_runs_in_state, silence_timeout_disposition,
-        stop_should_reset_to_idle, sync_retranscription_failure_metadata,
-        take_in_flight_transcription_audio, toast_clear_is_current, LocalFailureKind,
-        NormalizedTempFile, PillToastEventPayload, RecordingConfig, RecordingLicenseState,
-        SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard, TranscriptionFailure,
-        TranscriptionStatus,
+        build_failed_transcription_row, build_remote_server_error_payload,
+        build_remote_transcription_result, build_remote_upload_transcription_request,
+        build_transcription_job, build_translation_failed_history_metadata,
+        build_writing_history_metadata, classify_local_failure, emit_recording_too_short_feedback,
+        finalize_in_flight_audio, is_ai_auth_error, is_non_speech_transcript,
+        parakeet_preview_sink_eligible, parakeet_stream_engine_for_model, persist_if_current,
+        plan_desktop_writing_success, recording_license_state, remote_server_error_pill_message,
+        set_in_flight_transcription_audio, should_hide_pill_when_idle, silence_event_runs_in_state,
+        silence_timeout_disposition, stop_should_reset_to_idle,
+        sync_retranscription_failure_metadata, take_in_flight_transcription_audio,
+        toast_clear_is_current, LocalFailureKind, NormalizedTempFile, PillToastEventPayload,
+        RecordingConfig, RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition,
+        StopInFlightGuard, TranscriptionFailure, TranscriptionStatus,
     };
     use crate::cloud_stt::CloudProvider;
     use crate::commands::license::CachedLicense;
@@ -3493,6 +3492,24 @@ mod tests {
         assert!(
             !parakeet_preview_sink_eligible(true, true, true, &wrong_engine),
             "Parakeet preview must be ineligible for a non-parakeet engine"
+        );
+    }
+
+    #[test]
+    fn parakeet_models_route_to_their_streaming_engines() {
+        use crate::parakeet::messages::ParakeetStreamEngine;
+
+        assert_eq!(
+            parakeet_stream_engine_for_model("parakeet-tdt-0.6b-v3"),
+            ParakeetStreamEngine::DecodeAhead
+        );
+        assert_eq!(
+            parakeet_stream_engine_for_model("parakeet-unified-640ms"),
+            ParakeetStreamEngine::UnifiedEnglish
+        );
+        assert_eq!(
+            parakeet_stream_engine_for_model("nemotron-multilingual-1120ms"),
+            ParakeetStreamEngine::NemotronMultilingual
         );
     }
 

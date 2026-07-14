@@ -5,7 +5,7 @@ use crate::commands::settings::{
 use crate::emit_to_all;
 use crate::license::LicenseState;
 use crate::parakeet::manager::ParakeetEouModelStatus;
-use crate::parakeet::{messages::ParakeetResponse, ParakeetManager, ParakeetModelStatus};
+use crate::parakeet::{ParakeetManager, ParakeetModelStatus};
 use crate::provider_capabilities::ProviderEngine;
 use crate::remote::settings::RemoteSettings;
 use crate::secure_store;
@@ -578,12 +578,7 @@ pub struct UnifiedModelInfo {
     pub kind: String,
     pub requires_setup: bool,
     pub underlying_model: Option<String>,
-}
-
-#[derive(serde::Serialize)]
-pub struct ParakeetVocabularyStatusResponse {
-    pub supported: bool,
-    pub ready: bool,
+    pub supported_languages: Option<Vec<String>>,
 }
 
 /// Returns status of all available speech recognition models (Whisper + Parakeet).
@@ -629,128 +624,6 @@ pub async fn get_model_status(
     log::debug!("[GET_MODEL_STATUS] Returning {} models", models.len());
 
     Ok(ModelStatusResponse { models })
-}
-
-#[tauri::command]
-pub async fn get_parakeet_vocabulary_status(
-    app: AppHandle,
-    parakeet_manager: State<'_, ParakeetManager>,
-) -> Result<ParakeetVocabularyStatusResponse, String> {
-    match parakeet_manager.status(&app).await {
-        Ok(response) => {
-            let Some(status) = ParakeetManager::vocabulary_status_from_response(&response) else {
-                return Err(format!("Unexpected Parakeet response: {:?}", response));
-            };
-            Ok(ParakeetVocabularyStatusResponse {
-                supported: status.supported,
-                ready: status.ready,
-            })
-        }
-        Err(err) => Err(format!("Failed to get Parakeet vocabulary status: {}", err)),
-    }
-}
-
-#[tauri::command]
-pub async fn download_parakeet_vocabulary_model(
-    app: AppHandle,
-    parakeet_manager: State<'_, ParakeetManager>,
-    active_downloads: ActiveDownloadsState<'_>,
-) -> Result<(), String> {
-    const MODEL_ID: &str = "parakeet-vocabulary-ctc-110m";
-
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-    register_active_download(&active_downloads, MODEL_ID, cancel_flag.clone())?;
-
-    let _ = emit_to_all(
-        &app,
-        "download-progress",
-        serde_json::json!({
-            "model": MODEL_ID,
-            "engine": "parakeet",
-            "downloaded": 0,
-            "total": 1,
-            "progress": 0.0,
-            "requestId": null,
-            "phase": "starting",
-        }),
-    );
-
-    // The CTC sidecar command is currently a single request without a public cancel hook.
-    // Register the flag anyway so cancel_download sees the same active model id and this
-    // path can report cancellation consistently once the sidecar returns.
-    let download_result = parakeet_manager.download_ctc_models(&app).await;
-
-    clear_active_download(&active_downloads, MODEL_ID);
-
-    if cancel_flag.load(Ordering::Relaxed) {
-        let _ = emit_to_all(
-            &app,
-            "download-cancelled",
-            serde_json::json!({
-                "model": MODEL_ID,
-                "engine": "parakeet",
-                "requestId": null,
-            }),
-        );
-        return Err("Download cancelled by user".to_string());
-    }
-
-    match download_result {
-        Ok(ParakeetResponse::Ok { .. }) | Ok(ParakeetResponse::Status { .. }) => {
-            let _ = emit_to_all(
-                &app,
-                "model-downloaded",
-                serde_json::json!({
-                    "model": MODEL_ID,
-                    "engine": "parakeet",
-                    "requestId": null,
-                }),
-            );
-            Ok(())
-        }
-        Ok(ParakeetResponse::Error { code, message, .. }) => {
-            let error = format!("Failed to download Parakeet vocabulary model: {code}: {message}");
-            let _ = emit_to_all(
-                &app,
-                "download-error",
-                serde_json::json!({
-                    "model": MODEL_ID,
-                    "engine": "parakeet",
-                    "requestId": null,
-                    "error": &error,
-                }),
-            );
-            Err(error)
-        }
-        Ok(other) => {
-            let error = format!("Unexpected Parakeet response: {:?}", other);
-            let _ = emit_to_all(
-                &app,
-                "download-error",
-                serde_json::json!({
-                    "model": MODEL_ID,
-                    "engine": "parakeet",
-                    "requestId": null,
-                    "error": &error,
-                }),
-            );
-            Err(error)
-        }
-        Err(err) => {
-            let error = format!("Failed to download Parakeet vocabulary model: {}", err);
-            let _ = emit_to_all(
-                &app,
-                "download-error",
-                serde_json::json!({
-                    "model": MODEL_ID,
-                    "engine": "parakeet",
-                    "requestId": null,
-                    "error": &error,
-                }),
-            );
-            Err(error)
-        }
-    }
 }
 
 async fn ensure_model_is_not_currently_shared(
@@ -909,6 +782,7 @@ fn convert_whisper_model(name: String, info: ModelInfo) -> UnifiedModelInfo {
         kind: "local".to_string(),
         requires_setup: false,
         underlying_model: None,
+        supported_languages: None,
     }
 }
 
@@ -927,6 +801,7 @@ fn convert_parakeet_model(status: ParakeetModelStatus) -> UnifiedModelInfo {
         kind: "local".to_string(),
         requires_setup: false,
         underlying_model: None,
+        supported_languages: Some(status.supported_languages),
     }
 }
 
@@ -957,6 +832,7 @@ fn collect_cloud_models(app: &AppHandle) -> Vec<UnifiedModelInfo> {
                 kind: "cloud".to_string(),
                 requires_setup: !has_key,
                 underlying_model: Some(provider.model_name().to_string()),
+                supported_languages: None,
             }
         })
         .collect()

@@ -402,7 +402,7 @@ function CustomWordEditor({
         <div>
           <FieldLegend className="mb-1">Words & Names</FieldLegend>
           <FieldDescription>
-            Used to correct spelling; also improves recognition on Whisper, Parakeet, and Soniox.
+            Used to correct spelling; also improves recognition on Whisper, Soniox, and Deepgram.
           </FieldDescription>
         </div>
         <Button

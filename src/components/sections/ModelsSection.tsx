@@ -175,6 +175,11 @@ export function ModelsSection({
   const currentEngine = (settings?.current_model_engine ?? "whisper") as SpeechModelEngine;
   const currentModelName = settings?.current_model ?? "";
   const languageValue = settings?.speech_language ?? "en";
+  const currentModelInfo = useMemo(
+    () => models.find(([name]) => name === currentModelName)?.[1],
+    [currentModelName, models],
+  );
+  const supportedLanguages = currentModelInfo?.supported_languages ?? undefined;
   const transcriptionMode = settings?.transcription_mode ?? "regular";
   const whisperSpeedMode = settings?.whisper_speed_mode ?? false;
   const showSpeedModeRecommendation = currentEngine === "whisper" && whisperSpeedMode;
@@ -191,10 +196,13 @@ export function ModelsSection({
       return /\.en$/i.test(currentModelName);
     }
     if (currentEngine === "parakeet") {
-      return currentModelName.includes("-v2");
+      if (supportedLanguages) {
+        return supportedLanguages.length === 1 && supportedLanguages[0] === "en";
+      }
+      return currentModelName.includes("-v2") || currentModelName === "parakeet-unified-640ms";
     }
     return false;
-  }, [currentEngine, currentModelName, settings]);
+  }, [currentEngine, currentModelName, settings, supportedLanguages]);
 
   const handleLanguageChange = useCallback(
     async (value: string) => {
@@ -807,6 +815,7 @@ export function ModelsSection({
                 value={languageValue}
                 engine={currentEngine}
                 englishOnly={isEnglishOnlyModel}
+                supportedLanguages={supportedLanguages}
                 onValueChange={(value) => {
                   void handleLanguageChange(value);
                 }}
@@ -839,7 +848,7 @@ export function ModelsSection({
         <SettingsCard
           icon={Zap}
           title="Transcription mode"
-          description="Live preview is English-only for now; your final text still uses your selected model."
+          description="Live preview shows text as you speak; your final text still uses your selected model."
         >
           <SettingRow
             title="Mode"
@@ -860,7 +869,7 @@ export function ModelsSection({
                   className="[&_[data-state=on]]:!bg-sage-bg [&_[data-state=on]]:!text-sage [&_[data-state=on]]:!border-sage/50 [&_[data-state=on]]:font-medium"
                 >
                   <ToggleGroupItem value="regular">Regular</ToggleGroupItem>
-                  <ToggleGroupItem value="live_preview">Live preview (English)</ToggleGroupItem>
+                  <ToggleGroupItem value="live_preview">Live preview</ToggleGroupItem>
                 </ToggleGroup>
                 {isActivatingLivePreview && (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">

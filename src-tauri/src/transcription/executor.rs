@@ -26,12 +26,11 @@ use tempfile::{NamedTempFile, TempPath};
 
 pub(crate) const LOCAL_ENGINE_TIMEOUT_GRACE: Duration = Duration::from_secs(2);
 
-use crate::parakeet::manager::{ParakeetManager, ParakeetTranscriptionOptions};
+use crate::parakeet::manager::ParakeetManager;
 use crate::parakeet::messages::ParakeetResponse;
 use crate::provider_capabilities::ProviderEngine;
 use crate::secure_store::secure_get;
 use crate::transcription::engines::{
-    compile_parakeet_custom_vocabulary_for_transcription,
     parakeet_segments_to_transcription_segments, resolve_engine_for_model,
     transcribe_whisper_with_acceleration, transcription_watchdog_budget, ActiveEngineSelection,
 };
@@ -238,21 +237,14 @@ async fn route_once(
                 return Err(cancelled(source));
             }
 
-            let custom_vocabulary =
-                compile_parakeet_custom_vocabulary_for_transcription(app, language);
-            let options = ParakeetTranscriptionOptions {
-                language: request.spoken_language.clone(),
-                translate,
-                custom_vocabulary,
-                cancel_flag: Some(cancel),
-            };
-
             match manager
-                .transcribe_with_custom_vocabulary(
+                .transcribe(
                     app,
                     model_name,
                     input_path.to_path_buf(),
-                    options,
+                    request.spoken_language.clone(),
+                    translate,
+                    Some(cancel),
                 )
                 .await
             {
