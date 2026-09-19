@@ -644,10 +644,7 @@ impl Transcriber {
             ],
         );
 
-        let should_cancel_for_abort = should_cancel.clone();
-        params.set_abort_callback_safe(should_cancel_for_abort);
-
-        match state.full(params, &resampled_audio) {
+        match full_with_cancel(&mut state, params, &resampled_audio, should_cancel.clone()) {
             Ok(_) => {
                 let inference_time = inference_start.elapsed();
                 let inference_ms = inference_time.as_millis();
@@ -805,6 +802,32 @@ impl Transcriber {
     }
 }
 
+unsafe extern "C" fn whisper_abort_callback<F: Fn() -> bool>(
+    user_data: *mut std::ffi::c_void,
+) -> bool {
+    // SAFETY: full_with_cancel passes a live F, not a boxed trait object's address.
+    let should_cancel = unsafe { &*user_data.cast::<F>() };
+    should_cancel()
+}
+
+fn full_with_cancel<F: Fn() -> bool + 'static>(
+    state: &mut whisper_rs::WhisperState,
+    mut params: FullParams<'_, '_>,
+    audio: &[f32],
+    should_cancel: F,
+) -> Result<(), whisper_rs::WhisperError> {
+    // whisper-rs 0.16.0's safe helper casts Box<dyn FnMut()> storage to F,
+    // causing undefined behavior (including spurious encoder -6) and leaking it.
+    // SAFETY: this concrete F stays alive and unmoved until synchronous full()
+    // returns. whisper.cpp polls on the calling thread and does not retain the
+    // callback beyond full(). Neither the callback nor its data escapes here.
+    unsafe {
+        params.set_abort_callback(Some(whisper_abort_callback::<F>));
+        params.set_abort_callback_user_data(std::ptr::from_ref(&should_cancel).cast_mut().cast());
+    }
+    state.full(params, audio)
+}
+
 /// Convert multi-channel audio to mono by averaging all channels
 ///
 /// # Arguments
@@ -855,6 +878,85 @@ fn convert_multichannel_to_mono(audio: &[f32], channels: usize) -> Result<Vec<f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_abort_callback_reads_live_captured_token() {
+        use crate::transcription::request::CancellationToken;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        fn invoke<F: Fn() -> bool>(callback: &F) -> bool {
+            // SAFETY: the typed callback remains borrowed for this entire call.
+            unsafe { whisper_abort_callback::<F>(std::ptr::from_ref(callback).cast_mut().cast()) }
+        }
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::from_arc(flag.clone());
+        let callback = move || token.is_cancelled();
+        assert!(!invoke(&callback));
+        flag.store(true, Ordering::SeqCst);
+        assert!(invoke(&callback));
+        flag.store(false, Ordering::SeqCst);
+        assert!(!invoke(&callback));
+        drop(callback);
+        assert_eq!(Arc::strong_count(&flag), 1);
+    }
+
+    #[test]
+    #[ignore = "requires VOICETYPR_TEST_WHISPER_MODEL pointing to Base English weights"]
+    fn real_engine_captured_cancellation_and_context_reuse() {
+        use crate::transcription::request::CancellationToken;
+        use std::sync::{atomic::AtomicBool, Arc};
+
+        let model = std::env::var("VOICETYPR_TEST_WHISPER_MODEL").expect("set model path");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/audio-files/test-audio.wav");
+        let mut reader = hound::WavReader::open(fixture).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16000);
+        assert_eq!(reader.spec().channels, 1);
+        let audio: Vec<f32> = reader
+            .samples::<i16>()
+            .take(53931)
+            .map(|sample| sample.unwrap() as f32 / 32768.0)
+            .collect();
+        assert_eq!(audio.len(), 53931);
+        for use_gpu in [true, false] {
+            let mut context_params = WhisperContextParameters::default();
+            context_params.use_gpu(use_gpu);
+            let context = WhisperContext::new_with_params(&model, context_params).unwrap();
+            for cancelled in [false, true, false] {
+                let flag = Arc::new(AtomicBool::new(cancelled));
+                let token = CancellationToken::from_arc(flag.clone());
+                let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+                    beam_size: 5,
+                    patience: -1.0,
+                });
+                params.set_language(Some("en"));
+                params.set_n_threads(11);
+                params.set_print_progress(false);
+                params.set_print_realtime(false);
+                let mut state = context.create_state().unwrap();
+                let result =
+                    full_with_cancel(&mut state, params, &audio, move || token.is_cancelled());
+                if cancelled {
+                    assert!(
+                        matches!(result, Err(whisper_rs::WhisperError::GenericError(-6))),
+                        "{result:?}"
+                    );
+                } else {
+                    result.unwrap();
+                    let text: String = state
+                        .as_iter()
+                        .map(|segment| segment.to_str_lossy().unwrap().into_owned())
+                        .collect();
+                    assert!(text.to_lowercase().contains("testing"), "{text}");
+                }
+                assert_eq!(Arc::strong_count(&flag), 1, "callback capture leaked");
+            }
+        }
+    }
 
     #[test]
     fn test_convert_multichannel_to_mono() {
