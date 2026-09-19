@@ -59,8 +59,8 @@ fn cue_enabled(
     }
 }
 
-/// Starts the platform sound process and returns immediately. Feedback is
-/// best-effort: store or process-launch failures are logged and never affect
+/// Starts the platform sound work and returns immediately. Feedback is
+/// best-effort: store or playback-start failures are logged and never affect
 /// recording, delivery, or clipboard restoration.
 pub(crate) fn play_audio_feedback(app: &AppHandle, cue: AudioFeedbackCue) {
     let spec = cue_spec(cue);
@@ -102,19 +102,31 @@ fn play_platform_cue(cue: AudioFeedbackCue, spec: CueSpec) {
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let script = format!(
-            "[console]::beep({}, {})",
-            spec.windows_frequency_hz, spec.windows_duration_ms
-        );
-        if let Err(error) = std::process::Command::new("powershell")
-            .args(["-c", &script])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
+        // Beep is synchronous, so keep its alertable wait off the calling thread.
+        // Calling it directly also lets us report API playback failures instead of
+        // only knowing whether an intermediary PowerShell process was launched.
+        if let Err(error) = std::thread::Builder::new()
+            .name("audio-feedback".to_string())
+            .spawn(move || {
+                // SAFETY: frequency and duration are plain values in the ranges
+                // accepted by Beep and have no pointer or lifetime requirements.
+                if let Err(error) = unsafe {
+                    windows::Win32::System::Diagnostics::Debug::Beep(
+                        spec.windows_frequency_hz,
+                        spec.windows_duration_ms,
+                    )
+                } {
+                    log::warn!(
+                        "Windows Beep API failed for {:?} audio feedback ({} Hz, {} ms): {}",
+                        cue,
+                        spec.windows_frequency_hz,
+                        spec.windows_duration_ms,
+                        error
+                    );
+                }
+            })
         {
-            log::warn!("Failed to play {:?} audio feedback: {}", cue, error);
+            log::warn!("Failed to start {:?} audio feedback worker: {}", cue, error);
         }
     }
 
@@ -128,7 +140,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn cues_have_distinct_settings_and_platform_sounds() {
+    fn cues_preserve_platform_sound_specs() {
         let specs = [
             cue_spec(AudioFeedbackCue::RecordingStarted),
             cue_spec(AudioFeedbackCue::TranscriptReady),
@@ -159,10 +171,25 @@ mod tests {
                 .len(),
             3
         );
+        assert_eq!(
+            specs.map(|spec| (spec.windows_frequency_hz, spec.windows_duration_ms)),
+            [(800, 100), (600, 100), (1_000, 100)]
+        );
     }
 
     #[test]
-    fn transcript_ready_honors_legacy_disabled_preference() {
+    fn each_cue_honors_its_disabled_preference() {
+        for cue in [
+            AudioFeedbackCue::RecordingStarted,
+            AudioFeedbackCue::TranscriptReady,
+            AudioFeedbackCue::PasteCompleted,
+        ] {
+            assert!(!cue_enabled(cue, Some(false), Some(true)));
+        }
+    }
+
+    #[test]
+    fn transcript_ready_honors_legacy_disabled_preference_and_new_override() {
         assert!(!cue_enabled(
             AudioFeedbackCue::TranscriptReady,
             None,
@@ -171,11 +198,6 @@ mod tests {
         assert!(cue_enabled(
             AudioFeedbackCue::TranscriptReady,
             Some(true),
-            Some(false)
-        ));
-        assert!(cue_enabled(
-            AudioFeedbackCue::PasteCompleted,
-            None,
             Some(false)
         ));
     }

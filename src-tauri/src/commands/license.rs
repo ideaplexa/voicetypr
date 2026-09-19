@@ -44,6 +44,26 @@ impl CachedLicense {
 impl UnwindSafe for CachedLicense {}
 impl RefUnwindSafe for CachedLicense {}
 
+/// A completed failed check is not an in-flight check. Keep it distinct from
+/// both a missing entitlement and a successful status so recording can direct
+/// the user to recovery without falling back to an expired trial.
+#[derive(Clone, Debug, Default)]
+pub enum RuntimeLicenseCache {
+    #[default]
+    Loading,
+    Ready(CachedLicense),
+    Failed,
+}
+
+impl RuntimeLicenseCache {
+    fn from_check(result: &Result<LicenseStatus, String>) -> Self {
+        match result {
+            Ok(status) => Self::Ready(CachedLicense::new(status.clone())),
+            Err(_) => Self::Failed,
+        }
+    }
+}
+
 // Wrapper for cached license status with metadata
 #[derive(Serialize, Deserialize, Debug)]
 struct CachedLicenseStatus {
@@ -178,7 +198,7 @@ fn verification_state_for_failures(failures: u32) -> LicenseVerificationState {
 async fn seed_runtime_license_cache(app: &AppHandle, status: &LicenseStatus) {
     let app_state = app.state::<AppState>();
     let mut perf_cache = app_state.license_cache.write().await;
-    *perf_cache = Some(CachedLicense::new(status.clone()));
+    *perf_cache = RuntimeLicenseCache::Ready(CachedLicense::new(status.clone()));
 }
 
 fn cache_license_status(app: &AppHandle, status: &LicenseStatus) {
@@ -336,9 +356,9 @@ pub async fn check_license_status(app: AppHandle) -> Result<LicenseStatus, Strin
 
 async fn perform_license_status_check(app: &AppHandle) -> Result<LicenseStatus, String> {
     log::info!("Checking license status");
-    let status = check_license_status_impl(app.clone()).await?;
-    seed_runtime_license_cache(app, &status).await;
-    Ok(status)
+    let result = check_license_status_impl(app.clone()).await;
+    *app.state::<AppState>().license_cache.write().await = RuntimeLicenseCache::from_check(&result);
+    result
 }
 
 /// Internal implementation of license status check
@@ -434,11 +454,13 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
         }
     }
 
-    // Get device hash
+    // An unreadable saved license is a recovery error, never an absent license
+    // or a reason to query trial status under a newly selected identity.
+    let saved_license = keychain::get_license(&app)?;
     let device_hash = device::get_device_hash()?;
 
     // First, check if we have a stored license
-    if let Some(license_key) = keychain::get_license(&app)? {
+    if let Some(license_key) = saved_license {
         log::info!("Found stored license, validating...");
 
         // Try to validate the stored license
@@ -1090,7 +1112,7 @@ async fn clear_license_status_cache(app: &AppHandle) {
 
     let app_state = app.state::<AppState>();
     let mut runtime_cache = app_state.license_cache.write().await;
-    *runtime_cache = None;
+    *runtime_cache = RuntimeLicenseCache::Loading;
 }
 
 #[tauri::command]
@@ -1117,6 +1139,36 @@ pub async fn invalidate_license_cache(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_license_check_is_terminal_until_successful_recovery() {
+        assert!(matches!(
+            RuntimeLicenseCache::default(),
+            RuntimeLicenseCache::Loading
+        ));
+        let failed = RuntimeLicenseCache::from_check(&Err(
+            "Stored value for 'license' could not be decrypted; the saved entry was preserved"
+                .to_string(),
+        ));
+        assert!(matches!(failed, RuntimeLicenseCache::Failed));
+
+        let recovered = licensed_status(
+            "VT-RECOVERED-TEST".to_string(),
+            LicenseVerificationState::Verified,
+            None,
+            Some(Utc::now() + Duration::days(90)),
+        );
+        let ready = RuntimeLicenseCache::from_check(&Ok(recovered));
+        let RuntimeLicenseCache::Ready(cached) = ready else {
+            panic!("successful reactivation must replace the failed state");
+        };
+        assert_eq!(cached.status.status, LicenseState::Licensed);
+        assert_eq!(
+            cached.status.license_key.as_deref(),
+            Some("VT-RECOVERED-TEST")
+        );
+        assert!(cached.is_valid());
+    }
 
     #[test]
     fn repeated_verification_failures_escalate_without_expiring_entitlement() {

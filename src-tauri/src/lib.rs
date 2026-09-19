@@ -559,6 +559,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         &[("component", "secure_store")],
     );
 
+    #[cfg(not(target_os = "windows"))]
     if let Err(e) = secure_store::initialize_encryption_key() {
         log_failed(
             "ENCRYPTION_INIT",
@@ -645,6 +646,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .setup(move |app| {
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
+            // Windows identity persistence must run after the single-instance
+            // plugin has excluded secondary processes, before any secure reads.
+            #[cfg(target_os = "windows")]
+            if let Err(error) = secure_store::windows_identity::initialize(&app.path().app_data_dir()?) {
+                log::error!("Windows identity initialization failed: {}", error);
+                // Keep the UI available for recovery. Secure/API calls fail
+                // closed rather than silently choosing a different identity.
+            }
             let distribution_info = commands::distribution::get_distribution_info();
             log::info!(
                 "Distribution channel: channel={}, store_install={}, package_family_name={:?}",

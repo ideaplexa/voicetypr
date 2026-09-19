@@ -1,31 +1,34 @@
 use sha2::{Digest, Sha256};
 use std::process::Command;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 use std::process::Output;
 
 /// Generate a unique device hash based on the machine's hardware ID
 pub fn get_device_hash() -> Result<String, String> {
-    let machine_id = get_machine_uuid()?;
+    #[cfg(target_os = "windows")]
+    return crate::secure_store::windows_identity::device_hash();
 
+    #[cfg(not(target_os = "windows"))]
+    {
+        get_machine_uuid().map(|id| hash_machine_id(&id))
+    }
+}
+
+fn hash_machine_id(machine_id: &str) -> String {
     // Hash the machine ID for privacy
     let mut hasher = Sha256::new();
     hasher.update(machine_id.as_bytes());
     let result = hasher.finalize();
-
-    Ok(format!("{:x}", result))
+    format!("{:x}", result)
 }
 
 /// Get the machine's unique identifier based on the platform
+#[cfg(not(target_os = "windows"))]
 fn get_machine_uuid() -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         get_macos_uuid()
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        get_windows_uuid()
     }
 
     #[cfg(target_os = "linux")]
@@ -34,65 +37,77 @@ fn get_machine_uuid() -> Result<String, String> {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 trait WindowsCommandRunner {
     fn run(&self, program: &str, args: &[&str], timeout_ms: u64) -> Result<Output, String>;
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 struct RealWindowsCommandRunner;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 impl WindowsCommandRunner for RealWindowsCommandRunner {
     fn run(&self, program: &str, args: &[&str], timeout_ms: u64) -> Result<Output, String> {
+        use command_group::CommandGroup;
         use std::io::Read;
-        use std::os::windows::process::CommandExt;
         use std::process::Stdio;
+        use std::sync::mpsc;
         use std::thread;
         use std::time::{Duration, Instant};
 
+        #[cfg(target_os = "windows")]
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        let mut child = Command::new(program)
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let mut command = Command::new(program);
+        command
             .args(args)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .creation_flags(CREATE_NO_WINDOW)
+            .stderr(Stdio::piped());
+        let mut group = command.group();
+        // The group builder replaces Command's creation flags when adding
+        // CREATE_SUSPENDED, so configure hidden-window behavior on it directly.
+        #[cfg(target_os = "windows")]
+        group.creation_flags(CREATE_NO_WINDOW);
+        let mut child = group
             .spawn()
             .map_err(|e| format!("Failed to execute {}: {}", program, e))?;
 
-        let mut stdout = child
+        let stdout = child
+            .inner()
             .stdout
             .take()
             .ok_or_else(|| format!("Failed to capture {} stdout", program))?;
-        let mut stderr = child
+        let stderr = child
+            .inner()
             .stderr
             .take()
             .ok_or_else(|| format!("Failed to capture {} stderr", program))?;
 
-        let stdout_handle = thread::spawn(move || {
+        let (stdout_tx, stdout_rx) = mpsc::channel();
+        thread::spawn(move || {
             let mut buf = Vec::new();
-            let _ = stdout.read_to_end(&mut buf);
-            buf
+            let result = stdout.take(65_536).read_to_end(&mut buf).map(|_| buf);
+            let _ = stdout_tx.send(result);
         });
-        let stderr_handle = thread::spawn(move || {
+        let (stderr_tx, stderr_rx) = mpsc::channel();
+        thread::spawn(move || {
             let mut buf = Vec::new();
-            let _ = stderr.read_to_end(&mut buf);
-            buf
+            let result = stderr.take(65_536).read_to_end(&mut buf).map(|_| buf);
+            let _ = stderr_tx.send(result);
         });
-
-        let timeout = Duration::from_millis(timeout_ms);
-        let start = Instant::now();
 
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) => {
-                    if start.elapsed() >= timeout {
+                    if Instant::now() >= deadline {
                         let _ = child.kill();
-                        break child.wait().map_err(|e| {
-                            format!("Failed to wait for {} after kill: {}", program, e)
-                        })?;
+                        thread::spawn(move || {
+                            let _ = child.wait();
+                        });
+                        return Err(format!("Device lookup timed out: {}", program));
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
@@ -103,14 +118,28 @@ impl WindowsCommandRunner for RealWindowsCommandRunner {
             }
         };
 
-        let stdout_buf = stdout_handle.join().unwrap_or_default();
-        let stderr_buf = stderr_handle.join().unwrap_or_default();
+        // A descendant may retain a pipe after the parent exits. Never join a
+        // reader without a deadline; kill the entire job/process group instead.
+        let output = (|| {
+            let stdout = stdout_rx
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .map_err(|_| format!("Device lookup stdout timed out: {}", program))?
+                .map_err(|_| "Device lookup stdout read failed".to_string())?;
+            let stderr = stderr_rx
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .map_err(|_| format!("Device lookup stderr timed out: {}", program))?
+                .map_err(|_| "Device lookup stderr read failed".to_string())?;
+            Ok(Output {
+                status,
+                stdout,
+                stderr,
+            })
+        })();
+        if output.is_err() {
+            let _ = child.kill();
+        }
 
-        Ok(Output {
-            status,
-            stdout: stdout_buf,
-            stderr: stderr_buf,
-        })
+        output
     }
 }
 
@@ -141,12 +170,19 @@ fn get_macos_uuid() -> Result<String, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn get_windows_uuid() -> Result<String, String> {
-    get_windows_uuid_with_runner(&RealWindowsCommandRunner)
+pub(crate) fn discover_windows_device_hashes() -> Result<Vec<String>, String> {
+    windows_machine_ids(&RealWindowsCommandRunner)
+        .map(|ids| ids.iter().map(|id| hash_machine_id(id)).collect())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(test)]
 fn get_windows_uuid_with_runner(runner: &dyn WindowsCommandRunner) -> Result<String, String> {
+    windows_machine_ids(runner).map(|ids| ids[0].clone())
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_machine_ids(runner: &dyn WindowsCommandRunner) -> Result<Vec<String>, String> {
+    let mut ids = Vec::new();
     fn normalize_uuid(value: &str) -> Option<String> {
         let trimmed = value.trim().trim_matches(&['{', '}', '"', '\''][..]);
         if trimmed.is_empty() {
@@ -158,6 +194,12 @@ fn get_windows_uuid_with_runner(runner: &dyn WindowsCommandRunner) -> Result<Str
             return None;
         }
 
+        // Reject diagnostics accidentally printed to stdout, placeholder UUIDs,
+        // and malformed identifiers before they can become permanent identity.
+        let parsed = uuid::Uuid::parse_str(trimmed).ok()?;
+        if parsed.is_nil() || parsed.as_bytes().iter().all(|b| *b == 255) {
+            return None;
+        }
         Some(trimmed.to_ascii_uppercase())
     }
 
@@ -173,38 +215,56 @@ fn get_windows_uuid_with_runner(runner: &dyn WindowsCommandRunner) -> Result<Str
             for line in output_str.lines().skip(1) {
                 if let Some(uuid) = normalize_uuid(line) {
                     log::info!("[DeviceID] Source: wmic (csproduct UUID)");
-                    return Ok(uuid);
+                    ids.push(uuid);
+                    // Older releases hashed WMIC output without case normalization.
+                    if line.trim() != ids[0] {
+                        ids.push(line.trim().to_string());
+                    }
+                    break;
                 }
             }
         }
     }
 
     // Modern Windows: query CIM via PowerShell.
-    log::debug!("[DeviceID] wmic failed or unavailable, trying PowerShell CIM...");
-    if let Ok(output) = runner.run(
-        "powershell",
-        &[
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "(Get-CimInstance -ClassName Win32_ComputerSystemProduct).UUID",
-        ],
-        PS_TIMEOUT_MS,
-    ) {
-        if output.status.success() {
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            for line in output_str.lines() {
-                if let Some(uuid) = normalize_uuid(line) {
-                    log::info!("[DeviceID] Source: PowerShell (Get-CimInstance)");
-                    return Ok(uuid);
+    if ids.is_empty() {
+        log::debug!("[DeviceID] wmic failed or unavailable, trying PowerShell CIM...");
+        if let Ok(output) = runner.run(
+            "powershell",
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance -ClassName Win32_ComputerSystemProduct).UUID",
+            ],
+            PS_TIMEOUT_MS,
+        ) {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                for line in output_str.lines() {
+                    if let Some(uuid) = normalize_uuid(line) {
+                        log::info!("[DeviceID] Source: PowerShell (Get-CimInstance)");
+                        ids.push(uuid);
+                        break;
+                    }
                 }
             }
         }
     }
 
-    // Final fallback: MachineGuid from registry.
-    log::debug!("[DeviceID] PowerShell failed or unavailable, trying registry MachineGuid...");
+    // Old WMIC-only releases did not uppercase the returned identifier. Include
+    // the lowercase representation for authenticated recovery when WMIC is gone.
+    if let Some(hardware) = ids.first() {
+        let lowercase = hardware.to_ascii_lowercase();
+        if !ids.contains(&lowercase) {
+            ids.push(lowercase);
+        }
+    }
+
+    // Collect MachineGuid independently: existing entries may have been written
+    // on a launch where hardware discovery failed, even when it succeeds today.
+    log::debug!("[DeviceID] Collecting registry MachineGuid compatibility candidate...");
     if let Ok(output) = runner.run(
         "reg",
         &[
@@ -225,15 +285,22 @@ fn get_windows_uuid_with_runner(runner: &dyn WindowsCommandRunner) -> Result<Str
                 if let Some(rest) = line.split("REG_SZ").nth(1) {
                     if let Some(uuid) = normalize_uuid(rest) {
                         log::info!("[DeviceID] Source: Registry (MachineGuid)");
-                        return Ok(uuid);
+                        if !ids.contains(&uuid) {
+                            ids.push(uuid);
+                        }
+                        break;
                     }
                 }
             }
         }
     }
 
-    log::error!("[DeviceID] All sources failed: wmic, PowerShell, and registry");
-    Err("Could not determine machine UUID".to_string())
+    if ids.is_empty() {
+        log::error!("[DeviceID] All sources failed: wmic, PowerShell, and registry");
+        Err("Could not determine machine UUID".to_string())
+    } else {
+        Ok(ids)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -309,9 +376,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "windows")]
     fn windows_uuid_falls_back_when_wmic_unavailable() {
         use std::cell::RefCell;
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(target_os = "windows")]
         use std::os::windows::process::ExitStatusExt;
         use std::process::ExitStatus;
 
@@ -340,6 +409,7 @@ mod tests {
             responses: RefCell::new(vec![
                 Err("wmic not found".to_string()),
                 Ok(ok("{550E8400-E29B-41D4-A716-446655440000}\r\n")),
+                Err("registry unavailable".to_string()),
             ]),
         };
 
@@ -348,9 +418,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "windows")]
     fn windows_uuid_falls_back_to_registry_when_powershell_fails() {
         use std::cell::RefCell;
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(target_os = "windows")]
         use std::os::windows::process::ExitStatusExt;
         use std::process::ExitStatus;
 
@@ -393,5 +465,78 @@ mod tests {
 
         let uuid = get_windows_uuid_with_runner(&runner).expect("should fall back to registry");
         assert_eq!(uuid, "123E4567-E89B-12D3-A456-426614174000");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn command_timeout_includes_descendants_holding_output_pipes() {
+        let start = std::time::Instant::now();
+        let result = RealWindowsCommandRunner.run("/bin/sh", &["-c", "sleep 5 & exit 0"], 100);
+        assert!(result.unwrap_err().contains("timed out"));
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn discovery_retains_registry_candidate_even_when_hardware_works() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(target_os = "windows")]
+        use std::os::windows::process::ExitStatusExt;
+        struct Runner {
+            hardware_available: bool,
+        }
+        impl WindowsCommandRunner for Runner {
+            fn run(&self, program: &str, _: &[&str], _: u64) -> Result<Output, String> {
+                let stdout = match program {
+                    "wmic" if self.hardware_available => {
+                        "UUID\n550e8400-e29b-41d4-a716-446655440000\n"
+                    }
+                    "reg" => "MachineGuid REG_SZ 123e4567-e89b-12d3-a456-426614174000\n",
+                    // Successful process exit is not proof of a usable UUID.
+                    _ => "WARNING: hardware lookup failed\n00000000-0000-0000-0000-000000000000\n",
+                };
+                Ok(Output {
+                    status: std::process::ExitStatus::from_raw(0),
+                    stdout: stdout.as_bytes().to_vec(),
+                    stderr: vec![],
+                })
+            }
+        }
+        let available = windows_machine_ids(&Runner {
+            hardware_available: true,
+        })
+        .unwrap();
+        let unavailable = windows_machine_ids(&Runner {
+            hardware_available: false,
+        })
+        .unwrap();
+        assert_eq!(
+            available,
+            vec![
+                "550E8400-E29B-41D4-A716-446655440000",
+                "550e8400-e29b-41d4-a716-446655440000",
+                "123E4567-E89B-12D3-A456-426614174000"
+            ]
+        );
+        assert_eq!(unavailable, vec!["123E4567-E89B-12D3-A456-426614174000"]);
+        assert_ne!(
+            hash_machine_id(&available[0]),
+            hash_machine_id(&unavailable[0])
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn command_captures_both_streams_without_mixing_them() {
+        let output = RealWindowsCommandRunner
+            .run(
+                "/bin/sh",
+                &["-c", "printf hardware; printf diagnostic >&2"],
+                2_000,
+            )
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"hardware");
+        assert_eq!(output.stderr, b"diagnostic");
     }
 }
