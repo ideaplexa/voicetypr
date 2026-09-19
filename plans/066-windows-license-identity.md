@@ -1,7 +1,7 @@
 # Plan 066 — Stable Windows license identity
 
-Status: IN PROGRESS — Amp 2026-09-19. Follow-up to 065, not a claim that
-customer recovery or Windows runtime smoke has passed.
+Status: LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19. Follow-up to 065,
+not a claim that customer recovery or Windows runtime smoke has passed.
 
 ## Evidence
 
@@ -20,14 +20,38 @@ Reader-thread joins can outlive the nominal command timeout.
   decrypts the license, retain other authenticated candidates for mixed-key stores.
 - Never overwrite unreadable identity metadata or credentials. If the license
   cannot authenticate, require explicit activation before pinning a new identity.
-- Bootstrap after single-instance setup, before secure-store consumers. Publish
-  state only after required persistence succeeds; no network entitlement bypass.
+- Bootstrap the desktop after single-instance setup, before secure-store consumers;
+  the CLI loads the same protected identity. Publish state only after required
+  persistence succeeds; no network entitlement bypass. Keep the identity across
+  app resets, so resetting settings does not create a new trial identity.
 - Bound process-tree execution and pipe collection with one deadline.
 
 ## Verification
 
-Synthetic identities only. Test source changes, restart using persisted identity
-without discovery, mixed legacy keys, no matching key, malformed metadata/store,
-write failure, and command descendants retaining pipes. Real Windows DPAPI,
-activation and restart require packaged smoke before any new beta release.
-Do not merge or release PR142 as part of this work.
+Synthetic identities only; no customer keys submitted or stored in fixtures.
+
+- `cargo test --workspace`: 1,576 passed, 16 ignored, zero failures on macOS ARM.
+- `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, and
+  `git diff --check`: passed.
+- Authenticated AES fixtures reproduce failure when hardware and registry hashes
+  differ, then recover the registry-encrypted license with hardware discovery
+  available. A separate test process reloads the protected record without discovery
+  and decrypts the original, byte-preserved secure-store entry.
+- Tests cover mixed legacy keys, unavailable original key, malformed/unsupported
+  metadata, malformed store, failed protection and create-only commit, invalid UUID
+  output, registry collection even when hardware succeeds, and pipe descendants
+  outliving their parent. Timeout execution is exercised on Unix, not Windows.
+- Exact Windows identity/discovery modules, including tests and DPAPI bindings,
+  pass isolated `cargo check --target x86_64-pc-windows-msvc --tests` on this host.
+  That harness stubs parent secure-store helpers: it is not a full Windows app
+  build or a Windows runtime test. Portable persistence tests use an authenticated
+  test envelope on macOS; their Windows configuration uses real DPAPI.
+
+Real Windows DPAPI, direct/Store packaging, license-server activation and restart,
+CLI/desktop coexistence, and Windows process-tree deadlines remain unchecked in
+`SMOKE.md` (066-S1–S5). Earlier PR142 CI does not cover this local follow-up.
+The source-switch mechanism is proven; the customers' historical identities are
+not. Recovery requires an available matching candidate and cannot restore entries
+already deleted by an older build. An unreadable DPAPI pin fails closed and needs
+support rather than silent replacement. No merge, push or release performed for
+this follow-up; a new beta and affected smoke are required before release.

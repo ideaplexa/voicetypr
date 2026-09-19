@@ -277,6 +277,7 @@ fn attach_parent_console() {
 async fn build_cli_app(
     context: tauri::Context<tauri::Wry>,
 ) -> Result<tauri::App<tauri::Wry>, Box<dyn Error>> {
+    #[cfg(not(target_os = "windows"))]
     crate::secure_store::initialize_encryption_key()?;
 
     let app = tauri::Builder::default()
@@ -284,6 +285,9 @@ async fn build_cli_app(
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .build(context)?;
+
+    #[cfg(target_os = "windows")]
+    crate::secure_store::windows_identity::initialize(&app.path().app_data_dir()?)?;
 
     let models_dir = app.path().app_data_dir()?.join("models");
     std::fs::create_dir_all(&models_dir)?;

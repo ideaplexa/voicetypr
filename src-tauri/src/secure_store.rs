@@ -1,9 +1,11 @@
+#[cfg(not(target_os = "windows"))]
 use crate::license::device;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
+#[cfg(not(target_os = "windows"))]
 use once_cell::sync::OnceCell;
 use pbkdf2::pbkdf2_hmac;
 use rand::Rng;
@@ -13,51 +15,40 @@ use std::sync::Arc;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::{resolve_store_path, Store, StoreExt};
 
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod windows_identity;
+
 // Encryption key storage - OnceCell ensures thread-safe single initialization
+#[cfg(not(target_os = "windows"))]
 static ENCRYPTION_KEY: OnceCell<[u8; 32]> = OnceCell::new();
 
 /// Store file (relative to the app data directory) managed via tauri-plugin-store.
 const SECURE_STORE_FILE: &str = "secure.dat";
 
 /// Initialize the encryption key using the device hash with PBKDF2
+#[cfg(any(not(target_os = "windows"), test))]
 pub fn initialize_encryption_key() -> Result<(), String> {
+    #[cfg(all(target_os = "windows", test))]
+    return windows_identity::initialize_test_identity();
+    #[cfg(not(target_os = "windows"))]
     ENCRYPTION_KEY
-        .get_or_try_init(|| {
-            // Get the same device hash used for API authentication
-            let device_hash = device::get_device_hash()?;
-
-            // Validate device hash has sufficient entropy
-            // SHA256 produces 64 hex chars, we need at least that
-            if device_hash.len() < 64 {
-                return Err(format!(
-                    "Device hash has insufficient entropy: {} chars (expected 64)",
-                    device_hash.len()
-                ));
-            }
-
-            // Verify it's a valid hex string (additional validation)
-            if !device_hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Err("Device hash contains invalid characters".to_string());
-            }
-
-            // Use PBKDF2 to derive a proper encryption key from the device hash
-            let mut key = [0u8; 32];
-
-            // Salt: app-specific constant + version for future migration support
-            let salt = b"voicetypr-secure-store-v1";
-
-            // 100,000 iterations for good security/performance balance
-            pbkdf2_hmac::<Sha256>(device_hash.as_bytes(), salt, 100_000, &mut key);
-
-            // Verify key was properly generated (not all zeros)
-            if key.iter().all(|&b| b == 0) {
-                return Err("Failed to generate encryption key".to_string());
-            }
-
-            log::info!("Initialized encryption with PBKDF2-derived device-specific key");
-            Ok(key)
-        })
+        .get_or_try_init(|| derive_legacy_key(&device::get_device_hash()?))
         .map(|_| ())
+}
+
+fn derive_legacy_key(device_hash: &str) -> Result<[u8; 32], String> {
+    if device_hash.len() != 64 || !device_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid device hash for encryption".to_string());
+    }
+    // Keep the historical input, salt and iteration count byte-for-byte compatible.
+    let mut key = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(
+        device_hash.as_bytes(),
+        b"voicetypr-secure-store-v1",
+        100_000,
+        &mut key,
+    );
+    Ok(key)
 }
 
 /// Check if migration from keychain is needed (for future use)
@@ -80,10 +71,17 @@ pub fn check_migration_needed<R: Runtime>(app: &AppHandle<R>) -> bool {
 
 /// Encrypt a string value
 fn encrypt_value(value: &str) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    let key = &windows_identity::keys()?[0];
+    #[cfg(not(target_os = "windows"))]
     let key = ENCRYPTION_KEY
         .get()
         .ok_or("Encryption key not initialized")?;
 
+    encrypt_value_with_key(value, key)
+}
+
+fn encrypt_value_with_key(value: &str, key: &[u8; 32]) -> Result<String, String> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| "Failed to create cipher")?;
 
     // Generate random nonce
@@ -106,10 +104,27 @@ fn encrypt_value(value: &str) -> Result<String, String> {
 
 /// Decrypt a string value
 fn decrypt_value(encrypted: &str) -> Result<String, String> {
-    let key = ENCRYPTION_KEY
-        .get()
-        .ok_or("Encryption key not initialized")?;
+    #[cfg(target_os = "windows")]
+    {
+        for key in windows_identity::keys()? {
+            match decrypt_value_with_key(encrypted, key) {
+                Ok(value) => return Ok(value),
+                Err(error) if error == "Decryption failed" => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err("Decryption failed".to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let key = ENCRYPTION_KEY
+            .get()
+            .ok_or("Encryption key not initialized")?;
+        decrypt_value_with_key(encrypted, key)
+    }
+}
 
+fn decrypt_value_with_key(encrypted: &str, key: &[u8; 32]) -> Result<String, String> {
     // Base64 decode
     let combined = general_purpose::STANDARD
         .decode(encrypted)
@@ -135,6 +150,8 @@ fn decrypt_value(encrypted: &str) -> Result<String, String> {
 
 /// Set an encrypted value in the store
 pub fn secure_set<R: Runtime>(app: &AppHandle<R>, key: &str, value: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    windows_identity::ensure_persisted(key)?;
     let encrypted = encrypt_value(value)?;
 
     let store = writable_store(app)?;

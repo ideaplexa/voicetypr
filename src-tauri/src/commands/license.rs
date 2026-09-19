@@ -454,11 +454,13 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
         }
     }
 
-    // Get device hash
+    // An unreadable saved license is a recovery error, never an absent license
+    // or a reason to query trial status under a newly selected identity.
+    let saved_license = keychain::get_license(&app)?;
     let device_hash = device::get_device_hash()?;
 
     // First, check if we have a stored license
-    if let Some(license_key) = keychain::get_license(&app)? {
+    if let Some(license_key) = saved_license {
         log::info!("Found stored license, validating...");
 
         // Try to validate the stored license

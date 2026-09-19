@@ -6,6 +6,31 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
+## 066 — Stable Windows license identity (next candidate, not beta.10)
+
+- [ ] **066-S1 — Legacy source drift:** disposable Windows profile with synthetic
+  secure-store fixtures encrypted under a hardware UUID and, separately, registry
+  MachineGuid. Change which discovery source succeeds before first upgraded launch.
+  Available matching candidates recover the license without modifying `secure.dat`;
+  a fresh process uses the protected identity without launching WMIC/CIM/registry.
+  Mixed-key provider credentials remain readable. Do not alter the real machine's
+  registry or use a customer's license for this test.
+- [ ] **066-S2 — Real DPAPI and activation:** direct and Store packages, valid test
+  license: activate, exit normally, restart, reboot, and record. API identity remains
+  stable, paid entitlement remains valid, and no extra activation is consumed.
+  Repeat with the CLI; launching a second desktop instance cannot overwrite the pin.
+- [ ] **066-S3 — Recovery failures:** unreadable DPAPI pin, unavailable legacy key,
+  malformed store, and denied write permissions in disposable profiles. Errors must
+  preserve existing files and never become a trial response. Unknown-key credentials
+  require explicit reactivation; failed activation cannot pin a replacement identity.
+  A pin protected by another Windows user cannot be silently replaced.
+- [ ] **066-S4 — Lookup deadlines:** on Windows, stalled discovery and descendants
+  retaining output pipes return within the configured deadlines. Verify no hanging
+  PowerShell/WMIC children or console flashes. Pin-loaded restart skips discovery.
+- [ ] **066-S5 — Customer confirmation:** collect fresh activation/restart evidence
+  with the new candidate. The reproduced mechanism alone does not establish either
+  customer's historical identity or recover a license deleted by an older build.
+
 ## 065 — Windows customer recovery (next candidate, not beta.10)
 
 - [ ] **065-S1 — Quiet input:** Windows Yeti/default input, normal and soft
