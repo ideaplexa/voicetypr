@@ -62,6 +62,10 @@ opencodetmp
 .claude/skills/
 skills-lock.json
 
+# Separate local launch-video work and its authoring tools
+/videos/
+/agent/
+
 # bv (beads viewer) local config and caches
 .bv/
 pi-session-*.html
