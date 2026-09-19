@@ -53,5 +53,8 @@ CLI/desktop coexistence, and Windows process-tree deadlines remain unchecked in
 The source-switch mechanism is proven; the customers' historical identities are
 not. Recovery requires an available matching candidate and cannot restore entries
 already deleted by an older build. An unreadable DPAPI pin fails closed and needs
-support rather than silent replacement. No merge, push or release performed for
-this follow-up; a new beta and affected smoke are required before release.
+support rather than silent replacement. The user authorized pushing, reviewing
+and merging this follow-up into PR142 on 2026-09-19, targeting a combined
+`2.0.6-beta.11`. PR142 tracks published-head CI and merge status; earlier CI is
+not evidence for a later head. No release is implied by merge, and affected
+Windows smoke remains required.
