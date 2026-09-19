@@ -27,6 +27,8 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
+Plan 066 — IN PROGRESS — Amp 2026-09-19: investigate and fix Windows identity drift across license activation and secure-storage restarts. See `066-windows-license-identity.md`.
+
 Plan 065 — LOCAL FIXES VERIFIED / NEEDS-SMOKE — Amp 2026-09-19: quiet-input warning policy, failed-license recovery routing and native Windows cues implemented; 1,565 Rust and 732 frontend tests pass. Windows runtime and original license decryption/loss cause remain open. See `065-windows-customer-recovery.md`.
 
 Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified in rebuilt macOS packages, including Saved text punctuation and Dock-safe indicator placement. Engine limitations and external release gates remain open. See `063-macos-vm-qa.md`.
