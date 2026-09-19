@@ -27,6 +27,8 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
+Plan 068 — IN PROGRESS — claimed Amp 2026-09-19: #116 investigation reproduced spurious encoder -6 with the desktop cancellation closure in whisper-rs 0.16.0; correct native callback wiring and verify real-engine cancellation. See `068-whisper-abort-callback.md`.
+
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
 
 Plan 066 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed Windows identity drift with protected persistence and authenticated legacy recovery; 1,576 Rust tests pass. Windows DPAPI/runtime and customer recovery remain unverified. Follow-up included in PR142. See `066-windows-license-identity.md`.
