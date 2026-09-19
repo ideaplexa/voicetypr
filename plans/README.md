@@ -27,7 +27,7 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
-Plan 068 — IN PROGRESS — claimed Amp 2026-09-19: #116 investigation reproduced spurious encoder -6 with the desktop cancellation closure in whisper-rs 0.16.0; correct native callback wiring and verify real-engine cancellation. See `068-whisper-abort-callback.md`.
+Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
 
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
 

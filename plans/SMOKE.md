@@ -6,6 +6,16 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
+## 068 — Whisper callback correctness (beta.11 candidate, not released)
+
+- [ ] **068-S1 — Packaged desktop:** Base English on macOS Metal and Windows
+  in-process CPU fallback: transcribe short speech repeatedly, cancel during
+  inference, then transcribe again. No spurious encoder -6, no insertion after
+  cancellation, and no stuck state. Record exact candidate/platform/log evidence.
+- [ ] **068-S2 — Original #116 environment:** ask the reporter to retry the new
+  candidate on their Mac. Local reproduction of the callback defect is not proof
+  of the historical root cause; capture native engine diagnostics if -6 remains.
+
 ## 066 — Stable Windows license identity (next candidate, not beta.10)
 
 - [ ] **066-S1 — Legacy source drift:** disposable Windows profile with synthetic

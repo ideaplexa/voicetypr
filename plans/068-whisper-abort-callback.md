@@ -1,6 +1,6 @@
 # 068 — Whisper cancellation callback correctness (#116)
 
-IN PROGRESS — claimed Amp 2026-09-19.
+LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19. Not released.
 
 ## Evidence and scope
 
@@ -17,10 +17,22 @@ IN PROGRESS — claimed Amp 2026-09-19.
 
 ## Implementation and verification
 
-Keep callback storage alive with the correct concrete type for the entire
-synchronous native inference call; do not use the broken dependency helper.
-Add a real-engine regression that exercises the captured token with cancellation
-false, true during encoder execution, and false again on a reused context, on
-Metal and CPU. Check captured ownership is released. Run focused/full Rust tests,
-format and Clippy checks. Keep packaged desktop and original-customer verification
-unchecked in `SMOKE.md`; this is a beta.11 candidate, not a release.
+Callback storage now retains its concrete type for the entire synchronous native
+inference call without the broken helper's leaked boxes. No retry policy changed.
+
+- The repository regression failed before the fix with `GenericError(-6)` while
+  its actual `CancellationToken` was false. After the fix, Base English succeeds
+  with cancellation false, returns -6 when the native abort poll reads true, and
+  succeeds again on the same context. Both Metal (Apple M4 Pro) and CPU passed;
+  captured Arc ownership returns to one after each inference, including errors.
+- Fixture: existing `test-audio.wav`, first 53,931 mono 16kHz samples; 11 threads.
+  Model: ggerganov/whisper.cpp `ggml-base.en.bin`, SHA256
+  `a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002`.
+- Repeat from `src-tauri` with an existing model (no auto-download):
+  `VOICETYPR_TEST_WHISPER_MODEL=/path/to/base.en.bin cargo test --lib real_engine_captured_cancellation_and_context_reuse -- --ignored --nocapture`.
+- `cargo test --workspace`: 1,577 passed, 17 ignored (the new real-engine test
+  above was executed separately). `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` pass.
+- Packaged desktop cancellation/insertion and the original customer's environment
+  remain unchecked in `SMOKE.md` (068-S1/S2). Issue #116 stays open pending rollout
+  verification; the reproduced defect does not establish every possible -6 cause.
