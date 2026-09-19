@@ -1,7 +1,7 @@
 # Plan 061 — License preservation — non-destructive secure-store reads
 
-**Status:** CODE COMPLETE / NEEDS-SMOKE — PR #140 follow-up verified 2026-09-06;
-packaged 061-S1/S2 remain unverified; not released
+**Status:** MERGED / RELEASED AS `v2.0.6-beta.10` — published 2026-09-15;
+PR #140 follow-up verified 2026-09-06; packaged 061-S1/S2 remain unverified.
 **Priority:** P0
 **Effort:** S
 **Depends on:** 060 (release remediation wave; independent file ownership)

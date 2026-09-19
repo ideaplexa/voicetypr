@@ -64,7 +64,7 @@ reproduced failure against the named plan.
   restart log to establish why the license became unavailable. Original decrypt
   cause and already-deleted license recovery are not proven fixed by this patch.
 
-The 060/061 candidate is released as `v2.0.6-beta.10` (2026-09-14).
+The 060/061 candidate is released as `v2.0.6-beta.10` (2026-09-15).
 Smoke must run against that exact build, not against older betas or PR CI.
 Windows hardware, real-provider cleanup, and consent/alert delivery remain
 unchecked. Existing 045-S1–S6, 050-S1–S3, 058-S1/S2 and 059-S1/S2 must also be

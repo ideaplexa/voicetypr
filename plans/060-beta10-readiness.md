@@ -2,7 +2,7 @@
 
 **Status:** MERGED / RELEASED AS `v2.0.6-beta.10` — packaged smoke remains unchecked.
 See `060-pr140-review-followup.md` for current findings and validation.
-Release published 2026-09-14: https://github.com/ideaplexa/voicetypr/releases/tag/v2.0.6-beta.10
+Release published 2026-09-15: https://github.com/ideaplexa/voicetypr/releases/tag/v2.0.6-beta.10
 Smoke must now be run against that exact build, not against the PR head or older betas.
 
 Renumbered from PR 140's `plans/047-silent-failures-soniox-alerts-diagnostics.md`
