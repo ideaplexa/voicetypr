@@ -25,10 +25,10 @@ impl SilenceDetectorEvent {
 }
 
 pub struct SilenceDetector {
-    started_at: Instant,
-    last_voice_time: Instant,
+    last_signal_time: Instant,
     last_event: SilenceDetectorEvent,
     speech_detected: bool,
+    signal_observed: bool,
     voice_threshold: f32,
     no_speech_warning_after: Duration,
     long_silence_warning_after: Duration,
@@ -52,10 +52,10 @@ impl SilenceDetector {
 
     fn new_at(now: Instant) -> Self {
         Self {
-            started_at: now,
-            last_voice_time: now,
+            last_signal_time: now,
             last_event: SilenceDetectorEvent::Clear,
             speech_detected: false,
+            signal_observed: false,
             voice_threshold: VOICE_RMS_THRESHOLD,
             no_speech_warning_after: NO_SPEECH_WARNING_AFTER,
             long_silence_warning_after: LONG_SILENCE_WARNING_AFTER,
@@ -70,10 +70,21 @@ impl SilenceDetector {
             return None;
         }
 
-        if rms > self.voice_threshold {
+        // Signal presence is deliberately separate from speech detection. Any
+        // finite, positive RMS proves that the capture path is producing audio,
+        // but only sustained above-threshold input may latch speech. Negative
+        // values are invalid for RMS and are treated like other invalid input.
+        let signal_present = rms.is_finite() && rms > 0.0;
+        if signal_present {
+            self.signal_observed = true;
+            // Below-threshold audio is not proof of silence. Keep both warning
+            // and stop timers idle while any potentially useful audio arrives.
+            self.last_signal_time = now;
+        }
+
+        if rms.is_finite() && rms > self.voice_threshold {
             let run_start = *self.voice_run_start.get_or_insert(now);
             if now.saturating_duration_since(run_start) >= self.min_voice_duration {
-                self.last_voice_time = now;
                 self.speech_detected = true;
                 if self.last_event != SilenceDetectorEvent::Clear {
                     return self.emit_if_changed(SilenceDetectorEvent::Clear);
@@ -85,10 +96,16 @@ impl SilenceDetector {
         }
 
         if !self.speech_detected {
-            let elapsed = now.saturating_duration_since(self.started_at);
+            let elapsed = now.saturating_duration_since(self.last_signal_time);
             let tier = if elapsed >= self.silence_timeout_after {
-                SilenceDetectorEvent::TimeoutNoSpeech
-            } else if elapsed >= self.no_speech_warning_after {
+                if self.signal_observed {
+                    // The speech-positive latch is intentionally conservative.
+                    // Preserve uncertain captures rather than discarding them.
+                    SilenceDetectorEvent::TimeoutWithSpeech
+                } else {
+                    SilenceDetectorEvent::TimeoutNoSpeech
+                }
+            } else if !self.signal_observed && elapsed >= self.no_speech_warning_after {
                 SilenceDetectorEvent::DeadMicWarn
             } else {
                 SilenceDetectorEvent::Clear
@@ -96,7 +113,7 @@ impl SilenceDetector {
             return self.emit_if_changed(tier);
         }
 
-        let elapsed = now.saturating_duration_since(self.last_voice_time);
+        let elapsed = now.saturating_duration_since(self.last_signal_time);
         let tier = if elapsed >= self.silence_timeout_after {
             SilenceDetectorEvent::TimeoutWithSpeech
         } else if elapsed >= self.long_silence_warning_after {
@@ -121,6 +138,7 @@ mod tests {
     use super::*;
 
     const SILENT: f32 = 0.0;
+    const QUIET_SIGNAL: f32 = 0.0029;
     const SPEECH: f32 = VOICE_RMS_THRESHOLD + 0.001;
 
     fn t0() -> Instant {
@@ -197,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn brief_noise_blip_does_not_count_as_speech_and_still_cancels() {
+    fn brief_noise_blip_does_not_count_as_speech_but_is_retained() {
         let start = t0();
         let mut detector = SilenceDetector::new_at(start);
 
@@ -211,13 +229,16 @@ mod tests {
         );
         assert!(!detector.speech_detected);
         assert_eq!(
-            detector.update_at(SILENT, start + SILENCE_TIMEOUT_AFTER),
-            Some(SilenceDetectorEvent::TimeoutNoSpeech)
+            detector.update_at(
+                SILENT,
+                start + Duration::from_secs(1) + SILENCE_TIMEOUT_AFTER
+            ),
+            Some(SilenceDetectorEvent::TimeoutWithSpeech)
         );
     }
 
     #[test]
-    fn intermittent_blips_do_not_reset_no_speech_timeout() {
+    fn intermittent_blips_do_not_latch_speech_but_are_retained_at_timeout() {
         let start = t0();
         let mut detector = SilenceDetector::new_at(start);
 
@@ -230,6 +251,102 @@ mod tests {
             assert!(!detector.speech_detected);
         }
 
+        assert_eq!(
+            detector.update_at(
+                SILENT,
+                start + Duration::from_secs(55) + SILENCE_TIMEOUT_AFTER
+            ),
+            Some(SilenceDetectorEvent::TimeoutWithSpeech)
+        );
+    }
+
+    #[test]
+    fn report_level_quiet_input_never_warns_and_is_transcribed_at_timeout() {
+        let start = t0();
+        let mut detector = SilenceDetector::new_at(start);
+
+        for secs in [1u64, 10, 30, 120, 299] {
+            assert_eq!(
+                detector.update_at(QUIET_SIGNAL, start + Duration::from_secs(secs)),
+                None
+            );
+        }
+        assert!(!detector.speech_detected);
+        assert_eq!(
+            detector.update_at(SILENT, start + SILENCE_TIMEOUT_AFTER),
+            None
+        );
+        assert_eq!(
+            detector.update_at(SILENT, start + Duration::from_secs(598)),
+            None
+        );
+        assert_eq!(
+            detector.update_at(SILENT, start + Duration::from_secs(599)),
+            Some(SilenceDetectorEvent::TimeoutWithSpeech)
+        );
+    }
+
+    #[test]
+    fn quiet_input_does_not_time_out_while_audio_is_still_arriving() {
+        let start = t0();
+        let mut detector = SilenceDetector::new_at(start);
+        for secs in [1, 10, 299, 300, 301, 600] {
+            assert_eq!(
+                detector.update_at(QUIET_SIGNAL, start + Duration::from_secs(secs)),
+                None
+            );
+        }
+        assert!(!detector.speech_detected());
+    }
+
+    #[test]
+    fn quiet_input_after_speech_prevents_false_silence_warning() {
+        let start = t0();
+        let mut detector = SilenceDetector::new_at(start);
+        let voiced = confirm_speech(&mut detector, start);
+        for secs in [59, 60, 299, 300] {
+            assert_eq!(
+                detector.update_at(QUIET_SIGNAL, voiced + Duration::from_secs(secs)),
+                None
+            );
+        }
+        assert!(detector.speech_detected());
+    }
+
+    #[test]
+    fn quiet_signal_clears_dead_mic_warning_without_latching_speech() {
+        let start = t0();
+        let mut detector = SilenceDetector::new_at(start);
+
+        assert_eq!(
+            detector.update_at(SILENT, start + NO_SPEECH_WARNING_AFTER),
+            Some(SilenceDetectorEvent::DeadMicWarn)
+        );
+        assert_eq!(
+            detector.update_at(QUIET_SIGNAL, start + Duration::from_secs(11)),
+            Some(SilenceDetectorEvent::Clear)
+        );
+        assert!(!detector.speech_detected);
+        assert_eq!(
+            detector.update_at(SILENT, start + Duration::from_secs(20)),
+            None
+        );
+    }
+
+    #[test]
+    fn invalid_rms_is_not_signal_or_speech() {
+        let start = t0();
+        let mut detector = SilenceDetector::new_at(start);
+
+        detector.update_at(f32::NAN, start + Duration::from_secs(1));
+        detector.update_at(f32::INFINITY, start + Duration::from_secs(2));
+        detector.update_at(f32::NEG_INFINITY, start + Duration::from_secs(3));
+        detector.update_at(-0.001, start + Duration::from_secs(4));
+        assert!(!detector.speech_detected);
+        assert_eq!(
+            detector.update_at(SILENT, start + NO_SPEECH_WARNING_AFTER),
+            Some(SilenceDetectorEvent::DeadMicWarn)
+        );
         assert_eq!(
             detector.update_at(SILENT, start + SILENCE_TIMEOUT_AFTER),
             Some(SilenceDetectorEvent::TimeoutNoSpeech)
@@ -247,12 +364,13 @@ mod tests {
         );
         assert_eq!(
             detector.update_at(SPEECH, start + Duration::from_secs(12)),
-            None
+            Some(SilenceDetectorEvent::Clear)
         );
         assert_eq!(
             detector.update_at(SPEECH, start + Duration::from_secs(12) + MIN_VOICE_DURATION),
-            Some(SilenceDetectorEvent::Clear)
+            None
         );
+        assert!(detector.speech_detected);
     }
 
     #[test]
@@ -287,14 +405,14 @@ mod tests {
         );
         assert_eq!(
             detector.update_at(SPEECH, voiced + Duration::from_secs(70)),
-            None
+            Some(SilenceDetectorEvent::Clear)
         );
         assert_eq!(
             detector.update_at(
                 SPEECH,
                 voiced + Duration::from_secs(70) + MIN_VOICE_DURATION
             ),
-            Some(SilenceDetectorEvent::Clear)
+            None
         );
     }
 

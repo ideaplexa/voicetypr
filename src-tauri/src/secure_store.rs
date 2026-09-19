@@ -330,15 +330,18 @@ mod tests {
     fn unreadable_entry_survives_other_writes_and_allows_explicit_replacement() {
         initialize_encryption_key().unwrap();
         let dir = TempDir::new().unwrap();
-        let path = write_store_file(&dir, &serde_json::json!({"license": "not-base64!"}));
+        let unreadable = tamper_ciphertext(&encrypt_value("old-license").unwrap());
+        let path = write_store_file(&dir, &serde_json::json!({"license": unreadable}));
         let (app, mut plugin) = mock_store_app(&dir);
 
-        assert!(secure_get(app.handle(), "license").is_err());
+        assert!(secure_get(app.handle(), "license")
+            .unwrap_err()
+            .contains("Decryption failed"));
         secure_set(app.handle(), "api_key", "secret").unwrap();
         secure_delete(app.handle(), "api_key").unwrap();
         plugin.on_event(app.handle(), &tauri::RunEvent::Exit);
         let disk = read_store_file(&path).unwrap().unwrap();
-        assert_eq!(disk.get("license").unwrap(), "not-base64!");
+        assert_eq!(disk.get("license").unwrap(), &unreadable);
         assert!(secure_get(app.handle(), "license").is_err());
 
         secure_set(app.handle(), "license", "recovered-license").unwrap();
@@ -350,6 +353,18 @@ mod tests {
         let disk = read_store_file(&path).unwrap().unwrap();
         assert_eq!(
             decrypt_raw_entry("license", disk.get("license"))
+                .unwrap()
+                .as_deref(),
+            Some("recovered-license")
+        );
+
+        // A same-process readback alone can hide persistence bugs. A new app
+        // must read the replacement from disk, not the old in-memory cache.
+        drop(plugin);
+        drop(app);
+        let (restarted, _plugin) = mock_store_app(&dir);
+        assert_eq!(
+            secure_get(restarted.handle(), "license")
                 .unwrap()
                 .as_deref(),
             Some("recovered-license")

@@ -6,6 +6,29 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
+## 065 — Windows customer recovery (next candidate, not beta.10)
+
+- [ ] **065-S1 — Quiet input:** Windows Yeti/default input, normal and soft
+  speech for 5–15 seconds: no false “No audio detected” warning; transcript and
+  paste still succeed. Continue soft input beyond five minutes, and switch from
+  louder to soft speech: no false silence warning or automatic stop. Digital-zero
+  input still warns; uncertain audio is retained/transcribed after five minutes
+  without signal rather than discarded. Background noise can keep recording active.
+- [ ] **065-S2 — Feedback:** Windows direct and Store packages, each cue enabled
+  independently: recording, transcript-ready and paste sounds are audible on the
+  selected Windows default output. Disabled settings remain silent. Playback
+  failures log a Windows API error; no PowerShell process or console flash.
+- [ ] **065-S3 — License recovery:** disposable Windows profile with a valid JSON
+  secure store and an unreadable license entry: startup reports a read failure;
+  hotkey opens License with recovery guidance, never “still loading” or a claim
+  that the paid license expired. Retry and normal exit preserve unreadable data.
+  Re-enter a valid test license; activation, recording and a fresh restart work.
+  Do not reset customer data or submit a real customer's key for this test.
+- [ ] **065-S4 — Customer follow-up:** establish whether Wtin can reactivate and
+  remains activated after restart; for Roger, capture a fresh activation and
+  restart log to establish why the license became unavailable. Original decrypt
+  cause and already-deleted license recovery are not proven fixed by this patch.
+
 The 060/061 candidate is not released. PR #140 follow-up fixes are being
 validated locally; existing CI results apply only to the published PR head.
 Windows hardware, real-provider cleanup, and consent/alert delivery remain

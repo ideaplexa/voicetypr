@@ -12,6 +12,7 @@ vi.mock("sonner", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import { LicenseProvider, useLicense } from "./LicenseContext";
+import { AccountSection } from "@/components/sections/AccountSection";
 
 const SECRET_KEY = "SUPER-SECRET-LICENSE-KEY-XYZ";
 
@@ -70,6 +71,44 @@ describe("LicenseContext", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("allows re-entering an existing key after an unreadable saved license without a reset", async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "check_license_status") {
+        throw new Error(
+          "Your saved license could not be read. The saved entry has not been deleted.",
+        );
+      }
+      if (command === "activate_license") return licensedStatus;
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(
+      <LicenseProvider>
+        <AccountSection />
+      </LicenseProvider>,
+    );
+
+    expect(await screen.findByText("Couldn’t load license status")).toBeInTheDocument();
+    expect(screen.queryByText("Trial Expired")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Enter license key"), {
+      target: { value: SECRET_KEY },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+
+    expect(await screen.findByText("Pro Licensed")).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("activate_license", { licenseKey: SECRET_KEY });
+    expect(screen.queryByText("Couldn’t load license status")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Enter license key")).not.toBeInTheDocument();
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.every(
+          ([command]) => command === "check_license_status" || command === "activate_license",
+        ),
+    ).toBe(true);
   });
 
   it("never logs the license key when checking status", async () => {

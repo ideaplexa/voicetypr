@@ -1775,7 +1775,7 @@ mod tests {
         RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard,
         TranscriptionFailure, TranscriptionStatus,
     };
-    use crate::commands::license::CachedLicense;
+    use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
     use crate::license::{LicenseState, LicenseStatus};
     use crate::remote::client::{
         calculate_timeout_ms, RemoteClientError, RemoteEndpoint, TranscriptionSource,
@@ -2380,8 +2380,16 @@ mod tests {
     #[test]
     fn recording_license_state_is_loading_when_cache_absent() {
         assert_eq!(
-            recording_license_state(None),
+            recording_license_state(&RuntimeLicenseCache::Loading),
             RecordingLicenseState::Loading
+        );
+    }
+
+    #[test]
+    fn recording_license_state_requires_recovery_after_failed_check() {
+        assert_eq!(
+            recording_license_state(&RuntimeLicenseCache::Failed),
+            RecordingLicenseState::CheckFailed
         );
     }
 
@@ -2389,7 +2397,7 @@ mod tests {
     fn recording_license_state_blocks_expired_license() {
         let cached = cached_license(LicenseState::Expired);
         assert_eq!(
-            recording_license_state(Some(&cached)),
+            recording_license_state(&RuntimeLicenseCache::Ready(cached)),
             RecordingLicenseState::Blocked
         );
     }
@@ -2401,7 +2409,7 @@ mod tests {
         cached.status.verification_expires_at =
             Some(chrono::Utc::now() - chrono::Duration::seconds(1));
         assert_eq!(
-            recording_license_state(Some(&cached)),
+            recording_license_state(&RuntimeLicenseCache::Ready(cached)),
             RecordingLicenseState::VerificationRequired
         );
     }
@@ -2410,7 +2418,7 @@ mod tests {
     fn recording_license_state_blocks_missing_license() {
         let cached = cached_license(LicenseState::None);
         assert_eq!(
-            recording_license_state(Some(&cached)),
+            recording_license_state(&RuntimeLicenseCache::Ready(cached)),
             RecordingLicenseState::Blocked
         );
     }
@@ -2420,11 +2428,11 @@ mod tests {
         let trial = cached_license(LicenseState::Trial);
         let licensed = cached_license(LicenseState::Licensed);
         assert_eq!(
-            recording_license_state(Some(&trial)),
+            recording_license_state(&RuntimeLicenseCache::Ready(trial)),
             RecordingLicenseState::Ready
         );
         assert_eq!(
-            recording_license_state(Some(&licensed)),
+            recording_license_state(&RuntimeLicenseCache::Ready(licensed)),
             RecordingLicenseState::Ready
         );
     }
@@ -3795,22 +3803,24 @@ fn select_best_fallback_model(
 enum RecordingLicenseState {
     Ready,
     Loading,
+    CheckFailed,
     Blocked,
     VerificationRequired,
 }
 
 fn recording_license_state(
-    cache: Option<&crate::commands::license::CachedLicense>,
+    cache: &crate::commands::license::RuntimeLicenseCache,
 ) -> RecordingLicenseState {
+    use crate::commands::license::RuntimeLicenseCache;
     match cache {
-        Some(cached)
+        RuntimeLicenseCache::Ready(cached)
             if cached
                 .status
                 .verification_window_expired(chrono::Utc::now()) =>
         {
             RecordingLicenseState::VerificationRequired
         }
-        Some(cached)
+        RuntimeLicenseCache::Ready(cached)
             if matches!(
                 cached.status.status,
                 LicenseState::Expired | LicenseState::None
@@ -3818,8 +3828,9 @@ fn recording_license_state(
         {
             RecordingLicenseState::Blocked
         }
-        Some(_) => RecordingLicenseState::Ready,
-        None => RecordingLicenseState::Loading,
+        RuntimeLicenseCache::Ready(_) => RecordingLicenseState::Ready,
+        RuntimeLicenseCache::Loading => RecordingLicenseState::Loading,
+        RuntimeLicenseCache::Failed => RecordingLicenseState::CheckFailed,
     }
 }
 /// Pre-recording validation using the readiness state
@@ -3875,9 +3886,24 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
 
     // Check cached license status (warmed during startup/license transitions - no network call)
     let app_state = app.state::<AppState>();
-    let cache = app_state.license_cache.read().await;
+    let license_state = recording_license_state(&*app_state.license_cache.read().await);
 
-    match recording_license_state(cache.as_ref()) {
+    match license_state {
+        RecordingLicenseState::CheckFailed => {
+            log::warn!("Recording blocked: license check failed; recovery required");
+            let message = "License check failed. Open License and retry, or re-enter your existing license key to activate it again.";
+            let _ = crate::commands::window::focus_main_window(app.clone()).await;
+            let _ = emit_to_all(
+                app,
+                "license-required",
+                serde_json::json!({
+                    "title": "License Check Failed",
+                    "message": message,
+                    "action": "restore"
+                }),
+            );
+            return Err(message.to_string());
+        }
         RecordingLicenseState::VerificationRequired => {
             log::warn!("Recording blocked: offline license verification window has ended");
             let _ = crate::commands::window::focus_main_window(app.clone()).await;
@@ -3893,9 +3919,7 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
             return Err("License verification required to record".to_string());
         }
         RecordingLicenseState::Blocked => {
-            if let Some(cached) = cache.as_ref() {
-                log::warn!("Recording blocked: license is {:?}", cached.status.status);
-            }
+            log::warn!("Recording blocked: no active license or trial");
 
             let _ = crate::commands::window::focus_main_window(app.clone()).await;
 
@@ -3904,8 +3928,8 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
                 "license-required",
                 serde_json::json!({
                     "title": "License Required",
-                    "message": "Your trial has expired. Please purchase a license to continue",
-                    "action": "purchase"
+                    "message": "No active license or trial was found. If you already purchased a license, re-enter your existing key here to activate it again.",
+                    "action": "restore"
                 }),
             );
             return Err("License required to record".to_string());
@@ -3959,10 +3983,9 @@ fn silence_event_runs_in_state(state: RecordingState) -> bool {
 /// unit-testable without an `AppHandle`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SilenceTimeoutDisposition {
-    /// Speech was captured before the timeout → stop normally so it is
-    /// transcribed. NEVER discarded.
+    /// Speech or uncertain audio was captured → stop normally and transcribe.
     StopAndTranscribe,
-    /// No speech for the entire timeout window → cancel and discard.
+    /// No finite nonzero signal for the entire timeout window → cancel.
     CancelAndDiscard,
 }
 
@@ -4051,7 +4074,7 @@ fn spawn_silence_event_listener(
                             });
                         }
                         Some(SilenceTimeoutDisposition::CancelAndDiscard) => {
-                            // No speech the whole window → cancel and discard.
+                            // No signal the whole window → cancel and discard.
                             let app_for_cancel = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 match cancel_recording(app_for_cancel.clone()).await {
