@@ -58,3 +58,13 @@ and merging this follow-up into PR142 on 2026-09-19, targeting a combined
 `2.0.6-beta.11`. PR142 tracks published-head CI and merge status; earlier CI is
 not evidence for a later head. No release is implied by merge, and affected
 Windows smoke remains required.
+
+## Published-PR review correction
+
+Source review of command-group 5.0.1 confirmed that its Windows builder replaces
+the underlying Command creation flags when adding CREATE_SUSPENDED. Setting
+CREATE_NO_WINDOW on Command before group_spawn therefore lost the hidden-window
+flag. Configure it on the group builder instead. The same dependency inspection
+confirmed that kill still terminates the job after the parent has exited, which
+is needed for descendants retaining output pipes. Console-flash behavior remains
+part of Windows smoke; dependency inspection is not runtime proof.

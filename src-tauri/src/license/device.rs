@@ -50,8 +50,6 @@ impl WindowsCommandRunner for RealWindowsCommandRunner {
     fn run(&self, program: &str, args: &[&str], timeout_ms: u64) -> Result<Output, String> {
         use command_group::CommandGroup;
         use std::io::Read;
-        #[cfg(target_os = "windows")]
-        use std::os::windows::process::CommandExt;
         use std::process::Stdio;
         use std::sync::mpsc;
         use std::thread;
@@ -67,10 +65,13 @@ impl WindowsCommandRunner for RealWindowsCommandRunner {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let mut group = command.group();
+        // The group builder replaces Command's creation flags when adding
+        // CREATE_SUSPENDED, so configure hidden-window behavior on it directly.
         #[cfg(target_os = "windows")]
-        command.creation_flags(CREATE_NO_WINDOW);
-        let mut child = command
-            .group_spawn()
+        group.creation_flags(CREATE_NO_WINDOW);
+        let mut child = group
+            .spawn()
             .map_err(|e| format!("Failed to execute {}: {}", program, e))?;
 
         let stdout = child
