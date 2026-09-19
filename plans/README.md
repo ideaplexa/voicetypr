@@ -27,6 +27,8 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
+Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
+
 Plan 066 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed Windows identity drift with protected persistence and authenticated legacy recovery; 1,576 Rust tests pass. Windows DPAPI/runtime and customer recovery remain unverified. Follow-up included in PR142. See `066-windows-license-identity.md`.
 
 Plan 065 — LOCAL FIXES VERIFIED / NEEDS-SMOKE — Amp 2026-09-19: quiet-input warning policy, failed-license recovery routing and native Windows cues implemented; 1,565 Rust and 732 frontend tests pass. Windows runtime and original license decryption/loss cause remain open. See `065-windows-customer-recovery.md`.

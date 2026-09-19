@@ -179,6 +179,29 @@
   html {
     @apply font-sans;
   }
+
+  /* Tailwind v4 defaults buttons to an arrow. Keep action affordances consistent
+     across shadcn/Base UI controls without modifying the component primitives. */
+  :where(
+    button,
+    [role="button"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="tab"],
+    input[type="checkbox"],
+    input[type="radio"],
+    select,
+    summary,
+    label[for]
+  ):where(:not(:disabled):not([aria-disabled="true"]):not([data-disabled])) {
+    cursor: pointer;
+  }
+
+  /* A Field owns one control; its label must not advertise a disabled action. */
+  [data-slot="field"]:has(:is(:disabled, [aria-disabled="true"], [data-disabled])) label {
+    cursor: default;
+  }
 }
 
 /* Windows transparency fix for pill window */
