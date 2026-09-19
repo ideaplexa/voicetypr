@@ -1,10 +1,9 @@
 # Plan 060 — Beta10 release remediation (silent-failures work migrated from PR 047)
 
-**Status:** CODE COMPLETE / NEEDS-SMOKE — local review follow-up verified.
+**Status:** MERGED / RELEASED AS `v2.0.6-beta.10` — packaged smoke remains unchecked.
 See `060-pr140-review-followup.md` for current findings and validation.
-Packaged smoke remains unchecked.
-Candidate tracked in [PR #140](https://github.com/moinulmoin/voicetypr/pull/140);
-see the PR for its published head and CI status. Not merged or released.
+Release published 2026-09-14: https://github.com/ideaplexa/voicetypr/releases/tag/v2.0.6-beta.10
+Smoke must now be run against that exact build, not against the PR head or older betas.
 
 Renumbered from PR 140's `plans/047-silent-failures-soniox-alerts-diagnostics.md`
 to free 047 for main's landed `polish-provider-ux-audio-fast-path.md` (via #136).
