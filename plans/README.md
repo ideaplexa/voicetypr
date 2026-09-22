@@ -43,6 +43,7 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 | 047  | Wave 1 dispatch surface (#18 dead bytes cmd, #21 engine layer out of audio.rs) | P1 | M | 046 | DONE — `7974cd0`, merged to integrate |
 | 048  | Wave 3a uploads through executor (#16-full) | P1 | L | 047 | DONE — `7514e26`, merged to integrate |
 | 050  | Structural refactor: god-file split + engine unification + settings hardening | P2 | XL | feat/049 merge; independent of 043 | TODO — authored 2026-07-06 from arch-roadmap remainder + 2026-07-06 deep-review; own branch `refactor/050-structure`; phases A(safe extractions)→B(engine unification)→C(settings)→D(monsters); planning only, awaiting owner greenlight |
+| 069  | Handy research consolidation + audio/streaming recovery map | P1 | M | Existing integration branch | IN PROGRESS — claimed Codex 2026-09-22; consolidate research and map current implementation; product recovery remains a follow-up |
 
 ## Code-done, awaiting batched manual smoke (`plans/SMOKE.md`)
 
