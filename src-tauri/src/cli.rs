@@ -89,8 +89,11 @@ struct TranscribeArgs {
     #[arg(long)]
     file: PathBuf,
     /// Model to use (e.g. "base", "large-v3-turbo"); defaults to the app's selected model. Run `voicetypr models` to list installed models.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "model_file")]
     model: Option<String>,
+    /// Transcribe with a local Whisper GGML file outside the model catalog.
+    #[arg(long, conflicts_with = "model", requires = "engine")]
+    model_file: Option<PathBuf>,
     /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine.
     #[arg(long)]
     engine: Option<String>,
@@ -435,6 +438,17 @@ async fn run_transcribe(
     if !args.file.exists() {
         return Err(format!("Audio file not found: {}", args.file.display()).into());
     }
+    if let Some(model_file) = args.model_file.as_ref() {
+        if args.engine.as_deref() != Some("whisper") {
+            return Err("--model-file requires --engine whisper".into());
+        }
+        if !model_file.is_file() {
+            return Err("--model-file must point to an existing file".into());
+        }
+        if args.server.is_some() {
+            return Err("--model-file cannot be used with --server".into());
+        }
+    }
     if args.server.is_none() {
         check_license_status(app.clone()).await?;
     }
@@ -443,13 +457,19 @@ async fn run_transcribe(
         transcribe_via_remote(app, &args.file, server, password).await?
     } else {
         let settings = get_settings(app.clone()).await?;
-        let model = args
-            .model
-            .clone()
-            .or_else(|| {
-                (!settings.current_model.is_empty()).then_some(settings.current_model.clone())
-            })
-            .ok_or_else(|| "No model specified and no model is selected in the app. Pass --model <name> (run `voicetypr models` to list installed models) or choose a default model in Voicetypr settings.".to_string())?;
+        let model = if let Some(path) = args.model_file.as_ref() {
+            path.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("external-whisper")
+                .to_string()
+        } else {
+            args.model
+                .clone()
+                .or_else(|| {
+                    (!settings.current_model.is_empty()).then_some(settings.current_model.clone())
+                })
+                .ok_or_else(|| "No model specified and no model is selected in the app. Pass --model <name> (run `voicetypr models` to list installed models) or choose a default model in Voicetypr settings.".to_string())?
+        };
         let engine = args.engine.clone().or_else(|| {
             (!settings.current_model_engine.is_empty())
                 .then_some(settings.current_model_engine.clone())
@@ -462,6 +482,7 @@ async fn run_transcribe(
             args.language.clone(),
             args.audio_ctx,
             args.speed_mode,
+            args.model_file.clone(),
         )
         .await?;
         json!({ "text": t.text, "words": t.words, "metadata": t.metadata, "model": model, "engine": engine })
@@ -531,6 +552,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
             output_path.to_string_lossy().to_string(),
             model.clone(),
             engine.clone(),
+            None,
             None,
             None,
             None,
@@ -948,6 +970,46 @@ mod tests {
             }
             other => panic!("unexpected command: {:?}", other),
         }
+    }
+
+    #[test]
+    fn cli_parses_whisper_model_file_and_rejects_catalog_model_together() {
+        let cli = Cli::try_parse_from([
+            "voicetypr",
+            "transcribe",
+            "--file",
+            "sample.wav",
+            "--engine",
+            "whisper",
+            "--model-file",
+            "models/ggml-small.en-q8_0.bin",
+            "--json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Transcribe(args)) => {
+                assert_eq!(
+                    args.model_file,
+                    Some(PathBuf::from("models/ggml-small.en-q8_0.bin"))
+                );
+                assert!(args.model.is_none());
+                assert!(args.json);
+            }
+            other => panic!("unexpected command: {:?}", other),
+        }
+        assert!(Cli::try_parse_from([
+            "voicetypr",
+            "transcribe",
+            "--file",
+            "sample.wav",
+            "--engine",
+            "whisper",
+            "--model",
+            "small.en",
+            "--model-file",
+            "model.bin",
+        ])
+        .is_err());
     }
 
     #[test]

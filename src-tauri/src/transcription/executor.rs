@@ -50,9 +50,17 @@ pub async fn transcribe_with_app(
     app: &AppHandle,
     request: TranscriptionRequest,
 ) -> Result<TranscriptionResult, TranscriptionError> {
-    let source = request.source;
+    let active = resolve_active(app, &request.engine, request.source).await?;
+    transcribe_with_resolved_engine(app, request, active).await
+}
 
-    let active = resolve_active(app, &request.engine, source).await?;
+/// Keep the normal executor policy and result handling for a CLI supplied Whisper file.
+pub(crate) async fn transcribe_with_resolved_engine(
+    app: &AppHandle,
+    request: TranscriptionRequest,
+    active: ActiveEngineSelection,
+) -> Result<TranscriptionResult, TranscriptionError> {
+    let source = request.source;
     let job = TranscriptionJob {
         source,
         engine: active.engine_name().to_string(),

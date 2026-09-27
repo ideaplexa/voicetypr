@@ -8140,10 +8140,12 @@ pub async fn transcribe_audio_file(
         None,
         None,
         None,
+        None,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn transcribe_audio_file_for_cli(
     app: AppHandle,
     file_path: String,
@@ -8152,6 +8154,7 @@ pub async fn transcribe_audio_file_for_cli(
     language_override: Option<String>,
     audio_ctx: Option<i32>,
     speed_mode_override: Option<bool>,
+    model_file: Option<std::path::PathBuf>,
 ) -> Result<UploadTranscription, String> {
     transcribe_audio_file_impl(
         app,
@@ -8162,6 +8165,7 @@ pub async fn transcribe_audio_file_for_cli(
         language_override,
         audio_ctx,
         speed_mode_override,
+        model_file,
     )
     .await
 }
@@ -8242,6 +8246,7 @@ async fn transcribe_audio_file_impl(
     language_override: Option<String>,
     audio_ctx: Option<i32>,
     speed_mode_override: Option<bool>,
+    model_file: Option<std::path::PathBuf>,
 ) -> Result<UploadTranscription, String> {
     log::info!(
         "[UPLOAD] transcribe_audio_file START | file_path={:?}, model_name={}, engine_hint={:?}",
@@ -8276,8 +8281,14 @@ async fn transcribe_audio_file_impl(
     log::info!("[UPLOAD] Input ready at {:?}", wav_path);
 
     // Resolve engine (whisper/parakeet/cloud) for the requested model
-    let engine_selection =
-        resolve_engine_for_model(&app, &model_name, model_engine.as_deref()).await?;
+    let engine_selection = if let Some(path) = model_file.as_ref() {
+        ActiveEngineSelection::Whisper {
+            model_name: model_name.clone(),
+            model_path: path.clone(),
+        }
+    } else {
+        resolve_engine_for_model(&app, &model_name, model_engine.as_deref()).await?
+    };
     log::info!(
         "[UPLOAD] Engine resolved to: {}",
         engine_selection.engine_name()
@@ -8466,9 +8477,19 @@ async fn transcribe_audio_file_impl(
             audio_ctx,
             speed_mode_override,
         };
-        transcribe_with_app(&app, request)
+        if model_file.is_some() {
+            crate::transcription::executor::transcribe_with_resolved_engine(
+                &app,
+                request,
+                engine_selection,
+            )
             .await
             .map_err(upload_error_to_string)?
+        } else {
+            transcribe_with_app(&app, request)
+                .await
+                .map_err(upload_error_to_string)?
+        }
     };
 
     log::info!(

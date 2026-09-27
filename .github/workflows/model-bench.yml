@@ -1,0 +1,230 @@
+name: Whisper Model Bench
+
+on:
+  # Temporary: lets the first run happen before this workflow exists on main
+  # (workflow_dispatch only lists workflows from the default branch).
+  push:
+    branches: [feat/whisper-model-bench]
+    paths: ['.github/workflows/model-bench.yml']
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'Comma-separated model names (subset of the bench catalog)'
+        required: true
+        type: string
+        default: 'base.en,small.en,small.en-q8_0,turbo,turbo-q8_0,turbo-q5_0,large-v3-q5_0,distil-v3.5'
+      reps:
+        description: 'Runs per model and clip'
+        required: true
+        type: number
+        default: 2
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+
+jobs:
+  bench:
+    name: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            timeout: 240
+          - runner: windows-2022
+            timeout: 360
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Select Swift 6 toolchain and configure Clang runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          xcode=$(
+            find /Applications -maxdepth 1 \( -type d -o -type l \) \
+              \( -name 'Xcode_1[6-9]*.app' -o -name 'Xcode_[2-9][0-9]*.app' \) \
+              | sort -V | tail -1
+          )
+          if [ -z "$xcode" ]; then echo "No Xcode >=16 (Swift 6) found" >&2; exit 1; fi
+          sudo xcode-select -s "$xcode"
+          swift --version
+          clang_runtime=$(
+            find "$xcode/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang" \
+              -type f -name 'libclang_rt.osx.a' 2>/dev/null | sort -V | tail -1
+          )
+          if [ -n "$clang_runtime" ]; then
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+          fi
+
+      - name: Capture Swift toolchain cache key
+        if: runner.os == 'macOS'
+        id: swift-toolchain
+        shell: bash
+        run: echo "hash=$(swift --version | shasum -a 256 | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Swift Parakeet build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v5
+        with:
+          path: sidecar/parakeet-swift/.build
+          key: parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-${{ hashFiles('sidecar/parakeet-swift/Package.swift', 'sidecar/parakeet-swift/Package.resolved', 'sidecar/parakeet-swift/build.sh', 'sidecar/parakeet-swift/Sources/**') }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.19.0'
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.13.1 --activate
+          pnpm --version
+
+      - name: Set short Windows target directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'D:\cargo-target' | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value 'CARGO_TARGET_DIR=D:\cargo-target'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Tauri validates these bundle paths even for a CPU-only cargo build.
+      - name: Stub Windows bundle resources
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sidecar/whisper-vulkan/dist | Out-Null
+          New-Item -ItemType File -Force -Path sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe | Out-Null
+          New-Item -ItemType Directory -Force -Path src-tauri/windows/resources | Out-Null
+          foreach ($f in @('vc_redist.x64.exe','VulkanRT-Installer.exe','voicetypr.pdb')) {
+            New-Item -ItemType File -Force -Path "src-tauri/windows/resources/$f" | Out-Null
+          }
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build CLI (release)
+        working-directory: src-tauri
+        run: cargo build --release
+
+      - name: Select model files
+        id: select
+        shell: pwsh
+        env:
+          SELECTED_MODELS: ${{ inputs.models || 'base.en,small.en,small.en-q8_0,turbo,turbo-q8_0,turbo-q5_0,large-v3-q5_0,distil-v3.5' }}
+        run: |
+          $catalog = @{
+            'base.en' = 'ggml-base.en.bin'
+            'small.en' = 'ggml-small.en.bin'
+            'small.en-q8_0' = 'ggml-small.en-q8_0.bin'
+            'turbo' = 'ggml-large-v3-turbo.bin'
+            'turbo-q8_0' = 'ggml-large-v3-turbo-q8_0.bin'
+            'turbo-q5_0' = 'ggml-large-v3-turbo-q5_0.bin'
+            'large-v3-q5_0' = 'ggml-large-v3-q5_0.bin'
+            'distil-v3.5' = 'ggml-model.bin'
+          }
+          $names = @($env:SELECTED_MODELS.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($names.Count -eq 0) { throw 'Select at least one model' }
+          if (@($names | Select-Object -Unique).Count -ne $names.Count) { throw 'Duplicate model names' }
+          $selected = @()
+          foreach ($name in $names) {
+            if (-not $catalog.ContainsKey($name)) { throw "Unknown model: $name" }
+            $file = $catalog[$name]
+            $repo = if ($name -eq 'distil-v3.5') { 'distil-whisper/distil-large-v3.5-ggml' } else { 'ggerganov/whisper.cpp' }
+            $selected += [pscustomobject]@{ name = $name; file = $file; url = "https://huggingface.co/$repo/resolve/main/$file" }
+          }
+          ConvertTo-Json -InputObject $selected -Depth 4 | Set-Content -Path (Join-Path $env:RUNNER_TEMP 'model-bench-selected.json')
+          $files = ($selected | ForEach-Object { $_.file }) -join '-'
+          $models = ($selected | ForEach-Object { "$($_.name)=bench/models/$($_.file)" }) -join ','
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "files=$files"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "models=$models"
+
+      - name: Cache model files
+        uses: actions/cache@v5
+        with:
+          path: bench/models
+          key: whisper-models-${{ runner.os }}-${{ steps.select.outputs.files }}
+
+      - name: Download missing models
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bench/models | Out-Null
+          $selected = Get-Content (Join-Path $env:RUNNER_TEMP 'model-bench-selected.json') -Raw | ConvertFrom-Json
+          foreach ($model in $selected) {
+            $target = Join-Path 'bench/models' $model.file
+            if ((Test-Path $target) -and (Get-Item $target).Length -gt 10000000) { continue }
+            $partial = "$target.part"
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Invoke-WebRequest -Uri $model.url -OutFile $partial
+                if ((Get-Item $partial).Length -le 10000000) { throw "Download too small: $($model.file)" }
+                Move-Item -Force $partial $target
+                break
+              } catch {
+                Remove-Item -ErrorAction SilentlyContinue $partial
+                if ($attempt -eq 3) { throw }
+                Start-Sleep -Seconds (5 * $attempt)
+              }
+            }
+          }
+
+      - name: Fetch whisper.cpp JFK sample
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/master/samples/jfk.wav' -OutFile bench/clips/jfk.wav
+          $manifest = @(Get-Content bench/clips/manifest.json -Raw | ConvertFrom-Json)
+          $manifest += [pscustomobject]@{
+            file = 'jfk.wav'
+            lang = 'en'
+            ref = 'And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.'
+          }
+          ConvertTo-Json -InputObject $manifest -Depth 4 | Set-Content bench/clips/manifest.json
+
+      - name: Run model bench
+        shell: pwsh
+        env:
+          BENCH_MODELS: ${{ steps.select.outputs.models }}
+          BENCH_REPS: ${{ inputs.reps || 2 }}
+        run: |
+          $bin = if ($env:RUNNER_OS -eq 'Windows') { 'D:/cargo-target/release/voicetypr.exe' } else { 'src-tauri/target/release/voicetypr' }
+          node scripts/model-bench.mjs --bin $bin --clips bench/clips --models $env:BENCH_MODELS --reps $env:BENCH_REPS --out bench/results
+          if ($LASTEXITCODE -ne 0) { throw "Model bench failed with exit code $LASTEXITCODE" }
+
+      - name: Add report to job summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path bench/results/report.md) {
+            Get-Content bench/results/report.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload model bench report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: model-bench-${{ matrix.runner }}
+          path: |
+            bench/results/report.json
+            bench/results/report.md
+          if-no-files-found: warn
+          retention-days: 30
