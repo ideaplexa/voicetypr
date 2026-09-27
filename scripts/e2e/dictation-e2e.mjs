@@ -108,20 +108,20 @@ function prepareProfile(home, selection, livePreview, language, secureStore) {
   linkTree(real.whisperModels, paths.whisperModels);
   linkTree(real.fluidModels, paths.fluidModels);
   if (selection.engine === "whisper" && !existsSync(join(paths.whisperModels, `${selection.model}.bin`))) {
-    fail(`Whisper model ${selection.model}.bin is missing in ${real.whisperModels}. Download it in VoiceTypr first.`);
+    fail(`Whisper model ${selection.model}.bin is missing in ${real.whisperModels}. Download it in Voicetypr first.`);
   }
   if (selection.engine === "parakeet" && !PARAKEET_CACHE_SUBDIRS[selection.model]) {
     fail(`Unknown Parakeet model ${selection.model}. Check src-tauri/src/parakeet/models.rs.`);
   }
   if (selection.engine === "parakeet" && !existsSync(join(paths.fluidModels, PARAKEET_CACHE_SUBDIRS[selection.model]))) {
-    fail(`FluidAudio model ${selection.model} is missing in ${real.fluidModels}. Download it in VoiceTypr first.`);
+    fail(`FluidAudio model ${selection.model} is missing in ${real.fluidModels}. Download it in Voicetypr first.`);
   }
   if (!new Set(["whisper", "parakeet"]).has(selection.engine)) {
     if (!new Set(["soniox", "deepgram", "openai", "groq", "cohere"]).has(selection.engine)) fail(`Unknown engine ${selection.engine}.`);
     if (!secureStore) fail(`${selection.engine} requires --secure-store <path> with its encrypted API key.`);
     const source = resolve(secureStore);
     if (!existsSync(source) || !statSync(source).isFile()) fail(`Secure store file does not exist: ${source}`);
-    if (realpathSync(source) === join(real.data, "secure.dat")) fail("Provide a separate secure.dat file, not the normal VoiceTypr profile's secure store.");
+    if (realpathSync(source) === join(real.data, "secure.dat")) fail("Provide a separate secure.dat file, not the normal Voicetypr profile's secure store.");
     let values;
     try { values = JSON.parse(readFileSync(source, "utf8")); }
     catch { fail(`Secure store file is not valid JSON: ${source}`); }
@@ -155,14 +155,14 @@ async function launch(bin, home, paths) {
   try {
     await until(() => {
       if (spawnError) fail(`Could not launch ${bin}: ${spawnError.message}`);
-      if (child.exitCode !== null) fail(`VoiceTypr exited before ready (${child.exitCode}). See ${join(home, "app-stdout.log")}`);
+      if (child.exitCode !== null) fail(`Voicetypr exited before ready (${child.exitCode}). See ${join(home, "app-stdout.log")}`);
       const lines = logLines(paths);
       const modelPathLine = lines.find((line) => line.includes("Models directory:"));
       if (modelPathLine && !modelPathLine.includes(paths.whisperModels)) {
-        fail(`VoiceTypr resolved a non-isolated model path. Aborting before any cases: ${modelPathLine}`);
+        fail(`Voicetypr resolved a non-isolated model path. Aborting before any cases: ${modelPathLine}`);
       }
       return modelPathLine && lines.some((line) => line.includes(READY_LINE));
-    }, 30000, "VoiceTypr startup log");
+    }, 30000, "Voicetypr startup log");
   } catch (error) {
     child.kill("SIGTERM");
     throw error;
@@ -188,7 +188,7 @@ function buildWindowFinder(out) {
 }
 function pillScreenshot(windowFinder, pid, destination) {
   const id = command(windowFinder, [String(pid)]).trim();
-  if (!/^\d+$/u.test(id)) fail("Could not identify the on-screen VoiceTypr pill window. Allow Screen Recording for the calling host and verify the pill is visible.");
+  if (!/^\d+$/u.test(id)) fail("Could not identify the on-screen Voicetypr pill window. Allow Screen Recording for the calling host and verify the pill is visible.");
   command("screencapture", ["-x", "-l", id, destination]);
   if (!existsSync(destination) || statSync(destination).size === 0) fail(`Pill screenshot was not written: ${destination}. Check Screen Recording permission for the calling host.`);
 }
@@ -291,10 +291,10 @@ function summary(report, regressions) {
 async function stopApp(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
-  try { await until(() => child.exitCode !== null || child.signalCode !== null, 3000, "VoiceTypr exit"); }
+  try { await until(() => child.exitCode !== null || child.signalCode !== null, 3000, "Voicetypr exit"); }
   catch {
     child.kill("SIGKILL");
-    await until(() => child.exitCode !== null || child.signalCode !== null, 3000, "VoiceTypr forced exit");
+    await until(() => child.exitCode !== null || child.signalCode !== null, 3000, "Voicetypr forced exit");
   }
 }
 async function main() {
@@ -322,7 +322,7 @@ async function main() {
   const bin = resolve(args.bin || join(ROOT, "src-tauri", "target", "debug", "voicetypr"));
   if (!existsSync(bin)) fail(`Debug app binary is missing: ${bin}. Build it with pnpm tauri:dev first.`);
   const running = command("/usr/bin/pgrep", ["-x", "voicetypr"], { allowFailure: true }).trim();
-  if (/\d/u.test(running)) fail("VoiceTypr is already running. Quit it before the E2E run so the single-instance plugin cannot redirect this launch into the real profile.");
+  if (/\d/u.test(running)) fail("Voicetypr is already running. Quit it before the E2E run so the single-instance plugin cannot redirect this launch into the real profile.");
   const out = join(ROOT, ".tmp", "e2e", new Date().toISOString().replaceAll(":", "-"));
   mkdirSync(out, { recursive: true });
   const report = { generated_at: new Date().toISOString(), bin: basename(bin), baseline: Boolean(args.baseline), cases: [] };

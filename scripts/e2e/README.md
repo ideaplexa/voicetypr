@@ -2,7 +2,7 @@
 
 Build the debug app, install BlackHole 2ch, `ffmpeg` and `cliclick`, then grant the calling Terminal or agent host Accessibility, Automation → TextEdit, and Screen Recording in System Settings → Privacy & Security. Restart the host after changing permissions. Run `node scripts/e2e/dictation-e2e.mjs --check-setup` first; it reports missing devices and fix steps.
 
-Create an uncommitted real-speech clip directory with `manifest.json` containing entries like `[{"file":"clip1.wav","lang":"en","ref":"spoken reference"}, ...]`. The harness groups clips by language and reuses the first clip for a back-to-back case when a group has only one clip. Do not use synthetic TTS for accuracy decisions. Download the selected local model in VoiceTypr before running. Quit the normal VoiceTypr instance; the app has a single-instance plugin.
+Create an uncommitted real-speech clip directory with `manifest.json` containing entries like `[{"file":"clip1.wav","lang":"en","ref":"spoken reference"}, ...]`. The harness groups clips by language and reuses the first clip for a back-to-back case when a group has only one clip. Do not use synthetic TTS for accuracy decisions. Download the selected local model in Voicetypr before running. Quit the normal Voicetypr instance; the app has a single-instance plugin.
 
 ```bash
 node scripts/e2e/dictation-e2e.mjs --clips .tmp/e2e-clips --engines parakeet:parakeet-tdt-0.6b-v3,whisper:base.en
