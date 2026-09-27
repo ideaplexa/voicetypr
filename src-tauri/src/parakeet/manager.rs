@@ -118,6 +118,7 @@ fn model_files_complete(model_dir: &Path, definition: &ParakeetModelDefinition) 
 pub struct ParakeetStreamRequest<'a> {
     pub app: AppHandle,
     pub model_name: &'a str,
+    pub language: Option<String>,
     pub sample_rate: u32,
     pub channels: u16,
     pub engine: ParakeetStreamEngine,
@@ -241,6 +242,7 @@ impl ParakeetManager {
         let ParakeetStreamRequest {
             app,
             model_name,
+            language,
             sample_rate,
             channels,
             engine,
@@ -260,6 +262,7 @@ impl ParakeetManager {
                     app,
                     model_id: definition.id.to_string(),
                     model_version: Some(Self::model_version_for(definition).to_string()),
+                    language,
                     sample_rate,
                     channels,
                     engine,

@@ -641,6 +641,7 @@ async fn run_stream_bench(
             crate::parakeet::manager::ParakeetStreamRequest {
                 app: app.clone(),
                 model_name: &model,
+                language: None,
                 sample_rate: spec.sample_rate,
                 channels: spec.channels,
                 engine,

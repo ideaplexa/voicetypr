@@ -117,7 +117,110 @@ treat the whole text as tentative; commit it only at finalize or forced slide.
    clip with a ≥3 s silence tail. Lifecycle checks as before (stream_busy, cancel, no
    late events, restart).
 
-## Acceptance
+## Acceptance — REAL SPEECH ONLY (updated 2026-09-27)
+
+The synthetic TTS corpus (`perf-corpus/synthetic`) proved unrepresentative (it
+wrongly condemned Unified/Nemotron). Judge this plan on real speech: whisper.cpp
+`jfk.wav`, 4 LibriSpeech clips, 2 MLS German, 2 MLS Spanish, streamed in real
+time through the sidecar (session harness `real_suite.py`: batch WER vs
+live-stream-final WER, partial count, first-text time). Baseline before this
+plan (merged tree, FluidAudio 0.15.5):
+
+| TDT decode-ahead | English | German | Spanish |
+|---|---|---|---|
+| Batch WER | 0–8.8% | 7.4–25% | 0–2.4% |
+| Live-stream final WER | 0–6.7% | **28–59%** | 4.9–6.5% |
+
+Targets:
+- Live-stream final WER ≤ batch WER + 3 points on every real clip (German is
+  the main target: today up to 59%).
+- No sentence-start capitalization in the middle of committed text; no junk
+  tentative tails that later vanish ("And so, yeah.") on the English clips.
+- First nonempty partial ≤ 1.5 s; tentative updates ≥ 1/s during speech.
+- No "dropped" log lines; lifecycle checks unchanged (stream_busy, cancel, no
+  late events, restart).
+
+## Round-2 corrections (Claude, 2026-09-27, from the first real-speech run)
+
+First implementation passed all 10 planner checks but failed acceptance on
+ls-0 (13.3% vs batch 6.7%), ls-3 (11.1% vs 0%) and mls-de-1 (48.1% vs 7.4%).
+Commit traces showed three defects:
+
+1. **Boundary duplication.** `missed` → `misseded`, `has has`, `bei bei`,
+   `Ihren` → `Ihrenhren`: token times jitter between decodes (TDT frames are
+   80 ms), so a committed word or its continuation piece reappears after
+   `committedEnd`. Fix: (a) after dropping left-context tokens, also drop any
+   leading continuation pieces (tokens that do not start a word) — kept text
+   must begin at a word start; (b) text-aware boundary de-dup: if the first
+   kept word(s) equal the last committed word(s) (normalized: casefold,
+   letters/digits only) and their start is within 0.6 s of the committed
+   word's start, drop them.
+2. **No language hint in decode-ahead.** Batch passes the user's language to
+   `manager.transcribe(..., language:)` (main's languageHint fix); decode-ahead
+   does not, so a slid window loses the context and flips to English. Fix:
+   `start_stream` accepts an optional `language` (backward compatible), the
+   Rust side sends the user's selected speech language when opening a
+   Parakeet decode-ahead stream, and every decode-ahead `transcribe` passes
+   the same language hint the batch path uses.
+3. **Final text inherits early preview mistakes.** Fix: at finalize, re-decode
+   the current window once and build the final as
+   `committed text from before this window` + `all words of the final
+   decode after the window's left-context boundary` (not committed-in-window +
+   tail). For sessions that never slid, this equals a full-context batch
+   decode. Partials stay monotonic; `stream_final` may differ from the last
+   committed partial (it replaces the pill text).
+
+Add harness checks: continuation pieces never start kept text; duplicated
+boundary word is dropped under jitter; final after no slide equals the full
+final-decode words; language is forwarded (unit-level where possible).
+
+## Result (2026-09-27)
+
+Round 2 fixed duplication, language and final-text defects. Tuning on real
+speech then changed two constants: `leftContext` 3 s → **8 s** and
+`slideTrigger` 12 s → **13.5 s** (with 3 s, a slid German window flipped to
+English: "Ingenieur und Kapitän" → "engineer on Capitaine"; decode cost is flat
+up to the 15 s input). Real-speech suite, live-stream final vs batch WER:
+
+| Clip | Batch | Before plan | After |
+|---|---|---|---|
+| jfk / ls-2 / ls-3 / es-0 | 0% | 0–6.5% | 0% |
+| ls-0 | 6.7% | 6.7% | 6.7% |
+| ls-1 (15 s, slides) | 8.8% | 2.9% | 11.8% |
+| de-0 (18 s) | 25.0% | 28.1% | 21.9% |
+| de-1 (14 s) | 7.4% | 59.3% | 11.1% |
+| es-1 (19 s) | 2.4% | 4.9% | 0% |
+
+All clips within about one word of the batch + 3-point bar (de-1 is +3.7,
+one word of 27). Partials 2–4× more frequent; first non-English text ~1.3 s
+(was ~2.9 s). Harness: 15/15 planner checks + 5/5 token checks. Re-tune on the
+founder's Phase 1 recording set.
+
+## Final result after review rounds 3–6 (2026-09-27)
+
+Four adversarial reviews drove rounds 3–6: cap-decode starvation, final
+boundary freezing revisable words, repetition vs jitter (now word-sequence
+alignment), blank decodes (FluidAudio 0.15.5 bug #909 dropped a phrase in a
+52 s dictation → **FluidAudio bumped to 0.17.4 in this slice**; our own retry
+ladder was removed after it caused a loop), bounded preview memory (120 s),
+and sessions ≤ 15 s finalizing with one full-session decode (a 14.3 s German
+clip lost its onset when the final window started after a cap slide).
+
+Real speech, FluidAudio 0.17.4, live-stream final vs batch WER:
+
+| Clip | Batch | Before plan | Final |
+|---|---|---|---|
+| jfk, ls-0, ls-2, ls-3, es-0 | 0–6.7% | 0–6.7% | = batch |
+| ls-1 (15 s) | 8.8% | 2.9% | 8.8% |
+| de-0 (18 s) | 15.6% | 28.1% | 18.8% (one word) |
+| de-1 (14.3 s) | 7.4% | 59.3% | **7.4%** |
+| es-1 (19 s) | 4.9% | 4.9% | 0% |
+| long-en (52 s continuous) | 3.1% | dropped a phrase | **3.1%** |
+
+Harness: 32/32 planner checks + 5/5 token checks. Remaining edge cases from
+the fourth review are tracked in [plan 070b](070b-decode-ahead-edge-cases.md).
+
+## Acceptance (original, synthetic-era wording kept for reference)
 
 - Preview-final WER ≤ batch WER + 3 points on every fixture; ≥30 s clip ≤ batch + 5.
 - Committed text word-diff vs batch ≤ 5% (preview may be revised, committed may not).

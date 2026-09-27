@@ -224,9 +224,17 @@ fn build_parakeet_stream_sink_factory(
 
     let app = app.clone();
     let model_name = config.current_model.clone();
+    let language = (!config.speech_language.is_empty()).then(|| {
+        normalize_speech_language_for_model(
+            &config.current_engine,
+            &config.current_model,
+            &config.speech_language,
+        )
+    });
     Some(Arc::new(move |sample_rate, channels| {
         let app_for_stream = app.clone();
         let model_name_for_stream = model_name.clone();
+        let language_for_stream = language.clone();
         let gate = Arc::new(Mutex::new(StreamSessionGate::new(recording_generation)));
         let revision = Arc::new(AtomicU64::new(0));
         let committed = Arc::new(Mutex::new(String::new()));
@@ -256,6 +264,11 @@ fn build_parakeet_stream_sink_factory(
                     crate::parakeet::manager::ParakeetStreamRequest {
                         app: app_for_stream.clone(),
                         model_name: &model_name_for_stream,
+                        language: if matches!(stream_engine, ParakeetStreamEngine::DecodeAhead) {
+                            language_for_stream
+                        } else {
+                            None
+                        },
                         sample_rate,
                         channels,
                         engine: stream_engine,

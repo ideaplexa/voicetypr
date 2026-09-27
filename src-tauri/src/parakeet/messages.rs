@@ -79,6 +79,8 @@ pub enum ParakeetCommand {
         model_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         model_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
         sample_rate: u32,
         channels: u16,
         #[serde(default = "default_stream_engine")]
@@ -414,6 +416,26 @@ mod tests {
 
         let value = serde_json::to_value(command).unwrap();
         assert!(value.get("custom_vocabulary").is_none());
+    }
+
+    #[test]
+    fn start_stream_serializes_optional_language() {
+        let command = |language| ParakeetCommand::StartStream {
+            model_id: "parakeet-tdt-0.6b-v3".to_string(),
+            model_version: None,
+            language,
+            sample_rate: 16_000,
+            channels: 1,
+            engine: ParakeetStreamEngine::DecodeAhead,
+            chunk_ms: None,
+            config: None,
+        };
+
+        let german = serde_json::to_value(command(Some("de".to_string()))).unwrap();
+        assert_eq!(german["type"], "start_stream");
+        assert_eq!(german["language"], "de");
+        let absent = serde_json::to_value(command(None)).unwrap();
+        assert!(absent.get("language").is_none());
     }
 
     #[test]

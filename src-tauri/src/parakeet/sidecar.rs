@@ -55,6 +55,7 @@ pub struct ParakeetStreamOpenRequest {
     pub app: AppHandle,
     pub model_id: String,
     pub model_version: Option<String>,
+    pub language: Option<String>,
     pub sample_rate: u32,
     pub channels: u16,
     pub engine: ParakeetStreamEngine,
@@ -674,6 +675,7 @@ impl ParakeetClient {
             app,
             model_id,
             model_version,
+            language,
             sample_rate,
             channels,
             engine,
@@ -727,6 +729,7 @@ impl ParakeetClient {
             let start_command = ParakeetCommand::StartStream {
                 model_id,
                 model_version,
+                language,
                 sample_rate,
                 channels,
                 engine,
