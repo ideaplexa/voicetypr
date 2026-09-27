@@ -256,6 +256,9 @@ mod tests {
             sample_rate: 16_000,
             channels: 1,
             speech_detected,
+            post_roll_ms: 0,
+            post_roll_interrupted: false,
+            post_roll_speech_detected: false,
         }
     }
 

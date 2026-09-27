@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::ai::error::{user_facing_message, AiProviderError};
-use crate::audio::recorder::AudioRecorder;
+use crate::audio::recorder::{AudioRecorder, STOP_POST_ROLL};
 use crate::audio::silence_detector::SilenceDetectorEvent;
 use crate::audio::speech_evidence::{
     classify_speech_evidence, SpeechEvidenceAttempt, SpeechEvidenceOutcome,
@@ -48,7 +48,7 @@ use serde_json;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::async_runtime::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
@@ -4011,7 +4011,7 @@ async fn stop_recording_after_long_silence(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> Result<String, String> {
-    stop_recording(app, state).await
+    stop_recording_with_mode(app, state, Duration::ZERO).await
 }
 
 fn spawn_silence_event_listener(
@@ -4795,6 +4795,14 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> Result<String, String> {
+    stop_recording_with_mode(app, state, STOP_POST_ROLL).await
+}
+
+async fn stop_recording_with_mode(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+    post_roll: Duration,
+) -> Result<String, String> {
     #[cfg(debug_assertions)]
     let stop_start = Instant::now();
 
@@ -4862,7 +4870,9 @@ pub async fn stop_recording(
             return Ok(String::new());
         }
 
-        let stop_message = match recorder.stop_recording() {
+        // Escape can wait up to STOP_POST_ROLL before drain begins because this
+        // command holds the recorder mutex; that bounded cancel delay is accepted.
+        let stop_message = match recorder.stop_recording_with_post_roll(post_roll) {
             Ok(msg) => msg,
             Err(e) => {
                 log::error!("Recorder stop returned error: {}", e);
@@ -4876,6 +4886,14 @@ pub async fn stop_recording(
         };
         capture_metrics = recorder.take_last_capture_metrics();
         log::info!("{}", stop_message);
+        if let Some(metrics) = capture_metrics {
+            log::info!(
+                "Stop post-roll: post_roll_ms={}, post_roll_interrupted={}, post_roll_speech_detected={}",
+                metrics.post_roll_ms,
+                metrics.post_roll_interrupted,
+                metrics.post_roll_speech_detected
+            );
+        }
 
         // Resume system media if we paused it
         MEDIA_CONTROLLER.resume_if_we_paused();

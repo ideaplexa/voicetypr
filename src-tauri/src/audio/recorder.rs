@@ -62,13 +62,16 @@ const WRITER_JOIN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Outer budget [`AudioRecorder::stop_recording`] gives the whole recording
 /// thread to tear down during stop. It must cover every internal sub-budget —
-/// drain window (~200ms) + platform stream drop (≤3s on Windows) + writer
+/// post-roll (250ms) + drain window (~200ms) + platform stream drop (≤3s on Windows) + writer
 /// finalize ([`WRITER_JOIN_TIMEOUT`]) — plus a finalize margin. It is
 /// intentionally larger than their sum so the outer join never preempts the
 /// worker while it is still finalizing the WAV; the old independent 5s poll
 /// raced the (then-unbounded) writer join and timed out mid-finalize, leaving
 /// an unfinalized WAV that the command layer then deleted.
 const STOP_JOIN_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Keep capturing the end of a word after a user stops recording.
+pub const STOP_POST_ROLL: Duration = Duration::from_millis(250);
 
 enum WriterMsg {
     Chunk(Vec<i16>),
@@ -252,6 +255,10 @@ pub struct CaptureAudioMetrics {
     pub sample_rate: u32,
     pub channels: u16,
     pub speech_detected: bool,
+    pub post_roll_ms: u64,
+    pub post_roll_interrupted: bool,
+    /// A callback exceeded the silence detector's voice level during post-roll.
+    pub post_roll_speech_detected: bool,
 }
 
 const SPEECH_EVIDENCE_WINDOW_MS: u64 = 5;
@@ -267,6 +274,10 @@ struct CaptureMetricsAccumulator {
     evidence_window_sample_count: AtomicU64,
     samples_above_rms_floor: AtomicU64,
     windows_above_rms_floor: AtomicU32,
+    post_roll_active: AtomicBool,
+    post_roll_speech_detected: AtomicBool,
+    post_roll_ms: AtomicU64,
+    post_roll_interrupted: AtomicBool,
 }
 
 impl CaptureMetricsAccumulator {
@@ -286,6 +297,10 @@ impl CaptureMetricsAccumulator {
             evidence_window_sample_count: AtomicU64::new(0),
             samples_above_rms_floor: AtomicU64::new(0),
             windows_above_rms_floor: AtomicU32::new(0),
+            post_roll_active: AtomicBool::new(false),
+            post_roll_speech_detected: AtomicBool::new(false),
+            post_roll_ms: AtomicU64::new(0),
+            post_roll_interrupted: AtomicBool::new(false),
         }
     }
 
@@ -327,6 +342,11 @@ impl CaptureMetricsAccumulator {
         // Bit-exact legacy formula (including NaN on empty slices) — the
         // silence-detector threshold math depends on these bits.
         let window_rms = (callback_sum_squares / samples.len() as f32).sqrt();
+        if self.post_roll_active.load(Ordering::SeqCst)
+            && window_rms > crate::audio::silence_detector::VOICE_RMS_THRESHOLD
+        {
+            self.post_roll_speech_detected.store(true, Ordering::SeqCst);
+        }
         if !samples.is_empty() {
             self.sample_count
                 .fetch_add(samples.len() as u64, Ordering::Relaxed);
@@ -397,6 +417,9 @@ impl CaptureMetricsAccumulator {
             sample_rate,
             channels,
             speech_detected,
+            post_roll_ms: self.post_roll_ms.load(Ordering::SeqCst),
+            post_roll_interrupted: self.post_roll_interrupted.load(Ordering::SeqCst),
+            post_roll_speech_detected: self.post_roll_speech_detected.load(Ordering::SeqCst),
         }
     }
 }
@@ -463,7 +486,9 @@ impl Drop for AudioRecorder {
         if let Ok(mut handle_guard) = self.recording_handle.lock() {
             if let Some(handle) = handle_guard.take() {
                 // Send stop signal
-                if let Err(e) = handle.stop_tx.send(RecorderCommand::Stop) {
+                if let Err(e) = handle.stop_tx.send(RecorderCommand::Stop {
+                    post_roll: Duration::ZERO,
+                }) {
                     log::warn!("Failed to send stop signal during drop: {:?}", e);
                 }
                 // Don't wait for thread in Drop - let it clean up in background
@@ -495,7 +520,39 @@ struct RecordingHandle {
 
 #[derive(Debug)]
 enum RecorderCommand {
-    Stop,
+    Stop { post_roll: Duration },
+}
+
+fn stop_after_post_roll(
+    command: Option<&RecorderCommand>,
+    stop_rx: &mpsc::Receiver<RecorderCommand>,
+    capture_metrics: &CaptureMetricsAccumulator,
+    stop_requested: &AtomicBool,
+) {
+    let post_roll = match command {
+        Some(RecorderCommand::Stop { post_roll }) => *post_roll,
+        None => Duration::ZERO,
+    };
+    capture_metrics
+        .post_roll_ms
+        .store(post_roll.as_millis() as u64, Ordering::SeqCst);
+    if !post_roll.is_zero() {
+        capture_metrics
+            .post_roll_active
+            .store(true, Ordering::SeqCst);
+        match stop_rx.recv_timeout(post_roll) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(RecorderCommand::Stop { .. }) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                capture_metrics
+                    .post_roll_interrupted
+                    .store(true, Ordering::SeqCst);
+            }
+        }
+        capture_metrics
+            .post_roll_active
+            .store(false, Ordering::SeqCst);
+    }
+    stop_requested.store(true, Ordering::SeqCst);
 }
 
 impl AudioRecorder {
@@ -686,7 +743,9 @@ impl AudioRecorder {
                     let new_total =
                         writer_bytes.fetch_add(sample_bytes, Ordering::SeqCst) + sample_bytes;
                     if RecordingSize::check(new_total).is_err() {
-                        let _ = stop_tx_for_size.send(RecorderCommand::Stop);
+                        let _ = stop_tx_for_size.send(RecorderCommand::Stop {
+                            post_roll: Duration::ZERO,
+                        });
                     }
 
                     samples.clear();
@@ -735,7 +794,9 @@ impl AudioRecorder {
                     *guard = Some(format!("Audio device error: {}", err));
                 }
                 // Signal the recording thread to stop
-                let _ = stop_tx_for_error.send(RecorderCommand::Stop);
+                let _ = stop_tx_for_error.send(RecorderCommand::Stop {
+                    post_roll: Duration::ZERO,
+                });
             };
 
             // Drain barrier flags shared between callback and stop path
@@ -908,7 +969,12 @@ impl AudioRecorder {
             let stop_reason = stop_rx.recv().ok();
 
             // Drain barrier: signal callback to drain and wait for acknowledgment
-            stop_requested.store(true, Ordering::SeqCst);
+            stop_after_post_roll(
+                stop_reason.as_ref(),
+                &stop_rx,
+                &capture_metrics,
+                &stop_requested,
+            );
             let drain_start = Instant::now();
             while !callback_drained.load(Ordering::SeqCst) {
                 if drain_start.elapsed() > Duration::from_millis(200) {
@@ -993,7 +1059,7 @@ impl AudioRecorder {
 
             // Return appropriate message based on stop reason
             match stop_reason {
-                Some(RecorderCommand::Stop) => Ok("Recording stopped by user".to_string()),
+                Some(RecorderCommand::Stop { .. }) => Ok("Recording stopped by user".to_string()),
                 None => Ok("Recording stopped".to_string()),
             }
         });
@@ -1020,6 +1086,10 @@ impl AudioRecorder {
     }
 
     pub fn stop_recording(&mut self) -> Result<String, String> {
+        self.stop_recording_with_post_roll(Duration::ZERO)
+    }
+
+    pub fn stop_recording_with_post_roll(&mut self, post_roll: Duration) -> Result<String, String> {
         let handle = self
             .recording_handle
             .lock()
@@ -1038,11 +1108,14 @@ impl AudioRecorder {
 
         if let Some(handle) = handle {
             // Send stop signal
-            handle.stop_tx.send(RecorderCommand::Stop).ok();
+            handle
+                .stop_tx
+                .send(RecorderCommand::Stop { post_roll })
+                .ok();
 
             // Wait for the recording thread to finish, bounded by a SINGLE
             // teardown deadline that covers every internal sub-budget (drain
-            // window + platform stream drop + writer finalize). See
+            // post-roll + window + platform stream drop + writer finalize). See
             // [`STOP_JOIN_TIMEOUT`]. Replaces the old independent 5s poll that
             // raced the previously-unbounded writer join.
             let thread_handle = handle.thread_handle;
@@ -1497,6 +1570,109 @@ mod tests {
     }
 
     #[test]
+    fn stop_recording_requests_immediate_drain() {
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let worker_stop_requested = stop_requested.clone();
+        let thread_handle = thread::spawn(move || {
+            let command = stop_rx.recv().unwrap();
+            assert!(matches!(
+                &command,
+                RecorderCommand::Stop { post_roll } if post_roll.is_zero()
+            ));
+            let metrics = CaptureMetricsAccumulator::default();
+            stop_after_post_roll(Some(&command), &stop_rx, &metrics, &worker_stop_requested);
+            assert_eq!(metrics.snapshot(100, 1, false).post_roll_ms, 0);
+            Ok::<String, String>("stopped".to_string())
+        });
+        let mut recorder = AudioRecorder::new();
+        *recorder.recording_handle.lock().unwrap() = Some(RecordingHandle {
+            stop_tx,
+            thread_handle,
+        });
+
+        assert_eq!(recorder.stop_recording().unwrap(), "stopped");
+        assert!(stop_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn post_roll_delays_drain_barrier() {
+        let post_roll = Duration::from_millis(60);
+        let (_stop_tx, stop_rx) = mpsc::channel();
+        let command = RecorderCommand::Stop { post_roll };
+        let metrics = CaptureMetricsAccumulator::default();
+        let stop_requested = AtomicBool::new(false);
+
+        assert!(!stop_requested.load(Ordering::SeqCst));
+        let start = Instant::now();
+        stop_after_post_roll(Some(&command), &stop_rx, &metrics, &stop_requested);
+        assert!(start.elapsed() >= post_roll);
+        assert!(stop_requested.load(Ordering::SeqCst));
+        let snapshot = metrics.snapshot(100, 1, false);
+        assert!(!snapshot.post_roll_interrupted);
+        assert_eq!(snapshot.post_roll_ms, 60);
+    }
+
+    #[test]
+    fn later_stop_interrupts_post_roll() {
+        let (stop_tx, stop_rx) = mpsc::channel();
+        stop_tx
+            .send(RecorderCommand::Stop {
+                post_roll: Duration::ZERO,
+            })
+            .unwrap();
+        let command = RecorderCommand::Stop {
+            post_roll: Duration::from_secs(5),
+        };
+        let metrics = CaptureMetricsAccumulator::default();
+        let stop_requested = AtomicBool::new(false);
+
+        let start = Instant::now();
+        stop_after_post_roll(Some(&command), &stop_rx, &metrics, &stop_requested);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(stop_requested.load(Ordering::SeqCst));
+        assert!(metrics.snapshot(100, 1, false).post_roll_interrupted);
+    }
+
+    #[test]
+    fn disconnected_stop_channel_interrupts_post_roll() {
+        let (stop_tx, stop_rx) = mpsc::channel::<RecorderCommand>();
+        drop(stop_tx);
+        let command = RecorderCommand::Stop {
+            post_roll: Duration::from_secs(5),
+        };
+        let metrics = CaptureMetricsAccumulator::default();
+        let stop_requested = AtomicBool::new(false);
+
+        let start = Instant::now();
+        stop_after_post_roll(Some(&command), &stop_rx, &metrics, &stop_requested);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(stop_requested.load(Ordering::SeqCst));
+        assert!(metrics.snapshot(100, 1, false).post_roll_interrupted);
+    }
+
+    #[test]
+    fn capture_metrics_snapshot_includes_post_roll_speech() {
+        let metrics = CaptureMetricsAccumulator::default();
+        metrics.post_roll_ms.store(250, Ordering::SeqCst);
+        metrics.post_roll_active.store(true, Ordering::SeqCst);
+        metrics.observe(&[0.01, 0.01]);
+        metrics.post_roll_active.store(false, Ordering::SeqCst);
+
+        let snapshot = metrics.snapshot(100, 1, false);
+        assert_eq!(snapshot.post_roll_ms, 250);
+        assert!(!snapshot.post_roll_interrupted);
+        assert!(snapshot.post_roll_speech_detected);
+
+        let immediate = CaptureMetricsAccumulator::default();
+        immediate.observe(&[0.01, 0.01]);
+        let snapshot = immediate.snapshot(100, 1, false);
+        assert_eq!(snapshot.post_roll_ms, 0);
+        assert!(!snapshot.post_roll_interrupted);
+        assert!(!snapshot.post_roll_speech_detected);
+    }
+
+    #[test]
     fn take_silence_event_receiver_consumes_receiver() {
         let mut recorder = AudioRecorder::new();
         let (_tx, rx) = mpsc::sync_channel::<SilenceDetectorEvent>(1);
@@ -1670,6 +1846,9 @@ mod tests {
             sample_rate: 16_000,
             channels: 1,
             speech_detected: true,
+            post_roll_ms: 0,
+            post_roll_interrupted: false,
+            post_roll_speech_detected: false,
         };
 
         for (writer_result, device_error, expected_error) in [
@@ -1697,6 +1876,9 @@ mod tests {
             sample_rate: 16_000,
             channels: 1,
             speech_detected: false,
+            post_roll_ms: 0,
+            post_roll_interrupted: false,
+            post_roll_speech_detected: false,
         };
         if let Ok(mut guard) = recorder.last_capture_metrics.lock() {
             *guard = Some(expected);
