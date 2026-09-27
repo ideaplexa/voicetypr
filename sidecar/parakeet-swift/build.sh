@@ -75,11 +75,10 @@ esac
 echo "🖥️  Target triple: $TARGET_TRIPLE"
 
 # Copy binary with correct name for Tauri
-if [ "$BUILD_CONFIG" = "release" ]; then
-    BUILD_PATH=".build/release/ParakeetSidecar"
-else
-    BUILD_PATH=".build/debug/ParakeetSidecar"
-fi
+# Ask the active SwiftPM build system where it wrote this configuration.
+# Swift Build can leave older .build/debug or .build/release products in place.
+BIN_DIR=$(swift build -c "$BUILD_CONFIG" --show-bin-path)
+BUILD_PATH="$BIN_DIR/ParakeetSidecar"
 
 if [ ! -f "$BUILD_PATH" ]; then
     echo "❌ Error: Binary not found at $BUILD_PATH"

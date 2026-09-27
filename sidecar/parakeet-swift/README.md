@@ -45,7 +45,7 @@ The sidecar communicates via JSON messages on stdin/stdout:
 
 ```json
 // Download and load model
-{"type": "load_model", "model_id": "parakeet-tdt-0.6b-v3"}
+{"type": "load_model", "model_id": "parakeet-tdt-0.6b-v3", "model_version": "v3", "force_download": true}
 
 // Transcribe audio file
 {"type": "transcribe", "audio_path": "/path/to/audio.wav", "language": "en"}
@@ -54,7 +54,7 @@ The sidecar communicates via JSON messages on stdin/stdout:
 {"type": "status"}
 
 // Delete model files
-{"type": "delete_model"}
+{"type": "delete_model", "model_id": "parakeet-tdt-0.6b-v3", "model_version": "v3"}
 
 // Unload model from memory
 {"type": "unload_model"}
@@ -67,7 +67,7 @@ The sidecar communicates via JSON messages on stdin/stdout:
 
 ```json
 // Status response
-{"type": "status", "loaded_model": "parakeet-tdt-0.6b-v3"}
+{"type": "status", "loadedModel": "parakeet-tdt-0.6b-v3", "modelVersion": "v3"}
 
 // Transcription response
 {

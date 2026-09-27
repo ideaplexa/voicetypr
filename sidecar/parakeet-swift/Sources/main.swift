@@ -938,6 +938,13 @@ enum DecodeAheadTokenNormalizationHarness {
 @main
 struct ParakeetSidecar {
     static func main() async {
+        // Swift initializes globals lazily. Capture protocol stdout before a
+        // first load/download command redirects it for native-library logging.
+        // Otherwise the first progress event can permanently capture stderr.
+        guard protocolStdoutFileDescriptor >= 0 else {
+            log("Failed to preserve stdout for the sidecar protocol")
+            exit(1)
+        }
         logSystemInfo()
 
         if CommandLine.arguments.contains("--decode-ahead-token-harness") {
