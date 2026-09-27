@@ -136,7 +136,7 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
         .as_ref()
         .and_then(|store| store.get("ptt_hotkey"))
         .and_then(|value| value.as_str().map(str::to_string));
-    let is_recording = matches!(crate::get_recording_state(app), RecordingState::Recording);
+    let escape_cancel_active = escape_cancel_eligible(crate::get_recording_state(app));
 
     let (bindings, stale_id) = plan_engine_bindings(
         &settings.bindings,
@@ -144,7 +144,7 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
         recording_mode,
         use_different_ptt_key,
         ptt_hotkey.as_deref(),
-        is_recording,
+        escape_cancel_active,
     );
 
     // One-time durable migration (Issue A): when the combo hotkey is
@@ -172,6 +172,10 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
     apply_engine_bindings(app, &bindings);
 }
 
+fn escape_cancel_eligible(state: RecordingState) -> bool {
+    matches!(state, RecordingState::Starting | RecordingState::Recording)
+}
+
 /// Pure decision core for [`rebuild_engine_bindings`]. Given the persisted
 /// bindings and runtime state, returns:
 ///   * the final engine binding list to install, and
@@ -193,7 +197,7 @@ fn plan_engine_bindings(
     recording_mode: RecordingMode,
     use_different_ptt_key: bool,
     ptt_hotkey: Option<&str>,
-    is_recording: bool,
+    escape_cancel_active: bool,
 ) -> (Vec<ShortcutBinding>, Option<String>) {
     // Persisted bindings may predate current validation rules; the update/save
     // path rejects them, but at startup we read straight from the store. Skip
@@ -310,7 +314,7 @@ fn plan_engine_bindings(
         }
     }
 
-    if is_recording {
+    if escape_cancel_active {
         bindings.push(ShortcutBinding {
             id: "escape-cancel".to_string(),
             action: ShortcutAction::CancelRecording,
@@ -385,13 +389,36 @@ pub fn start_engine(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{bindings_needing_release, plan_engine_bindings, stale_primary_candidate};
+    use super::{
+        bindings_needing_release, escape_cancel_eligible, plan_engine_bindings,
+        stale_primary_candidate,
+    };
     use crate::commands::shortcuts::{
         ModifierKind, ModifierSpec, ShortcutAction, ShortcutBinding, ShortcutTrigger, SideKind,
         TriggerKind,
     };
     use crate::trigger::EngineBinding;
-    use crate::RecordingMode;
+    use crate::{RecordingMode, RecordingState};
+
+    #[test]
+    fn escape_cancel_is_eligible_during_starting_and_recording() {
+        assert!(escape_cancel_eligible(RecordingState::Starting));
+        assert!(escape_cancel_eligible(RecordingState::Recording));
+        assert!(!escape_cancel_eligible(RecordingState::Idle));
+        assert!(!escape_cancel_eligible(RecordingState::Stopping));
+
+        let (starting_bindings, _) = plan_engine_bindings(
+            &[],
+            "CommandOrControl+Space",
+            RecordingMode::Toggle,
+            false,
+            None,
+            escape_cancel_eligible(RecordingState::Starting),
+        );
+        assert!(starting_bindings.iter().any(|binding| {
+            binding.id == "escape-cancel" && binding.action == ShortcutAction::CancelRecording
+        }));
+    }
 
     fn binding(id: &str, action: ShortcutAction, trigger: ShortcutTrigger) -> EngineBinding {
         EngineBinding {

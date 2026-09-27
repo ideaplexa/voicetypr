@@ -180,6 +180,21 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
   });
 
+  it("queues one stop when toggled during starting and still debounces repeats", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValueOnce(1000).mockReturnValueOnce(1400).mockReturnValueOnce(1500);
+    renderHook(() => useInAppRecordingHotkey());
+
+    fireHotkey(editable);
+    mockRecording.state = "starting";
+    fireHotkey(editable);
+    fireHotkey(editable);
+
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
+    now.mockRestore();
+  });
+
   it("ignores the hotkey during transitional states (transcribing)", () => {
     mockRecording.state = "transcribing";
     renderHook(() => useInAppRecordingHotkey());

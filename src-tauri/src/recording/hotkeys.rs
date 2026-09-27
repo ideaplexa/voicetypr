@@ -1,5 +1,6 @@
 use crate::commands::audio::{
-    start_recording, stop_recording, RecorderState, PTT_START_ABORTED_AFTER_RELEASE,
+    queue_stop_during_start, start_recording, stop_recording, RecorderState,
+    PTT_START_ABORTED_AFTER_RELEASE,
 };
 use crate::commands::shortcuts::{
     self, hold_shortcut_transition, pressed_shortcut_should_run, CustomHoldTransition,
@@ -74,13 +75,13 @@ fn handle_toggle_mode(
                 }
             });
         }
-        RecordingState::Starting => {
-            log::info!("Toggle: stop requested while starting; will stop after start completes");
-            app_state
-                .pending_stop_after_start
-                .store(true, Ordering::SeqCst);
-        }
-        RecordingState::Recording => {
+        RecordingState::Starting | RecordingState::Recording
+            if hotkey_stop_needs_dispatch(
+                current_state,
+                &app_state.pending_stop_after_start,
+                || app_state.get_current_state(),
+            ) =>
+        {
             log::info!("Toggle: Stopping recording via hotkey");
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -91,12 +92,24 @@ fn handle_toggle_mode(
                 }
             });
         }
+        RecordingState::Starting => {
+            log::info!("Toggle: stop requested while starting; will stop after start completes");
+        }
         _ => log::debug!("Toggle: Ignoring hotkey in state {:?}", current_state),
     }
 }
 
 fn claim_toggle_press(toggle_key_held: &AtomicBool) -> bool {
     !toggle_key_held.swap(true, Ordering::SeqCst)
+}
+
+fn hotkey_stop_needs_dispatch(
+    state: RecordingState,
+    pending: &AtomicBool,
+    read_state: impl FnOnce() -> RecordingState,
+) -> bool {
+    matches!(state, RecordingState::Starting | RecordingState::Recording)
+        && !queue_stop_during_start(state, pending, read_state)
 }
 
 fn handle_hold_to_record_source(
@@ -170,7 +183,13 @@ fn handle_ptt_mode(
             }
 
             match current_state {
-                RecordingState::Recording => {
+                RecordingState::Starting | RecordingState::Recording
+                    if hotkey_stop_needs_dispatch(
+                        current_state,
+                        &app_state.pending_stop_after_start,
+                        || app_state.get_current_state(),
+                    ) =>
+                {
                     log::info!("PTT: Stopping recording");
                     let app_handle = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -182,16 +201,7 @@ fn handle_ptt_mode(
                     });
                 }
                 RecordingState::Starting => {
-                    // Key released while recording is still starting up.
-                    // Set the pending flag so start_recording() can honor the stop
-                    // as soon as it reaches the Recording state. This prevents
-                    // recording from continuing after the user released PTT.
-                    log::info!(
-                        "PTT: Key released while Starting; setting pending_stop_after_start"
-                    );
-                    app_state
-                        .pending_stop_after_start
-                        .store(true, Ordering::SeqCst);
+                    log::info!("PTT: Key released while Starting; stop queued after start");
                 }
                 _ => {
                     log::debug!("PTT: Key released in state {:?}; no action", current_state);
@@ -333,8 +343,11 @@ pub(crate) fn dispatch_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{claim_toggle_press, should_dispatch_custom_pressed_binding};
+    use super::{
+        claim_toggle_press, hotkey_stop_needs_dispatch, should_dispatch_custom_pressed_binding,
+    };
     use crate::commands::shortcuts::ShortcutAction;
+    use crate::RecordingState;
     use keytrigger::KeyPhase;
     use std::{
         collections::HashSet,
@@ -350,6 +363,48 @@ mod tests {
 
         held.store(false, Ordering::SeqCst);
         assert!(claim_toggle_press(&held));
+    }
+
+    #[test]
+    fn hotkey_release_reclaims_stop_after_start_consumed_empty_flag() {
+        let pending = AtomicBool::new(false);
+        // Start published Recording and consumed the empty flag after the
+        // hotkey captured Starting, but before it queued the release.
+        assert!(!pending.swap(false, Ordering::SeqCst));
+        assert!(hotkey_stop_needs_dispatch(
+            RecordingState::Starting,
+            &pending,
+            || {
+                assert!(pending.load(Ordering::SeqCst));
+                RecordingState::Recording
+            },
+        ));
+        assert!(!pending.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn hotkey_release_leaves_queued_stop_for_start_to_consume() {
+        let pending = AtomicBool::new(false);
+        assert!(!hotkey_stop_needs_dispatch(
+            RecordingState::Starting,
+            &pending,
+            || RecordingState::Starting,
+        ));
+        assert!(pending.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn hotkey_release_does_not_dispatch_when_start_consumes_queued_stop() {
+        let pending = AtomicBool::new(false);
+        assert!(!hotkey_stop_needs_dispatch(
+            RecordingState::Starting,
+            &pending,
+            || {
+                assert!(pending.swap(false, Ordering::SeqCst));
+                RecordingState::Recording
+            },
+        ));
+        assert!(!pending.load(Ordering::SeqCst));
     }
 
     #[test]

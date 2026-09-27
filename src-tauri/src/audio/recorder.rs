@@ -5,6 +5,7 @@ use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
 
 use super::level_meter::AudioLevelMeter;
 use super::silence_detector::{SilenceDetector, SilenceDetectorEvent};
@@ -244,6 +245,7 @@ fn chunk_capacity_for(max_frames: usize, channels: usize) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CaptureAudioMetrics {
     pub sample_count: u64,
+    pub start_to_first_audio_ms: Option<u64>,
     pub duration_ms: u64,
     pub rms: f64,
     pub peak: f32,
@@ -274,6 +276,7 @@ const SPEECH_EVIDENCE_WINDOW_MS: u64 = 5;
 #[derive(Debug)]
 struct CaptureMetricsAccumulator {
     sample_count: AtomicU64,
+    start_to_first_audio_ms: AtomicU64,
     sum_squares_bits: AtomicU64,
     peak_bits: AtomicU32,
     max_window_rms_bits: AtomicU32,
@@ -297,6 +300,7 @@ impl CaptureMetricsAccumulator {
             .max(1);
         Self {
             sample_count: AtomicU64::new(0),
+            start_to_first_audio_ms: AtomicU64::new(u64::MAX),
             sum_squares_bits: AtomicU64::new(0),
             peak_bits: AtomicU32::new(0),
             max_window_rms_bits: AtomicU32::new(0),
@@ -416,6 +420,10 @@ impl CaptureMetricsAccumulator {
 
         CaptureAudioMetrics {
             sample_count,
+            start_to_first_audio_ms: match self.start_to_first_audio_ms.load(Ordering::Relaxed) {
+                u64::MAX => None,
+                ms => Some(ms),
+            },
             duration_ms,
             rms,
             peak: f32::from_bits(self.peak_bits.load(Ordering::Relaxed)),
@@ -486,6 +494,43 @@ pub struct AudioRecorder {
     audio_level_receiver: Arc<Mutex<Option<mpsc::Receiver<f64>>>>,
     silence_event_receiver: Arc<Mutex<Option<mpsc::Receiver<SilenceDetectorEvent>>>>,
     last_capture_metrics: Arc<Mutex<Option<CaptureAudioMetrics>>>,
+}
+
+#[derive(Debug)]
+pub enum RecordingReadiness {
+    Ready { first_audio_ms: u64 },
+    Failed(String),
+}
+
+struct ReadinessReporter {
+    tx: Option<oneshot::Sender<RecordingReadiness>>,
+}
+
+impl Drop for ReadinessReporter {
+    fn drop(&mut self) {
+        report_start_failure(&mut self.tx, "Microphone initialization failed");
+    }
+}
+
+fn report_first_callback(
+    callback_seen: &AtomicBool,
+    ready_tx: &mut Option<oneshot::Sender<RecordingReadiness>>,
+    started_at: Instant,
+) -> Option<u64> {
+    if !callback_seen.load(Ordering::SeqCst) {
+        return None;
+    }
+    let first_audio_ms = started_at.elapsed().as_millis() as u64;
+    if let Some(tx) = ready_tx.take() {
+        let _ = tx.send(RecordingReadiness::Ready { first_audio_ms });
+    }
+    Some(first_audio_ms)
+}
+
+fn report_start_failure(ready_tx: &mut Option<oneshot::Sender<RecordingReadiness>>, error: &str) {
+    if let Some(tx) = ready_tx.take() {
+        let _ = tx.send(RecordingReadiness::Failed(error.to_string()));
+    }
 }
 
 impl Drop for AudioRecorder {
@@ -573,6 +618,7 @@ impl AudioRecorder {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start_recording(
         &mut self,
         output_path: &str,
@@ -581,7 +627,8 @@ impl AudioRecorder {
         recording_generation: u64,
         stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
         stream_sink_factory: Option<StreamTapSinkFactory>,
-    ) -> Result<(), String> {
+        started_at: Instant,
+    ) -> Result<oneshot::Receiver<RecordingReadiness>, String> {
         log::info!(
             "AudioRecorder::start_recording called with path: {}",
             output_path
@@ -612,6 +659,7 @@ impl AudioRecorder {
 
         let output_path = PathBuf::from(output_path);
         let (stop_tx, stop_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = oneshot::channel();
         let stop_tx_clone = stop_tx.clone();
         let last_capture_metrics = self.last_capture_metrics.clone();
 
@@ -620,6 +668,7 @@ impl AudioRecorder {
         let (silence_event_tx, silence_event_rx) = mpsc::sync_channel::<SilenceDetectorEvent>(8);
         // Spawn recording thread
         let thread_handle = thread::spawn(move || -> Result<String, String> {
+            let mut readiness_reporter = ReadinessReporter { tx: Some(ready_tx) };
             let host = cpal::default_host();
             let device = if let Some(device_name) = device_name {
                 // Try to find the specified device
@@ -650,10 +699,6 @@ impl AudioRecorder {
             log::info!("======================================");
 
             let config = device.default_input_config().map_err(|e| e.to_string())?;
-            let stream_sink = stream_sink_factory
-                .as_ref()
-                .and_then(|factory| factory(config.sample_rate().0, config.channels()));
-
             log::info!(
                 "Audio config: sample_rate={} Hz, channels={}, format={:?}",
                 config.sample_rate().0,
@@ -708,13 +753,17 @@ impl AudioRecorder {
             let writer_bytes = bytes_written.clone();
             let writer_dropped = dropped_chunks.clone();
             let stop_tx_for_size = stop_tx_clone.clone();
+            let (play_tx, play_rx) = mpsc::channel();
             let (stream_tap_rt, stream_tap_finalizer) = if let Some(handle) =
-                stream_tap::maybe_spawn_noop_worker(
+                stream_tap::maybe_spawn_noop_worker_after_play(
                     streaming_tap_enabled,
                     recording_generation,
                     chunk_capacity,
                     stream_cancelled,
-                    stream_sink,
+                    stream_sink_factory,
+                    config.sample_rate().0,
+                    config.channels(),
+                    play_rx,
                 ) {
                 let (rt, finalizer) = handle.into_rt();
                 (Some(rt), Some(finalizer))
@@ -830,6 +879,7 @@ impl AudioRecorder {
             // Drain barrier flags shared between callback and stop path
             let stop_requested = Arc::new(AtomicBool::new(false));
             let callback_drained = Arc::new(AtomicBool::new(false));
+            let first_callback = Arc::new(AtomicBool::new(false));
 
             // Common audio processing closure
             let process_audio = {
@@ -843,8 +893,10 @@ impl AudioRecorder {
                 let callback_drained_clone = callback_drained.clone();
                 let stream_tap_rt: Option<StreamTapRt> = stream_tap_rt;
                 let capture_metrics_clone = capture_metrics.clone();
+                let first_callback_clone = first_callback.clone();
 
                 move |f32_samples: &[f32], i16_samples: &[i16]| {
+                    first_callback_clone.store(true, Ordering::SeqCst);
                     // A panic in this real-time path would unwind into CPAL's
                     // `extern "C"` WASAPI callback (CPAL wraps it in no catch_unwind)
                     // and ABORT the whole process. Catch it and drop this buffer
@@ -920,6 +972,7 @@ impl AudioRecorder {
                 }
             };
 
+            let build_start = Instant::now();
             let stream = match config.sample_format() {
                 cpal::SampleFormat::F32 => {
                     let process_audio = process_audio;
@@ -990,16 +1043,51 @@ impl AudioRecorder {
                     ))
                 }
             };
+            log::debug!(
+                "⏱️ [REC TIMING] build_input_stream={}ms (+{}ms)",
+                build_start.elapsed().as_millis(),
+                started_at.elapsed().as_millis()
+            );
 
+            let play_start = Instant::now();
             stream.play().map_err(|e| {
                 log::error!("Failed to start audio stream: {}", e);
                 e.to_string()
             })?;
+            log::debug!(
+                "⏱️ [REC TIMING] stream.play={}ms (+{}ms)",
+                play_start.elapsed().as_millis(),
+                started_at.elapsed().as_millis()
+            );
+            // The tap worker creates its sink only after play. Frames captured
+            // while a cold preview sink initializes still reach the WAV writer.
+            let _ = play_tx.send(());
 
             log::info!("Audio stream started successfully");
 
             // Wait for stop signal
-            let stop_reason = stop_rx.recv().ok();
+            let stop_reason = loop {
+                if let Some(first_audio_ms) =
+                    report_first_callback(&first_callback, &mut readiness_reporter.tx, started_at)
+                {
+                    capture_metrics
+                        .start_to_first_audio_ms
+                        .store(first_audio_ms, Ordering::Relaxed);
+                    log::debug!("⏱️ [REC TIMING] first callback (+{}ms)", first_audio_ms);
+                    break stop_rx.recv().ok();
+                }
+                match stop_rx.recv_timeout(Duration::from_millis(2)) {
+                    Ok(reason) => {
+                        report_start_failure(
+                            &mut readiness_reporter.tx,
+                            "Recording stopped before first audio callback",
+                        );
+                        break Some(reason);
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break None,
+                }
+            };
 
             // Drain barrier: signal callback to drain and wait for acknowledgment
             stop_after_post_roll(
@@ -1119,7 +1207,7 @@ impl AudioRecorder {
             .lock()
             .map_err(|e| format!("Failed to acquire lock: {}", e))? = Some(audio_level_rx);
 
-        Ok(())
+        Ok(ready_rx)
     }
 
     pub fn stop_recording(&mut self) -> Result<String, String> {
@@ -1328,6 +1416,42 @@ pub(crate) fn stop_error_is_integrity_failure(error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readiness_waits_for_first_callback_flag() {
+        let flag = AtomicBool::new(false);
+        let (tx, rx) = oneshot::channel();
+        let mut tx = Some(tx);
+        let started_at = Instant::now();
+        assert_eq!(report_first_callback(&flag, &mut tx, started_at), None);
+        assert!(tx.is_some());
+        flag.store(true, Ordering::SeqCst);
+        let elapsed = report_first_callback(&flag, &mut tx, started_at).unwrap();
+        assert!(tx.is_none());
+        assert!(
+            matches!(rx.blocking_recv(), Ok(RecordingReadiness::Ready { first_audio_ms }) if first_audio_ms == elapsed)
+        );
+    }
+
+    #[test]
+    fn forced_start_error_reports_failed_once() {
+        let (tx, rx) = oneshot::channel();
+        let mut reporter = ReadinessReporter { tx: Some(tx) };
+        report_start_failure(&mut reporter.tx, "device failed");
+        drop(reporter);
+        assert!(
+            matches!(rx.blocking_recv(), Ok(RecordingReadiness::Failed(error)) if error == "device failed")
+        );
+    }
+
+    #[test]
+    fn early_worker_exit_reports_failed() {
+        let (tx, rx) = oneshot::channel();
+        drop(ReadinessReporter { tx: Some(tx) });
+        assert!(
+            matches!(rx.blocking_recv(), Ok(RecordingReadiness::Failed(error)) if error == "Microphone initialization failed")
+        );
+    }
 
     #[test]
     fn next_writer_action_writes_chunk() {
@@ -1919,6 +2043,7 @@ mod tests {
     fn capture_metrics_survive_writer_and_device_errors() {
         let expected = CaptureAudioMetrics {
             sample_count: 16_000,
+            start_to_first_audio_ms: None,
             duration_ms: 1000,
             rms: 0.1,
             peak: 0.2,
@@ -1949,6 +2074,7 @@ mod tests {
         let recorder = AudioRecorder::new();
         let expected = CaptureAudioMetrics {
             sample_count: 16_000,
+            start_to_first_audio_ms: None,
             duration_ms: 1000,
             rms: 0.1,
             peak: 0.2,

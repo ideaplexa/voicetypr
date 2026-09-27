@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::ai::error::{user_facing_message, AiProviderError};
-use crate::audio::recorder::{AudioRecorder, STOP_POST_ROLL};
+use crate::audio::recorder::{AudioRecorder, RecordingReadiness, STOP_POST_ROLL};
 use crate::audio::silence_detector::SilenceDetectorEvent;
 use crate::audio::speech_evidence::{
     classify_speech_evidence, SpeechEvidenceAttempt, SpeechEvidenceOutcome,
@@ -981,7 +981,11 @@ pub(crate) fn current_recording_generation() -> u64 {
 /// True when `captured` belongs to a recording generation that is no longer
 /// current — i.e. a newer recording started while this result was in flight.
 pub(crate) fn recording_generation_is_stale(captured: u64) -> bool {
-    captured != current_recording_generation()
+    start_continuation_is_stale(captured, current_recording_generation())
+}
+
+fn start_continuation_is_stale(captured: u64, current: u64) -> bool {
+    captured != current
 }
 
 /// Take the cloud WS-final receiver for `generation` (if one was registered) and
@@ -2513,18 +2517,20 @@ mod tests {
         build_remote_transcription_result, build_remote_upload_transcription_request,
         build_transcription_job, build_translation_failed_history_metadata,
         build_writing_history_metadata, classify_local_failure, classify_polish_outcome,
+        consume_pending_stop_after_start, decide_start_readiness,
         emit_recording_too_short_feedback, finalize_in_flight_audio, is_ai_auth_error,
         is_non_speech_transcript, parakeet_preview_sink_eligible, parakeet_stream_engine_for_model,
-        persist_if_current, plan_desktop_writing_success, recording_license_state,
-        recording_started_cue_eligible, remote_server_error_pill_message,
-        set_in_flight_transcription_audio, should_hide_pill_when_idle, silence_event_runs_in_state,
-        silence_timeout_disposition, stop_should_reset_to_idle,
-        sync_retranscription_failure_metadata, take_in_flight_transcription_audio,
-        toast_clear_is_current, transcript_ready_cue_eligible, LocalFailureKind,
-        NormalizedTempFile, PillToastEventPayload, RecordingConfig, RecordingLicenseState,
-        SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard, TranscriptionFailure,
-        TranscriptionStatus,
+        persist_if_current, plan_desktop_writing_success, queue_stop_during_start,
+        recording_generation_is_stale, recording_license_state, recording_started_cue_eligible,
+        remote_server_error_pill_message, set_in_flight_transcription_audio,
+        should_hide_pill_when_idle, silence_event_runs_in_state, silence_timeout_disposition,
+        stop_should_reset_to_idle, sync_retranscription_failure_metadata,
+        take_in_flight_transcription_audio, toast_clear_is_current, transcript_ready_cue_eligible,
+        LocalFailureKind, NormalizedTempFile, PillToastEventPayload, RecordingConfig,
+        RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition,
+        StartReadinessDecision, StopInFlightGuard, TranscriptionFailure, TranscriptionStatus,
     };
+    use crate::audio::recorder::RecordingReadiness;
     use crate::cloud_stt::CloudProvider;
     use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
     use crate::license::{LicenseState, LicenseStatus};
@@ -2553,9 +2559,133 @@ mod tests {
     }
 
     #[test]
-    fn recording_started_cue_requires_no_pending_stop() {
-        assert!(recording_started_cue_eligible(false));
-        assert!(!recording_started_cue_eligible(true));
+    fn recording_started_cue_requires_current_recording_without_pending_stop() {
+        assert!(recording_started_cue_eligible(
+            false,
+            RecordingState::Recording,
+            false
+        ));
+        assert!(!recording_started_cue_eligible(
+            true,
+            RecordingState::Recording,
+            false
+        ));
+        assert!(!recording_started_cue_eligible(
+            false,
+            RecordingState::Stopping,
+            false
+        ));
+        assert!(!recording_started_cue_eligible(
+            false,
+            RecordingState::Recording,
+            true
+        ));
+    }
+
+    #[test]
+    fn stale_generation_after_pill_await_aborts_start_continuation() {
+        assert!(!super::start_continuation_is_stale(7, 7));
+        assert!(super::start_continuation_is_stale(7, 8));
+    }
+
+    #[test]
+    fn recording_readiness_orders_state_and_cue() {
+        assert_eq!(
+            decide_start_readiness(
+                Some(RecordingReadiness::Ready { first_audio_ms: 42 }),
+                false
+            ),
+            StartReadinessDecision::Ready(42)
+        );
+        assert_eq!(
+            decide_start_readiness(
+                Some(RecordingReadiness::Failed("device failed".into())),
+                false
+            ),
+            StartReadinessDecision::Failed("device failed".into())
+        );
+        assert_eq!(
+            decide_start_readiness(None, false),
+            StartReadinessDecision::TimedOut
+        );
+    }
+
+    #[test]
+    fn stale_readiness_never_selects_cleanup_or_cue() {
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let stale_generation = begin_recording_generation();
+        begin_recording_generation();
+        for readiness in [
+            RecordingReadiness::Ready { first_audio_ms: 42 },
+            RecordingReadiness::Failed("old recorder failed".into()),
+        ] {
+            assert_eq!(
+                decide_start_readiness(
+                    Some(readiness),
+                    recording_generation_is_stale(stale_generation)
+                ),
+                StartReadinessDecision::Stale
+            );
+        }
+    }
+
+    #[test]
+    fn pending_stop_during_readiness_wait_is_consumed_once_without_cue() {
+        let pending = std::sync::atomic::AtomicBool::new(false);
+        assert!(!queue_stop_during_start(
+            crate::RecordingState::Idle,
+            &pending,
+            || crate::RecordingState::Idle,
+        ));
+        assert!(queue_stop_during_start(
+            crate::RecordingState::Starting,
+            &pending,
+            || crate::RecordingState::Starting,
+        ));
+        let first_stop = consume_pending_stop_after_start(&pending);
+        assert!(first_stop);
+        assert!(!recording_started_cue_eligible(
+            first_stop,
+            RecordingState::Recording,
+            false
+        ));
+        assert!(!consume_pending_stop_after_start(&pending));
+    }
+
+    #[test]
+    fn stop_reclaims_flag_when_start_consumed_before_stop_queued() {
+        let pending = AtomicBool::new(false);
+        // Start transitions and consumes an empty flag after stop's first read.
+        let initial_state = RecordingState::Starting;
+        assert!(!consume_pending_stop_after_start(&pending));
+        assert!(!queue_stop_during_start(initial_state, &pending, || {
+            RecordingState::Recording
+        }));
+        assert!(!pending.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn stop_returns_when_start_consumes_queued_flag() {
+        let pending = AtomicBool::new(false);
+        let mut consumed = false;
+        assert!(queue_stop_during_start(
+            RecordingState::Starting,
+            &pending,
+            || {
+                // Start transitions, then consumes the flag before stop's reread.
+                consumed = consume_pending_stop_after_start(&pending);
+                RecordingState::Recording
+            },
+        ));
+        assert!(consumed);
+        assert!(!recording_started_cue_eligible(
+            consumed,
+            RecordingState::Recording,
+            false
+        ));
+        assert!(!pending.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -4803,8 +4933,58 @@ pub(crate) fn clear_pending_stop_after_start(app_state: &AppState) {
         .store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
-fn recording_started_cue_eligible(pending_stop_consumed: bool) -> bool {
-    !pending_stop_consumed
+fn recording_started_cue_eligible(
+    pending_stop_consumed: bool,
+    state: RecordingState,
+    generation_is_stale: bool,
+) -> bool {
+    !pending_stop_consumed && state == RecordingState::Recording && !generation_is_stale
+}
+
+fn consume_pending_stop_after_start(pending: &AtomicBool) -> bool {
+    pending.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+pub(crate) fn queue_stop_during_start(
+    state: RecordingState,
+    pending: &AtomicBool,
+    read_state: impl FnOnce() -> RecordingState,
+) -> bool {
+    if state != RecordingState::Starting {
+        return false;
+    }
+    pending.store(true, std::sync::atomic::Ordering::SeqCst);
+    // Start publishes Recording before consuming this flag. If it already
+    // crossed both steps, reclaim our flag and stop normally; otherwise start
+    // owns the queued stop and must dispatch it without our stop guard held.
+    if read_state() == RecordingState::Starting {
+        return true;
+    }
+    !pending.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum StartReadinessDecision {
+    Stale,
+    Ready(u64),
+    TimedOut,
+    Failed(String),
+}
+
+fn decide_start_readiness(
+    readiness: Option<RecordingReadiness>,
+    is_stale: bool,
+) -> StartReadinessDecision {
+    if is_stale {
+        return StartReadinessDecision::Stale;
+    }
+    match readiness {
+        Some(RecordingReadiness::Ready { first_audio_ms }) => {
+            StartReadinessDecision::Ready(first_audio_ms)
+        }
+        Some(RecordingReadiness::Failed(error)) => StartReadinessDecision::Failed(error),
+        None => StartReadinessDecision::TimedOut,
+    }
 }
 
 fn transcript_ready_cue_eligible(writing_succeeded: bool, should_deliver: bool) -> bool {
@@ -4962,6 +5142,15 @@ pub(crate) fn ptt_key_released(app_state: &AppState) -> bool {
             .load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Rebuilds hotkey bindings from the current recording state when dropped.
+struct RebuildBindingsOnExit(AppHandle);
+
+impl Drop for RebuildBindingsOnExit {
+    fn drop(&mut self) {
+        crate::trigger::engine_host::rebuild_engine_bindings(&self.0);
+    }
+}
+
 #[tauri::command]
 /// Returns `true` when THIS call started the recording, `false` when it was a
 /// redundant no-op on an already starting/active recording (idempotent
@@ -5091,6 +5280,22 @@ pub async fn start_recording(
     ) {
         return Err("Cannot start recording in current state".to_string());
     }
+
+    // Arm Escape as soon as Starting is published, before device initialization.
+    let app_state = app.state::<AppState>();
+    app_state
+        .esc_pressed_once
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
+        if let Some(handle) = timeout_guard.take() {
+            handle.abort();
+        }
+    }
+    crate::trigger::engine_host::rebuild_engine_bindings(&app);
+    // A bound Escape is swallowed system-wide, so rebuild on every exit: a start
+    // that ends without reaching Recording (quick PTT release, readiness failure,
+    // cancel, stale generation) must not leave the Starting-only binding armed.
+    let _rebuild_bindings_on_exit = RebuildBindingsOnExit(app.clone());
 
     let (streaming_tap_enabled, streaming_engine_enabled, live_preview_mode) = app
         .store("settings")
@@ -5266,7 +5471,7 @@ pub async fn start_recording(
         "⏱️ [REC TIMING] acquiring recorder lock (+{}ms)",
         recording_start.elapsed().as_millis()
     );
-    let (audio_level_rx_to_spawn, silence_event_rx_to_spawn) = {
+    let (audio_level_rx_to_spawn, silence_event_rx_to_spawn, readiness_rx, recording_generation) = {
         let mut recorder = match state.inner().0.lock() {
             Ok(recorder) => recorder,
             Err(e) => {
@@ -5287,45 +5492,6 @@ pub async fn start_recording(
             log::warn!("Already recording!");
             resume_media_if_needed();
             return Err("Already recording".to_string());
-        }
-
-        // Log the current audio device before starting
-        log::debug!(
-            "⏱️ [REC TIMING] checking audio device (+{}ms)",
-            recording_start.elapsed().as_millis()
-        );
-        log_start("AUDIO_DEVICE_CHECK");
-        log_with_context(
-            log::Level::Debug,
-            "Checking audio device",
-            &[("stage", "pre_recording")],
-        );
-
-        if let Ok(host) = std::panic::catch_unwind(cpal::default_host) {
-            if let Some(device) = host.default_input_device() {
-                if let Ok(name) = device.name() {
-                    log::info!("🎙️ Audio device available: {}", name);
-                    log_with_context(
-                        log::Level::Info,
-                        "🎮 MICROPHONE",
-                        &[("device_name", &name), ("status", "available")],
-                    );
-                } else {
-                    log::warn!("⚠️  Could not get device name, but device is available");
-                    log_with_context(
-                        log::Level::Info,
-                        "🎮 MICROPHONE",
-                        &[("status", "available_unnamed")],
-                    );
-                }
-            } else {
-                log_failed("AUDIO_DEVICE", "No default input device found");
-                log_with_context(
-                    log::Level::Debug,
-                    "Device detection failed",
-                    &[("component", "audio_device"), ("stage", "device_detection")],
-                );
-            }
         }
 
         // Try to start recording with graceful error handling
@@ -5402,15 +5568,16 @@ pub async fn start_recording(
             ),
             _ => None,
         };
-        let (audio_level_rx, silence_event_rx) = match recorder.start_recording(
+        let (audio_level_rx, silence_event_rx, readiness_rx) = match recorder.start_recording(
             audio_path_str,
             selected_microphone.clone(),
             streaming_tap_enabled,
             recording_generation,
             stream_cancelled,
             stream_sink_factory,
+            recording_start,
         ) {
-            Ok(_) => {
+            Ok(readiness_rx) => {
                 log::debug!(
                     "⏱️ [REC TIMING] recorder.start_recording returned Ok (+{}ms)",
                     recording_start.elapsed().as_millis()
@@ -5474,7 +5641,7 @@ pub async fn start_recording(
                     system_monitor::log_resources_before_operation("RECORDING_START");
                 }
 
-                (level_rx, silence_rx)
+                (level_rx, silence_rx, readiness_rx)
             }
             Err(e) => {
                 log_failed("RECORDER_START", &e);
@@ -5520,10 +5687,79 @@ pub async fn start_recording(
 
         // Release the recorder lock after successful start
         drop(recorder);
-        (audio_level_rx, silence_event_rx)
+        (
+            audio_level_rx,
+            silence_event_rx,
+            readiness_rx,
+            recording_generation,
+        )
     }; // MutexGuard dropped here
 
     // Now perform async operations after mutex is released
+    let readiness = match tokio::time::timeout(Duration::from_secs(2), readiness_rx).await {
+        Ok(Ok(readiness)) => Some(readiness),
+        Ok(Err(_)) => Some(RecordingReadiness::Failed(
+            "Recorder stopped before reporting microphone readiness".to_string(),
+        )),
+        Err(_) => None,
+    };
+    match decide_start_readiness(
+        readiness,
+        recording_generation_is_stale(recording_generation),
+    ) {
+        StartReadinessDecision::Stale => {
+            log::debug!("Ignoring readiness from stale recording generation");
+            return Ok(false);
+        }
+        StartReadinessDecision::Ready(first_audio_ms) => log::debug!(
+            "⏱️ [REC TIMING] readiness confirmed (+{}ms)",
+            first_audio_ms
+        ),
+        StartReadinessDecision::TimedOut => {
+            log::warn!("Recording readiness timed out after 2s; continuing capture");
+        }
+        StartReadinessDecision::Failed(_) if app_state.is_cancellation_requested() => {
+            // The cancellation path below owns its Idle transition and file cleanup.
+        }
+        StartReadinessDecision::Failed(error) => {
+            log_failed("RECORDER_START", &error);
+            let stop_result = state
+                .inner()
+                .0
+                .lock()
+                .map_err(|e| format!("Failed to acquire recorder lock: {e}"))
+                .and_then(|mut recorder| recorder.stop_recording());
+            if let Err(stop_error) = stop_result {
+                log::warn!("Recorder cleanup after start failure: {stop_error}");
+            }
+            begin_recording_generation();
+            clear_pending_stop_after_start(&app_state);
+            if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
+                if let Some(path) = path_guard.take() {
+                    if let Err(remove_error) = std::fs::remove_file(&path) {
+                        log::warn!("Failed to remove failed recording file: {remove_error}");
+                    }
+                }
+            }
+            update_recording_state(&app, RecordingState::Error, Some(error.clone()));
+            let (user_message, suggestion) =
+                if error.contains("permission") || error.contains("access") {
+                    (
+                        "Microphone permission denied",
+                        "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
+                    )
+                } else if error.contains("device") || error.contains("not found") {
+                    ("No microphone found", "Connect a microphone and try again")
+                } else if error.contains("in use") || error.contains("busy") {
+                    ("Microphone busy", "Close other apps using the microphone")
+                } else {
+                    ("Recording failed", "Try recording again")
+                };
+            pill_toast_with_suggestion(&app, user_message, suggestion, 1500, None);
+            resume_media_if_needed();
+            return Err(error);
+        }
+    }
 
     // If cancellation was requested while we were starting (e.g. Escape
     // during slow device init), abort instead of committing to Recording.
@@ -5560,7 +5796,7 @@ pub async fn start_recording(
 
         update_recording_state(&app, RecordingState::Idle, None);
         stop_result?;
-        return Err("Recording start cancelled".to_string());
+        return Ok(false);
     }
 
     // Second PTT guard: check again right before committing to Recording state.
@@ -5623,9 +5859,8 @@ pub async fn start_recording(
     // after entering Recording state. For PTT, key-up in Starting state sets this flag.
     // The second PTT guard above handles key-up during audio init; this handles the
     // narrow window between Starting transition and this point.
-    let pending_stop_consumed = app_state
-        .pending_stop_after_start
-        .swap(false, std::sync::atomic::Ordering::SeqCst);
+    let pending_stop_consumed =
+        consume_pending_stop_after_start(&app_state.pending_stop_after_start);
     if pending_stop_consumed {
         log::info!("Toggle: pending stop triggered right after start; stopping now");
         let app_handle = app.clone();
@@ -5635,7 +5870,11 @@ pub async fn start_recording(
                 log::error!("Toggle: pending stop failed: {}", e);
             }
         });
-    } else if recording_started_cue_eligible(pending_stop_consumed) {
+    } else if recording_started_cue_eligible(
+        pending_stop_consumed,
+        app_state.get_current_state(),
+        recording_generation_is_stale(recording_generation),
+    ) {
         crate::commands::audio_feedback::play_audio_feedback(
             &app,
             crate::commands::audio_feedback::AudioFeedbackCue::RecordingStarted,
@@ -5677,7 +5916,11 @@ pub async fn start_recording(
         should_show_pill
     );
     if should_show_pill {
-        match crate::commands::window::show_pill_widget(app.clone()).await {
+        let pill_result = crate::commands::window::show_pill_widget(app.clone()).await;
+        if recording_generation_is_stale(recording_generation) {
+            return Ok(false);
+        }
+        match pill_result {
             Ok(_) => log::debug!("Pill widget shown successfully"),
             Err(e) => {
                 log::warn!("Failed to show pill widget: {}. Recording will continue without visual feedback.", e);
@@ -5696,7 +5939,13 @@ pub async fn start_recording(
     }
 
     // Also emit legacy event for compatibility
-    let _ = emit_to_window(&app, "pill", "recording-started", ());
+    if recording_started_cue_eligible(
+        pending_stop_consumed,
+        app_state.get_current_state(),
+        recording_generation_is_stale(recording_generation),
+    ) {
+        let _ = emit_to_window(&app, "pill", "recording-started", ());
+    }
 
     // Log successful recording start
     log_complete(
@@ -5712,21 +5961,8 @@ pub async fn start_recording(
         ],
     );
 
-    // Route ESC cancellation through the native trigger engine while recording is active.
-    let app_state = app.state::<AppState>();
-
-    // Clear ESC state
-    app_state
-        .esc_pressed_once
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-
-    // Cancel any existing ESC timeout
-    if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
-        if let Some(handle) = timeout_guard.take() {
-            handle.abort();
-        }
-    }
-
+    // Refresh bindings after the Recording transition without resetting an
+    // Escape tap already received during Starting.
     crate::trigger::engine_host::rebuild_engine_bindings(&app);
 
     Ok(true)
@@ -5759,6 +5995,15 @@ async fn stop_recording_with_mode(
     );
 
     let app_state = app.state::<AppState>();
+    let state_before_queue = app_state.get_current_state();
+    if queue_stop_during_start(
+        state_before_queue,
+        &app_state.pending_stop_after_start,
+        || app_state.get_current_state(),
+    ) {
+        log::info!("stop_recording during Starting: queueing pending stop after start");
+        return Ok(String::new());
+    }
     let Some(_stop_guard) = StopInFlightGuard::try_acquire(app_state.stop_in_flight.clone()) else {
         log::debug!("stop_recording: a stop is already in flight; ignoring duplicate call");
         return Ok(String::new());
@@ -5788,20 +6033,6 @@ async fn stop_recording_with_mode(
             log::warn!("stop_recording called but not currently recording");
             // Don't error - just return empty result; only reset if this stop owns the flow.
             drop(recorder); // Drop the lock before updating state
-            if entry_state == RecordingState::Starting {
-                // A start is still in flight (e.g. the in-app bare-modifier
-                // hold released before audio init finished). Queue the stop so
-                // start_recording honors it immediately after the Recording
-                // transition — same contract as the PTT key-up-during-Starting
-                // path in recording/hotkeys.rs. Without this the stop is
-                // silently dropped and the start wins, leaving an orphaned
-                // recording with no keyup owner.
-                log::info!("stop_recording during Starting: queueing pending stop after start");
-                app_state
-                    .pending_stop_after_start
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                return Ok(String::new());
-            }
             if stop_should_reset_to_idle(entry_state) {
                 update_recording_state(&app, RecordingState::Idle, None);
             } else if entry_state == RecordingState::Stopping
@@ -5843,6 +6074,9 @@ async fn stop_recording_with_mode(
         capture_metrics = recorder.take_last_capture_metrics();
         log::info!("{}", stop_message);
         if let Some(metrics) = capture_metrics {
+            if let Some(first_audio_ms) = metrics.start_to_first_audio_ms {
+                log::info!("⏱️ [REC TIMING] start_to_first_audio_ms={first_audio_ms}");
+            }
             log::info!(
                 "Stop post-roll: post_roll_ms={}, post_roll_interrupted={}, post_roll_speech_detected={}",
                 metrics.post_roll_ms,

@@ -34,7 +34,7 @@ baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
 Plan 075 — SPEC — Claude 2026-09-27: desktop E2E dictation harness — BlackHole 2ch virtual mic, isolated HOME profile, cliclick hotkeys, TextEdit target, stop→text/WER/first-word metrics. Runs before every 2.1 beta. See `075-desktop-e2e-harness.md`.
 
-Plan 074 — SPEC — Claude 2026-09-27: first word not clipped — the "recording" cue waits for the first real audio callback, sink creation never delays capture, duplicate device probe removed, start latency measured. Target 2.1.0-beta.2 after 073. See `074-truthful-recording-start.md`.
+Plan 074 — LOCAL CHECKS PASSED / NEEDS E2E first-word run — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed x4): first word not clipped — the "recording" cue waits for the first real audio callback, sink creation never delays capture, duplicate device probe removed, start latency measured. Target 2.1.0-beta.2 after 073. See `074-truthful-recording-start.md`.
 
 Plan 073 — LOCAL CHECKS PASSED / NEEDS real Soniox-key check — Claude 2026-09-27 (gpt-6-sol implemented, gpt-6-astra reviewed): Soniox streams every recording over the realtime WS (preview only controls the pill); REST stays the fallback. Target 2.1.0-beta.2. See `073-soniox-realtime-default.md`.
 

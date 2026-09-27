@@ -64,6 +64,25 @@ a founder decision, only if the numbers after this plan still show clipping.
    callback) to capture metrics and a `⏱️ [REC TIMING]` log line for
    build_input_stream, play and first callback. No content.
 
+## Review outcomes (gpt-6-astra medium, four rounds, 2026-09-28)
+
+The longer Starting window exposed old races; all P1s fixed with scripted
+interleaving tests:
+- stale readiness / pill-await continuations return `Ok(false)` without side
+  effects (generation checked after every await);
+- stops during Starting queue before `StopInFlightGuard`, re-read the state and
+  reclaim the flag if start already moved on — used by `stop_recording`, native
+  PTT release and toggle;
+- the in-app toggle sends its stop during `starting`; Escape-cancel is armed in
+  Starting; the start cue/event fire only if this generation is still Recording;
+- bindings are rebuilt on every `start_recording` exit (a bound Escape is
+  swallowed system-wide, so it must never stay armed in Idle).
+
+Accepted P2: cancellation landing between the final cancellation check and the
+Recording transition (sub-millisecond) can leave cancel's Starting cleanup
+rejected by the state machine. The clean-core state machine (0.4a) replaces
+these hand-rolled handoffs.
+
 ## Tests (must exist before merge)
 
 - Recorder: readiness sent only after the first callback flag is set

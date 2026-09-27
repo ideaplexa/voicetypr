@@ -202,7 +202,7 @@ export function useInAppRecordingHotkey(): void {
     let holdStartPromise: Promise<boolean> | null = null;
 
     // Toggle recording, mirroring the native state machine (handle_toggle_mode):
-    // act only on settled states, ignore transitional ones, and debounce.
+    // queue a stop during Starting, ignore other transitional states, and debounce.
     const performToggle = (reason: string): void => {
       const { recording: currentRecording } = latest.current;
       const now = Date.now();
@@ -212,7 +212,7 @@ export function useInAppRecordingHotkey(): void {
       if (state === "idle" || state === "error") {
         log.debug(`In-app ${reason} in editable field — starting recording`);
         void currentRecording.startRecording();
-      } else if (state === "recording") {
+      } else if (state === "starting" || state === "recording") {
         log.debug(`In-app ${reason} in editable field — stopping recording`);
         void currentRecording.stopRecording();
       }
