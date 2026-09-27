@@ -14,6 +14,12 @@ mod deepgram;
 mod groq;
 mod openai;
 mod soniox;
+// Realtime (WebSocket) streaming path — reachable from the recorder tap factory
+// in commands::audio (plan 043).
+pub(crate) mod deepgram_rt;
+pub(crate) mod deepgram_ws;
+pub(crate) mod soniox_rt;
+pub(crate) mod soniox_ws;
 pub(crate) use soniox::{cleanup_stored, storage_counts, SonioxCleanupResult, SonioxStorageCounts};
 
 use crate::transcription::TranscriptionWord;
@@ -244,28 +250,14 @@ impl CloudProvider {
         }
     }
 
-    /// Transcribe `audio_path` using the stored API key for this provider.
-    pub async fn transcribe(
-        self,
-        app: &AppHandle,
-        audio_path: &Path,
-        language: Option<&str>,
-    ) -> Result<String, String> {
-        let key = crate::secure_store::secure_get(app, self.key_name())?
-            .ok_or_else(|| format!("{} API key not set", self.display_name()))?;
-        self.transcribe_typed(app, &key, audio_path, language)
-            .await
-            .map_err(|e| e.message(self.display_name()))
-    }
-
     pub(crate) async fn transcribe_typed(
         self,
         app: &AppHandle,
         api_key: &str,
+        model: &str,
         audio_path: &Path,
         language: Option<&str>,
     ) -> Result<String, common::SttError> {
-        let model = self.selected_model(app).id;
         match self {
             Self::Soniox => {
                 soniox::transcribe_typed(app, api_key, model, audio_path, language).await
@@ -317,7 +309,7 @@ impl CloudProvider {
             }
             _ => {
                 let text = self
-                    .transcribe_typed(app, api_key, audio_path, language)
+                    .transcribe_typed(app, api_key, model, audio_path, language)
                     .await?;
                 Ok(CloudTranscript {
                     text,

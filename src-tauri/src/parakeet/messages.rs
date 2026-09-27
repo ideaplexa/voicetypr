@@ -65,6 +65,36 @@ pub enum ParakeetCommand {
     },
     Status {},
     DownloadCtcModels {},
+    Warmup {},
+    EouModelStatus {
+        chunk_ms: u16,
+    },
+    DownloadEouModel {
+        chunk_ms: u16,
+    },
+    WarmupEou {
+        chunk_ms: u16,
+    },
+    StartStream {
+        model_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+        sample_rate: u32,
+        channels: u16,
+        #[serde(default = "default_stream_engine")]
+        engine: ParakeetStreamEngine,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        chunk_ms: Option<u16>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        config: Option<ParakeetStreamConfig>,
+    },
+    AudioChunk {
+        pcm_b64: String,
+    },
+    FinalizeStream {},
+    CancelStream {},
     DeleteModel {
         #[serde(skip_serializing_if = "Option::is_none")]
         model_id: Option<String>,
@@ -75,6 +105,7 @@ pub enum ParakeetCommand {
 }
 
 pub const SHORT_REQUEST_TIMEOUT_SECS: u64 = 30;
+pub const WARMUP_TIMEOUT_SECS: u64 = 60;
 pub const LOAD_MODEL_TIMEOUT_SECS: u64 = 300;
 pub const DOWNLOAD_MODEL_TIMEOUT_SECS: u64 = 60 * 60;
 pub const TRANSCRIBE_TIMEOUT_SECS: u64 = 180;
@@ -89,6 +120,14 @@ impl ParakeetCommand {
             Self::Diarize { .. } => "diarize",
             Self::Status { .. } => "status",
             Self::DownloadCtcModels { .. } => "download_ctc_models",
+            Self::Warmup { .. } => "warmup",
+            Self::EouModelStatus { .. } => "eou_model_status",
+            Self::DownloadEouModel { .. } => "download_eou_model",
+            Self::WarmupEou { .. } => "warmup_eou",
+            Self::StartStream { .. } => "start_stream",
+            Self::AudioChunk { .. } => "audio_chunk",
+            Self::FinalizeStream { .. } => "finalize_stream",
+            Self::CancelStream { .. } => "cancel_stream",
             Self::DeleteModel { .. } => "delete_model",
             Self::Shutdown { .. } => "shutdown",
         }
@@ -103,11 +142,87 @@ impl ParakeetCommand {
             Self::Transcribe { audio_path, .. } | Self::Diarize { audio_path } => {
                 transcribe_timeout_secs(audio_path)
             }
+            Self::DownloadEouModel { .. } => DOWNLOAD_MODEL_TIMEOUT_SECS,
             Self::DownloadCtcModels { .. } => DOWNLOAD_MODEL_TIMEOUT_SECS,
+            Self::Warmup { .. } => WARMUP_TIMEOUT_SECS,
+            Self::WarmupEou { .. } => WARMUP_TIMEOUT_SECS,
             Self::Status { .. }
+            | Self::EouModelStatus { .. }
             | Self::Shutdown { .. }
+            | Self::StartStream { .. }
+            | Self::AudioChunk { .. }
+            | Self::FinalizeStream { .. }
+            | Self::CancelStream { .. }
             | Self::DeleteModel { .. }
             | Self::UnloadModel { .. } => SHORT_REQUEST_TIMEOUT_SECS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParakeetStreamEngine {
+    SlidingWindow,
+    Eou,
+    /// Decode-ahead live-preview engine (plan 051, Phase 1): fresh coherent decode of
+    /// the whole un-committed window on a ~1s cadence, committing only by token
+    /// timestamp so boundary-cut words stay revisable. Phase-1 / bench-only: the
+    /// capability flip that selects it lives in Phase 2.
+    DecodeAhead,
+    UnifiedEnglish,
+    NemotronMultilingual,
+}
+
+fn default_stream_engine() -> ParakeetStreamEngine {
+    ParakeetStreamEngine::SlidingWindow
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ParakeetStreamConfig {
+    pub chunk_seconds: f64,
+    pub hypothesis_chunk_seconds: f64,
+    pub left_context_seconds: f64,
+    pub right_context_seconds: f64,
+    pub min_context_for_confirmation: f64,
+    pub confirmation_threshold: f64,
+}
+
+impl ParakeetStreamConfig {
+    pub fn streaming() -> Self {
+        Self {
+            chunk_seconds: 11.0,
+            hypothesis_chunk_seconds: 1.0,
+            left_context_seconds: 2.0,
+            right_context_seconds: 2.0,
+            min_context_for_confirmation: 10.0,
+            confirmation_threshold: 0.80,
+        }
+    }
+
+    pub fn tuned_hypothesis_500ms() -> Self {
+        Self {
+            hypothesis_chunk_seconds: 0.5,
+            ..Self::streaming()
+        }
+    }
+
+    /// Live-preview window geometry (task #19). FluidAudio's sliding-window loop
+    /// only processes once `chunk + right_context` audio has accumulated and then
+    /// advances by `chunk` — the default 11s+2s geometry means the FIRST update
+    /// lands at 13s, which is why the 042 bench saw partials only at the end (its
+    /// `hypothesis_chunk_seconds` "quick feedback" knob is defined upstream but
+    /// never consulted by the loop). Shrinking the geometry turns the SAME loop
+    /// into a ~1s-cadence decode-ahead: first update at ~1.5s, window
+    /// left+chunk+right = 4+1+0.5 = 5.5s (fits the model's fixed 15s input).
+    /// Preview-only quality: the pasted text stays the batch decode at stop.
+    pub fn preview_geometry() -> Self {
+        Self {
+            chunk_seconds: 1.0,
+            hypothesis_chunk_seconds: 0.5,
+            left_context_seconds: 4.0,
+            right_context_seconds: 0.5,
+            min_context_for_confirmation: 10.0,
+            confirmation_threshold: 0.80,
         }
     }
 }
@@ -188,6 +303,25 @@ pub enum ParakeetResponse {
         phase: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
+    EouModelStatus {
+        chunk_ms: u16,
+        downloaded: bool,
+        path: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    StreamStarted {},
+    #[serde(rename_all = "snake_case")]
+    StreamPartial {
+        text: String,
+        is_confirmed: bool,
+        #[serde(default)]
+        confidence: Option<f32>,
+    },
+    #[serde(rename_all = "camelCase")]
+    StreamFinal { text: String },
+    #[serde(rename_all = "camelCase")]
+    StreamCancelled {},
+    #[serde(rename_all = "camelCase")]
     Diarization {
         #[serde(default)]
         segments: Vec<ParakeetSpeakerSegment>,
@@ -201,6 +335,13 @@ pub enum ParakeetResponse {
         language: Option<String>,
         #[serde(default)]
         duration: Option<f32>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Warmed {
+        warmed: bool,
+        ms: u64,
+        #[serde(default)]
+        error: Option<String>,
     },
 }
 
@@ -278,20 +419,85 @@ mod tests {
     }
 
     #[test]
+    fn start_stream_serializes_optional_language() {
+        let command = |language| ParakeetCommand::StartStream {
+            model_id: "parakeet-tdt-0.6b-v3".to_string(),
+            model_version: None,
+            language,
+            sample_rate: 16_000,
+            channels: 1,
+            engine: ParakeetStreamEngine::DecodeAhead,
+            chunk_ms: None,
+            config: None,
+        };
+
+        let german = serde_json::to_value(command(Some("de".to_string()))).unwrap();
+        assert_eq!(german["type"], "start_stream");
+        assert_eq!(german["language"], "de");
+        let absent = serde_json::to_value(command(None)).unwrap();
+        assert!(absent.get("language").is_none());
+    }
+
+    #[test]
     fn ctc_download_command_serializes_snake_case_type() {
         let value = serde_json::to_value(ParakeetCommand::DownloadCtcModels {}).unwrap();
         assert_eq!(value["type"], "download_ctc_models");
     }
 
     #[test]
+    fn status_response_defaults_custom_vocabulary_flags() {
+        let response: ParakeetResponse = serde_json::from_value(serde_json::json!({
+            "type": "status",
+            "loadedModel": null,
+            "modelPath": null,
+            "precision": null,
+            "attention": null
+        }))
+        .unwrap();
+
+        match response {
+            ParakeetResponse::Status {
+                custom_vocabulary_supported,
+                custom_vocabulary_ready,
+                ..
+            } => {
+                assert!(!custom_vocabulary_supported);
+                assert!(!custom_vocabulary_ready);
+            }
+            other => panic!("unexpected response: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn status_response_decodes_custom_vocabulary_flags() {
+        let response: ParakeetResponse = serde_json::from_value(serde_json::json!({
+            "type": "status",
+            "loadedModel": null,
+            "modelPath": null,
+            "precision": null,
+            "attention": null,
+            "customVocabularySupported": true,
+            "customVocabularyReady": true
+        }))
+        .unwrap();
+
+        match response {
+            ParakeetResponse::Status {
+                custom_vocabulary_supported,
+                custom_vocabulary_ready,
+                ..
+            } => {
+                assert!(custom_vocabulary_supported);
+                assert!(custom_vocabulary_ready);
+            }
+            other => panic!("unexpected response: {:?}", other),
+        }
+    }
+    #[test]
     fn request_timeout_secs_restores_per_command_bounds() {
         assert_eq!(
             ParakeetCommand::Status {}.request_timeout_secs(),
             SHORT_REQUEST_TIMEOUT_SECS
-        );
-        assert_eq!(
-            ParakeetCommand::DownloadCtcModels {}.request_timeout_secs(),
-            DOWNLOAD_MODEL_TIMEOUT_SECS
         );
         assert_eq!(
             ParakeetCommand::LoadModel {
@@ -346,52 +552,14 @@ mod tests {
     }
 
     #[test]
-    fn status_response_defaults_custom_vocabulary_flags() {
-        let response: ParakeetResponse = serde_json::from_value(serde_json::json!({
-            "type": "status",
-            "loadedModel": null,
-            "modelPath": null,
-            "precision": null,
-            "attention": null
-        }))
-        .unwrap();
-
-        match response {
-            ParakeetResponse::Status {
-                custom_vocabulary_supported,
-                custom_vocabulary_ready,
-                ..
-            } => {
-                assert!(!custom_vocabulary_supported);
-                assert!(!custom_vocabulary_ready);
-            }
-            other => panic!("unexpected response: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn status_response_decodes_custom_vocabulary_flags() {
-        let response: ParakeetResponse = serde_json::from_value(serde_json::json!({
-            "type": "status",
-            "loadedModel": null,
-            "modelPath": null,
-            "precision": null,
-            "attention": null,
-            "customVocabularySupported": true,
-            "customVocabularyReady": true
-        }))
-        .unwrap();
-
-        match response {
-            ParakeetResponse::Status {
-                custom_vocabulary_supported,
-                custom_vocabulary_ready,
-                ..
-            } => {
-                assert!(custom_vocabulary_supported);
-                assert!(custom_vocabulary_ready);
-            }
-            other => panic!("unexpected response: {:?}", other),
-        }
+    fn native_stream_engines_use_sidecar_wire_names() {
+        assert_eq!(
+            serde_json::to_value(ParakeetStreamEngine::UnifiedEnglish).unwrap(),
+            "unified_english"
+        );
+        assert_eq!(
+            serde_json::to_value(ParakeetStreamEngine::NemotronMultilingual).unwrap(),
+            "nemotron_multilingual"
+        );
     }
 }

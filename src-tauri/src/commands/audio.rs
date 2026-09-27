@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::ai::error::{user_facing_message, AiProviderError};
 use crate::audio::recorder::{AudioRecorder, STOP_POST_ROLL};
@@ -7,6 +7,8 @@ use crate::audio::silence_detector::SilenceDetectorEvent;
 use crate::audio::speech_evidence::{
     classify_speech_evidence, SpeechEvidenceAttempt, SpeechEvidenceOutcome,
 };
+use crate::audio::stream_tap::{StreamTapSink, StreamTapSinkFactory};
+use crate::cloud_stt::common::SttError;
 use crate::commands::settings::{
     get_settings, normalize_final_text_language, normalize_speech_language_for_model,
     normalize_transcription_task, recording_retention_days_from_store, resolve_pill_indicator_mode,
@@ -14,8 +16,8 @@ use crate::commands::settings::{
 };
 use crate::license::LicenseState;
 use crate::media::MediaPauseController;
-use crate::parakeet::manager::ParakeetTranscriptionOptions;
-use crate::parakeet::messages::{ParakeetResponse, ParakeetSegment};
+use crate::parakeet::messages::{ParakeetResponse, ParakeetStreamConfig, ParakeetStreamEngine};
+use crate::parakeet::sidecar::ParakeetStreamHandle;
 use crate::parakeet::ParakeetManager;
 use crate::provider_capabilities::ProviderEngine;
 use crate::remote::client::{
@@ -23,22 +25,24 @@ use crate::remote::client::{
     TranscriptionRequest as RemoteTranscriptionRequest, TranscriptionSource as RemoteTimeoutSource,
 };
 use crate::remote::settings::RemoteSettings;
-use crate::transcription::error::TranscriptionErrorCode;
-use crate::transcription::executor::transcribe_with_app;
+use crate::transcription::error::{TranscriptionError, TranscriptionErrorCode};
+use crate::transcription::executor::{
+    ensure_cloud_task_supported, transcribe_with_app, watchdog_budget_for,
+};
 use crate::transcription::request::{
     AudioFormatHint, CancellationToken, CleanupPolicy, EngineSelection, RequestContext,
     TimeoutPolicy, TranscriptionAudio, TranscriptionRequest,
 };
+use crate::transcription::stream::{
+    StreamSessionGate, TranscriptionStreamEvent, TRANSCRIPTION_STREAM_EVENT,
+};
 use crate::transcription::{
-    TranscriptionJob, TranscriptionResult, TranscriptionSegment, TranscriptionSource,
-    TranscriptionWord,
+    TranscriptionJob, TranscriptionResult, TranscriptionSource, TranscriptionWord,
 };
 use crate::utils::logger::*;
 #[cfg(debug_assertions)]
 use crate::utils::system_monitor;
-use crate::whisper::cache::TranscriberCache;
 use crate::whisper::manager::WhisperManager;
-use crate::whisper::transcriber::WhisperTranscriptionOutput;
 use crate::{
     emit_to_all, emit_to_window, update_recording_state, AppState, RecordingMode, RecordingState,
 };
@@ -52,6 +56,8 @@ use std::time::{Duration, Instant};
 use tauri::async_runtime::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
+
+pub(crate) use crate::transcription::engines::*;
 
 pub(crate) const PTT_START_ABORTED_AFTER_RELEASE: &str =
     "PTT key released before recording could start";
@@ -79,6 +85,812 @@ pub fn cleanup_media_pause_on_exit() {
 /// capture (stop/spawn) and check (deliver) linearizable.
 static RECORDING_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// Generation-keyed handoff of the cloud WS-final text from the (detached)
+/// stream-tap worker to the transcription task. The tap worker resolves the oneshot
+/// when its WS finalize completes; the transcription task awaits it
+/// ([`take_cloud_ws_final`]) to take WS authority before falling back to REST-on-WAV.
+/// A map, NOT a single slot (Codex 043b finding): a delayed older task must only ever
+/// remove ITS OWN generation's entry — never consume-and-discard a newer recording's
+/// receiver. Older entries are pruned when a new recording registers (generations are
+/// monotonic, so anything older is stale and its delivery is discarded anyway).
+type CloudWsFinalMap =
+    std::collections::HashMap<u64, tokio::sync::oneshot::Receiver<Result<String, SttError>>>;
+static CLOUD_WS_FINAL: Lazy<Mutex<CloudWsFinalMap>> =
+    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+struct ParakeetPreviewStreamSink {
+    app: AppHandle,
+    handle: ParakeetStreamHandle,
+    session_id: u64,
+    revision: Arc<AtomicU64>,
+    gate: Arc<Mutex<StreamSessionGate>>,
+    started: Instant,
+}
+
+impl ParakeetPreviewStreamSink {
+    fn next_revision(&self) -> u64 {
+        self.revision.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    }
+
+    fn emit(&self, event: TranscriptionStreamEvent) {
+        emit_stream_event(&self.app, &self.gate, event);
+    }
+}
+
+impl StreamTapSink for ParakeetPreviewStreamSink {
+    fn send_frame(&mut self, samples: &[i16]) {
+        if let Err(error) = self.handle.send_chunk(samples) {
+            log::warn!("Failed to enqueue Parakeet stream audio chunk: {}", error);
+        }
+    }
+
+    // Preview only (batch is authoritative), so RT frame drops don't matter here.
+    fn finalize(&mut self, _dropped_frames: u64) -> Option<String> {
+        match tauri::async_runtime::block_on(self.handle.finalize()) {
+            Ok(text) => {
+                log_performance(
+                    "PARAKEET_STREAM_FINAL",
+                    self.started.elapsed().as_millis() as u64,
+                    Some("source=preview"),
+                );
+                self.emit(TranscriptionStreamEvent::Final {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    text: text.clone(),
+                });
+                Some(text)
+            }
+            Err(error) => {
+                self.emit(TranscriptionStreamEvent::Error {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    error: error.to_string(),
+                });
+                log::warn!("Parakeet stream finalization failed: {}", error);
+                None
+            }
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.handle.cancel();
+        self.emit(TranscriptionStreamEvent::Cancelled {
+            session_id: self.session_id,
+            revision: self.next_revision(),
+        });
+    }
+}
+
+fn emit_stream_event(
+    app: &AppHandle,
+    gate: &Arc<Mutex<StreamSessionGate>>,
+    event: TranscriptionStreamEvent,
+) {
+    let admitted = gate
+        .lock()
+        .map(|mut gate| gate.admit(&event))
+        .unwrap_or(crate::transcription::stream::Admit::StaleSession);
+    if !matches!(admitted, crate::transcription::stream::Admit::Accept) {
+        log::debug!("Dropping stale Parakeet stream event: {:?}", admitted);
+        return;
+    }
+    if let Err(error) = emit_to_window(app, "pill", TRANSCRIPTION_STREAM_EVENT, event) {
+        log::warn!("Failed to emit Parakeet stream event: {}", error);
+    }
+}
+
+/// Pure eligibility gate for [`build_parakeet_stream_sink_factory`], extracted so
+/// the regular-mode-with-dev-flags regression — the missing `!live_preview_mode`
+/// guard that let SlidingWindow produce a garbled preview — is unit-testable
+/// without an `AppHandle<Wry>`. Mirrors the inline guards on the Whisper/Soniox/
+/// Deepgram factories (all include `live_preview_mode`).
+fn parakeet_preview_sink_eligible(
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    config: &RecordingConfig,
+) -> bool {
+    streaming_tap_enabled
+        && streaming_engine_enabled
+        && live_preview_mode
+        && config.current_engine == "parakeet"
+        && !config.current_model.is_empty()
+}
+
+fn parakeet_stream_engine_for_model(model_name: &str) -> ParakeetStreamEngine {
+    match model_name {
+        "parakeet-unified-640ms" => ParakeetStreamEngine::UnifiedEnglish,
+        "nemotron-multilingual-1120ms" => ParakeetStreamEngine::NemotronMultilingual,
+        _ => ParakeetStreamEngine::DecodeAhead,
+    }
+}
+
+fn build_parakeet_stream_sink_factory(
+    app: &AppHandle,
+    config: &RecordingConfig,
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    recording_generation: u64,
+) -> Option<StreamTapSinkFactory> {
+    if !parakeet_preview_sink_eligible(
+        streaming_tap_enabled,
+        streaming_engine_enabled,
+        live_preview_mode,
+        config,
+    ) {
+        return None;
+    }
+
+    let app = app.clone();
+    let model_name = config.current_model.clone();
+    let language = (!config.speech_language.is_empty()).then(|| {
+        normalize_speech_language_for_model(
+            &config.current_engine,
+            &config.current_model,
+            &config.speech_language,
+        )
+    });
+    Some(Arc::new(move |sample_rate, channels| {
+        let app_for_stream = app.clone();
+        let model_name_for_stream = model_name.clone();
+        let language_for_stream = language.clone();
+        let gate = Arc::new(Mutex::new(StreamSessionGate::new(recording_generation)));
+        let revision = Arc::new(AtomicU64::new(0));
+        let committed = Arc::new(Mutex::new(String::new()));
+        let first_partial_logged = Arc::new(AtomicBool::new(false));
+        let first_confirmed_logged = Arc::new(AtomicBool::new(false));
+        let started = Instant::now();
+
+        let callback_app = app_for_stream.clone();
+        let callback_gate = gate.clone();
+        let callback_revision = revision.clone();
+        let callback_committed = committed.clone();
+        let callback_first_partial_logged = first_partial_logged.clone();
+        let callback_first_confirmed_logged = first_confirmed_logged.clone();
+
+        // TDT uses decode-ahead because FluidAudio's EOU path is still unreliable.
+        // Native streaming models use their own stateful managers and built-in
+        // punctuation/capitalization.
+        let stream_engine = parakeet_stream_engine_for_model(&model_name_for_stream);
+        let opened = tauri::async_runtime::block_on(async move {
+            let parakeet_manager = app_for_stream.state::<ParakeetManager>();
+            parakeet_manager
+                .load_model(&app_for_stream, &model_name_for_stream)
+                .await
+                .map_err(|error| error.to_string())?;
+            parakeet_manager
+                .open_stream(
+                    crate::parakeet::manager::ParakeetStreamRequest {
+                        app: app_for_stream.clone(),
+                        model_name: &model_name_for_stream,
+                        language: if matches!(stream_engine, ParakeetStreamEngine::DecodeAhead) {
+                            language_for_stream
+                        } else {
+                            None
+                        },
+                        sample_rate,
+                        channels,
+                        engine: stream_engine,
+                        chunk_ms: matches!(stream_engine, ParakeetStreamEngine::Eou).then_some(320),
+                        config: matches!(stream_engine, ParakeetStreamEngine::SlidingWindow)
+                            .then_some(ParakeetStreamConfig::streaming()),
+                    },
+                    move |partial| {
+                        if !callback_first_partial_logged.swap(true, AtomicOrdering::SeqCst) {
+                            log_performance(
+                                "PARAKEET_STREAM_FIRST_PARTIAL",
+                                started.elapsed().as_millis() as u64,
+                                Some("source=preview"),
+                            );
+                        }
+
+                        let mut committed_guard = match callback_committed.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => {
+                                log::warn!("Parakeet stream committed guard poisoned");
+                                return;
+                            }
+                        };
+
+                        let (committed_text, tentative_text) = if partial.is_confirmed {
+                            if !callback_first_confirmed_logged.swap(true, AtomicOrdering::SeqCst) {
+                                log_performance(
+                                    "PARAKEET_STREAM_FIRST_CONFIRMED",
+                                    started.elapsed().as_millis() as u64,
+                                    Some("source=preview"),
+                                );
+                            }
+                            if !StreamSessionGate::assert_committed_monotonic(
+                                &committed_guard,
+                                &partial.text,
+                            ) {
+                                log::warn!("Rejected non-monotonic Parakeet committed stream text");
+                                return;
+                            }
+                            *committed_guard = partial.text.clone();
+                            (committed_guard.clone(), String::new())
+                        } else {
+                            (committed_guard.clone(), partial.text)
+                        };
+                        drop(committed_guard);
+
+                        let event = TranscriptionStreamEvent::Partial {
+                            session_id: recording_generation,
+                            revision: callback_revision.fetch_add(1, AtomicOrdering::SeqCst) + 1,
+                            committed: committed_text,
+                            tentative: tentative_text,
+                        };
+                        emit_stream_event(&callback_app, &callback_gate, event);
+                    },
+                )
+                .await
+        });
+
+        match opened {
+            Ok(handle) => {
+                emit_stream_event(
+                    &app,
+                    &gate,
+                    TranscriptionStreamEvent::Started {
+                        session_id: recording_generation,
+                        engine: "parakeet".to_string(),
+                        revision: 0,
+                    },
+                );
+                Some(Box::new(ParakeetPreviewStreamSink {
+                    app: app.clone(),
+                    handle,
+                    session_id: recording_generation,
+                    revision,
+                    gate,
+                    started,
+                }) as Box<dyn StreamTapSink>)
+            }
+            Err(error) => {
+                log::warn!("Failed to open Parakeet preview stream: {}", error);
+                None
+            }
+        }
+    }))
+}
+
+/// Live-preview sink for local Whisper via decode-ahead (plan 032). Mirrors
+/// `ParakeetPreviewStreamSink`, but the streaming `Partial` events are emitted from the
+/// decode thread's callback (Whisper isn't final-only); this sink handles Final/Cancel.
+struct WhisperPreviewStreamSink {
+    app: AppHandle,
+    handle: crate::whisper::decode_stream::WhisperDecodeStreamHandle,
+    session_id: u64,
+    revision: Arc<AtomicU64>,
+    gate: Arc<Mutex<StreamSessionGate>>,
+}
+
+impl WhisperPreviewStreamSink {
+    fn next_revision(&self) -> u64 {
+        self.revision.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    }
+
+    fn emit(&self, event: TranscriptionStreamEvent) {
+        emit_stream_event(&self.app, &self.gate, event);
+    }
+}
+
+impl StreamTapSink for WhisperPreviewStreamSink {
+    fn send_frame(&mut self, samples: &[i16]) {
+        self.handle.send_chunk(samples);
+    }
+
+    // Preview only: the authoritative pasted text stays the batch decode at stop,
+    // so RT frame drops don't matter here.
+    fn finalize(&mut self, _dropped_frames: u64) -> Option<String> {
+        match self.handle.finalize() {
+            Some(text) => {
+                self.emit(TranscriptionStreamEvent::Final {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    text: text.clone(),
+                });
+                Some(text)
+            }
+            None => None,
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.handle.cancel();
+        self.emit(TranscriptionStreamEvent::Cancelled {
+            session_id: self.session_id,
+            revision: self.next_revision(),
+        });
+    }
+}
+
+/// Build a Whisper decode-ahead preview sink factory (mirror of the Parakeet one).
+/// Returns None unless the engine is Whisper in live-preview mode with a loaded model.
+fn build_whisper_stream_sink_factory(
+    app: &AppHandle,
+    config: &RecordingConfig,
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    recording_generation: u64,
+) -> Option<StreamTapSinkFactory> {
+    if !streaming_tap_enabled
+        || !streaming_engine_enabled
+        || !live_preview_mode
+        || config.current_engine != "whisper"
+        || config.current_model.is_empty()
+    {
+        return None;
+    }
+
+    let app = app.clone();
+    let model_name = config.current_model.clone();
+    let language = {
+        let trimmed = config.speech_language.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+
+    Some(Arc::new(move |sample_rate, channels| {
+        let app_for_stream = app.clone();
+        let model_name = model_name.clone();
+        let language = language.clone();
+        let gate = Arc::new(Mutex::new(StreamSessionGate::new(recording_generation)));
+        let revision = Arc::new(AtomicU64::new(0));
+
+        // Resolve the already-loaded model from the shared cache (Arc clone — no second
+        // model load). If it isn't loaded, get_or_create loads it here; preview is best
+        // effort, so any failure just yields no sink (falls back to non-preview).
+        let transcriber = tauri::async_runtime::block_on(async {
+            let model_path = app_for_stream
+                .state::<AsyncRwLock<WhisperManager>>()
+                .read()
+                .await
+                .get_model_path(&model_name)?;
+            let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app_for_stream);
+            let cache_state =
+                app_for_stream.state::<AsyncMutex<crate::whisper::cache::TranscriberCache>>();
+            let mut cache = cache_state.lock().await;
+            // Peek only — NEVER load the model on the recorder thread. A miss means the
+            // model isn't warm yet, so we skip preview this recording (best effort).
+            cache.get_loaded(&model_path, speed_mode)
+        })?;
+
+        let callback_app = app_for_stream.clone();
+        let callback_gate = gate.clone();
+        let callback_revision = revision.clone();
+        let on_partial = move |partial: crate::whisper::decode_ahead::DecodeAheadPartial| {
+            let event = TranscriptionStreamEvent::Partial {
+                session_id: recording_generation,
+                revision: callback_revision.fetch_add(1, AtomicOrdering::SeqCst) + 1,
+                committed: partial.committed,
+                tentative: partial.tentative,
+            };
+            emit_stream_event(&callback_app, &callback_gate, event);
+        };
+
+        let handle = crate::whisper::decode_stream::open(
+            crate::whisper::decode_stream::WhisperStreamConfig {
+                transcriber,
+                input_sample_rate: sample_rate,
+                channels,
+                language,
+            },
+            on_partial,
+        );
+
+        emit_stream_event(
+            &app,
+            &gate,
+            TranscriptionStreamEvent::Started {
+                session_id: recording_generation,
+                engine: "whisper".to_string(),
+                revision: 0,
+            },
+        );
+
+        Some(Box::new(WhisperPreviewStreamSink {
+            app: app.clone(),
+            handle,
+            session_id: recording_generation,
+            revision,
+            gate,
+        }) as Box<dyn StreamTapSink>)
+    }))
+}
+
+/// Live-preview sink for Soniox realtime WebSocket streaming (plan 043). Mirrors the
+/// Whisper sink; `Partial`s come from the WS task's callback, this handles Final/Cancel.
+/// The WS final is the AUTHORITATIVE pasted result (plan 043b): `finalize()` resolves a
+/// oneshot ([`CLOUD_WS_FINAL`]) that the transcription task awaits
+/// ([`take_cloud_ws_final`]) before falling back to REST-on-WAV. REST runs only on WS
+/// failure/empty/gap — so the happy path bills a single stream, not a double bill.
+struct SonioxPreviewStreamSink {
+    app: AppHandle,
+    handle: crate::cloud_stt::soniox_ws::SonioxStreamHandle,
+    session_id: u64,
+    revision: Arc<AtomicU64>,
+    gate: Arc<Mutex<StreamSessionGate>>,
+    /// Resolved when the WS finalize completes (on the detached tap worker); the
+    /// transcription task awaits it ([`take_cloud_ws_final`]) to take WS authority.
+    final_tx: Option<tokio::sync::oneshot::Sender<Result<String, SttError>>>,
+}
+
+impl SonioxPreviewStreamSink {
+    fn next_revision(&self) -> u64 {
+        self.revision.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    }
+
+    fn emit(&self, event: TranscriptionStreamEvent) {
+        emit_stream_event(&self.app, &self.gate, event);
+    }
+}
+
+impl StreamTapSink for SonioxPreviewStreamSink {
+    fn send_frame(&mut self, samples: &[i16]) {
+        if let Err(error) = self.handle.send_chunk(samples) {
+            log::warn!("Failed to enqueue Soniox stream audio chunk: {error:?}");
+        }
+    }
+
+    fn finalize(&mut self, dropped_frames: u64) -> Option<String> {
+        match tauri::async_runtime::block_on(self.handle.finalize()) {
+            Ok(text) => {
+                self.emit(TranscriptionStreamEvent::Final {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    text: text.clone(),
+                });
+                // Hand WS authority to the transcription task. The receiver is
+                // single-use; resolving after it was already consumed is a no-op.
+                // Dropped RT frames invalidate authority (Codex 043b finding): the
+                // stream saw incomplete audio, so the complete-WAV REST fallback owns
+                // the pasted result. The Final above stays — it's cosmetic preview,
+                // same stance as Whisper's decode-ahead final vs its batch decode.
+                if let Some(tx) = self.final_tx.take() {
+                    if dropped_frames > 0 {
+                        log::warn!(
+                            "Soniox WS authority invalidated: {dropped_frames} RT frames dropped; falling back to REST-on-WAV"
+                        );
+                        let _ = tx.send(Err(SttError::Network));
+                    } else {
+                        let _ = tx.send(Ok(text.clone()));
+                    }
+                }
+                Some(text)
+            }
+            Err(error) => {
+                // WS failed: emit Error; the transcription task falls back to REST-on-WAV.
+                self.emit(TranscriptionStreamEvent::Error {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    error: format!("{error:?}"),
+                });
+                log::warn!("Soniox stream finalize failed: {error:?}");
+                if let Some(tx) = self.final_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                None
+            }
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.handle.cancel();
+        // Drop the sender so a waiting receiver resolves immediately (oneshot close)
+        // instead of waiting for the finalize/timeout path.
+        self.final_tx.take();
+        self.emit(TranscriptionStreamEvent::Cancelled {
+            session_id: self.session_id,
+            revision: self.next_revision(),
+        });
+    }
+}
+
+/// Build a Soniox realtime WS sink factory. None unless the engine is Soniox in
+/// live-preview mode with an API key in secure storage. The WS final is authoritative;
+/// REST-on-WAV runs only as fallback (plan 043b).
+fn build_soniox_stream_sink_factory(
+    app: &AppHandle,
+    config: &RecordingConfig,
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    recording_generation: u64,
+) -> Option<StreamTapSinkFactory> {
+    if !streaming_tap_enabled
+        || !streaming_engine_enabled
+        || !live_preview_mode
+        || config.current_engine != "soniox"
+    {
+        return None;
+    }
+
+    // No key -> no streaming preview (the REST path surfaces the missing-key error).
+    let api_key =
+        crate::secure_store::secure_get(app, crate::cloud_stt::CloudProvider::Soniox.key_name())
+            .ok()
+            .flatten()?;
+
+    // Register the WS-final side-channel: the (detached) tap worker resolves this
+    // oneshot when the WS finalize completes, and the transcription task awaits it
+    // ([`take_cloud_ws_final`]) to take WS authority before falling back to REST.
+    let (final_tx, final_rx) = tokio::sync::oneshot::channel();
+    {
+        let mut map = CLOUD_WS_FINAL.lock().unwrap();
+        // Prune stale generations (strictly older — their tasks fall back to REST,
+        // whose delivery is generation-gated anyway) so the map stays bounded.
+        map.retain(|&generation, _| generation >= recording_generation);
+        map.insert(recording_generation, final_rx);
+    }
+    // The factory is `Fn` (callable per-recording), so wrap the single-use sender in
+    // a Mutex<Option> — taken once when the sink is built.
+    let final_tx = Mutex::new(Some(final_tx));
+
+    let app = app.clone();
+    let language = {
+        let trimmed = config.speech_language.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+
+    Some(Arc::new(move |sample_rate, channels| {
+        let app_for_stream = app.clone();
+        let api_key = api_key.clone();
+        let language = language.clone();
+        let gate = Arc::new(Mutex::new(StreamSessionGate::new(recording_generation)));
+        let revision = Arc::new(AtomicU64::new(0));
+
+        // Soniox biasing context (custom vocab etc.) from writing settings — best effort.
+        let context = match crate::writing::load_writing_settings(&app_for_stream) {
+            Ok(settings) => crate::writing::compile_soniox_context(&settings, language.as_deref()),
+            Err(_) => None,
+        };
+        let language_hints = language.clone().map(|lang| vec![lang]).unwrap_or_default();
+
+        let callback_app = app_for_stream.clone();
+        let callback_gate = gate.clone();
+        let callback_revision = revision.clone();
+        let on_partial = move |partial: crate::cloud_stt::soniox_rt::SonioxRtPartial| {
+            let event = TranscriptionStreamEvent::Partial {
+                session_id: recording_generation,
+                revision: callback_revision.fetch_add(1, AtomicOrdering::SeqCst) + 1,
+                committed: partial.committed,
+                tentative: partial.tentative,
+            };
+            emit_stream_event(&callback_app, &callback_gate, event);
+        };
+
+        let handle = crate::cloud_stt::soniox_ws::open(
+            crate::cloud_stt::soniox_ws::SonioxStreamConfig {
+                api_key,
+                sample_rate,
+                channels,
+                language_hints,
+                context,
+            },
+            on_partial,
+        );
+
+        emit_stream_event(
+            &app,
+            &gate,
+            TranscriptionStreamEvent::Started {
+                session_id: recording_generation,
+                engine: "soniox".to_string(),
+                revision: 0,
+            },
+        );
+
+        Some(Box::new(SonioxPreviewStreamSink {
+            app: app.clone(),
+            handle,
+            session_id: recording_generation,
+            revision,
+            gate,
+            final_tx: final_tx.lock().unwrap().take(),
+        }) as Box<dyn StreamTapSink>)
+    }))
+}
+
+/// Live-preview sink for Deepgram realtime WebSocket streaming (plan 044). Mirrors
+/// the Soniox sink byte-for-byte in shape — Partials from the WS callback; this
+/// handles Final/Cancel. The WS final is the AUTHORITATIVE pasted result: `finalize()`
+/// resolves a oneshot ([`CLOUD_WS_FINAL`]) that the transcription task awaits
+/// ([`take_cloud_ws_final`]) before falling back to REST-on-WAV.
+struct DeepgramPreviewStreamSink {
+    app: AppHandle,
+    handle: crate::cloud_stt::deepgram_ws::DeepgramStreamHandle,
+    session_id: u64,
+    revision: Arc<AtomicU64>,
+    gate: Arc<Mutex<StreamSessionGate>>,
+    /// Resolved when the WS finalize completes (on the detached tap worker); the
+    /// transcription task awaits it ([`take_cloud_ws_final`]) to take WS authority.
+    final_tx: Option<tokio::sync::oneshot::Sender<Result<String, SttError>>>,
+}
+
+impl DeepgramPreviewStreamSink {
+    fn next_revision(&self) -> u64 {
+        self.revision.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    }
+
+    fn emit(&self, event: TranscriptionStreamEvent) {
+        emit_stream_event(&self.app, &self.gate, event);
+    }
+}
+
+impl StreamTapSink for DeepgramPreviewStreamSink {
+    fn send_frame(&mut self, samples: &[i16]) {
+        if let Err(error) = self.handle.send_chunk(samples) {
+            log::warn!("Failed to enqueue Deepgram stream audio chunk: {error:?}");
+        }
+    }
+
+    fn finalize(&mut self, dropped_frames: u64) -> Option<String> {
+        match tauri::async_runtime::block_on(self.handle.finalize()) {
+            Ok(text) => {
+                self.emit(TranscriptionStreamEvent::Final {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    text: text.clone(),
+                });
+                // Hand WS authority to the transcription task. Dropped RT frames
+                // invalidate authority (same stance as Soniox): the stream saw
+                // incomplete audio, so the complete-WAV REST fallback owns the result.
+                if let Some(tx) = self.final_tx.take() {
+                    if dropped_frames > 0 {
+                        log::warn!(
+                            "Deepgram WS authority invalidated: {dropped_frames} RT frames dropped; falling back to REST-on-WAV"
+                        );
+                        let _ = tx.send(Err(SttError::Network));
+                    } else {
+                        let _ = tx.send(Ok(text.clone()));
+                    }
+                }
+                Some(text)
+            }
+            Err(error) => {
+                self.emit(TranscriptionStreamEvent::Error {
+                    session_id: self.session_id,
+                    revision: self.next_revision(),
+                    error: format!("{error:?}"),
+                });
+                log::warn!("Deepgram stream finalize failed: {error:?}");
+                if let Some(tx) = self.final_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                None
+            }
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.handle.cancel();
+        self.final_tx.take();
+        self.emit(TranscriptionStreamEvent::Cancelled {
+            session_id: self.session_id,
+            revision: self.next_revision(),
+        });
+    }
+}
+
+/// Build a Deepgram realtime WS sink factory. None unless the engine is Deepgram in
+/// live-preview mode with an API key in secure storage. The WS final is
+/// authoritative; REST-on-WAV runs only as fallback (plan 044).
+fn build_deepgram_stream_sink_factory(
+    app: &AppHandle,
+    config: &RecordingConfig,
+    streaming_tap_enabled: bool,
+    streaming_engine_enabled: bool,
+    live_preview_mode: bool,
+    recording_generation: u64,
+) -> Option<StreamTapSinkFactory> {
+    if !streaming_tap_enabled
+        || !streaming_engine_enabled
+        || !live_preview_mode
+        || config.current_engine != "deepgram"
+    {
+        return None;
+    }
+
+    // No key -> no streaming preview (the REST path surfaces the missing-key error).
+    let api_key =
+        crate::secure_store::secure_get(app, crate::cloud_stt::CloudProvider::Deepgram.key_name())
+            .ok()
+            .flatten()?;
+
+    // Register the WS-final side-channel (same engine-agnostic mechanism as Soniox).
+    let (final_tx, final_rx) = tokio::sync::oneshot::channel();
+    {
+        let mut map = CLOUD_WS_FINAL.lock().unwrap();
+        map.retain(|&generation, _| generation >= recording_generation);
+        map.insert(recording_generation, final_rx);
+    }
+    let final_tx = Mutex::new(Some(final_tx));
+
+    let app = app.clone();
+    let language = {
+        let trimmed = config.speech_language.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+
+    Some(Arc::new(move |sample_rate, channels| {
+        let app_for_stream = app.clone();
+        let api_key = api_key.clone();
+        let language = language.clone();
+        let gate = Arc::new(Mutex::new(StreamSessionGate::new(recording_generation)));
+        let revision = Arc::new(AtomicU64::new(0));
+
+        // Deepgram keyterms (custom vocab) from writing settings — best effort,
+        // same load-settings pattern the Soniox factory uses for its context.
+        let keyterms = match crate::writing::load_writing_settings(&app_for_stream) {
+            Ok(settings) => {
+                crate::writing::compile_deepgram_keyterms(&settings, language.as_deref())
+            }
+            Err(_) => Vec::new(),
+        };
+
+        let callback_app = app_for_stream.clone();
+        let callback_gate = gate.clone();
+        let callback_revision = revision.clone();
+        let on_partial = move |partial: crate::cloud_stt::deepgram_rt::DeepgramRtPartial| {
+            let event = TranscriptionStreamEvent::Partial {
+                session_id: recording_generation,
+                revision: callback_revision.fetch_add(1, AtomicOrdering::SeqCst) + 1,
+                committed: partial.committed,
+                tentative: partial.tentative,
+            };
+            emit_stream_event(&callback_app, &callback_gate, event);
+        };
+
+        let handle = crate::cloud_stt::deepgram_ws::open(
+            crate::cloud_stt::deepgram_ws::DeepgramStreamConfig {
+                api_key,
+                model: crate::cloud_stt::CloudProvider::Deepgram
+                    .selected_model(&app_for_stream)
+                    .id
+                    .to_string(),
+                sample_rate,
+                channels,
+                language,
+                keyterms,
+            },
+            on_partial,
+        );
+
+        emit_stream_event(
+            &app,
+            &gate,
+            TranscriptionStreamEvent::Started {
+                session_id: recording_generation,
+                engine: "deepgram".to_string(),
+                revision: 0,
+            },
+        );
+
+        Some(Box::new(DeepgramPreviewStreamSink {
+            app: app.clone(),
+            handle,
+            session_id: recording_generation,
+            revision,
+            gate,
+            final_tx: final_tx.lock().unwrap().take(),
+        }) as Box<dyn StreamTapSink>)
+    }))
+}
+
 /// Open a new recording generation. Called at the top of `start_recording`
 /// before `Starting` is published, so every stop/cancel and spawned
 /// transcription task within this attempt observes the same generation.
@@ -95,6 +907,40 @@ pub(crate) fn current_recording_generation() -> u64 {
 /// current — i.e. a newer recording started while this result was in flight.
 pub(crate) fn recording_generation_is_stale(captured: u64) -> bool {
     captured != current_recording_generation()
+}
+
+/// Take the cloud WS-final receiver for `generation` (if one was registered) and
+/// await it, bounded by 4s (covers the sink's 3s WS drain + scheduling slack). Returns
+/// the authoritative text only when the WS path produced non-empty text; every other
+/// outcome (no entry, WS error, empty text, timeout) returns `None` so the caller
+/// falls back to REST-on-WAV. Engine-agnostic: Soniox and Deepgram both register
+/// their WS-final here (at most ONE cloud WS factory registers per recording).
+///
+/// Removes ONLY this generation's entry — a delayed older task can never
+/// consume-and-discard a newer recording's receiver (Codex 043b finding); pruning of
+/// stale generations happens at registration instead.
+async fn take_cloud_ws_final(generation: u64) -> Option<String> {
+    let rx = CLOUD_WS_FINAL.lock().unwrap().remove(&generation)?;
+    match tokio::time::timeout(std::time::Duration::from_secs(4), rx).await {
+        Ok(Ok(Ok(text))) if !text.trim().is_empty() => Some(text),
+        Ok(Ok(Ok(_))) => {
+            log::info!("Cloud WS final was empty; falling back to REST-on-WAV");
+            None
+        }
+        Ok(Ok(Err(error))) => {
+            log::info!("Cloud WS final errored ({error:?}); falling back to REST-on-WAV");
+            None
+        }
+        Ok(Err(_)) => {
+            // Sender dropped (cancel path) — resolves immediately, no 4s wait.
+            log::info!("Cloud WS final sender dropped; falling back to REST-on-WAV");
+            None
+        }
+        Err(_) => {
+            log::warn!("Cloud WS final timed out (4s); falling back to REST-on-WAV");
+            None
+        }
+    }
 }
 
 /// Audio file owned by the currently in-flight transcription task, keyed by
@@ -411,8 +1257,8 @@ fn toast_clear_is_current(counter: &AtomicU64, toast_id: u64) -> bool {
         .is_ok()
 }
 
-fn emit_pill_toast(
-    app: &AppHandle,
+fn emit_pill_toast<R: Runtime>(
+    app: &AppHandle<R>,
     message: &str,
     duration_ms: u64,
     variant: Option<PillToastVariant>,
@@ -483,12 +1329,12 @@ fn emit_pill_toast(
 /// Show a toast message on the pill's toast window (above the pill).
 /// Existing call sites intentionally emit no variant, preserving frontend
 /// severity inference.
-pub fn pill_toast(app: &AppHandle, message: &str, duration_ms: u64) -> u64 {
+pub fn pill_toast<R: Runtime>(app: &AppHandle<R>, message: &str, duration_ms: u64) -> u64 {
     emit_pill_toast(app, message, duration_ms, None, false, None)
 }
 
-pub fn pill_toast_with_variant(
-    app: &AppHandle,
+pub fn pill_toast_with_variant<R: Runtime>(
+    app: &AppHandle<R>,
     message: &str,
     duration_ms: u64,
     variant: PillToastVariant,
@@ -496,13 +1342,17 @@ pub fn pill_toast_with_variant(
     emit_pill_toast(app, message, duration_ms, Some(variant), false, None)
 }
 
-pub fn pill_toast_persistent(app: &AppHandle, message: &str, variant: PillToastVariant) -> u64 {
+pub fn pill_toast_persistent<R: Runtime>(
+    app: &AppHandle<R>,
+    message: &str,
+    variant: PillToastVariant,
+) -> u64 {
     emit_pill_toast(app, message, 0, Some(variant), true, None)
 }
 
 /// Show a toast with a remediation suggestion rendered below the message.
-pub fn pill_toast_with_suggestion(
-    app: &AppHandle,
+pub fn pill_toast_with_suggestion<R: Runtime>(
+    app: &AppHandle<R>,
     message: &str,
     suggestion: &str,
     duration_ms: u64,
@@ -511,7 +1361,7 @@ pub fn pill_toast_with_suggestion(
     emit_pill_toast(app, message, duration_ms, variant, false, Some(suggestion))
 }
 
-pub fn clear_pill_toast(app: &AppHandle, toast_id: u64) {
+pub fn clear_pill_toast<R: Runtime>(app: &AppHandle<R>, toast_id: u64) {
     if !toast_clear_is_current(&TOAST_ID_COUNTER, toast_id) {
         return;
     }
@@ -534,6 +1384,17 @@ pub fn clear_pill_toast(app: &AppHandle, toast_id: u64) {
 
 fn should_hide_pill_when_idle(mode: &str) -> bool {
     mode != "always"
+}
+
+fn emit_recording_too_short_feedback<R: Runtime>(
+    app: &AppHandle<R>,
+    min_duration_label: &str,
+) -> u64 {
+    pill_toast(
+        app,
+        &format!("Recording shorter than {} seconds", min_duration_label),
+        1000,
+    )
 }
 
 /// Check if pill should be hidden based on pill_indicator_mode setting.
@@ -1080,21 +1941,11 @@ fn build_transcription_job(
     )
 }
 
-fn seconds_to_duration_ms(duration_seconds: Option<f32>) -> Option<u64> {
-    duration_seconds.map(|seconds| (seconds.max(0.0) * 1000.0) as u64)
-}
-
-pub(crate) fn transcription_watchdog_budget(audio_duration_ms: Option<u64>) -> std::time::Duration {
-    const MIN_SECONDS: u64 = 180;
-    const MAX_SECONDS: u64 = 30 * 60;
-
-    let budget_seconds = audio_duration_ms
-        .map(|duration_ms| duration_ms.saturating_add(999) / 1000)
-        .map(|duration_seconds| duration_seconds.saturating_mul(4).saturating_add(60))
-        .unwrap_or(MIN_SECONDS)
-        .clamp(MIN_SECONDS, MAX_SECONDS);
-
-    std::time::Duration::from_secs(budget_seconds)
+fn upload_error_to_string(error: TranscriptionError) -> String {
+    if error.code == TranscriptionErrorCode::Timeout {
+        return error.user_message;
+    }
+    error.detail.unwrap_or(error.user_message)
 }
 
 /// Build a [`TranscriptionRequest`] for the desktop record→insert hot path from an
@@ -1139,6 +1990,8 @@ fn build_desktop_transcription_request(
         timeout: TimeoutPolicy::Interactive,
         cancellation,
         initial_prompt,
+        audio_ctx: None,
+        speed_mode_override: None,
     })
 }
 
@@ -1175,20 +2028,6 @@ fn is_non_speech_transcript(raw: &str) -> bool {
             | "(music)"
             | "(noise)"
     )
-}
-
-pub(crate) fn parakeet_segments_to_transcription_segments(
-    segments: Vec<ParakeetSegment>,
-) -> Vec<TranscriptionSegment> {
-    segments
-        .into_iter()
-        .map(|segment| TranscriptionSegment {
-            text: segment.text,
-            start_ms: seconds_to_duration_ms(segment.start),
-            end_ms: seconds_to_duration_ms(segment.end),
-            speaker_id: None,
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1309,6 +2148,9 @@ fn build_writing_history_metadata(
     }
     if let Some(v) = transcription.timings.processing_duration_ms {
         map.insert("processing_duration_ms".into(), v.into());
+    }
+    if let Some(v) = transcription.timings.spans_ms.as_ref() {
+        map.insert("timings_ms".into(), v.clone());
     }
     map.insert("diarized".into(), transcription.words.is_some().into());
     if let Some(wr) = writing {
@@ -1453,26 +2295,6 @@ fn notify_ai_polish_failure(app: &AppHandle, error: &AiProviderError) {
     }
 }
 
-async fn save_ai_polish_fallback_history(
-    app: AppHandle,
-    transcription: &TranscriptionResult,
-    writing_result: &crate::writing::WritingResult,
-) -> Result<(), String> {
-    save_transcription_with_recording(
-        app.clone(),
-        writing_result.final_text.clone(),
-        transcription.model.clone(),
-        None,
-        Some(build_writing_history_metadata(
-            transcription,
-            Some(writing_result),
-        )),
-    )
-    .await?;
-    let _ = emit_to_window(&app, "main", "history-updated", ());
-    Ok(())
-}
-
 #[derive(Debug)]
 struct DesktopWritingSuccessPlan {
     final_text: String,
@@ -1523,44 +2345,8 @@ pub fn compile_remote_request_context(
     )
 }
 
-pub(crate) fn compile_parakeet_custom_vocabulary_for_transcription(
-    app: &AppHandle,
-    language: Option<&str>,
-) -> Vec<crate::parakeet::messages::ParakeetVocabularyTerm> {
-    let Ok(settings) = crate::writing::load_writing_settings(app) else {
-        return Vec::new();
-    };
-
-    if settings.custom_words.is_empty() {
-        return Vec::new();
-    }
-
-    crate::writing::compile_parakeet_custom_vocabulary(&settings, language)
-}
-
 fn compile_whisper_initial_prompt(app: &AppHandle, language: Option<&str>) -> Option<String> {
     compile_remote_request_context(app, language)
-}
-
-#[cfg(target_os = "windows")]
-const DEFAULT_TRANSCRIPTION_ACCELERATION: &str = "auto";
-#[cfg(target_os = "windows")]
-fn normalize_transcription_acceleration(value: Option<&str>) -> String {
-    match value {
-        Some("cpu") => "cpu".to_string(),
-        Some("gpu") => "gpu".to_string(),
-        _ => DEFAULT_TRANSCRIPTION_ACCELERATION.to_string(),
-    }
-}
-#[cfg(target_os = "windows")]
-async fn transcription_acceleration_mode(app: &AppHandle) -> String {
-    if let Ok(store) = app.store("settings") {
-        let value = store
-            .get("transcription_acceleration")
-            .and_then(|v| v.as_str().map(str::to_owned));
-        return normalize_transcription_acceleration(value.as_deref());
-    }
-    DEFAULT_TRANSCRIPTION_ACCELERATION.to_string()
 }
 
 /// Best-effort warm of the Windows Vulkan sidecar when a Whisper model is preloaded.
@@ -1584,127 +2370,6 @@ pub(crate) async fn warm_whisper_gpu_sidecar_on_model_preload(
         let _ = (app, model_path);
         false
     }
-}
-
-pub(crate) async fn transcribe_whisper_with_acceleration<F>(
-    app: &AppHandle,
-    model_path: &Path,
-    audio_path: &Path,
-    language: Option<&str>,
-    translate: bool,
-    initial_prompt: Option<&str>,
-    should_cancel: F,
-) -> Result<WhisperTranscriptionOutput, String>
-where
-    F: Fn() -> bool + Clone + Send + 'static,
-{
-    #[cfg(target_os = "windows")]
-    let mode = transcription_acceleration_mode(app).await;
-
-    #[cfg(target_os = "windows")]
-    let mut preserve_gpu_status = false;
-
-    #[cfg(target_os = "windows")]
-    if mode != "cpu" {
-        if should_cancel() {
-            return Err("Transcription cancelled".to_string());
-        }
-
-        let gpu_client = app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>();
-        let status = gpu_client.status().await;
-        let should_try_gpu = mode == "gpu" || status.gpu_available != Some(false);
-
-        if should_try_gpu {
-            // Plan 060.1: mark the ACTUAL attempt BEFORE the await. Success-only
-            // marking left the backend tag stale through the whole sidecar
-            // attempt, so a failure event (or a later read) could attribute this
-            // recording to whatever backend the PREVIOUS run used.
-            crate::whisper::transcriber::record_attempt_backend("sidecar");
-            let gpu_result = gpu_client
-                .transcribe(
-                    app,
-                    crate::whisper::gpu_sidecar::GpuTranscribeRequest {
-                        model_path,
-                        audio_path,
-                        language,
-                        translate,
-                        initial_prompt,
-                        mode: &mode,
-                    },
-                )
-                .await;
-
-            match gpu_result {
-                Ok(output) => return Ok(output),
-                Err(error)
-                    if error == "Transcription cancelled"
-                        || error == crate::whisper::gpu_sidecar::SIDECAR_ABORT_ERROR =>
-                {
-                    // User cancel / watchdog abort: not a GPU fault. Surface the
-                    // canonical cancellation — no CPU re-run, no GPU-status change.
-                    gpu_client.abort_active_process().await;
-                    return Err("Transcription cancelled".to_string());
-                }
-                Err(error) => {
-                    preserve_gpu_status = true;
-                    log::warn!(
-                        "GPU sidecar failed, unloading sidecar before CPU fallback: {error}"
-                    );
-                    gpu_client.abort_active_process().await;
-                    if mode == "gpu" {
-                        pill_toast(app, "GPU unavailable, using CPU", 4000);
-                    }
-                }
-            }
-        } else {
-            preserve_gpu_status = true;
-            log::info!("Skipping Vulkan sidecar in auto mode after previous GPU failure");
-        }
-    }
-
-    // Plan 060.1: the CPU attempt's mark — placed BEFORE model init and the
-    // CPU transcription, so a failure anywhere below attributes "cpu" (or the
-    // sidecar above), never a previous recording's backend.
-    #[cfg(target_os = "windows")]
-    crate::whisper::transcriber::record_attempt_backend("cpu");
-
-    let transcriber = {
-        let cache_state = app.state::<AsyncMutex<TranscriberCache>>();
-        let mut cache = cache_state.lock().await;
-        cache.get_or_create(model_path)?
-    };
-    // Plan 060.1: warm-cache attempts use the loaded instance's backend.
-    // Cold initialization records each selected backend before attempting it,
-    // so a failed initialization retains the final attempted backend as well.
-    crate::whisper::transcriber::record_attempt_backend(transcriber.backend());
-
-    let audio_path = audio_path.to_path_buf();
-    let language = language.map(str::to_owned);
-    let initial_prompt = initial_prompt.map(str::to_owned);
-    let should_cancel_for_decode = should_cancel.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        transcriber.transcribe_with_metadata_with_prompt(
-            &audio_path,
-            language.as_deref(),
-            translate,
-            initial_prompt.as_deref(),
-            should_cancel_for_decode,
-        )
-    })
-    .await
-    .map_err(|error| format!("Whisper transcription worker failed: {error}"))?;
-
-    #[cfg(target_os = "windows")]
-    {
-        if result.is_ok() && !preserve_gpu_status {
-            let gpu_client = app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>();
-            gpu_client
-                .set_cpu_status(&mode, "Last transcription used CPU mode.")
-                .await;
-        }
-    }
-
-    result
 }
 
 fn build_remote_upload_transcription_request(
@@ -1764,27 +2429,32 @@ mod tests {
         build_remote_transcription_result, build_remote_upload_transcription_request,
         build_transcription_job, build_translation_failed_history_metadata,
         build_writing_history_metadata, classify_local_failure, classify_polish_outcome,
-        finalize_in_flight_audio, is_ai_auth_error, is_non_speech_transcript, persist_if_current,
-        plan_desktop_writing_success, recording_license_state, recording_started_cue_eligible,
-        remote_server_error_pill_message, set_in_flight_transcription_audio,
-        should_hide_pill_when_idle, should_use_active_remote, silence_event_runs_in_state,
+        emit_recording_too_short_feedback, finalize_in_flight_audio, is_ai_auth_error,
+        is_non_speech_transcript, parakeet_preview_sink_eligible, parakeet_stream_engine_for_model,
+        persist_if_current, plan_desktop_writing_success, recording_license_state,
+        recording_started_cue_eligible, remote_server_error_pill_message,
+        set_in_flight_transcription_audio, should_hide_pill_when_idle, silence_event_runs_in_state,
         silence_timeout_disposition, stop_should_reset_to_idle,
         sync_retranscription_failure_metadata, take_in_flight_transcription_audio,
-        toast_clear_is_current, transcript_ready_cue_eligible, transcription_watchdog_budget,
-        ActiveEngineSelection, LocalFailureKind, NormalizedTempFile, PillToastEventPayload,
-        RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard,
-        TranscriptionFailure, TranscriptionStatus,
+        toast_clear_is_current, transcript_ready_cue_eligible, LocalFailureKind,
+        NormalizedTempFile, PillToastEventPayload, RecordingConfig, RecordingLicenseState,
+        SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard, TranscriptionFailure,
+        TranscriptionStatus,
     };
+    use crate::cloud_stt::CloudProvider;
     use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
     use crate::license::{LicenseState, LicenseStatus};
     use crate::remote::client::{
         calculate_timeout_ms, RemoteClientError, RemoteEndpoint, TranscriptionSource,
     };
+    use crate::transcription::error::TranscriptionErrorCode;
+    use crate::transcription::executor::ensure_cloud_task_supported;
     use crate::{AppState, RecordingState};
     use reqwest::StatusCode;
     use std::fs;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use tauri::{Listener, Manager};
 
     fn cached_license(status: LicenseState) -> CachedLicense {
         CachedLicense::new(LicenseStatus {
@@ -1902,39 +2572,40 @@ mod tests {
     }
 
     #[test]
-    fn transcription_watchdog_budget_defaults_to_minimum_for_unknown_duration() {
+    fn recording_too_short_feedback_emits_toast_without_pill_window() {
+        let app = tauri::test::mock_app();
+        let received = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let received_for_listener = received.clone();
+        app.listen("toast", move |event| {
+            let payload = serde_json::from_str(event.payload()).expect("toast payload json");
+            received_for_listener.lock().unwrap().push(payload);
+        });
+
+        assert!(app.get_webview_window("pill").is_none());
+        emit_recording_too_short_feedback(app.handle(), "0.5");
+
+        let events = received.lock().unwrap();
+        assert_eq!(events.len(), 1);
         assert_eq!(
-            transcription_watchdog_budget(None),
-            std::time::Duration::from_secs(180)
+            events[0]["message"].as_str(),
+            Some("Recording shorter than 0.5 seconds")
         );
+        assert_eq!(events[0]["duration_ms"].as_u64(), Some(1000));
     }
 
     #[test]
-    fn transcription_watchdog_budget_floors_to_minimum_for_short_audio() {
-        assert_eq!(
-            transcription_watchdog_budget(Some(10_000)),
-            std::time::Duration::from_secs(180)
-        );
-    }
+    fn upload_cloud_translate_guard_rejects_unsupported_providers() {
+        for provider in CloudProvider::ALL {
+            let error = ensure_cloud_task_supported(
+                *provider,
+                true,
+                crate::transcription::TranscriptionSource::AudioFile,
+            )
+            .expect_err("translate-to-English must be rejected");
 
-    #[test]
-    fn transcription_watchdog_budget_scales_duration_and_adds_sixty_seconds() {
-        assert_eq!(
-            transcription_watchdog_budget(Some(60_000)),
-            std::time::Duration::from_secs(300)
-        );
-    }
-
-    #[test]
-    fn transcription_watchdog_budget_ceilings_partial_seconds_and_clamps_maximum() {
-        assert_eq!(
-            transcription_watchdog_budget(Some(60_001)),
-            std::time::Duration::from_secs(304)
-        );
-        assert_eq!(
-            transcription_watchdog_budget(Some(600_000)),
-            std::time::Duration::from_secs(1800)
-        );
+            assert_eq!(error.code, TranscriptionErrorCode::EngineUnavailable);
+            assert!(error.user_message.contains("translate to English"));
+        }
     }
 
     #[test]
@@ -2452,18 +3123,6 @@ mod tests {
     }
 
     #[test]
-    fn explicit_engine_hint_bypasses_active_remote() {
-        assert!(!should_use_active_remote(Some("whisper")));
-        assert!(!should_use_active_remote(Some("parakeet")));
-        assert!(!should_use_active_remote(Some("soniox")));
-    }
-
-    #[test]
-    fn missing_engine_hint_allows_active_remote() {
-        assert!(should_use_active_remote(None));
-    }
-
-    #[test]
     fn retryable_preserved_remote_failure_emits_history_capable_payload_and_copy() {
         let failure = TranscriptionFailure::Remote(RemoteClientError::Timeout {
             endpoint: RemoteEndpoint::Transcribe,
@@ -2586,6 +3245,7 @@ mod tests {
             timings: TranscriptionTimings {
                 audio_duration_ms: Some(5000),
                 processing_duration_ms: Some(1200),
+                spans_ms: None,
             },
         }
     }
@@ -2863,8 +3523,6 @@ mod tests {
         );
     }
 
-    static POST_TRANSCRIPTION_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn unique_side_effect_path(label: &str) -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -2873,7 +3531,9 @@ mod tests {
 
     #[test]
     fn persist_if_current_skips_stale_generation_and_cancel() {
-        let _guard = POST_TRANSCRIPTION_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let app_state = AppState::new();
         let generation = begin_recording_generation();
         let mut commits = 0;
@@ -2907,7 +3567,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // process-wide test serialization lock; current-thread runtime
     async fn stale_task_cannot_clear_newer_in_flight_tracker() {
-        let _guard = POST_TRANSCRIPTION_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let stale_generation = begin_recording_generation();
         let stale_path = unique_side_effect_path("stale-audio");
         fs::write(&stale_path, b"stale audio").unwrap();
@@ -2943,7 +3605,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // process-wide test serialization lock; current-thread runtime
     async fn failed_history_after_late_cancel_is_skipped_at_commit_site() {
-        let _guard = POST_TRANSCRIPTION_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let generation = begin_recording_generation();
         let app_state = Arc::new(AppState::new());
         let history_path = unique_side_effect_path("failed-history");
@@ -2979,7 +3643,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // process-wide test serialization lock; current-thread runtime
     async fn translation_failed_history_after_late_cancel_is_skipped_at_commit_site() {
-        let _guard = POST_TRANSCRIPTION_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let generation = begin_recording_generation();
         let app_state = Arc::new(AppState::new());
         let history_path = unique_side_effect_path("translation-history");
@@ -3016,7 +3682,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // process-wide test serialization lock; current-thread runtime
     async fn cancel_between_gate_and_spawned_history_save_is_rechecked_inside_task() {
-        let _guard = POST_TRANSCRIPTION_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let generation = begin_recording_generation();
         let app_state = Arc::new(AppState::new());
         let history_path = unique_side_effect_path("spawned-history");
@@ -3048,33 +3716,173 @@ mod tests {
             "spawned history task must recheck cancellation at the write site"
         );
     }
-    #[test]
-    fn active_engine_routes_are_stable_for_evidence_logs() {
-        let selections = [
-            ActiveEngineSelection::Whisper {
-                model_name: "base".to_string(),
-                model_path: std::path::PathBuf::new(),
-            },
-            ActiveEngineSelection::Parakeet {
-                model_name: "parakeet".to_string(),
-            },
-            ActiveEngineSelection::Cloud {
-                provider: crate::cloud_stt::CloudProvider::Openai,
-                model_name: "gpt-4o-mini-transcribe".to_string(),
-            },
-            ActiveEngineSelection::Remote {
-                server_id: "server".to_string(),
-                server_name: "Remote".to_string(),
-                host: "127.0.0.1".to_string(),
-                port: 47842,
-                password: None,
-            },
-        ];
+    // ── Cloud WS-final authority (plans 043b + 044) ──────────────────────
+    // All tests below touch the global CLOUD_WS_FINAL map, so they serialize and
+    // use disjoint generation keys as belt-and-braces.
+    static CLOUD_WS_FINAL_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-        assert_eq!(selections[0].route(), "local");
-        assert_eq!(selections[1].route(), "local");
-        assert_eq!(selections[2].route(), "cloud");
-        assert_eq!(selections[3].route(), "remote");
+    fn insert_ws_final(
+        generation: u64,
+        rx: tokio::sync::oneshot::Receiver<Result<String, crate::cloud_stt::common::SttError>>,
+    ) {
+        super::CLOUD_WS_FINAL.lock().unwrap().insert(generation, rx);
+    }
+
+    #[tokio::test]
+    async fn ws_final_returns_text_on_matching_generation() {
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok("hello".to_string()));
+        insert_ws_final(42, rx);
+        let result = super::take_cloud_ws_final(42).await;
+        assert_eq!(result.as_deref(), Some("hello"));
+        // Entry consumed by take.
+        assert!(!super::CLOUD_WS_FINAL.lock().unwrap().contains_key(&42));
+    }
+
+    #[tokio::test]
+    async fn ws_final_mismatched_take_never_consumes_another_generations_entry() {
+        // Codex 043b finding: a delayed OLDER task must not consume-and-discard a
+        // NEWER recording's receiver. take(200) leaves generation 100's entry alone.
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        insert_ws_final(100, rx);
+        assert_eq!(super::take_cloud_ws_final(200).await, None);
+        assert!(
+            super::CLOUD_WS_FINAL.lock().unwrap().contains_key(&100),
+            "generation 100's receiver must survive a mismatched take"
+        );
+        // And generation 100 can still take its own WS final afterwards.
+        let _ = tx.send(Ok("still mine".to_string()));
+        assert_eq!(
+            super::take_cloud_ws_final(100).await.as_deref(),
+            Some("still mine")
+        );
+    }
+
+    #[tokio::test]
+    async fn ws_final_none_on_error_result() {
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Err(crate::cloud_stt::common::SttError::Network));
+        insert_ws_final(7, rx);
+        assert_eq!(super::take_cloud_ws_final(7).await, None);
+    }
+
+    #[tokio::test]
+    async fn ws_final_none_on_whitespace_only_text() {
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok("   ".to_string()));
+        insert_ws_final(9, rx);
+        assert_eq!(super::take_cloud_ws_final(9).await, None);
+    }
+
+    #[tokio::test]
+    async fn ws_final_none_quickly_when_sender_dropped() {
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        insert_ws_final(11, rx);
+        drop(tx);
+        let start = std::time::Instant::now();
+        let result = super::take_cloud_ws_final(11).await;
+        let elapsed = start.elapsed();
+        assert_eq!(result, None);
+        // oneshot close resolves immediately — must NOT wait the full 4s timeout.
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "ws_final took {elapsed:?} on dropped sender; expected near-instant"
+        );
+    }
+    /// Build a minimal RecordingConfig pinned to the Parakeet engine with a
+    /// non-empty model. Only the guard-relevant fields matter; the rest are
+    /// inert defaults.
+    fn parakeet_recording_config() -> RecordingConfig {
+        RecordingConfig {
+            show_pill_widget: true,
+            pill_indicator_mode: "when_recording".to_string(),
+            ai_enabled: false,
+            ai_provider: String::new(),
+            ai_model: String::new(),
+            current_model: "parakeet-rtc-1.6b".to_string(),
+            current_engine: "parakeet".to_string(),
+            speech_language: "en".to_string(),
+            transcription_task: "transcribe".to_string(),
+            final_text_language: "en".to_string(),
+            show_recording_status: true,
+            loaded_at: std::time::Instant::now(),
+        }
+    }
+
+    /// Regression: persistent dev flags (`streaming_tap_enabled` +
+    /// `streaming_engine_enabled` in settings) make the tap/engine booleans
+    /// `true` even in regular mode — `start_recording` computes them as
+    /// `live_preview_mode || dev_*_enabled`. The Whisper/Soniox/Deepgram
+    /// factories all guard with `!live_preview_mode`, but the Parakeet factory
+    /// historically omitted it. Without that guard, regular mode falls through
+    /// to `SlidingWindow`, which permanently bakes chunk tokens into a garbled
+    /// live preview. The guard must return `None` so no Parakeet preview sink is
+    /// built in regular mode, while still building one in live-preview mode.
+    #[test]
+    fn parakeet_stream_sink_factory_skips_regular_mode_with_dev_flags() {
+        let config = parakeet_recording_config();
+
+        // Regular mode: dev flags ON, live preview OFF → must be ineligible.
+        // This is the regression: `start_recording` computes the tap/engine
+        // booleans as `live_preview_mode || dev_*_enabled`, so persistent dev
+        // flags make them `true` even outside live-preview. Without the
+        // `live_preview_mode` term in the guard, the factory would proceed and
+        // select SlidingWindow — which bakes chunk tokens permanently into a
+        // garbled preview. This assertion fails without the fix.
+        assert!(
+            !parakeet_preview_sink_eligible(true, true, false, &config),
+            "Parakeet preview must be ineligible in regular mode even with dev flags"
+        );
+
+        // Live-preview mode: same dev flags, live preview ON → eligible
+        // (decode-ahead preview path preserved).
+        assert!(
+            parakeet_preview_sink_eligible(true, true, true, &config),
+            "Parakeet preview must be eligible in live-preview mode"
+        );
+
+        // Guard still honors the other terms regardless of live-preview mode.
+        assert!(
+            !parakeet_preview_sink_eligible(true, true, true, &empty_model_config()),
+            "Parakeet preview must be ineligible when no model is loaded"
+        );
+        let mut wrong_engine = parakeet_recording_config();
+        wrong_engine.current_engine = "whisper".to_string();
+        assert!(
+            !parakeet_preview_sink_eligible(true, true, true, &wrong_engine),
+            "Parakeet preview must be ineligible for a non-parakeet engine"
+        );
+    }
+
+    #[test]
+    fn parakeet_models_route_to_their_streaming_engines() {
+        use crate::parakeet::messages::ParakeetStreamEngine;
+
+        assert_eq!(
+            parakeet_stream_engine_for_model("parakeet-tdt-0.6b-v3"),
+            ParakeetStreamEngine::DecodeAhead
+        );
+        assert_eq!(
+            parakeet_stream_engine_for_model("parakeet-unified-640ms"),
+            ParakeetStreamEngine::UnifiedEnglish
+        );
+        assert_eq!(
+            parakeet_stream_engine_for_model("nemotron-multilingual-1120ms"),
+            ParakeetStreamEngine::NemotronMultilingual
+        );
+    }
+
+    /// RecordingConfig with an empty model — exercises the `!model.is_empty()`
+    /// arm of the guard independently.
+    fn empty_model_config() -> RecordingConfig {
+        let mut config = parakeet_recording_config();
+        config.current_model = String::new();
+        config
     }
 }
 
@@ -3485,67 +4293,6 @@ pub async fn open_recordings_folder(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Clone)]
-pub(crate) enum ActiveEngineSelection {
-    Whisper {
-        model_name: String,
-        model_path: PathBuf,
-    },
-    Parakeet {
-        model_name: String,
-    },
-    Cloud {
-        provider: crate::cloud_stt::CloudProvider,
-        model_name: String,
-    },
-    Remote {
-        server_id: String,
-        server_name: String,
-        host: String,
-        port: u16,
-        password: Option<String>,
-    },
-}
-
-impl ActiveEngineSelection {
-    pub(crate) fn engine_name(&self) -> &'static str {
-        match self {
-            ActiveEngineSelection::Whisper { .. } => "whisper",
-            ActiveEngineSelection::Parakeet { .. } => "parakeet",
-            ActiveEngineSelection::Cloud { provider, .. } => provider.id(),
-            ActiveEngineSelection::Remote { .. } => "remote",
-        }
-    }
-
-    pub(crate) const fn analytics_kind(&self) -> crate::product_analytics::EngineKind {
-        match self {
-            Self::Whisper { .. } => crate::product_analytics::EngineKind::Whisper,
-            Self::Parakeet { .. } => crate::product_analytics::EngineKind::Parakeet,
-            Self::Cloud { .. } => crate::product_analytics::EngineKind::Cloud,
-            Self::Remote { .. } => crate::product_analytics::EngineKind::Remote,
-        }
-    }
-
-    pub(crate) const fn route(&self) -> &'static str {
-        match self {
-            ActiveEngineSelection::Whisper { .. } | ActiveEngineSelection::Parakeet { .. } => {
-                "local"
-            }
-            ActiveEngineSelection::Cloud { .. } => "cloud",
-            ActiveEngineSelection::Remote { .. } => "remote",
-        }
-    }
-
-    pub(crate) fn model_name(&self) -> &str {
-        match self {
-            ActiveEngineSelection::Whisper { model_name, .. } => model_name,
-            ActiveEngineSelection::Parakeet { model_name } => model_name,
-            ActiveEngineSelection::Cloud { model_name, .. } => model_name,
-            ActiveEngineSelection::Remote { server_name, .. } => server_name,
-        }
-    }
-}
-
 async fn abort_due_to_missing_model(
     app: &AppHandle,
     audio_path: &Path,
@@ -3586,140 +4333,6 @@ async fn abort_due_to_missing_model(
     update_recording_state(app, RecordingState::Idle, None);
 
     Err(log_message.to_string())
-}
-
-fn should_use_active_remote(engine_hint: Option<&str>) -> bool {
-    engine_hint.is_none()
-}
-
-pub(crate) async fn resolve_engine_for_model(
-    app: &AppHandle,
-    model_name: &str,
-    engine_hint: Option<&str>,
-) -> Result<ActiveEngineSelection, String> {
-    let remote_settings = app.state::<AsyncMutex<RemoteSettings>>();
-    let active_remote = {
-        let settings = remote_settings.lock().await;
-        settings.get_active_connection().cloned()
-    };
-
-    if should_use_active_remote(engine_hint) {
-        if let Some(remote_conn) = active_remote {
-            if matches!(
-                remote_conn.status,
-                crate::remote::settings::ConnectionStatus::Online
-            ) {
-                return Ok(ActiveEngineSelection::Remote {
-                    server_id: remote_conn.id.clone(),
-                    server_name: remote_conn.display_name(),
-                    host: remote_conn.host,
-                    port: remote_conn.port,
-                    password: remote_conn.password,
-                });
-            }
-
-            return Err(
-                "Selected remote unavailable. Reconnect or choose another source.".to_string(),
-            );
-        }
-    }
-
-    let whisper_state = app.state::<AsyncRwLock<WhisperManager>>();
-    let parakeet_manager = app.state::<ParakeetManager>();
-
-    match engine_hint.map(|e| e.to_lowercase()) {
-        Some(ref engine) if crate::cloud_stt::CloudProvider::from_id(engine).is_some() => {
-            let provider = crate::cloud_stt::CloudProvider::from_id(engine).unwrap();
-            if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
-                Ok(ActiveEngineSelection::Cloud {
-                    provider,
-                    model_name: model_name.to_string(),
-                })
-            } else {
-                Err(format!(
-                    "{} key not configured. Please configure it in Models.",
-                    provider.display_name()
-                ))
-            }
-        }
-        Some(ref engine) if engine == "parakeet" => {
-            let status = parakeet_manager
-                .list_models()
-                .into_iter()
-                .find(|m| m.name == model_name);
-
-            match status {
-                Some(info) if info.downloaded => Ok(ActiveEngineSelection::Parakeet {
-                    model_name: model_name.to_string(),
-                }),
-                Some(_) => Err(format!(
-                    "Parakeet model '{}' is not downloaded. Please download it first.",
-                    model_name
-                )),
-                None => Err(format!(
-                    "Parakeet model '{}' not found in registry.",
-                    model_name
-                )),
-            }
-        }
-        Some(ref engine) if engine == "whisper" || engine == "whisper.cpp" => {
-            let path = whisper_state
-                .read()
-                .await
-                .get_model_path(model_name)
-                .ok_or_else(|| format!("Whisper model '{}' not found", model_name))?;
-
-            Ok(ActiveEngineSelection::Whisper {
-                model_name: model_name.to_string(),
-                model_path: path,
-            })
-        }
-        Some(engine) => Err(format!("Unknown model engine '{}'.", engine)),
-        None => {
-            if let Some(provider) = crate::cloud_stt::CloudProvider::from_id(model_name) {
-                if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
-                    return Ok(ActiveEngineSelection::Cloud {
-                        provider,
-                        model_name: model_name.to_string(),
-                    });
-                } else {
-                    return Err(format!(
-                        "{} key not configured. Please configure it in Models.",
-                        provider.display_name()
-                    ));
-                }
-            }
-            if let Some(path) = whisper_state.read().await.get_model_path(model_name) {
-                return Ok(ActiveEngineSelection::Whisper {
-                    model_name: model_name.to_string(),
-                    model_path: path,
-                });
-            }
-
-            let status = parakeet_manager
-                .list_models()
-                .into_iter()
-                .find(|m| m.name == model_name);
-
-            if let Some(info) = status {
-                if info.downloaded {
-                    return Ok(ActiveEngineSelection::Parakeet {
-                        model_name: model_name.to_string(),
-                    });
-                } else {
-                    return Err(format!(
-                        "Model '{}' is a Parakeet model but not downloaded. Please download it first.",
-                        model_name
-                    ));
-                }
-            }
-
-            Err(format!(
-                "Model '{}' not found in Whisper or Parakeet registries",
-                model_name
-            ))
-        }
-    }
 }
 
 /// Helper function to invalidate recording config cache when settings change
@@ -4126,10 +4739,14 @@ pub(crate) fn ptt_key_released(app_state: &AppState) -> bool {
 }
 
 #[tauri::command]
+/// Returns `true` when THIS call started the recording, `false` when it was a
+/// redundant no-op on an already starting/active recording (idempotent
+/// fast-path). Callers that pair a later stop with their own start (the in-app
+/// bare-modifier hold) must key on this — a bare Ok never proved ownership.
 pub async fn start_recording(
     app: AppHandle,
     state: State<'_, RecorderState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let recording_start = Instant::now();
 
     log_start("RECORDING_START");
@@ -4215,7 +4832,7 @@ pub async fn start_recording(
                 "start_recording: already {:?}; treating redundant start as no-op",
                 live_state
             );
-            return Ok(());
+            return Ok(false);
         }
     }
 
@@ -4250,6 +4867,30 @@ pub async fn start_recording(
     ) {
         return Err("Cannot start recording in current state".to_string());
     }
+
+    let (streaming_tap_enabled, streaming_engine_enabled, live_preview_mode) = app
+        .store("settings")
+        .ok()
+        .map(|store| {
+            let live_preview_mode = store
+                .get("transcription_mode")
+                .and_then(|value| value.as_str().map(|value| value == "live_preview"))
+                .unwrap_or(false);
+            let dev_tap_enabled = store
+                .get("streaming_tap_enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let dev_engine_enabled = store
+                .get("streaming_engine_enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            (
+                live_preview_mode || dev_tap_enabled,
+                live_preview_mode || dev_engine_enabled,
+                live_preview_mode,
+            )
+        })
+        .unwrap_or((false, false, false));
 
     // Pause system media if enabled (default: off)
     let mut resume_media_on_error = false;
@@ -4466,79 +5107,84 @@ pub async fn start_recording(
         log_file_operation("RECORDING_START", audio_path_str, false, None, None);
 
         // Start recording and get side-channel receivers
-        let (audio_level_rx, silence_event_rx) =
-            match recorder.start_recording(audio_path_str, selected_microphone.clone()) {
-                Ok(_) => {
-                    log::debug!(
-                        "⏱️ [REC TIMING] recorder.start_recording returned Ok (+{}ms)",
-                        recording_start.elapsed().as_millis()
+        let recording_generation = current_recording_generation();
+        // Streaming preview is engine-dispatched (plan 032/043 #14a). Parakeet keeps its
+        // OWN factory so its behavior is byte-identical even though its capability row is
+        // dormant-FINAL_ONLY (the reconciliation trap); Whisper adds decode-ahead. The
+        // streaming_* flags already encode live-preview mode from settings.
+        let streaming_engine_supported = matches!(
+            config.current_engine.as_str(),
+            "parakeet" | "whisper" | "soniox" | "deepgram"
+        );
+        let streaming_tap_enabled = streaming_tap_enabled && streaming_engine_supported;
+        let streaming_engine_enabled = streaming_engine_enabled && streaming_engine_supported;
+        let cancellation_flag = app_state.should_cancel_recording.clone();
+        let stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync> =
+            Arc::new(move || cancellation_flag.load(AtomicOrdering::SeqCst));
+        let stream_sink_factory = match config.current_engine.as_str() {
+            "parakeet" => build_parakeet_stream_sink_factory(
+                &app,
+                &config,
+                streaming_tap_enabled,
+                streaming_engine_enabled,
+                live_preview_mode,
+                recording_generation,
+            ),
+            "whisper" => build_whisper_stream_sink_factory(
+                &app,
+                &config,
+                streaming_tap_enabled,
+                streaming_engine_enabled,
+                live_preview_mode,
+                recording_generation,
+            ),
+            "soniox" => build_soniox_stream_sink_factory(
+                &app,
+                &config,
+                streaming_tap_enabled,
+                streaming_engine_enabled,
+                live_preview_mode,
+                recording_generation,
+            ),
+            "deepgram" => build_deepgram_stream_sink_factory(
+                &app,
+                &config,
+                streaming_tap_enabled,
+                streaming_engine_enabled,
+                live_preview_mode,
+                recording_generation,
+            ),
+            _ => None,
+        };
+        let (audio_level_rx, silence_event_rx) = match recorder.start_recording(
+            audio_path_str,
+            selected_microphone.clone(),
+            streaming_tap_enabled,
+            recording_generation,
+            stream_cancelled,
+            stream_sink_factory,
+        ) {
+            Ok(_) => {
+                log::debug!(
+                    "⏱️ [REC TIMING] recorder.start_recording returned Ok (+{}ms)",
+                    recording_start.elapsed().as_millis()
+                );
+                // Verify recording actually started
+                let is_recording = recorder.is_recording();
+
+                // Get receivers before potentially dropping recorder
+                let level_rx = recorder.take_audio_level_receiver();
+                let silence_rx = recorder.take_silence_event_receiver();
+
+                if !is_recording {
+                    drop(recorder); // Release the lock if we're erroring out
+                    log_failed(
+                        "RECORDER_INIT",
+                        "Recording failed to start after initialization",
                     );
-                    // Verify recording actually started
-                    let is_recording = recorder.is_recording();
-
-                    // Get receivers before potentially dropping recorder
-                    let level_rx = recorder.take_audio_level_receiver();
-                    let silence_rx = recorder.take_silence_event_receiver();
-
-                    if !is_recording {
-                        drop(recorder); // Release the lock if we're erroring out
-                        log_failed(
-                            "RECORDER_INIT",
-                            "Recording failed to start after initialization",
-                        );
-                        log_with_context(
-                            log::Level::Debug,
-                            "Recorder initialization failed",
-                            &[
-                                ("audio_path", audio_path_str),
-                                (
-                                    "init_time_ms",
-                                    recorder_init_start
-                                        .elapsed()
-                                        .as_millis()
-                                        .to_string()
-                                        .as_str(),
-                                ),
-                            ],
-                        );
-
-                        update_recording_state(
-                            &app,
-                            RecordingState::Error,
-                            Some("Microphone initialization failed".to_string()),
-                        );
-
-                        // Emit user-friendly error via pill toast
-                        pill_toast_with_suggestion(
-                        &app,
-                        "Microphone access failed",
-                        "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
-                        1500,
-                        None,
-                    );
-
-                        resume_media_if_needed();
-                        return Err("Failed to start recording".to_string());
-                    } else {
-                        log_performance(
-                            "RECORDER_INIT",
-                            recorder_init_start.elapsed().as_millis() as u64,
-                            Some(&format!("file={}", audio_path_str)),
-                        );
-                        log::info!("✅ Recording started successfully");
-
-                        // Monitor system resources at recording start
-                        #[cfg(debug_assertions)]
-                        system_monitor::log_resources_before_operation("RECORDING_START");
-                    }
-
-                    (level_rx, silence_rx)
-                }
-                Err(e) => {
-                    log_failed("RECORDER_START", &e);
                     log_with_context(
                         log::Level::Debug,
-                        "Recorder start failed",
+                        "Recorder initialization failed",
                         &[
                             ("audio_path", audio_path_str),
                             (
@@ -4552,29 +5198,79 @@ pub async fn start_recording(
                         ],
                     );
 
-                    update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
+                    update_recording_state(
+                        &app,
+                        RecordingState::Error,
+                        Some("Microphone initialization failed".to_string()),
+                    );
 
-                    // Provide specific error messages for common issues
-                    let (user_message, suggestion) =
-                        if e.contains("permission") || e.contains("access") {
-                            (
+                    // Emit user-friendly error via pill toast
+                    pill_toast_with_suggestion(
+                        &app,
+                        "Microphone access failed",
+                        "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
+                        1500,
+                        None,
+                    );
+
+                    resume_media_if_needed();
+                    return Err("Failed to start recording".to_string());
+                } else {
+                    log_performance(
+                        "RECORDER_INIT",
+                        recorder_init_start.elapsed().as_millis() as u64,
+                        Some(&format!("file={}", audio_path_str)),
+                    );
+                    log::info!("✅ Recording started successfully");
+
+                    // Monitor system resources at recording start
+                    #[cfg(debug_assertions)]
+                    system_monitor::log_resources_before_operation("RECORDING_START");
+                }
+
+                (level_rx, silence_rx)
+            }
+            Err(e) => {
+                log_failed("RECORDER_START", &e);
+                log_with_context(
+                    log::Level::Debug,
+                    "Recorder start failed",
+                    &[
+                        ("audio_path", audio_path_str),
+                        (
+                            "init_time_ms",
+                            recorder_init_start
+                                .elapsed()
+                                .as_millis()
+                                .to_string()
+                                .as_str(),
+                        ),
+                    ],
+                );
+
+                update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
+
+                // Provide specific error messages for common issues
+                let (user_message, suggestion) = if e.contains("permission") || e.contains("access")
+                {
+                    (
                         "Microphone permission denied",
                         "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
                     )
-                        } else if e.contains("device") || e.contains("not found") {
-                            ("No microphone found", "Connect a microphone and try again")
-                        } else if e.contains("in use") || e.contains("busy") {
-                            ("Microphone busy", "Close other apps using the microphone")
-                        } else {
-                            ("Recording failed", "Try recording again")
-                        };
+                } else if e.contains("device") || e.contains("not found") {
+                    ("No microphone found", "Connect a microphone and try again")
+                } else if e.contains("in use") || e.contains("busy") {
+                    ("Microphone busy", "Close other apps using the microphone")
+                } else {
+                    ("Recording failed", "Try recording again")
+                };
 
-                    pill_toast_with_suggestion(&app, user_message, suggestion, 1500, None);
+                pill_toast_with_suggestion(&app, user_message, suggestion, 1500, None);
 
-                    resume_media_if_needed();
-                    return Err(e);
-                }
-            };
+                resume_media_if_needed();
+                return Err(e);
+            }
+        };
 
         // Release the recorder lock after successful start
         drop(recorder);
@@ -4787,7 +5483,7 @@ pub async fn start_recording(
 
     crate::trigger::engine_host::rebuild_engine_bindings(&app);
 
-    Ok(())
+    Ok(true)
 }
 
 #[tauri::command]
@@ -4846,6 +5542,20 @@ async fn stop_recording_with_mode(
             log::warn!("stop_recording called but not currently recording");
             // Don't error - just return empty result; only reset if this stop owns the flow.
             drop(recorder); // Drop the lock before updating state
+            if entry_state == RecordingState::Starting {
+                // A start is still in flight (e.g. the in-app bare-modifier
+                // hold released before audio init finished). Queue the stop so
+                // start_recording honors it immediately after the Recording
+                // transition — same contract as the PTT key-up-during-Starting
+                // path in recording/hotkeys.rs. Without this the stop is
+                // silently dropped and the start wins, leaving an orphaned
+                // recording with no keyup owner.
+                log::info!("stop_recording during Starting: queueing pending stop after start");
+                app_state
+                    .pending_stop_after_start
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                return Ok(String::new());
+            }
             if stop_should_reset_to_idle(entry_state) {
                 update_recording_state(&app, RecordingState::Idle, None);
             } else if entry_state == RecordingState::Stopping
@@ -5375,7 +6085,7 @@ async fn stop_recording_with_mode(
         _ => {
             let normalization_started = std::time::Instant::now();
             // Normalize captured audio to Whisper contract (WAV PCM s16, mono, 16k):
-            // try in-process first (off the async runtime), fall back to ffmpeg sidecar.
+            // try in-process first (off the async runtime), fall back to the streaming decoder.
             let parent_dir = audio_path
                 .parent()
                 .map(|p| p.to_path_buf())
@@ -5400,17 +6110,20 @@ async fn stop_recording_with_mode(
                             Err(e) => e.to_string(),
                         };
                         log::warn!(
-                            "In-process audio normalization failed; falling back to ffmpeg: {:?}",
+                            "In-process audio normalization failed; falling back to streaming decode: {:?}",
                             other_err
                         );
                         let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
                         let out_path = parent_dir.join(format!("normalized_{}.wav", ts));
-                        if let Err(e) =
-                            crate::ffmpeg::normalize_streaming(&app, &audio_path, &out_path).await
+                        if let Err(e) = crate::audio::decode::normalize_to_wav_async(
+                            audio_path.to_path_buf(),
+                            out_path.to_path_buf(),
+                        )
+                        .await
                         {
                             speech_evidence_attempt
                                 .set_outcome(SpeechEvidenceOutcome::PreparationFailure);
-                            log::error!("Audio normalization (ffmpeg) failed: {}", e);
+                            log::error!("Audio normalization (decode) failed: {}", e);
                             update_recording_state(
                                 &app,
                                 RecordingState::Error,
@@ -5475,13 +6188,7 @@ async fn stop_recording_with_mode(
 
             if matches!(duration_gate, Ok((true, _))) {
                 speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::RecordingTooShort);
-                // Emit friendly feedback and stop here
-                let _ = emit_to_window(
-                    &app,
-                    "pill",
-                    "recording-too-short",
-                    format!("Recording shorter than {} seconds", min_duration_label),
-                );
+                emit_recording_too_short_feedback(&app, &min_duration_label);
                 if let Err(e) = std::fs::remove_file(&normalized_path) {
                     log::debug!("Failed to remove short normalized audio: {}", e);
                 }
@@ -5607,6 +6314,42 @@ async fn stop_recording_with_mode(
 
         let transcription_result: Result<TranscriptionResult, TranscriptionFailure> =
             match &engine_selection_for_task {
+                // Cloud WS-final authority (plans 043b + 044): the cloud WS final is
+                // the AUTHORITATIVE result when live preview ran AND this is a plain
+                // transcribe (the WS config never translates). On any WS gap (no slot,
+                // generation mismatch, error, empty text, timeout) the task falls
+                // through to REST-on-WAV below — the only path that double-bills,
+                // and only on WS failure. Engine-agnostic: Soniox and Deepgram both
+                // register via CLOUD_WS_FINAL.
+                ActiveEngineSelection::Cloud {
+                    provider:
+                        crate::cloud_stt::CloudProvider::Soniox
+                        | crate::cloud_stt::CloudProvider::Deepgram,
+                    ..
+                } if transcription_job_for_task.task
+                    == crate::transcription::TranscriptionTask::Transcribe =>
+                {
+                    if let Some(text) = take_cloud_ws_final(task_generation).await {
+                        log::info!(
+                            "Cloud WS-final authoritative ({} chars); REST skipped",
+                            text.chars().count()
+                        );
+                        Ok(TranscriptionResult::new(&transcription_job_for_task, text))
+                    } else {
+                        match build_desktop_transcription_request(
+                            &app_for_task,
+                            &engine_selection_for_task,
+                            &transcription_job_for_task,
+                            language_for_task.clone(),
+                            audio_path_clone.clone(),
+                        ) {
+                            Ok(request) => transcribe_with_app(&app_for_task, request)
+                                .await
+                                .map_err(desktop_failure_from_transcription_error),
+                            Err(failure) => Err(failure),
+                        }
+                    }
+                }
                 // Local + cloud run through the shared transcription executor (plan
                 // 020 Stage 2): it owns normalization, the interactive watchdog /
                 // shared cancel flag, Whisper retry, and the cloud network timeout.
@@ -6908,7 +7651,17 @@ pub async fn transcribe_audio_file(
     model_name: String,
     model_engine: Option<String>,
 ) -> Result<UploadTranscription, String> {
-    transcribe_audio_file_impl(app, file_path, model_name, model_engine, true).await
+    transcribe_audio_file_impl(
+        app,
+        file_path,
+        model_name,
+        model_engine,
+        true,
+        None,
+        None,
+        None,
+    )
+    .await
 }
 
 pub async fn transcribe_audio_file_for_cli(
@@ -6916,16 +7669,99 @@ pub async fn transcribe_audio_file_for_cli(
     file_path: String,
     model_name: String,
     model_engine: Option<String>,
+    language_override: Option<String>,
+    audio_ctx: Option<i32>,
+    speed_mode_override: Option<bool>,
 ) -> Result<UploadTranscription, String> {
-    transcribe_audio_file_impl(app, file_path, model_name, model_engine, false).await
+    transcribe_audio_file_impl(
+        app,
+        file_path,
+        model_name,
+        model_engine,
+        false,
+        language_override,
+        audio_ctx,
+        speed_mode_override,
+    )
+    .await
 }
 
+async fn normalize_upload_audio_for_cloud(
+    recordings_dir: &Path,
+    wav_path: &Path,
+) -> Result<NormalizedTempFile, String> {
+    log::debug!("[UPLOAD] Normalizing to WAV for cloud transcription...");
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
+    crate::audio::decode::normalize_to_wav_async(wav_path.to_path_buf(), out_path.to_path_buf())
+        .await
+        .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
+    Ok(NormalizedTempFile::new(out_path))
+}
+
+fn cloud_provider_supports_diarized_words(provider: crate::cloud_stt::CloudProvider) -> bool {
+    matches!(
+        provider,
+        crate::cloud_stt::CloudProvider::Deepgram | crate::cloud_stt::CloudProvider::Soniox
+    )
+}
+
+async fn maybe_return_diarized_cloud_upload(
+    app: &AppHandle,
+    provider: crate::cloud_stt::CloudProvider,
+    audio_path: &Path,
+    language: &str,
+    transcription_job: &TranscriptionJob,
+) -> Result<Option<UploadTranscription>, String> {
+    if !cloud_provider_supports_diarized_words(provider) {
+        return Ok(None);
+    }
+
+    let budget = watchdog_budget_for(audio_path, &TimeoutPolicy::Upload);
+    let transcribe = provider.transcribe_diarized(app, audio_path, Some(language));
+    let cloud_transcript = match budget {
+        Some(deadline) => tokio::time::timeout(deadline, transcribe)
+            .await
+            .map_err(|_| "Transcription timed out".to_string())?,
+        None => transcribe.await,
+    }?;
+
+    if cloud_transcript.words.is_empty() {
+        log::debug!(
+            "[UPLOAD] {} diarized probe returned plain transcript ({} chars); routing through executor",
+            provider.display_name(),
+            cloud_transcript.text.len()
+        );
+        return Ok(None);
+    }
+
+    let words = cloud_transcript.words;
+    let text = group_words_into_speaker_text(&words);
+    log::info!(
+        "[UPLOAD] Diarized cloud transcript: {} words, {} chars",
+        words.len(),
+        text.len()
+    );
+    let mut diarized_result = TranscriptionResult::new(transcription_job, text.clone());
+    diarized_result.words = Some(words.clone());
+    let metadata = Some(build_writing_history_metadata(&diarized_result, None));
+    Ok(Some(UploadTranscription {
+        text,
+        words: Some(words),
+        metadata,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn transcribe_audio_file_impl(
     app: AppHandle,
     file_path: String,
     model_name: String,
     model_engine: Option<String>,
     validate_requirements: bool,
+    language_override: Option<String>,
+    audio_ctx: Option<i32>,
+    speed_mode_override: Option<bool>,
 ) -> Result<UploadTranscription, String> {
     log::info!(
         "[UPLOAD] transcribe_audio_file START | file_path={:?}, model_name={}, engine_hint={:?}",
@@ -6955,7 +7791,7 @@ async fn transcribe_audio_file_impl(
     std::fs::create_dir_all(&recordings_dir)
         .map_err(|e| format!("Failed to create recordings directory: {}", e))?;
 
-    // No pre-conversion needed; ffmpeg normalizer can read most formats directly.
+    // No pre-conversion needed; the normalizer can read most formats directly.
     let wav_path = audio_path.to_path_buf();
     log::info!("[UPLOAD] Input ready at {:?}", wav_path);
 
@@ -6977,10 +7813,12 @@ async fn transcribe_audio_file_impl(
         .get("translate_to_english")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let language = store
-        .get("speech_language")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or(legacy_speech_language);
+    let language = language_override.unwrap_or_else(|| {
+        store
+            .get("speech_language")
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or(legacy_speech_language)
+    });
     let stored_transcription_task = store
         .get("transcription_task")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
@@ -7012,208 +7850,145 @@ async fn transcribe_audio_file_impl(
         translate_to_english,
     );
 
-    // For cloud providers, skip normalization and send original wav_path
-    let transcription_result = match engine_selection {
-        ActiveEngineSelection::Whisper { model_path, .. } => {
-            // Normalize to Whisper contract
-            log::debug!("[UPLOAD] Normalizing to Whisper WAV (16k mono s16)...");
-            let normalized_file = NormalizedTempFile::new({
-                let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
-                crate::ffmpeg::normalize_streaming(&app, &wav_path, &out_path)
-                    .await
-                    .map_err(|e| format!("Audio normalization (ffmpeg) failed: {}", e))?;
-                out_path
-            });
-            log::info!("[UPLOAD] Normalized WAV at {:?}", normalized_file.path());
-            let initial_prompt = compile_whisper_initial_prompt(&app, Some(&language));
-            let output = transcribe_whisper_with_acceleration(
-                &app,
-                &model_path,
-                normalized_file.path(),
-                Some(&language),
-                translate_to_english,
-                initial_prompt.as_deref(),
-                || false,
+    let transcription_result = if let ActiveEngineSelection::Remote {
+        server_id,
+        server_name,
+        host,
+        port,
+        password,
+        ..
+    } = &engine_selection
+    {
+        // Normalize to Whisper contract (16k mono s16 WAV) for remote transcription
+        log::debug!("[UPLOAD] Normalizing to Whisper WAV for remote transcription...");
+        let normalized_file = NormalizedTempFile::new({
+            let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+            let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
+            crate::audio::decode::normalize_to_wav_async(
+                wav_path.to_path_buf(),
+                out_path.to_path_buf(),
             )
-            .await?;
-            TranscriptionResult::new(&transcription_job, output.raw_text)
-                .with_transcript_language(output.transcript_language)
-                .with_segments(output.segments)
-                .with_audio_duration_ms(Some(output.audio_duration_ms))
-                .with_processing_duration_ms(Some(output.processing_duration_ms))
-        }
-        ActiveEngineSelection::Parakeet { model_name } => {
-            // Normalize to Whisper/Parakeet contract first
-            log::debug!("[UPLOAD] Normalizing to Whisper WAV (16k mono s16)...");
-            let normalized_file = NormalizedTempFile::new({
-                let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
-                crate::ffmpeg::normalize_streaming(&app, &wav_path, &out_path)
-                    .await
-                    .map_err(|e| format!("Audio normalization (ffmpeg) failed: {}", e))?;
-                out_path
-            });
-            log::info!("[UPLOAD] Normalized WAV at {:?}", normalized_file.path());
-            let parakeet_manager = app.state::<ParakeetManager>();
+            .await
+            .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
+            out_path
+        });
+        log::info!("[UPLOAD] Normalized WAV at {:?}", normalized_file.path());
 
-            parakeet_manager
-                .load_model(&app, &model_name)
-                .await
-                .map_err(|e| format!("Failed to load Parakeet model: {}", e))?;
-
-            let custom_vocabulary =
-                compile_parakeet_custom_vocabulary_for_transcription(&app, Some(&language));
-
-            match parakeet_manager
-                .transcribe_with_custom_vocabulary(
-                    &app,
-                    &model_name,
-                    normalized_file.path().to_path_buf(),
-                    ParakeetTranscriptionOptions {
-                        language: Some(language.clone()),
-                        translate: translate_to_english,
-                        custom_vocabulary,
-                        cancel_flag: None,
-                    },
-                )
-                .await
-            {
-                Ok(ParakeetResponse::Transcription {
-                    text,
-                    segments,
-                    language,
-                    duration,
-                }) => TranscriptionResult::new(&transcription_job, text)
-                    .with_transcript_language(language)
-                    .with_segments(parakeet_segments_to_transcription_segments(segments))
-                    .with_audio_duration_ms(seconds_to_duration_ms(duration)),
-                Ok(other) => {
-                    return Err(format!("Unexpected Parakeet response: {:?}", other));
-                }
-                Err(err) => {
-                    return Err(format!("Parakeet transcription failed: {}", err));
-                }
-            }
-        }
-        ActiveEngineSelection::Cloud { provider, .. } => {
-            log::debug!("[UPLOAD] Normalizing to WAV for cloud transcription...");
-            let normalized_file = NormalizedTempFile::new({
-                let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
-                crate::ffmpeg::normalize_streaming(&app, &wav_path, &out_path)
-                    .await
-                    .map_err(|e| format!("Audio normalization (ffmpeg) failed: {}", e))?;
-                out_path
-            });
-            let cloud_transcript = provider
-                .transcribe_diarized(&app, normalized_file.path(), Some(&language))
-                .await?;
-
-            // If the provider returned speaker-attributed words, group them and
-            // return directly — no AI polish for diarized uploads.
-            if !cloud_transcript.words.is_empty() {
-                let words = cloud_transcript.words;
-                let text = group_words_into_speaker_text(&words);
-                log::info!(
-                    "[UPLOAD] Diarized cloud transcript: {} words, {} chars",
-                    words.len(),
-                    text.len()
-                );
-                let mut diarized_result =
-                    TranscriptionResult::new(&transcription_job, text.clone());
-                diarized_result.words = Some(words.clone());
-                let metadata = Some(build_writing_history_metadata(&diarized_result, None));
-                return Ok(UploadTranscription {
-                    text,
-                    words: Some(words),
-                    metadata,
-                });
-            }
-
-            let cloud_job = build_transcription_job(
-                TranscriptionSource::AudioFile,
-                transcription_job.engine.clone(),
-                transcription_job.model.clone(),
-                transcription_job.spoken_language.clone(),
-                false,
-            );
-            TranscriptionResult::new(&cloud_job, cloud_transcript.text)
-        }
-        ActiveEngineSelection::Remote {
-            server_id,
+        log::info!(
+            "🌐 [Remote Upload] Starting transcription to '{}' ({}:{})",
             server_name,
             host,
-            port,
-            password,
-            ..
-        } => {
-            // Normalize to Whisper contract (16k mono s16 WAV) for remote transcription
-            log::debug!("[UPLOAD] Normalizing to Whisper WAV for remote transcription...");
-            let normalized_file = NormalizedTempFile::new({
-                let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
-                crate::ffmpeg::normalize_streaming(&app, &wav_path, &out_path)
-                    .await
-                    .map_err(|e| format!("Audio normalization (ffmpeg) failed: {}", e))?;
-                out_path
-            });
-            log::info!("[UPLOAD] Normalized WAV at {:?}", normalized_file.path());
+            port
+        );
 
-            log::info!(
-                "🌐 [Remote Upload] Starting transcription to '{}' ({}:{})",
-                server_name,
-                host,
-                port
-            );
+        let audio_data = std::fs::read(normalized_file.path())
+            .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
-            // Read the normalized audio file
-            let audio_data = std::fs::read(normalized_file.path())
-                .map_err(|e| format!("Failed to read audio file: {}", e))?;
+        let audio_size_kb = audio_data.len() as f64 / 1024.0;
+        log::info!(
+            "🌐 [Remote Upload] Sending {:.1} KB audio to '{}'",
+            audio_size_kb,
+            server_name
+        );
 
-            let audio_size_kb = audio_data.len() as f64 / 1024.0;
-            log::info!(
-                "🌐 [Remote Upload] Sending {:.1} KB audio to '{}'",
-                audio_size_kb,
-                server_name
-            );
+        let server_conn = RemoteServerConnection::new(host.clone(), *port, password.clone());
 
-            // Create HTTP client connection
-            let server_conn = RemoteServerConnection::new(host.clone(), port, password.clone());
+        let request_context = crate::commands::remote::resolve_remote_request_context(
+            &app,
+            server_id,
+            transcription_job.spoken_language.as_deref(),
+        )
+        .await;
 
-            let request_context = crate::commands::remote::resolve_remote_request_context(
-                &app,
-                &server_id,
-                transcription_job.spoken_language.as_deref(),
-            )
-            .await;
+        let (request, timeout_ms) = build_remote_upload_transcription_request(
+            normalized_file.path(),
+            audio_data,
+            Some(&transcription_job),
+            request_context,
+        );
 
-            let (request, timeout_ms) = build_remote_upload_transcription_request(
-                normalized_file.path(),
-                audio_data,
-                Some(&transcription_job),
-                request_context,
-            );
+        let response = client::transcribe_audio(&server_conn, request, timeout_ms)
+            .await
+            .map_err(|e| {
+                log::warn!(
+                    "🌐 [Remote Upload] Remote transcription FAILED to '{}': {}",
+                    server_name,
+                    e
+                );
+                e.to_string()
+            })?;
 
-            let response = client::transcribe_audio(&server_conn, request, timeout_ms)
-                .await
-                .map_err(|e| {
-                    log::warn!(
-                        "🌐 [Remote Upload] Remote transcription FAILED to '{}': {}",
-                        server_name,
-                        e
-                    );
-                    e.to_string()
-                })?;
+        log::info!(
+            "🌐 [Remote Upload] Transcription COMPLETED from '{}': {} chars received",
+            server_name,
+            response.text.len()
+        );
 
-            log::info!(
-                "🌐 [Remote Upload] Transcription COMPLETED from '{}': {} chars received",
-                server_name,
-                response.text.len()
-            );
-
-            build_remote_transcription_result(&transcription_job, response)
-        }
+        build_remote_transcription_result(&transcription_job, response)
+    } else {
+        let mut _executor_audio_guard: Option<NormalizedTempFile> = None;
+        let (executor_audio_path, format_hint) = match &engine_selection {
+            ActiveEngineSelection::Cloud { provider, .. } => {
+                ensure_cloud_task_supported(
+                    *provider,
+                    translate_to_english,
+                    TranscriptionSource::AudioFile,
+                )
+                .map_err(upload_error_to_string)?;
+                let normalized_file =
+                    normalize_upload_audio_for_cloud(&recordings_dir, &wav_path).await?;
+                if let Some(diarized) = maybe_return_diarized_cloud_upload(
+                    &app,
+                    *provider,
+                    normalized_file.path(),
+                    &language,
+                    &transcription_job,
+                )
+                .await?
+                {
+                    return Ok(diarized);
+                }
+                let path = normalized_file.path().to_path_buf();
+                _executor_audio_guard = Some(normalized_file);
+                (path, Some(AudioFormatHint::Wav))
+            }
+            _ => (wav_path.clone(), None),
+        };
+        let engine =
+            ProviderEngine::from_engine_str(engine_selection.engine_name()).ok_or_else(|| {
+                format!(
+                    "Unknown transcription engine: {}",
+                    engine_selection.engine_name()
+                )
+            })?;
+        let initial_prompt = if matches!(engine_selection, ActiveEngineSelection::Whisper { .. }) {
+            compile_whisper_initial_prompt(&app, Some(&language))
+        } else {
+            None
+        };
+        let request = TranscriptionRequest {
+            source: TranscriptionSource::AudioFile,
+            audio: TranscriptionAudio::Path {
+                path: executor_audio_path,
+                format_hint,
+                cleanup: CleanupPolicy::CallerOwns,
+            },
+            engine: EngineSelection::Explicit {
+                engine,
+                model: engine_selection.model_name().to_string(),
+            },
+            spoken_language: Some(language.clone()),
+            task: transcription_job.task,
+            context: RequestContext::default(),
+            timeout: TimeoutPolicy::Upload,
+            cancellation: CancellationToken::new(),
+            initial_prompt,
+            audio_ctx,
+            speed_mode_override,
+        };
+        transcribe_with_app(&app, request)
+            .await
+            .map_err(upload_error_to_string)?
     };
 
     log::info!(
@@ -7273,252 +8048,6 @@ pub async fn diarize_audio_file(
             other
         )),
     }
-}
-
-#[tauri::command]
-pub async fn transcribe_audio(
-    app: AppHandle,
-    audio_data: Vec<u8>,
-    model_name: String,
-    model_engine: Option<String>,
-) -> Result<String, String> {
-    log::info!(
-        "[UPLOAD] transcribe_audio (bytes) START | bytes={}, model_name={}, engine_hint={:?}",
-        audio_data.len(),
-        model_name,
-        model_engine
-    );
-    // Validate requirements (includes license check)
-    validate_recording_requirements(&app).await?;
-
-    // Save audio data to app data directory
-    let recordings_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("recordings");
-
-    // Ensure directory exists
-    std::fs::create_dir_all(&recordings_dir)
-        .map_err(|e| format!("Failed to create recordings directory: {}", e))?;
-
-    let temp_path = recordings_dir.join("temp_audio.wav");
-
-    std::fs::write(&temp_path, audio_data).map_err(|e| e.to_string())?;
-
-    let engine_selection =
-        resolve_engine_for_model(&app, &model_name, model_engine.as_deref()).await?;
-
-    // Get language and translation settings
-    let store = app.store("settings").map_err(|e| e.to_string())?;
-    let legacy_speech_language = store
-        .get("language")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "en".to_string());
-    let legacy_translate_to_english = store
-        .get("translate_to_english")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let language = store
-        .get("speech_language")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or(legacy_speech_language);
-    let stored_transcription_task = store
-        .get("transcription_task")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-    let transcription_task = resolve_transcription_task_for_audio(
-        &app,
-        legacy_translate_to_english,
-        stored_transcription_task.as_deref(),
-    )?;
-    let translate_to_english = task_uses_translate_to_english(&transcription_task);
-
-    let language = normalize_speech_language_for_model(
-        engine_selection.engine_name(),
-        engine_selection.model_name(),
-        &language,
-    );
-
-    log::info!(
-        "[LANGUAGE] transcribe_audio using language: {}, transcription_task={}, translate: {}",
-        language,
-        transcription_task,
-        translate_to_english
-    );
-
-    let transcription_job = build_transcription_job(
-        TranscriptionSource::AudioBytes,
-        engine_selection.engine_name().to_string(),
-        engine_selection.model_name().to_string(),
-        Some(language.clone()),
-        translate_to_english,
-    );
-
-    let transcription_result = match engine_selection {
-        ActiveEngineSelection::Whisper { model_path, .. } => {
-            let initial_prompt = compile_whisper_initial_prompt(&app, Some(language.as_str()));
-            let output = transcribe_whisper_with_acceleration(
-                &app,
-                &model_path,
-                &temp_path,
-                Some(language.as_str()),
-                translate_to_english,
-                initial_prompt.as_deref(),
-                || false,
-            )
-            .await?;
-            TranscriptionResult::new(&transcription_job, output.raw_text)
-                .with_transcript_language(output.transcript_language)
-                .with_segments(output.segments)
-                .with_audio_duration_ms(Some(output.audio_duration_ms))
-                .with_processing_duration_ms(Some(output.processing_duration_ms))
-        }
-        ActiveEngineSelection::Parakeet { model_name } => {
-            let parakeet_manager = app.state::<ParakeetManager>();
-
-            parakeet_manager
-                .load_model(&app, &model_name)
-                .await
-                .map_err(|e| format!("Failed to load Parakeet model: {}", e))?;
-
-            let custom_vocabulary =
-                compile_parakeet_custom_vocabulary_for_transcription(&app, Some(&language));
-
-            match parakeet_manager
-                .transcribe_with_custom_vocabulary(
-                    &app,
-                    &model_name,
-                    temp_path.clone(),
-                    ParakeetTranscriptionOptions {
-                        language: Some(language.clone()),
-                        translate: translate_to_english,
-                        custom_vocabulary,
-                        cancel_flag: None,
-                    },
-                )
-                .await
-            {
-                Ok(ParakeetResponse::Transcription {
-                    text,
-                    segments,
-                    language,
-                    duration,
-                }) => TranscriptionResult::new(&transcription_job, text)
-                    .with_transcript_language(language)
-                    .with_segments(parakeet_segments_to_transcription_segments(segments))
-                    .with_audio_duration_ms(seconds_to_duration_ms(duration)),
-                Ok(other) => return Err(format!("Unexpected Parakeet response: {:?}", other)),
-                Err(err) => return Err(format!("Parakeet transcription failed: {}", err)),
-            }
-        }
-        ActiveEngineSelection::Cloud { provider, .. } => {
-            let text = provider
-                .transcribe(&app, &temp_path, Some(&language))
-                .await?;
-            let cloud_job = build_transcription_job(
-                TranscriptionSource::AudioBytes,
-                transcription_job.engine.clone(),
-                transcription_job.model.clone(),
-                transcription_job.spoken_language.clone(),
-                false,
-            );
-            TranscriptionResult::new(&cloud_job, text)
-        }
-        ActiveEngineSelection::Remote {
-            server_id,
-            server_name,
-            host,
-            port,
-            password,
-            ..
-        } => {
-            // Normalize to Whisper contract (16k mono s16 WAV) for remote transcription
-            log::debug!("[CLIPBOARD] Normalizing to Whisper WAV for remote transcription...");
-            let normalized_file = NormalizedTempFile::new({
-                let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-                let out_path = recordings_dir.join(format!("normalized_clipboard_{}.wav", ts));
-                crate::ffmpeg::normalize_streaming(&app, &temp_path, &out_path)
-                    .await
-                    .map_err(|e| format!("Audio normalization (ffmpeg) failed: {}", e))?;
-                out_path
-            });
-            log::info!("[CLIPBOARD] Normalized WAV at {:?}", normalized_file.path());
-
-            log::info!(
-                "🌐 [Remote Clipboard] Starting transcription to '{}' ({}:{})",
-                server_name,
-                host,
-                port
-            );
-
-            // Read the normalized audio file
-            let audio_data = std::fs::read(normalized_file.path())
-                .map_err(|e| format!("Failed to read audio file: {}", e))?;
-
-            let audio_size_kb = audio_data.len() as f64 / 1024.0;
-            log::info!(
-                "🌐 [Remote Clipboard] Sending {:.1} KB audio to '{}'",
-                audio_size_kb,
-                server_name
-            );
-
-            // Create HTTP client connection
-            let server_conn = RemoteServerConnection::new(host.clone(), port, password.clone());
-
-            let request_context = crate::commands::remote::resolve_remote_request_context(
-                &app,
-                &server_id,
-                transcription_job.spoken_language.as_deref(),
-            )
-            .await;
-
-            let (request, timeout_ms) = build_remote_upload_transcription_request(
-                normalized_file.path(),
-                audio_data,
-                Some(&transcription_job),
-                request_context,
-            );
-
-            let response = client::transcribe_audio(&server_conn, request, timeout_ms)
-                .await
-                .map_err(|e| {
-                    log::warn!(
-                        "🌐 [Remote Clipboard] Remote transcription FAILED to '{}': {}",
-                        server_name,
-                        e
-                    );
-                    e.to_string()
-                })?;
-
-            log::info!(
-                "🌐 [Remote Clipboard] Transcription COMPLETED from '{}': {} chars received",
-                server_name,
-                response.text.len()
-            );
-
-            build_remote_transcription_result(&transcription_job, response)
-        }
-    };
-
-    // Clean up
-    if let Err(e) = std::fs::remove_file(&temp_path) {
-        log::warn!("Failed to remove test audio file: {}", e);
-    }
-
-    let writing_result =
-        crate::writing::process_transcription(app.clone(), transcription_result.clone())
-            .await
-            .map_err(|e| e.user_message())?;
-    if let Some(error) = writing_result.ai_error.as_ref() {
-        log::warn!(
-            "AI polish failed with {}; returning and saving deterministic test transcription text",
-            ai_failure_category(error)
-        );
-        notify_ai_polish_failure(&app, error);
-        save_ai_polish_fallback_history(app.clone(), &transcription_result, &writing_result)
-            .await?;
-    }
-    Ok(writing_result.final_text)
 }
 
 #[tauri::command]

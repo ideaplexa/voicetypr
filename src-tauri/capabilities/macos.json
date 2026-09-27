@@ -28,15 +28,11 @@
     "shell:allow-open",
     { "identifier": "shell:allow-spawn", "allow": [
       { "name": "parakeet-sidecar", "sidecar": true },
-      { "name": "parakeet-sidecar-aarch64-apple-darwin", "sidecar": true },
-      { "name": "ffmpeg", "sidecar": true },
-      { "name": "ffprobe", "sidecar": true }
+      { "name": "parakeet-sidecar-aarch64-apple-darwin", "sidecar": true }
     ] },
     { "identifier": "shell:allow-stdin-write", "allow": [
       { "name": "parakeet-sidecar", "sidecar": true },
-      { "name": "parakeet-sidecar-aarch64-apple-darwin", "sidecar": true },
-      { "name": "ffmpeg", "sidecar": true },
-      { "name": "ffprobe", "sidecar": true }
+      { "name": "parakeet-sidecar-aarch64-apple-darwin", "sidecar": true }
     ] },
     "macos-permissions:default",
     "autostart:allow-enable",

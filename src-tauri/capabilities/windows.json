@@ -27,8 +27,6 @@
     "fs:scope-appdata",
     "shell:allow-open",
     { "identifier": "shell:allow-spawn", "allow": [
-      { "name": "ffmpeg.exe", "sidecar": true },
-      { "name": "ffprobe.exe", "sidecar": true },
       { "name": "whisper-vulkan-sidecar", "sidecar": true }
     ] },
     "autostart:allow-enable",

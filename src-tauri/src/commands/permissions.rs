@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use tokio::time::{sleep, Duration};
 
 use crate::audio::device_watcher::try_start_device_watcher_if_ready;
@@ -67,6 +68,7 @@ fn emit_accessibility_granted(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub async fn request_accessibility_permission(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {

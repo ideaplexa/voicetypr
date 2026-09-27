@@ -54,7 +54,9 @@ fn package_family_name() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{distribution_info, get_distribution_info};
+    use super::distribution_info;
+    #[cfg(not(target_os = "windows"))]
+    use super::get_distribution_info;
 
     #[test]
     fn distribution_info_maps_store_detection_to_channel() {

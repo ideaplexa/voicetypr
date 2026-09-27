@@ -17,6 +17,7 @@ import { ModelsEmptyStates } from "./models/ModelsEmptyStates";
 import { ModelsLanguageRow } from "./models/ModelsLanguageRow";
 import { ModelsSourcesHeader } from "./models/ModelsSourcesHeader";
 import { RemoteServersBlock } from "./models/RemoteServersBlock";
+import { TranscriptionControls } from "./models/TranscriptionControls";
 import type { ModelsSectionProps, SourceFilter } from "./models/types";
 import { useCloudProviders } from "./models/useCloudProviders";
 import { useRemoteServers } from "./models/useRemoteServers";
@@ -42,14 +43,14 @@ export function ModelsSection({
   refreshModels,
 }: ModelsSectionProps) {
   const { refreshSettings } = useSettings();
-  const language = useSpokenLanguage();
+  const selectedModel = models.find(([name]) => name === currentModel)?.[1];
+  const language = useSpokenLanguage(selectedModel?.supported_languages ?? undefined);
   const remotes = useRemoteServers();
   const cloud = useCloudProviders({
     onSelect,
     refreshModels,
     clearActiveRemote: remotes.clearActiveRemote,
   });
-  const selectedModel = models.find(([name]) => name === currentModel)?.[1];
   const selectedSourceType = selectedModel && isCloudModel(selectedModel) ? "cloud" : "local";
   const trackedSource = remotes.activeRemoteServer ? "remote" : selectedSourceType;
   const [localSourceFilter, setLocalSourceFilter] = useState<SourceFilter>(trackedSource);
@@ -149,6 +150,8 @@ export function ModelsSection({
     currentModel,
     activeRemoteServer: remotes.activeRemoteServer,
     clearActiveRemote: remotes.clearActiveRemote,
+    speedModeRecommended:
+      language.currentEngine === "whisper" && language.settings?.whisper_speed_mode === true,
   };
 
   const cloudBindings = {
@@ -170,11 +173,17 @@ export function ModelsSection({
             languageValue={language.languageValue}
             currentEngine={language.currentEngine}
             isEnglishOnlyModel={language.isEnglishOnlyModel}
+            supportedLanguages={language.supportedLanguages}
             hasDownloading={hasDownloading}
             hasVerifying={hasVerifying}
             onLanguageChange={language.handleLanguageChange}
           />
         </ModelsSourcesHeader>
+
+        <TranscriptionControls
+          engine={language.currentEngine}
+          modelName={language.currentModelName}
+        />
 
         <Tabs
           value={sourceFilter}

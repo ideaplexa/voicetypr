@@ -9,6 +9,7 @@ interface ModelsLanguageRowProps {
   languageValue: string;
   currentEngine: SpeechModelEngine;
   isEnglishOnlyModel: boolean;
+  supportedLanguages?: readonly string[];
   hasDownloading: boolean;
   hasVerifying: boolean;
   onLanguageChange: (value: string) => void;
@@ -18,6 +19,7 @@ export function ModelsLanguageRow({
   languageValue,
   currentEngine,
   isEnglishOnlyModel,
+  supportedLanguages,
   hasDownloading,
   hasVerifying,
   onLanguageChange,
@@ -42,6 +44,7 @@ export function ModelsLanguageRow({
             value={languageValue}
             engine={currentEngine}
             englishOnly={isEnglishOnlyModel}
+            supportedLanguages={supportedLanguages}
             onValueChange={(value) => void onLanguageChange(value)}
           />
         </div>

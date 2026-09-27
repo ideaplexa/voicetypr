@@ -80,7 +80,7 @@ export interface AISettings {
   modelsByProvider: Record<string, string>;
   reasoningByProvider: Record<string, string>;
   fastModeByProvider: Record<string, boolean>;
-  enhancement_options?: EnhancementOptions;
+  aiModelNeedsReselection?: boolean;
 }
 
 export interface AIModel {

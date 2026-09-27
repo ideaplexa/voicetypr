@@ -174,10 +174,6 @@ fn pending_stop_after_start_swap_consumes_and_resets_flag() {
     assert!(!state.pending_stop_after_start.swap(false, Ordering::SeqCst));
 }
 
-// Serialize tests that advance the process-global RECORDING_GENERATION counter,
-// so parallel test threads cannot make each other's captured generations stale.
-static GENERATION_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[test]
 fn pending_stop_set_after_starting_publish_survives_to_recording_commit() {
     // Regression for the "stop during Starting is erased" race (finding 1).
@@ -189,7 +185,9 @@ fn pending_stop_set_after_starting_publish_survives_to_recording_commit() {
     // commit Recording ⇒ the stop is still honored.
     use crate::commands::audio::{begin_recording_generation, current_recording_generation};
 
-    let _guard = GENERATION_TEST_LOCK.lock().unwrap();
+    let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let app_state = AppState::new();
 
     // start_recording: open a new generation and clear stale flags (BEFORE
@@ -237,7 +235,9 @@ fn stale_recording_generation_result_is_rejected() {
         begin_recording_generation, current_recording_generation, recording_generation_is_stale,
     };
 
-    let _guard = GENERATION_TEST_LOCK.lock().unwrap();
+    let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     // Recording generation 1 begins; its transcription task captures gen 1.
     let gen1 = begin_recording_generation();
@@ -282,7 +282,9 @@ async fn delivery_recheck_aborts_stale_result_before_insert_and_history() {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    let _guard = GENERATION_TEST_LOCK.lock().unwrap();
+    let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     // OUTER task captured generation 1 and PASSED its pre-delivery gate (gen
     // current, no cancel). The window the outer gate cannot see is everything

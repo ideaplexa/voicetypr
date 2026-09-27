@@ -32,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
 };
 
-use super::vk::should_consume_keydown;
+use super::vk::{map_modifier_vk, should_consume_keydown};
 use crate::engine::{ConsumeSet, KeyEventSource, Msg, ReadySignal};
 use crate::types::{KeySpec, ModSet, Modifier, NamedKey, RawKeyEvent, Side};
 
@@ -163,7 +163,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         state.down.remove(&vk);
                         false
                     };
-                    let (key, side) = map_vk(vk);
+                    let (key, side) = map_vk(vk, kb.scanCode, kb.flags.0);
                     let _ = state.tx.send(Msg::Raw(RawKeyEvent {
                         key,
                         side,
@@ -204,15 +204,12 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 
 /// Map a Windows virtual-key code to a [`KeySpec`] and (for side modifiers) a
 /// [`Side`]. Unmapped keys fall back to [`KeySpec::Raw`].
-fn map_vk(vk: u32) -> (KeySpec, Option<Side>) {
+fn map_vk(vk: u32, scan_code: u32, flags: u32) -> (KeySpec, Option<Side>) {
     // Side-specific modifiers (LL hook reports L/R distinctly).
+    if let Some(mapped) = map_modifier_vk(vk, scan_code, flags) {
+        return mapped;
+    }
     match vk {
-        0xA0 => return (KeySpec::Named(NamedKey::ShiftLeft), Some(Side::Left)),
-        0xA1 => return (KeySpec::Named(NamedKey::ShiftRight), Some(Side::Right)),
-        0xA2 => return (KeySpec::Named(NamedKey::ControlLeft), Some(Side::Left)),
-        0xA3 => return (KeySpec::Named(NamedKey::ControlRight), Some(Side::Right)),
-        0xA4 => return (KeySpec::Named(NamedKey::AltLeft), Some(Side::Left)),
-        0xA5 => return (KeySpec::Named(NamedKey::AltRight), Some(Side::Right)),
         0x5B => return (KeySpec::Named(NamedKey::MetaLeft), Some(Side::Left)),
         0x5C => return (KeySpec::Named(NamedKey::MetaRight), Some(Side::Right)),
         _ => {}
@@ -361,13 +358,13 @@ fn map_vk(vk: u32) -> (KeySpec, Option<Side>) {
 /// virtual-key codes (the LL hook reports side-specific modifier vks).
 fn modset_from_down(down: &HashSet<u32>) -> ModSet {
     let mut m = ModSet::empty();
-    if down.contains(&0xA0) || down.contains(&0xA1) {
+    if down.contains(&0x10) || down.contains(&0xA0) || down.contains(&0xA1) {
         m.insert(Modifier::Shift);
     }
-    if down.contains(&0xA2) || down.contains(&0xA3) {
+    if down.contains(&0x11) || down.contains(&0xA2) || down.contains(&0xA3) {
         m.insert(Modifier::Control);
     }
-    if down.contains(&0xA4) || down.contains(&0xA5) {
+    if down.contains(&0x12) || down.contains(&0xA4) || down.contains(&0xA5) {
         m.insert(Modifier::Alt);
     }
     if down.contains(&0x5B) || down.contains(&0x5C) {

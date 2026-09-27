@@ -15,7 +15,7 @@ const MAX_CACHE_SIZE: usize = 1;
 /// of RAM (1-3GB per model). By keeping a limited number of models in memory
 /// we balance performance with memory usage.
 pub struct TranscriberCache {
-    /// Keyed by absolute path to the `.bin` model file.
+    /// Keyed by absolute path to the `.bin` model file plus context-load flags.
     map: HashMap<String, Arc<Transcriber>>,
     /// Track access order for LRU eviction
     lru_order: VecDeque<String>,
@@ -45,7 +45,26 @@ impl TranscriberCache {
     }
 
     /// Retrieve a cached transcriber, or load and cache it if it isn't present yet.
-    pub fn get_or_create(&mut self, model_path: &Path) -> Result<Arc<Transcriber>, String> {
+    /// Return an already-loaded transcriber for this model, or `None` if it is not
+    /// currently cached — WITHOUT loading it. The live-preview factory uses this so it
+    /// never blocks recorder start on a cold model load; a miss just means no preview
+    /// for this recording (best effort). Same cache key as `get_or_create`.
+    pub fn get_loaded(&mut self, model_path: &Path, speed_mode: bool) -> Option<Arc<Transcriber>> {
+        let path = model_path.to_string_lossy();
+        let key = format!("{path}|fa={speed_mode}");
+        if self.map.contains_key(&key) {
+            let transcriber = self.map.get(&key).cloned();
+            self.update_lru(&key);
+            return transcriber;
+        }
+        None
+    }
+
+    pub fn get_or_create(
+        &mut self,
+        model_path: &Path,
+        speed_mode: bool,
+    ) -> Result<Arc<Transcriber>, String> {
         log::info!(
             "[TRANSCRIPTION_DEBUG] get_or_create called with path: {:?}",
             model_path
@@ -58,9 +77,10 @@ impl TranscriberCache {
             return Err(error);
         }
 
-        // We store the path as a string key – this is fine because the path is
-        // produced by the app itself and therefore always valid Unicode.
-        let key = model_path.to_string_lossy().to_string();
+        // Whisper context parameters are fixed at model-load time, so speed
+        // mode must be part of the cache key.
+        let path = model_path.to_string_lossy();
+        let key = format!("{path}|fa={speed_mode}");
 
         // Check if already cached
         if self.map.contains_key(&key) {
@@ -87,7 +107,7 @@ impl TranscriberCache {
         );
         let start = std::time::Instant::now();
 
-        let transcriber = match Transcriber::new(model_path) {
+        let transcriber = match Transcriber::new(model_path, speed_mode) {
             Ok(t) => {
                 let elapsed = start.elapsed();
                 log::info!(
@@ -178,8 +198,10 @@ impl TranscriberCache {
         }
     }
 
-    /// Manually clear the cache (e.g. to free RAM or after a model upgrade).
-    #[cfg(test)]
+    /// Clear the cache, dropping every cached `Arc<Transcriber>` (and, when that was the
+    /// last reference, freeing its Whisper/Metal GPU buffers). Called on process exit to
+    /// empty the ggml-metal residency set before teardown so the device destructor does
+    /// not assert (#28); also usable to free RAM or after a model upgrade.
     pub fn clear(&mut self) {
         self.map.clear();
         self.lru_order.clear();

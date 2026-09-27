@@ -39,7 +39,7 @@ describe('CI change classification', () => {
     for (const filePath of [
       'src-tauri/src/lib.rs',
       'sidecar/parakeet-swift/Package.swift',
-      'scripts/ensure-ffmpeg-sidecar.cjs',
+      'scripts/build-msix-store.ps1',
       'package.json',
       'pnpm-lock.yaml',
     ]) {

@@ -3,7 +3,9 @@
 //! Pauses system media when recording starts and resumes when recording stops.
 //! Only resumes if WE paused it (not if user manually paused during recording).
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU32, AtomicU8};
 
 #[cfg(target_os = "windows")]
 use parking_lot::Mutex;
@@ -220,6 +222,7 @@ impl MediaPauseController {
 
     /// Resume media if we paused it. Call when recording stops.
     /// Returns true if media was resumed.
+    #[allow(clippy::needless_return)]
     pub fn resume_if_we_paused(&self) -> bool {
         // Resolve an in-flight pause first (under the lifecycle lock): a
         // very short recording can stop before the pause worker finished,

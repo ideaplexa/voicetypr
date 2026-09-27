@@ -1,7 +1,9 @@
 pub mod capabilities;
+pub(crate) mod engines;
 pub mod error;
 pub mod executor;
 pub mod request;
+pub mod stream;
 
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +80,8 @@ pub struct TranscriptionSegment {
 pub struct TranscriptionTimings {
     pub audio_duration_ms: Option<u64>,
     pub processing_duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spans_ms: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,6 +149,11 @@ impl TranscriptionResult {
 
     pub fn with_processing_duration_ms(mut self, processing_duration_ms: Option<u64>) -> Self {
         self.timings.processing_duration_ms = processing_duration_ms;
+        self
+    }
+
+    pub fn with_span_timings_ms(mut self, spans_ms: serde_json::Value) -> Self {
+        self.timings.spans_ms = Some(spans_ms);
         self
     }
 }

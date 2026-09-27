@@ -16,7 +16,6 @@ mod audio;
 pub mod cli;
 mod cloud_stt;
 mod commands;
-mod ffmpeg;
 mod license;
 mod media;
 mod menu;
@@ -306,7 +305,8 @@ use commands::{
     license::*,
     logs::{clear_old_logs, get_latest_log_for_bug_report, get_log_directory, open_logs_folder},
     model::{
-        cancel_download, delete_model, download_model, download_parakeet_vocabulary_model,
+        activate_live_preview, cancel_download, delete_model, download_eou_model, download_model,
+        download_parakeet_vocabulary_model, eou_model_status, get_active_stream_capabilities,
         get_model_status, get_parakeet_vocabulary_status, list_downloaded_models, preload_model,
         set_cloud_stt_model, verify_model,
     },
@@ -581,6 +581,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _sentry_guard = telemetry::init(telemetry_enabled, telemetry_install_id);
     product_analytics::init(analytics_consent);
 
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(setup_logging().build())
@@ -1395,7 +1396,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 let preload_result = {
                                     let cache_state = app_handle.state::<AsyncMutex<TranscriberCache>>();
                                     let mut cache = cache_state.lock().await;
-                                    cache.get_or_create(&model_path).map(|_| ())
+                                    let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app_handle);
+                                    cache.get_or_create(&model_path, speed_mode).map(|_| ())
                                 };
 
                                 match preload_result {
@@ -1482,6 +1484,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .transparent(true)
                         .shadow(false)  // Prevent window shadow on macOS
                         .inner_size(crate::window_manager::PILL_WIDTH, crate::window_manager::PILL_HEIGHT)
+                        .accept_first_mouse(true)
                         .position(pos_x, pos_y)
                         .visible(true)  // Always visible (controlled by show_pill_indicator setting)
                         .focused(false);  // Don't steal focus
@@ -1542,6 +1545,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(debug_assertions)]
                 let toast_builder = toast_builder;
 
+                #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
                 let toast_window = toast_builder.build()?;
 
                 // macOS: Convert toast to NSPanel to match pill behavior
@@ -1626,13 +1630,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_audio_devices,
             get_current_audio_device,
             download_model,
+            download_eou_model,
+            eou_model_status,
+            activate_live_preview,
+            get_active_stream_capabilities,
             get_model_status,
-            get_parakeet_vocabulary_status,
-            download_parakeet_vocabulary_model,
             preload_model,
             verify_model,
             set_cloud_stt_model,
-            transcribe_audio,
+            download_parakeet_vocabulary_model,
+            get_parakeet_vocabulary_status,
             transcribe_audio_file,
             diarize_audio_file,
             get_settings,
@@ -1804,21 +1811,34 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             Box::new(e)
         })?
         .run(|app_handle, event| match event {
+            // #28: unload every in-process Whisper model (and its Metal GPU buffers) before
+            // the process tears down. On Apple Silicon the ggml-metal device destructor
+            // asserts at exit if a model's residency set is still live, aborting the process
+            // (SIGABRT) on quit — after transcription already succeeded. Two owners must be
+            // emptied: the local dictation cache (managed `TranscriberCache`), and the
+            // strong-host remote server's OWN cache (inside `RealTranscriptionContext`) —
+            // stopping the server joins its tasks and drops that context. Both harmless on
+            // non-Apple platforms: they just release resources a moment early.
+            tauri::RunEvent::Exit => {
+                tauri::async_runtime::block_on(async move {
+                    if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {
+                        cache.lock().await.clear();
+                    }
+                    if let Some(remote) = app_handle
+                        .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()
+                    {
+                        remote.lock().await.stop().await;
+                    }
+                });
+                #[cfg(target_os = "macos")]
+                crate::commands::audio::cleanup_media_pause_on_exit();
+                product_analytics::shutdown();
+            }
             #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen {
-                has_visible_windows,
-                ..
-            } => {
+            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
                 if !has_visible_windows {
                     show_main_window(app_handle);
                 }
-            }
-            tauri::RunEvent::Exit => {
-                // Never strand a system output device we muted: restore the
-                // mute state we changed before the process goes away.
-                #[cfg(target_os = "macos")]
-                crate::commands::audio::cleanup_media_pause_on_exit();
-                product_analytics::shutdown()
             }
             _ => {}
         });
@@ -2230,6 +2250,15 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
             match parakeet_manager.load_model(&app, &model_name).await {
                 Ok(_) => {
                     log::info!("✅ Parakeet model '{}' autoloaded from cache", model_name);
+                    match parakeet_manager.warmup(&app).await {
+                        Ok(Some(ms)) => {
+                            log::info!("✅ Parakeet model '{}' warmed in {}ms", model_name, ms)
+                        }
+                        Ok(None) => log::info!("Parakeet warmup skipped for '{}'", model_name),
+                        Err(err) => {
+                            log::warn!("Failed to warm Parakeet model '{}': {}", model_name, err)
+                        }
+                    }
                 }
                 Err(err) => {
                     log::warn!(

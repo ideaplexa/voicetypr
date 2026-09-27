@@ -738,11 +738,13 @@ export function useOnboardingDesktop({
     holdToTalk,
     capturedBareModifier,
     onHotkeyChange: (value: string) => {
+      setHotkeyHydrated(true);
       setHotkey(value);
       setCapturedBareModifier(null);
     },
     onEditingChange: setIsEditingHotkey,
     onBareModifier: (spec: BareModifierSpec) => {
+      setHotkeyHydrated(true);
       setCapturedBareModifier(spec);
       setHotkey("");
     },

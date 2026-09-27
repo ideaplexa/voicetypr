@@ -43,6 +43,7 @@ function LocalModelCards({
   currentModel,
   activeRemoteServer,
   clearActiveRemote,
+  speedModeRecommended,
 }: LocalModelCardsProps) {
   return (
     <div className="grid gap-3">
@@ -65,6 +66,7 @@ function LocalModelCards({
           }}
           showSelectButton={model.downloaded}
           isSelected={!activeRemoteServer && currentModel === name}
+          speedModeRecommended={speedModeRecommended && name === "large-v3-turbo"}
         />
       ))}
     </div>

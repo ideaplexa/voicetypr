@@ -185,7 +185,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     {
         // Windows Registry cleanup
         match std::process::Command::new("reg")
-            .args(&[
+            .args([
                 "delete",
                 &format!("HKCU\\\\Software\\\\{}", app_identifier),
                 "/f",

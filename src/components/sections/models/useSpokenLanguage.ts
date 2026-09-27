@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 const log = createLogger("models");
 
-export function useSpokenLanguage() {
+export function useSpokenLanguage(supportedLanguages?: readonly string[]) {
   const { settings, updateSettings } = useSettings();
   const currentEngine = (settings?.current_model_engine ?? "whisper") as SpeechModelEngine;
   const currentModelName = settings?.current_model ?? "";
@@ -18,10 +18,13 @@ export function useSpokenLanguage() {
       return /\.en$/i.test(currentModelName);
     }
     if (currentEngine === "parakeet") {
-      return currentModelName.includes("-v2");
+      if (supportedLanguages) {
+        return supportedLanguages.length === 1 && supportedLanguages[0] === "en";
+      }
+      return currentModelName.includes("-v2") || currentModelName === "parakeet-unified-640ms";
     }
     return false;
-  }, [currentEngine, currentModelName, settings]);
+  }, [currentEngine, currentModelName, settings, supportedLanguages]);
 
   const handleLanguageChange = useCallback(
     async (value: string) => {
@@ -50,6 +53,7 @@ export function useSpokenLanguage() {
     currentEngine,
     currentModelName,
     languageValue,
+    supportedLanguages,
     isEnglishOnlyModel,
     handleLanguageChange,
   };

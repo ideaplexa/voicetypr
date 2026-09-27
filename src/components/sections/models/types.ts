@@ -54,4 +54,5 @@ export interface LocalModelActions {
   currentModel?: string;
   activeRemoteServer: string | null;
   clearActiveRemote: () => Promise<void>;
+  speedModeRecommended?: boolean;
 }

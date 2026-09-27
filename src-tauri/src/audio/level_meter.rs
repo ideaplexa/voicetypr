@@ -1,9 +1,9 @@
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 
 /// Simple voice-optimized audio level meter
 /// Maps normal speaking voice to 0.5-0.8 range for better UX
 pub struct AudioLevelMeter {
-    audio_level_tx: Sender<f64>,
+    audio_level_tx: SyncSender<f64>,
     smoothed_level: f32,
     sample_count: usize,
     update_interval: usize,
@@ -13,7 +13,7 @@ impl AudioLevelMeter {
     pub fn new(
         sample_rate: u32,
         _channels: u32, // Not needed for simple RMS
-        audio_level_tx: Sender<f64>,
+        audio_level_tx: SyncSender<f64>,
     ) -> Result<Self, String> {
         Ok(Self {
             audio_level_tx,
@@ -44,9 +44,7 @@ impl AudioLevelMeter {
             // We map this to 0.2-0.9 for good visual feedback
             let display_level = map_voice_level(self.smoothed_level);
 
-            if let Err(e) = self.audio_level_tx.send(display_level) {
-                log::debug!("Failed to send audio level: channel disconnected ({})", e);
-            }
+            let _ = self.audio_level_tx.try_send(display_level);
         }
 
         Ok(())

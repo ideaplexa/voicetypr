@@ -74,11 +74,42 @@ const bareControlBinding = {
   modifier: { modifier: "control", side: "either" },
 };
 
+const holdControlBinding = {
+  ...bareControlBinding,
+  action: "hold_to_record",
+  trigger: "hold",
+  trigger_kind: "modifier_hold",
+};
+
 // Dispatch a clean lone-modifier tap (keydown then keyup, same physical key).
 function fireModifierTap(target: Element, init: KeyboardEventInit = {}): void {
   const opts = { bubbles: true, cancelable: true, code: "ControlLeft", key: "Control", ...init };
   target.dispatchEvent(new KeyboardEvent("keydown", opts));
   target.dispatchEvent(new KeyboardEvent("keyup", opts));
+}
+
+function fireModifierDown(target: Element, init: KeyboardEventInit = {}): void {
+  target.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      code: "ControlLeft",
+      key: "Control",
+      ...init,
+    }),
+  );
+}
+
+function fireModifierUp(target: Element, init: KeyboardEventInit = {}): void {
+  target.dispatchEvent(
+    new KeyboardEvent("keyup", {
+      bubbles: true,
+      cancelable: true,
+      code: "ControlLeft",
+      key: "Control",
+      ...init,
+    }),
+  );
 }
 
 // Render the hook and flush the async get_shortcut_settings load so the
@@ -91,6 +122,19 @@ async function renderWithBareModifier(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+async function flushHoldStart(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  });
+}
+
+function markAltGraph(event: KeyboardEvent): KeyboardEvent {
+  Object.defineProperty(event, "getModifierState", {
+    value: (key: string) => key === "AltGraph",
+  });
+  return event;
 }
 
 describe("useInAppRecordingHotkey", () => {
@@ -317,18 +361,242 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
   });
 
-  it("ignores a push-to-talk (modifier_hold) binding — tap path is toggle-only", async () => {
+  it("starts on keydown and stops on keyup for a push-to-talk modifier_hold binding", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [
-        { ...bareControlBinding, action: "hold_to_record", trigger_kind: "modifier_hold" },
-      ],
+      bindings: [holdControlBinding],
     });
     await renderWithBareModifier();
 
-    fireModifierTap(editable);
+    fireModifierDown(editable);
+    await flushHoldStart();
+
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+
+    mockRecording.state = "recording";
+    fireModifierUp(editable);
+
+    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses auto-repeat keydowns for a push-to-talk modifier_hold binding", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    fireModifierDown(editable, { repeat: true });
+    fireModifierDown(editable, { repeat: true });
+    await flushHoldStart();
+
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a modifier_hold recording for AltGr's synthesized Control then RightAlt sequence", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    editable.dispatchEvent(
+      markAltGraph(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          code: "AltRight",
+          key: "AltGraph",
+          ctrlKey: true,
+          altKey: true,
+        }),
+      ),
+    );
+    await flushHoldStart();
+    editable.dispatchEvent(
+      markAltGraph(
+        new KeyboardEvent("keyup", {
+          bubbles: true,
+          cancelable: true,
+          code: "ControlLeft",
+          key: "Control",
+          ctrlKey: true,
+          altKey: true,
+        }),
+      ),
+    );
 
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("chains the hold stop after an in-flight start so stop-before-Starting is never dropped", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    let resolveStart: ((started: boolean) => void) | undefined;
+    mockRecording.startRecording.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    await flushHoldStart();
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+
+    // Key released while the start invoke is still in flight (backend has not
+    // yet published `Starting`): the stop must wait for the start, not drop.
+    // NOTE: React state deliberately stays 'idle' here — the settle-time gate
+    // must rely on the reported outcome, not possibly-stale observed state.
+    fireModifierUp(editable);
+    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+
+    resolveStart?.(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it("keyup still stops the hold after a duplicate non-repeat keydown of the same modifier", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    mockRecording.startRecording.mockResolvedValueOnce(true);
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    await flushHoldStart();
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    mockRecording.state = "recording";
+
+    // Duplicate keydown WITHOUT repeat (lost keyup / focus churn) must not
+    // clobber the dispatched hold state or re-arm the start.
+    fireModifierDown(editable);
+    await flushHoldStart();
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+
+    fireModifierUp(editable);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not issue the deferred stop when the start was a redundant no-op on a recording it does not own", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    let resolveStart: ((started: boolean) => void) | undefined;
+    mockRecording.startRecording.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    await flushHoldStart();
+    fireModifierUp(editable);
+
+    // Backend reports false: a recording was already starting/active (e.g. the
+    // native hotkey path won the race), so this hold owns nothing — stopping
+    // would kill someone else's dictation mid-sentence.
+    resolveStart?.(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("does not issue the deferred stop when the in-flight start failed, preserving the error state", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    let resolveStart: ((started: boolean) => void) | undefined;
+    mockRecording.startRecording.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    await flushHoldStart();
+    fireModifierUp(editable);
+
+    // Start settles as a failure (startRecording swallows the rejection and
+    // reports false). The deferred stop must NOT fire — it would reset the
+    // backend to Idle and wipe the error message.
+    resolveStart?.(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("stops a hold that already started when AltGr's second key arrives after the hold-start timer", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    // Race: the 0ms hold-start timer fires BETWEEN the synthesized Control
+    // keydown and the AltGraph keydown — the hold has already started.
+    await flushHoldStart();
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    mockRecording.state = "recording";
+    editable.dispatchEvent(
+      markAltGraph(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          code: "AltRight",
+          key: "AltGraph",
+          ctrlKey: true,
+          altKey: true,
+        }),
+      ),
+    );
+
+    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops an active modifier_hold even when keyup still reports AltGraph", async () => {
+    mockSettings.hotkey = "";
+    mockInvoke.mockResolvedValue({
+      bindings: [holdControlBinding],
+    });
+    await renderWithBareModifier();
+
+    fireModifierDown(editable);
+    await flushHoldStart();
+    mockRecording.state = "recording";
+    editable.dispatchEvent(
+      markAltGraph(
+        new KeyboardEvent("keyup", {
+          bubbles: true,
+          cancelable: true,
+          code: "ControlLeft",
+          key: "Control",
+          ctrlKey: true,
+          altKey: true,
+        }),
+      ),
+    );
+
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
   });
 
   it("bails if recording state changed between keydown and keyup", async () => {
@@ -414,5 +682,26 @@ describe("useInAppRecordingHotkey", () => {
 
     expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("rearms from shortcut-settings-changed even when the cached hotkey is stale", async () => {
+    mockSettings.hotkey = "CommandOrControl+Shift+Space";
+    mockInvoke.mockResolvedValue({ bindings: [] });
+    await renderWithBareModifier();
+
+    fireModifierTap(editable);
+
+    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+
+    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    await act(async () => {
+      eventMock.shortcutSettingsChangedHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    fireModifierTap(editable);
+
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
   });
 });

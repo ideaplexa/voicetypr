@@ -37,11 +37,15 @@ cpal = "0.16.0"
 hound = "3.5.1"
 symphonia = { version = "0.5", features = ["all"] }
 rubato = "2.0"
+audiopus = "=0.3.0-rc.0"
 audioadapter-buffers = "3.0"
 parking_lot = "0.12"
 futures-util = "0.3.31"
 tokio = { version = "1.46.0", features = ["full"] }
 reqwest = { version = "0.13.4", features = ["json", "stream", "multipart", "blocking", "query"] }
+# Soniox realtime STT (plan 043): wss client. rustls-webpki-roots reuses the tree's
+# existing rustls 0.23 stack (verified via cargo tree) — no second TLS backend.
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 enigo = "0.5.0"
 rdev = "0.5.3"
 sha2 = "0.10.9"

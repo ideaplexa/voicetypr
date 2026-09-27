@@ -19,6 +19,7 @@ interface ModelCardProps {
   isVerifying?: boolean;
   downloadError?: string;
   isSelected?: boolean;
+  speedModeRecommended?: boolean;
   onDownload: (name: string) => void;
   onSelect: (name: string) => void;
   onDelete?: (name: string) => void;
@@ -35,6 +36,7 @@ export const ModelCard = function ModelCard({
   downloadError,
   isVerifying = false,
   isSelected = false,
+  speedModeRecommended = false,
   onDownload,
   onSelect,
   onDelete,
@@ -84,6 +86,12 @@ export const ModelCard = function ModelCard({
               <Badge variant="secondary" className="gap-1 bg-sage-bg text-sage">
                 <Star className="size-3 fill-current" aria-label="Recommended model" />
                 Recommended
+              </Badge>
+            )}
+            {speedModeRecommended && (
+              <Badge variant="outline" className="gap-1 border-sage/40 bg-sage-bg/40 text-sage">
+                <Zap className="size-3" />
+                Speed mode
               </Badge>
             )}
             {isSelected && (

@@ -1,12 +1,20 @@
 use crate::commands::license::check_license_status_internal;
+use crate::commands::settings::{
+    normalize_transcription_mode, TRANSCRIPTION_MODE_LIVE_PREVIEW, TRANSCRIPTION_MODE_REGULAR,
+};
 use crate::emit_to_all;
 use crate::license::LicenseState;
+use crate::parakeet::manager::ParakeetEouModelStatus;
 use crate::parakeet::{messages::ParakeetResponse, ParakeetManager, ParakeetModelStatus};
+use crate::provider_capabilities::ProviderEngine;
+use crate::remote::settings::RemoteSettings;
 use crate::secure_store;
+use crate::transcription::stream::EngineStreamCapabilities;
 use crate::utils::onboarding_logger;
 #[cfg(debug_assertions)]
 use crate::utils::system_monitor;
 use crate::whisper::manager::{ModelInfo, WhisperManager};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -14,8 +22,160 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 use tauri::async_runtime::{Mutex as AsyncMutex, RwLock};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_store::StoreExt;
 
 type ActiveDownloadsState<'a> = State<'a, Arc<StdMutex<HashMap<String, Arc<AtomicBool>>>>>;
+const DEFAULT_EOU_CHUNK_MS: u16 = 320;
+const EOU_MODEL_ID: &str = "parakeet-eou-live-preview";
+// Used again when Parakeet's native EOU activation returns (upstream broken; plans 042/051).
+#[allow(dead_code)]
+const EOU_MODEL_SIZE_BYTES: u64 = 250 * 1024 * 1024;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActiveStreamCapabilities {
+    pub active_engine: String,
+    pub capabilities: EngineStreamCapabilities,
+    pub eou_model_downloaded: bool,
+    pub eou_model_path: Option<String>,
+    pub eou_chunk_ms: u16,
+    pub transcription_mode: String,
+}
+
+fn provider_engine_from_settings(engine: &str) -> ProviderEngine {
+    ProviderEngine::from_engine_str(engine).unwrap_or(ProviderEngine::Whisper)
+}
+
+async fn resolve_active_engine(app: &AppHandle) -> Result<String, String> {
+    if let Some(remote_state) = app.try_state::<AsyncMutex<RemoteSettings>>() {
+        let settings = remote_state.lock().await;
+        if settings.get_active_connection().is_some() {
+            return Ok("remote".to_string());
+        }
+    }
+
+    let settings = crate::commands::settings::get_settings(app.clone()).await?;
+    Ok(settings.current_model_engine)
+}
+
+fn persist_transcription_mode(app: &AppHandle, mode: &str) -> Result<(), String> {
+    let store = app.store("settings").map_err(|error| error.to_string())?;
+    store.set(
+        "transcription_mode",
+        json!(normalize_transcription_mode(Some(mode))),
+    );
+    store.save().map_err(|error| error.to_string())?;
+    let _ = app.emit("settings-changed", json!({ "key": "transcription_mode" }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_active_stream_capabilities(
+    app: AppHandle,
+    parakeet_manager: State<'_, ParakeetManager>,
+) -> Result<ActiveStreamCapabilities, String> {
+    let active_engine = resolve_active_engine(&app).await?;
+    let provider_engine = provider_engine_from_settings(&active_engine);
+    let capabilities = EngineStreamCapabilities::for_engine(provider_engine);
+    let settings = crate::commands::settings::get_settings(app.clone()).await?;
+    let eou_status = if provider_engine == ProviderEngine::Parakeet {
+        parakeet_manager
+            .eou_model_status(&app, DEFAULT_EOU_CHUNK_MS)
+            .await
+            .map_err(|error| error.to_string())?
+    } else {
+        ParakeetEouModelStatus {
+            chunk_ms: DEFAULT_EOU_CHUNK_MS,
+            downloaded: false,
+            path: None,
+        }
+    };
+
+    Ok(ActiveStreamCapabilities {
+        active_engine,
+        capabilities,
+        eou_model_downloaded: eou_status.downloaded,
+        eou_model_path: eou_status.path,
+        eou_chunk_ms: eou_status.chunk_ms,
+        transcription_mode: settings.transcription_mode,
+    })
+}
+
+#[tauri::command]
+pub async fn eou_model_status(
+    app: AppHandle,
+    chunk_ms: Option<u16>,
+    parakeet_manager: State<'_, ParakeetManager>,
+) -> Result<ParakeetEouModelStatus, String> {
+    parakeet_manager
+        .eou_model_status(&app, chunk_ms.unwrap_or(DEFAULT_EOU_CHUNK_MS))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn download_eou_model(
+    app: AppHandle,
+    chunk_ms: Option<u16>,
+    parakeet_manager: State<'_, ParakeetManager>,
+) -> Result<(), String> {
+    let chunk_ms = chunk_ms.unwrap_or(DEFAULT_EOU_CHUNK_MS);
+    let app_for_progress = app.clone();
+    parakeet_manager
+        .download_eou_model(&app, chunk_ms, move |downloaded, total, phase| {
+            let progress = if total == 0 {
+                0.0
+            } else {
+                (downloaded as f64 / total as f64) * 100.0
+            };
+            let _ = emit_to_all(
+                &app_for_progress,
+                "download-progress",
+                json!({
+                    "model": EOU_MODEL_ID,
+                    "engine": "parakeet",
+                    "downloaded": downloaded,
+                    "total": total,
+                    "progress": progress,
+                    "requestId": null,
+                    "phase": phase.as_deref(),
+                }),
+            );
+        })
+        .await?;
+    let _ = emit_to_all(
+        &app,
+        "model-downloaded",
+        json!({
+            "model": EOU_MODEL_ID,
+            "engine": "parakeet",
+            "requestId": null
+        }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn activate_live_preview(
+    app: AppHandle,
+    parakeet_manager: State<'_, ParakeetManager>,
+) -> Result<ActiveStreamCapabilities, String> {
+    persist_transcription_mode(&app, TRANSCRIPTION_MODE_REGULAR)?;
+
+    let active_engine = resolve_active_engine(&app).await?;
+    let provider_engine = provider_engine_from_settings(&active_engine);
+    let capabilities = EngineStreamCapabilities::for_engine(provider_engine);
+    if !capabilities.supports_streaming {
+        return Err("Live preview requires a streaming-capable engine.".to_string());
+    }
+
+    // Every streaming engine now enables instantly: Whisper and Parakeet decode-ahead
+    // (plans 032/051) reuse the already-loaded transcription model, and the cloud WS
+    // engines need only their API key. The Parakeet EOU download+warmup that used to
+    // live here returns when upstream FluidAudio fixes EOU (empty transcripts,
+    // retested broken on 0.15.5 — plans/042 + 051).
+    persist_transcription_mode(&app, TRANSCRIPTION_MODE_LIVE_PREVIEW)?;
+    get_active_stream_capabilities(app, parakeet_manager).await
+}
 
 pub(crate) fn register_active_download(
     active_downloads: &Arc<StdMutex<HashMap<String, Arc<AtomicBool>>>>,
@@ -419,6 +579,7 @@ pub struct UnifiedModelInfo {
     pub requires_setup: bool,
     pub available_models: Option<Vec<crate::cloud_stt::CloudSttModel>>,
     pub underlying_model: Option<String>,
+    pub supported_languages: Option<Vec<String>>,
 }
 
 #[derive(serde::Serialize)]
@@ -750,6 +911,7 @@ fn convert_whisper_model(name: String, info: ModelInfo) -> UnifiedModelInfo {
         kind: "local".to_string(),
         requires_setup: false,
         underlying_model: None,
+        supported_languages: None,
         available_models: None,
     }
 }
@@ -769,6 +931,7 @@ fn convert_parakeet_model(status: ParakeetModelStatus) -> UnifiedModelInfo {
         kind: "local".to_string(),
         requires_setup: false,
         underlying_model: None,
+        supported_languages: Some(status.supported_languages),
         available_models: None,
     }
 }
@@ -800,6 +963,7 @@ fn collect_cloud_models(app: &AppHandle) -> Vec<UnifiedModelInfo> {
                 kind: "cloud".to_string(),
                 requires_setup: !has_key,
                 underlying_model: Some(provider.selected_model(app).id.to_string()),
+                supported_languages: None,
                 available_models: Some(provider.available_models().to_vec()),
             }
         })
@@ -1001,7 +1165,8 @@ pub async fn preload_model(
     {
         let cache_state = app.state::<AsyncMutex<TranscriberCache>>();
         let mut cache = cache_state.lock().await;
-        cache.get_or_create(&model_path)?;
+        let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app);
+        cache.get_or_create(&model_path, speed_mode)?;
     }
 
     log::info!("Model '{}' preloaded successfully", model_name);

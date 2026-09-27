@@ -8,7 +8,6 @@
     "ci:mac": "bash ./scripts/ci-local-macos.sh",
     "ci:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\ci-local-windows.ps1",
     "ci:win:full": "powershell -ExecutionPolicy Bypass -File .\\scripts\\ci-local-windows.ps1 -Full",
-    "sidecar:ensure-ffmpeg": "node scripts/ensure-ffmpeg-sidecar.cjs",
     "sidecar:build": "bash ./scripts/build-parakeet-sidecar.sh",
     "build": "tsc && vite build",
     "preview": "vite preview",
@@ -26,7 +25,7 @@
     "test:backend": "cd src-tauri && cargo test",
     "test:frontend": "vitest run",
     "test:all": "pnpm test:backend && pnpm test:frontend",
-    "benchmark": "node scripts/benchmark-runner.js",
+    "benchmark": "node scripts/perf-harness.mjs",
     "macos:sign": "./scripts/macos-sign-app.sh",
     "typecheck": "tsc --noEmit"
   },

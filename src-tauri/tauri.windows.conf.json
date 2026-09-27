@@ -10,8 +10,6 @@
       "windows/resources/voicetypr.pdb"
     ],
     "externalBin": [
-      "../sidecar/ffmpeg/dist/ffmpeg",
-      "../sidecar/ffmpeg/dist/ffprobe",
       "../sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar"
     ],
     "windows": {

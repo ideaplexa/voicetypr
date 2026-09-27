@@ -48,7 +48,6 @@ claudedocs/
 # Swift build artifacts
 .build/
 
-sidecar/ffmpeg/vendor
 opencodetmp
 
 # Git worktrees for parallel development

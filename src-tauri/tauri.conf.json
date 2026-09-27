@@ -3,9 +3,9 @@
   "productName": "Voicetypr",
   "identifier": "com.ideaplexa.voicetypr",
   "build": {
-    "beforeDevCommand": "pnpm run sidecar:ensure-ffmpeg && pnpm dev",
+    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm run sidecar:ensure-ffmpeg && pnpm build",
+    "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -45,10 +45,7 @@
     "publisher": "Ideaplexa LLC",
     "active": true,
     "targets": ["nsis", "app", "dmg"],
-    "externalBin": [
-      "../sidecar/ffmpeg/dist/ffmpeg",
-      "../sidecar/ffmpeg/dist/ffprobe"
-    ],
+    "externalBin": [],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

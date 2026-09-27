@@ -75,19 +75,19 @@ foreach ($exe in $testExes) {
     }
 }
 
-# Run tests
+# Run the manifest-embedded test exes DIRECTLY. Using `cargo test` here re-links the
+# binaries (build.rs re-embeds its own resource via embed-resource), which DROPS the
+# Common-Controls manifest and reintroduces the STATUS_ENTRYPOINT_NOT_FOUND /
+# TaskDialogIndirect failure. Running the exes directly preserves the embedded manifest.
 Write-Host "Running tests..." -ForegroundColor Cyan
-$testArgs = @("test")
-if ($TestFilter) {
-    $testArgs += $TestFilter
+$failed = 0
+foreach ($exe in $testExes) {
+    Write-Host "  Running $($exe.Name)..." -ForegroundColor Cyan
+    $runArgs = @()
+    if ($TestFilter) { $runArgs += $TestFilter }
+    if ($IgnoredOnly) { $runArgs += "--ignored" }
+    if ($NoCapture) { $runArgs += "--nocapture" }
+    & $exe.FullName @runArgs
+    if ($LASTEXITCODE -ne 0) { $failed = 1 }
 }
-$testArgs += "--"
-if ($IgnoredOnly) {
-    $testArgs += "--ignored"
-}
-if ($NoCapture) {
-    $testArgs += "--nocapture"
-}
-
-& cargo $testArgs
-exit $LASTEXITCODE
+exit $failed

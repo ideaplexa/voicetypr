@@ -148,6 +148,8 @@ pub struct TranscriptionRequest {
     pub timeout: TimeoutPolicy,
     pub cancellation: CancellationToken,
     pub initial_prompt: Option<String>,
+    pub audio_ctx: Option<i32>,
+    pub speed_mode_override: Option<bool>,
 }
 
 impl std::fmt::Debug for CancellationToken {
@@ -210,11 +212,15 @@ mod tests {
             timeout: TimeoutPolicy::Interactive,
             cancellation: CancellationToken::new(),
             initial_prompt: None,
+            audio_ctx: None,
+            speed_mode_override: None,
         };
 
         assert_eq!(request.source, TranscriptionSource::AudioBytes);
         assert_eq!(request.task, TranscriptionTask::Transcribe);
         assert!(!request.cancellation.is_cancelled());
+        assert_eq!(request.audio_ctx, None);
+        assert_eq!(request.speed_mode_override, None);
     }
 
     #[test]
@@ -252,6 +258,8 @@ mod tests {
             timeout: TimeoutPolicy::Interactive,
             cancellation: CancellationToken::new(),
             initial_prompt: Some("custom vocab".to_string()),
+            audio_ctx: None,
+            speed_mode_override: None,
         };
 
         assert_eq!(request.initial_prompt.as_deref(), Some("custom vocab"));

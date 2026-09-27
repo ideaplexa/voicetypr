@@ -13,7 +13,7 @@ mod tests {
         let path = PathBuf::from("/tmp/test_model.bin");
 
         // This should not panic even with non-UTF8 paths
-        let result = Transcriber::new(&path);
+        let result = Transcriber::new(&path, false);
 
         // It should return an error, not panic
         assert!(result.is_err());

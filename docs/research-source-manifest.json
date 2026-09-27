@@ -1,0 +1,86 @@
+{
+  "imported_on": "2026-09-22",
+  "source_worktree": "/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-handy-teardown",
+  "source_branch": "research/handy-teardown",
+  "source_head": "af63ab13ad92cf954f206b7a1f8a4efde1061e6f",
+  "source_status": "15 previously untracked historical research documents; copied without edits",
+  "integration_application_baseline": "58ec176adc34e4e03ac9b3930dade68f13acd43f",
+  "main_baseline": "c47e1465f7ef34ac2ca31b5b5b226981b41b17ab",
+  "files": [
+    {
+      "path": "docs/handy-teardown/00-README.md",
+      "bytes": 12495,
+      "sha256": "2a98127cd379713dc0e84470fea3a09c56dad633128db6a42c9ea29671799994"
+    },
+    {
+      "path": "docs/handy-teardown/01-streaming-engine.md",
+      "bytes": 36871,
+      "sha256": "ee9363d15cf77e5179177fc056033d2b2fd34f0ed777796630c63fcd945d5f26"
+    },
+    {
+      "path": "docs/handy-teardown/02-overlay-ux.md",
+      "bytes": 35300,
+      "sha256": "ae8ce40aa91209bbf3712539a12bb1017dc910b338d0f2c6628bba36bc65293e"
+    },
+    {
+      "path": "docs/handy-teardown/03-onboarding.md",
+      "bytes": 36115,
+      "sha256": "43cf4d5d3b624fe6c661889be2c5e40199c5c6e7148cea6552a5f442a0f39ba3"
+    },
+    {
+      "path": "docs/handy-teardown/04-backend-architecture.md",
+      "bytes": 41194,
+      "sha256": "1477181307a84caaf2437636d1144b471ae465283398cd3525e8b6b3e2975a70"
+    },
+    {
+      "path": "docs/handy-teardown/05-model-and-postprocessing.md",
+      "bytes": 38764,
+      "sha256": "f46ba977af2dcdc1484e9c067631341ecccda3312ff4fa13c85ab272ff4ec8a2"
+    },
+    {
+      "path": "docs/handy-teardown/06-oracle-decision.md",
+      "bytes": 32950,
+      "sha256": "c84abfe65d6ea90156bf434d84e535d018231bb65ba7a4a3b2f2dc3731e31f1d"
+    },
+    {
+      "path": "docs/voicetypr-perf/00-MASTER-ROADMAP.md",
+      "bytes": 16067,
+      "sha256": "c61b0d18abcdbd94a19292a5ed74708453f9f1df727201f5377d363868c1d338"
+    },
+    {
+      "path": "docs/voicetypr-perf/01-hotpath-latency.md",
+      "bytes": 28389,
+      "sha256": "9e9d906908968c4ed2ddcf1e17f8d642f21227ab2c24036fcb293b7ffa3b97ee"
+    },
+    {
+      "path": "docs/voicetypr-perf/02-audio-pipeline.md",
+      "bytes": 30691,
+      "sha256": "02f46f1a970dfe704d3e7f954576fc1a290705aa19bee9d0ec9697b7c0ed3c9d"
+    },
+    {
+      "path": "docs/voicetypr-perf/03-whisper-engine.md",
+      "bytes": 30857,
+      "sha256": "900c2ad8465b3aaf7ae348fe9d3cf7dc82962cbd5d236c75f1daa9ea5507ab76"
+    },
+    {
+      "path": "docs/voicetypr-perf/04-parakeet-engine.md",
+      "bytes": 25975,
+      "sha256": "466e29a8347b140afb672dd1134e0aa3a7eee1580a7c06aa7c1366908671e687"
+    },
+    {
+      "path": "docs/voicetypr-perf/05-cloud-and-shell.md",
+      "bytes": 28121,
+      "sha256": "6134ba45a8fba72384097f74ad3e16d3d7cde84998bcb7c2a719b76cebacf528"
+    },
+    {
+      "path": "docs/voicetypr-perf/07-competitive-sota.md",
+      "bytes": 28514,
+      "sha256": "53f99202cc678a4ed76615197f63e04113b4183475a9022f7450a072f9834012"
+    },
+    {
+      "path": "docs/voicetypr-perf/08-roadmap-review.md",
+      "bytes": 32551,
+      "sha256": "dbb160a6158bc68613c7772ecc709b728050ceb70f16cde58bdcd18cba2697c0"
+    }
+  ]
+}

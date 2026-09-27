@@ -10,8 +10,36 @@ DIST_DIR="$SCRIPT_DIR/dist"
 echo "🔨 Building Swift Parakeet Sidecar..."
 
 # Determine build configuration
-BUILD_CONFIG="${1:-release}"
+BUILD_CONFIG="release"
+CLEAN_BUILD=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --clean)
+            CLEAN_BUILD=true
+            ;;
+        debug|release)
+            BUILD_CONFIG="$arg"
+            ;;
+        *)
+            echo "❌ Unknown argument: $arg"
+            echo "Usage: $0 [debug|release] [--clean]"
+            exit 1
+            ;;
+    esac
+done
+
 echo "📦 Build configuration: $BUILD_CONFIG"
+
+# Keep SwiftPM build products by default so local builds are incremental.
+if [ "$CLEAN_BUILD" = true ]; then
+    echo "🧹 Cleaning SwiftPM build products..."
+    rm -rf "$SCRIPT_DIR/.build"
+fi
+
+# Keep Swift scratch space on this volume instead of the system disk.
+export TMPDIR="$SCRIPT_DIR/.tmp"
+mkdir -p "$TMPDIR"
 
 # Build Swift package
 echo "🏗️  Compiling Swift package..."
@@ -47,11 +75,10 @@ esac
 echo "🖥️  Target triple: $TARGET_TRIPLE"
 
 # Copy binary with correct name for Tauri
-if [ "$BUILD_CONFIG" = "release" ]; then
-    BUILD_PATH=".build/release/ParakeetSidecar"
-else
-    BUILD_PATH=".build/debug/ParakeetSidecar"
-fi
+# Ask the active SwiftPM build system where it wrote this configuration.
+# Swift Build can leave older .build/debug or .build/release products in place.
+BIN_DIR=$(swift build -c "$BUILD_CONFIG" --show-bin-path)
+BUILD_PATH="$BIN_DIR/ParakeetSidecar"
 
 if [ ! -f "$BUILD_PATH" ]; then
     echo "❌ Error: Binary not found at $BUILD_PATH"

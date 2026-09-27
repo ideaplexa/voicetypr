@@ -10,11 +10,9 @@ use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-use super::transcriber::WhisperTranscriptionOutput;
+use super::transcriber::{WhisperTranscriptionOutput, WhisperTranscriptionTimings};
 use crate::transcription::TranscriptionSegment;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt as _;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -110,6 +108,7 @@ enum SidecarResponse {
     Health {
         id: u64,
         ok: bool,
+        #[allow(dead_code)]
         backend: String,
     },
     Probe {
@@ -131,6 +130,7 @@ enum SidecarResponse {
     Shutdown {
         id: u64,
         ok: bool,
+        #[allow(dead_code)]
         backend: String,
     },
     Error {
@@ -482,6 +482,12 @@ impl GpuSidecarClient {
                     segments: sidecar_segments_to_transcription_segments(segments),
                     audio_duration_ms,
                     processing_duration_ms,
+                    timings: WhisperTranscriptionTimings {
+                        preprocessing_ms: 0,
+                        inference_ms: processing_duration_ms,
+                        extraction_ms: 0,
+                        total_ms: processing_duration_ms,
+                    },
                 })
             }
             Ok(SidecarResponse::Error { code, message, .. }) => {

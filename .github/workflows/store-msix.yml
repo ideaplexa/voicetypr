@@ -123,12 +123,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Cache verified FFmpeg sidecars
-        uses: actions/cache@v5
-        with:
-          path: sidecar/ffmpeg/dist
-          key: ffmpeg-sidecars-${{ runner.os }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

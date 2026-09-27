@@ -78,7 +78,8 @@ export function ModelsTab(sourceFilterProps: SourceFilterProps) {
       onRepair={repairModel}
       onSelect={async (modelName) => {
         if (!settings) return;
-        const engine = sortedModels.find(([name]) => name === modelName)?.[1]?.engine ?? "whisper";
+        const selectedModel = sortedModels.find(([name]) => name === modelName)?.[1];
+        const engine = selectedModel?.engine ?? "whisper";
         const previousSpeechLanguage = settings.speech_language;
         const parakeetSupportedLanguages = new Set([
           "bg",
@@ -107,12 +108,15 @@ export function ModelsTab(sourceFilterProps: SourceFilterProps) {
           "sv",
           "uk",
         ]);
+        const supportedLanguages = selectedModel?.supported_languages;
         const requiresSpeechLanguageReset =
           (engine === "whisper" && /\.en$/i.test(modelName) && previousSpeechLanguage !== "en") ||
           (engine === "parakeet" &&
-            ((modelName.includes("-v2") && previousSpeechLanguage !== "en") ||
-              (!modelName.includes("-v2") &&
-                !parakeetSupportedLanguages.has(previousSpeechLanguage))));
+            (supportedLanguages
+              ? !supportedLanguages.includes(previousSpeechLanguage)
+              : (modelName.includes("-v2") && previousSpeechLanguage !== "en") ||
+                (!modelName.includes("-v2") &&
+                  !parakeetSupportedLanguages.has(previousSpeechLanguage))));
 
         await saveSettings({
           current_model: modelName,

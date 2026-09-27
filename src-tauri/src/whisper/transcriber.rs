@@ -39,6 +39,15 @@ pub struct WhisperTranscriptionOutput {
     pub segments: Vec<crate::transcription::TranscriptionSegment>,
     pub audio_duration_ms: u64,
     pub processing_duration_ms: u64,
+    pub timings: WhisperTranscriptionTimings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WhisperTranscriptionTimings {
+    pub preprocessing_ms: u64,
+    pub inference_ms: u64,
+    pub extraction_ms: u64,
+    pub total_ms: u64,
 }
 
 impl Transcriber {
@@ -47,7 +56,7 @@ impl Transcriber {
         self.backend
     }
 
-    pub fn new(model_path: &Path) -> Result<Self, String> {
+    pub fn new(model_path: &Path, speed_mode: bool) -> Result<Self, String> {
         let init_start = Instant::now();
         let model_path_str = model_path
             .to_str()
@@ -62,6 +71,9 @@ impl Transcriber {
                 ("platform", std::env::consts::OS),
             ],
         );
+
+        #[cfg(not(target_os = "macos"))]
+        let _ = speed_mode;
 
         // Log model file info
         if let Ok(metadata) = std::fs::metadata(model_path) {
@@ -99,6 +111,10 @@ impl Transcriber {
                 ctx_params.use_gpu(false);
             } else {
                 ctx_params.use_gpu(true);
+                if speed_mode {
+                    ctx_params.flash_attn(true);
+                    log::info!("[PERFORMANCE] Whisper speed mode enabled (Metal flash attention)");
+                }
             }
 
             let metal_start = Instant::now();
@@ -263,6 +279,51 @@ impl Transcriber {
         })
     }
 
+    /// Decode a 16 kHz mono f32 window for LIVE PREVIEW (plan 032 decode-ahead).
+    ///
+    /// Uses fast greedy sampling (preview prioritizes latency over the batch path's
+    /// beam-search accuracy) and no cross-window context. Returns each segment's text
+    /// plus its END timestamp in centiseconds (window-relative) — exactly what
+    /// `decode_ahead::DecodeAheadBuffer::ingest` consumes. This runs on the preview
+    /// decode thread against a state created fresh each call, so it never disturbs the
+    /// authoritative batch decode at stop.
+    pub(crate) fn decode_window(
+        &self,
+        samples_16k: &[f32],
+        language: Option<&str>,
+    ) -> Result<Vec<crate::whisper::decode_ahead::DecodedSegment>, String> {
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_no_context(true);
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        // English default everywhere; auto-detect is intentionally not offered.
+        let final_lang = match language {
+            Some("auto") | None => "en",
+            Some(lang) => super::languages::validate_language(Some(lang)),
+        };
+        params.set_language(Some(final_lang));
+
+        let mut state = self
+            .context
+            .create_state()
+            .map_err(|e| format!("preview state create failed: {e}"))?;
+        state
+            .full(params, samples_16k)
+            .map_err(|e| format!("preview decode failed: {e}"))?;
+
+        let mut segments = Vec::new();
+        for segment in state.as_iter() {
+            segments.push(crate::whisper::decode_ahead::DecodedSegment {
+                text: segment.to_string(),
+                end_cs: segment.end_timestamp(),
+            });
+        }
+        Ok(segments)
+    }
+
     #[allow(dead_code)]
     pub fn transcribe_with_translation(
         &self,
@@ -304,6 +365,7 @@ impl Transcriber {
             language,
             translate,
             None,
+            None,
             should_cancel,
         )
     }
@@ -314,6 +376,7 @@ impl Transcriber {
         language: Option<&str>,
         translate: bool,
         initial_prompt: Option<&str>,
+        audio_ctx: Option<i32>,
         should_cancel: F,
     ) -> Result<WhisperTranscriptionOutput, String>
     where
@@ -506,6 +569,16 @@ impl Transcriber {
             resampled_audio.len() as f32 / 16_000_f32
         );
 
+        let samples_count = resampled_audio.len();
+        let duration_seconds = samples_count as f32 / 16_000_f32;
+
+        // Check minimum duration (0.5 seconds)
+        if duration_seconds < 0.5 {
+            let error = "Recording too short".to_string();
+            log::warn!("[TRANSCRIPTION_DEBUG] {}", error);
+            return Err(error);
+        }
+
         let mut params = if self.cpu_profile {
             log::info!("[PERFORMANCE] Using CPU fast transcription profile");
             FullParams::new(SamplingStrategy::Greedy { best_of: 1 })
@@ -601,6 +674,29 @@ impl Transcriber {
 
         params.set_initial_prompt(initial_prompt.unwrap_or(""));
 
+        let effective_audio_ctx = audio_ctx.or_else(|| adaptive_audio_ctx(samples_count));
+        match (audio_ctx, effective_audio_ctx) {
+            (Some(custom_ctx), _) => {
+                log::info!(
+                    "[PERFORMANCE] Using custom Whisper audio_ctx={}",
+                    custom_ctx
+                );
+            }
+            (None, Some(adaptive_ctx)) => {
+                log::info!(
+                    "[PERFORMANCE] Using adaptive Whisper audio_ctx={} for {:.2}s audio",
+                    adaptive_ctx,
+                    duration_seconds
+                );
+            }
+            (None, None) => {
+                log::info!("[PERFORMANCE] Using full Whisper audio context");
+            }
+        }
+        if let Some(effective_audio_ctx) = effective_audio_ctx {
+            params.set_audio_ctx(effective_audio_ctx);
+        }
+
         params.set_temperature(if self.cpu_profile { 0.0 } else { 0.2 });
         params.set_temperature_inc(0.2); // Increase by 0.2 on fallback (default)
         params.set_max_initial_ts(1.0); // Limit initial timestamp search
@@ -618,16 +714,6 @@ impl Transcriber {
             error
         })?;
 
-        let samples_count = resampled_audio.len();
-        let duration_seconds = samples_count as f32 / 16_000_f32;
-
-        // Check minimum duration (0.5 seconds)
-        if duration_seconds < 0.5 {
-            let error = "Recording too short".to_string();
-            log::warn!("[TRANSCRIPTION_DEBUG] {}", error);
-            return Err(error);
-        }
-
         let inference_start = Instant::now();
         log_start("WHISPER_INFERENCE");
         log_with_context(
@@ -644,14 +730,15 @@ impl Transcriber {
             ],
         );
 
+        let inference_ms;
         match full_with_cancel(&mut state, params, &resampled_audio, should_cancel.clone()) {
             Ok(_) => {
                 let inference_time = inference_start.elapsed();
-                let inference_ms = inference_time.as_millis();
+                inference_ms = inference_time.as_millis() as u64;
 
                 log_performance(
                     "WHISPER_INFERENCE",
-                    inference_ms as u64,
+                    inference_ms,
                     Some(&format!(
                         "audio_duration={:.2}s, samples={}",
                         duration_seconds, samples_count
@@ -798,7 +885,39 @@ impl Transcriber {
             segments,
             audio_duration_ms: (duration_seconds * 1000.0) as u64,
             processing_duration_ms: total_time.as_millis() as u64,
+            timings: WhisperTranscriptionTimings {
+                preprocessing_ms: preprocessing_time,
+                inference_ms,
+                extraction_ms: extraction_time,
+                total_ms: total_time.as_millis() as u64,
+            },
         })
+    }
+}
+
+fn adaptive_audio_ctx(samples: usize) -> Option<i32> {
+    const SAMPLE_RATE: usize = 16_000;
+    const POSITIONS_PER_SECOND: usize = 50;
+    const TAIL_PAD_POSITIONS: usize = 50;
+    const CONTEXT_MULTIPLE: usize = 64;
+    // Floor raised 256 -> 512 after the WER gate caught a repetition hallucination
+    // at ctx=256 on short clips (e.g. de-2s duplicated the whole sentence); ctx>=384
+    // is clean, 512 gives margin. Still ~2.5-4x faster than the full 1500 window.
+    const MIN_CONTEXT: usize = 512;
+    const FULL_CONTEXT_THRESHOLD: usize = 1_500;
+
+    let positions = samples
+        .saturating_mul(POSITIONS_PER_SECOND)
+        .saturating_add(SAMPLE_RATE - 1)
+        / SAMPLE_RATE;
+    let needed = positions.saturating_add(TAIL_PAD_POSITIONS);
+    let rounded = needed.saturating_add(CONTEXT_MULTIPLE - 1) / CONTEXT_MULTIPLE * CONTEXT_MULTIPLE;
+    let ctx = rounded.max(MIN_CONTEXT);
+
+    if ctx >= FULL_CONTEXT_THRESHOLD {
+        None
+    } else {
+        Some(ctx as i32)
     }
 }
 
@@ -873,6 +992,31 @@ fn convert_multichannel_to_mono(audio: &[f32], channels: usize) -> Result<Vec<f3
     );
 
     Ok(mono_audio)
+}
+
+#[cfg(test)]
+mod adaptive_audio_ctx_tests {
+    use super::adaptive_audio_ctx;
+
+    const SAMPLE_RATE: usize = 16_000;
+
+    #[test]
+    fn adaptive_audio_ctx_uses_floor_for_very_short_audio() {
+        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE), Some(512));
+        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 2), Some(512));
+    }
+
+    #[test]
+    fn adaptive_audio_ctx_rounds_up_with_tail_pad() {
+        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 5), Some(512)); // floored
+        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 27), Some(1408));
+    }
+
+    #[test]
+    fn adaptive_audio_ctx_keeps_full_context_for_long_audio() {
+        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 30), None);
+        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 60), None);
+    }
 }
 
 #[cfg(test)]
@@ -1013,7 +1157,7 @@ mod tests {
         // file exercises real initialization failure without GPU/model assets.
         ATTEMPT_BACKEND
             .scope(std::cell::Cell::new(None), async {
-                assert!(Transcriber::new(&missing_model).is_err());
+                assert!(Transcriber::new(&missing_model, false).is_err());
                 // On Apple Silicon the Metal attempt fails first, then CPU;
                 // other platforms attempt CPU directly.
                 assert_eq!(attempt_backend(), Some("cpu"));
@@ -1030,7 +1174,7 @@ mod tests {
             .scope(std::cell::Cell::new(Some("sidecar")), async {
                 tokio::spawn(async move {
                     assert_eq!(attempt_backend(), None);
-                    assert!(Transcriber::new(&missing_model).is_err());
+                    assert!(Transcriber::new(&missing_model, false).is_err());
                     assert_eq!(attempt_backend(), None);
                 })
                 .await

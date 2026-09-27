@@ -27,6 +27,11 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
+Current audio/streaming continuation: [Plan 069](069-handy-informed-audio-streaming-recovery.md)
+and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcile
+the historical research and plan statuses against the integration application
+baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
+
 Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
 
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
@@ -48,6 +53,12 @@ Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified 
 | 026  | Wave 5 (F5) — actionable errors + feedback | P2 | S | 021 | DONE (code) — NEEDS-SMOKE 026-S1 |
 | 027  | Formatting & recording-pill UI/UX pass (naming, guidance, pill state legibility, app-category UI) | P2 | M | 016, 017 | TODO — captured 2026-06-19; backlog for post-2.0.0-smoke UAUX phase (notes only, not yet claimed) |
 | 028  | Transcription latency + streaming ("fast af" dictation) — investigation + phased design | P2 | XL | 015/020 smoke | TODO — drafted 2026-06-20; design/index only, not claimed. Phase 0 (insert-path plumbing tail + ffmpeg normalize) is S/LOW-risk and shippable alone; Phases 1–5 (decode-ahead, Parakeet/Whisper/cloud streaming, partial UX) graduate to 029+ |
+| 043  | Soniox WS streaming + final-result authority | P1 | L | 037–042 substrate + 046b–048b (integration) | CODE PRESENT / NEEDS-VALIDATION — Soniox WS preview and authoritative final/fallback implemented through `cc5421a9`; Deepgram counterpart in `b2fcd18f`. Fresh validation, live-provider smoke, and main reconciliation remain pending; see `069-handy-informed-audio-streaming-recovery.md` |
+| 046b | Wave 0 correctness (too-short swallow, error misclass, hotkey overwrite, upload timeout) | P0 | M | — | DONE — `8b016ab`, merged to integrate |
+| 047b | Wave 1 dispatch surface (#18 dead bytes cmd, #21 engine layer out of audio.rs) | P1 | M | 046b | DONE — `7974cd0`, merged to integrate |
+| 048b | Wave 3a uploads through executor (#16-full) | P1 | L | 047b | DONE — `7514e26`, merged to integrate |
+| 050  | Structural refactor: god-file split + engine unification + settings hardening | P2 | XL | feat/049 merge; independent of 043 | TODO — authored 2026-07-06 from arch-roadmap remainder + 2026-07-06 deep-review; own branch `refactor/050-structure`; phases A(safe extractions)→B(engine unification)→C(settings)→D(monsters); planning only, awaiting owner greenlight |
+| 069  | Handy research consolidation + audio/streaming recovery map | P1 | M | Existing integration branch | DONE (research consolidation) — 2026-09-22; 15 sources preserved and mapped to code; main reconciliation and runtime recovery remain TODO. See `069-handy-informed-audio-streaming-recovery.md` |
 | 031  | GlitchTip observability — errors, symbols, curated logs, sampled traces | P0 | M | — | IN PROGRESS — claimed Main 2026-07-14; user approved stages 1–4 for next Beta |
 | 032  | Product analytics + automatic formatting corrections | P1 | XL | 031 core | TODO — backend approved 2026-07-16: PostHog Cloud EU + first-party Cloudflare Worker/R2; wait for unfinished 031 source changes |
 | 034  | Compact report problem page | P1 | S | 033 | DONE — reviewer pass; contact fields + system configuration preview; local macOS UI smoke and frontend checks passed 2026-07-23 |

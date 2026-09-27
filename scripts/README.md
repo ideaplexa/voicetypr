@@ -104,15 +104,7 @@ The release script and GitHub workflow verify downloaded VC++ and Vulkan Runtime
 **1. Vulkan SDK**
 Download from https://vulkan.lunarg.com/sdk/home and ensure `VULKAN_SDK` is set.
 
-**2. FFmpeg Sidecar Binaries**
-Place the following files in `sidecar/ffmpeg/dist/`:
-- `ffmpeg.exe` and `ffprobe.exe` (base binaries)
-- `ffmpeg-x86_64-pc-windows-msvc.exe` and `ffprobe-x86_64-pc-windows-msvc.exe`
-- `ffmpeg.exe-x86_64-pc-windows-msvc.exe` and `ffprobe.exe-x86_64-pc-windows-msvc.exe`
-
-These are not tracked in git due to their size (~100MB each).
-
-**3. Windows MAX_PATH Limitation**
+**2. Windows MAX_PATH Limitation**
 Windows has a 260-character path limit. When using git worktrees or long paths, set a short target directory for both the sidecar and main app builds:
 ```powershell
 $env:CARGO_TARGET_DIR = "C:\tmp\vt-target"

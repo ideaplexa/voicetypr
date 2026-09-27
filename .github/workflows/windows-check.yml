@@ -1,0 +1,78 @@
+name: Windows Checks (fast)
+
+# Fast, code-only Windows verification: clippy (-D warnings) + the full Rust test
+# suite on a windows-2022 runner, WITHOUT the slow/flaky bits of the release build
+# (Vulkan SDK install, Whisper-Vulkan sidecar compile, VulkanRT download, Tauri
+# bundle). Those are only needed to produce the installer, not to prove the code is
+# correct on Windows. Mirrors the known-good macOS `build-macos` check steps.
+#
+# Run it on-demand from the Actions tab ("Run workflow") for high-confidence Windows
+# feedback in ~5-8 min instead of the ~25 min full build. Also runs automatically on
+# PRs so Windows clippy/test regressions surface fast.
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: windows-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-check:
+    runs-on: windows-2022
+    env:
+      # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep deps.
+      CARGO_TARGET_DIR: D:\cargo-target
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.19.0'
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.13.1 --activate
+          pnpm --version
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri's Windows build.rs validates that every externalBin + resource path in
+      # tauri.windows.conf.json EXISTS — even for clippy/cargo test. We check code, not
+      # build an installer, so drop in empty placeholders instead of the slow/flaky
+      # Vulkan SDK + sidecar compile + runtime-installer downloads.
+      - name: Stub Windows bundle resources (existence-only)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sidecar/whisper-vulkan/dist | Out-Null
+          New-Item -ItemType File -Force -Path sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe | Out-Null
+          New-Item -ItemType Directory -Force -Path src-tauri/windows/resources | Out-Null
+          foreach ($f in @('vc_redist.x64.exe','VulkanRT-Installer.exe','voicetypr.pdb')) {
+            New-Item -ItemType File -Force -Path "src-tauri/windows/resources/$f" | Out-Null
+          }
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Clippy (-D warnings, all targets)
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
+
+      # Match the repo's Windows test contract: run-tests.ps1 builds tests
+      # (--no-run) then runs the exes with a Common-Controls manifest, working
+      # around the TaskDialogIndirect entry-point error (tauri-apps/tauri#13419).
+      # Plain `cargo test` fails on Windows, so it must NOT be used here.
+      - name: Rust tests
+        shell: pwsh
+        working-directory: src-tauri
+        run: ./run-tests.ps1

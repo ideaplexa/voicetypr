@@ -122,16 +122,6 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
-        uses: actions/cache@v5
-        with:
-          path: |
-            sidecar/ffmpeg/dist/ffmpeg
-            sidecar/ffmpeg/dist/ffprobe
-            sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
-            sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
-          key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -143,7 +133,7 @@ jobs:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.91.1
         with:
           targets: aarch64-apple-darwin
 
@@ -180,9 +170,6 @@ jobs:
           cp .build/arm64-apple-macosx/release/ParakeetSidecar dist/parakeet-sidecar-aarch64-apple-darwin
           chmod +x dist/parakeet-sidecar-aarch64-apple-darwin
           ln -sfn parakeet-sidecar-aarch64-apple-darwin dist/parakeet-sidecar
-
-      - name: Ensure FFmpeg sidecar
-        run: pnpm run sidecar:ensure-ffmpeg
 
       - name: Build Tauri app
         env:
@@ -331,16 +318,6 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
-        uses: actions/cache@v5
-        with:
-          path: |
-            sidecar/ffmpeg/dist/ffmpeg
-            sidecar/ffmpeg/dist/ffprobe
-            sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
-            sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
-          key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -352,7 +329,7 @@ jobs:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.91.1
         with:
           targets: x86_64-apple-darwin
 
@@ -380,9 +357,6 @@ jobs:
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
           rm certificate.p12
-
-      - name: Ensure FFmpeg sidecar
-        run: pnpm run sidecar:ensure-ffmpeg
 
       - name: Build Tauri app
         env:
@@ -509,7 +483,7 @@ jobs:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.91.1
         with:
           targets: x86_64-pc-windows-msvc
 
@@ -534,9 +508,6 @@ jobs:
 
       - name: Apply release version
         run: node .github/scripts/release-tool.mjs apply-version "${{ needs.prepare.outputs.version }}"
-
-      - name: Ensure FFmpeg sidecar
-        run: pnpm run sidecar:ensure-ffmpeg
 
       - name: Build whisper-vulkan sidecar (x86_64 only)
         shell: pwsh

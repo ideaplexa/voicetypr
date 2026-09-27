@@ -12,6 +12,7 @@ const {
   eventListeners,
   modelManagement,
   settingsState,
+  settingsView,
 } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   updateSettingsMock: vi.fn(),
@@ -26,6 +27,7 @@ const {
     speech_language: "en",
     onboarding_completed: false,
   },
+  settingsView: { current: null as null | Record<string, unknown> },
   modelManagement: {
     models: {
       "base.en": {
@@ -57,7 +59,7 @@ const {
 
 vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({
-    settings: settingsState,
+    settings: settingsView.current,
     updateSettings: updateSettingsMock,
   }),
 }));
@@ -116,6 +118,7 @@ beforeEach(() => {
     speech_language: "en",
     onboarding_completed: false,
   });
+  settingsView.current = settingsState;
   delete (settingsState as Record<string, unknown>).transcription_acceleration;
   modelManagement.models = {
     "base.en": {
@@ -241,6 +244,93 @@ describe("OnboardingDesktop", () => {
     });
     expect(invokeMock).toHaveBeenCalledWith("update_shortcut_settings", {
       settings: { bindings: [userBinding] },
+    });
+  });
+
+  it("resyncs the hotkey when settings arrive after mount", async () => {
+    const user = userEvent.setup();
+    settingsView.current = null;
+    const view = renderOnboarding();
+
+    settingsState.hotkey = "CommandOrControl+Alt+M";
+    settingsView.current = settingsState;
+    view.rerender(
+      <OnboardingDesktop
+        onCompletionStart={onCompletionStartMock}
+        onCompletionError={onCompletionErrorMock}
+        onComplete={onCompleteMock}
+        modelManagement={modelManagement as never}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /start setup/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /save hotkey/i }));
+
+    expect(invokeMock).toHaveBeenCalledWith("set_global_shortcut", {
+      shortcut: "CommandOrControl+Alt+M",
+    });
+  });
+
+  it("keeps a user-edited hotkey when settings arrive later", async () => {
+    const user = userEvent.setup();
+    settingsView.current = null;
+    const server = {
+      id: "remote-1",
+      name: "Studio Mac",
+      host: "10.0.0.12",
+      port: 47842,
+      created_at: 1,
+      model: "base.en",
+      status: "Online",
+    };
+    invokeMock.mockImplementation((command: string) => {
+      switch (command) {
+        case "discover_remote_servers":
+          return Promise.resolve([]);
+        case "list_remote_servers":
+          return Promise.resolve([server]);
+        case "get_active_remote_server":
+          return Promise.resolve(null);
+        case "check_remote_server_status":
+          return Promise.resolve(server);
+        case "set_active_remote_server":
+        case "set_global_shortcut":
+          return Promise.resolve(true);
+        default:
+          return Promise.resolve(null);
+      }
+    });
+    const view = renderOnboarding();
+
+    await user.click(screen.getByRole("button", { name: /start setup/i }));
+    await user.click(screen.getByRole("button", { name: /use another Voicetypr/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(await screen.findByRole("button", { name: /use this server/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await user.click(screen.getByTitle("Change hotkey"));
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", metaKey: true });
+    fireEvent.keyUp(window, { key: "k", code: "KeyK", metaKey: true });
+    await user.click(screen.getByTitle("Save hotkey"));
+
+    settingsState.hotkey = "CommandOrControl+Shift+P";
+    settingsView.current = settingsState;
+    view.rerender(
+      <OnboardingDesktop
+        onCompletionStart={onCompletionStartMock}
+        onCompletionError={onCompletionErrorMock}
+        onComplete={onCompleteMock}
+        modelManagement={modelManagement as never}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /save hotkey/i }));
+    expect(invokeMock).toHaveBeenCalledWith("set_global_shortcut", {
+      shortcut: "CommandOrControl+K",
     });
   });
 

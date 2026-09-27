@@ -5,8 +5,8 @@ use crate::utils::logger::*;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-pub(crate) const PILL_WIDTH: f64 = 240.0;
-pub(crate) const PILL_HEIGHT: f64 = 48.0;
+pub(crate) const PILL_WIDTH: f64 = 260.0;
+pub(crate) const PILL_HEIGHT: f64 = 64.0;
 pub(crate) const TOAST_WIDTH: f64 = 400.0;
 pub(crate) const TOAST_HEIGHT: f64 = 80.0;
 pub(crate) const FLOATING_WINDOW_GAP: f64 = 8.0;
@@ -326,6 +326,7 @@ impl WindowManager {
         .shadow(false) // Disabled to fix Windows transparency issue
         .skip_taskbar(true)
         .inner_size(PILL_WIDTH, PILL_HEIGHT)
+        .accept_first_mouse(true)
         .position(position_x, position_y)
         .visible(true) // Start visible
         .focused(false); // Don't steal focus
@@ -359,14 +360,13 @@ impl WindowManager {
         // Apply Windows-specific window flags to prevent focus stealing
         #[cfg(target_os = "windows")]
         {
-            use std::ffi::c_void;
             use windows::Win32::Foundation::HWND;
             use windows::Win32::UI::WindowsAndMessaging::*;
 
             if let Ok(hwnd) = pill_window.hwnd() {
                 unsafe {
                     // windows crate 0.62+: HWND wraps *mut c_void instead of isize
-                    let hwnd = HWND(hwnd.0 as *mut c_void);
+                    let hwnd = HWND(hwnd.0);
 
                     // Validate HWND before using it
                     if IsWindow(Some(hwnd)).as_bool() {
@@ -861,9 +861,9 @@ mod tests {
         DesktopArea::new(0.0, 0.0, 1920.0, 1080.0)
     }
 
-    // Screen: 1920x1080, pill: 240x48, edge_offset: 10
-    // x_left = 10, x_center = 840, x_right = 1670
-    // y_top = 10, y_bottom = 1022
+    // Screen: 1920x1080, pill: 260x64, edge_offset: 10
+    // x_left = 10, x_center = 830, x_right = 1650
+    // y_top = 10, y_bottom = 1006
 
     #[test]
     fn calculate_pill_position_top_left() {
@@ -875,14 +875,14 @@ mod tests {
     #[test]
     fn calculate_pill_position_top_center() {
         let (x, y) = calculate_pill_position("top-center", full_screen(), 10.0);
-        assert_eq!(x, 840.0);
+        assert_eq!(x, 830.0);
         assert_eq!(y, 10.0);
     }
 
     #[test]
     fn calculate_pill_position_top_right() {
         let (x, y) = calculate_pill_position("top-right", full_screen(), 10.0);
-        assert_eq!(x, 1670.0);
+        assert_eq!(x, 1650.0);
         assert_eq!(y, 10.0);
     }
 
@@ -890,28 +890,28 @@ mod tests {
     fn calculate_pill_position_bottom_left() {
         let (x, y) = calculate_pill_position("bottom-left", full_screen(), 10.0);
         assert_eq!(x, 10.0);
-        assert_eq!(y, 1022.0);
+        assert_eq!(y, 1006.0);
     }
 
     #[test]
     fn calculate_pill_position_bottom_center() {
         let (x, y) = calculate_pill_position("bottom-center", full_screen(), 10.0);
-        assert_eq!(x, 840.0);
-        assert_eq!(y, 1022.0);
+        assert_eq!(x, 830.0);
+        assert_eq!(y, 1006.0);
     }
 
     #[test]
     fn calculate_pill_position_bottom_right() {
         let (x, y) = calculate_pill_position("bottom-right", full_screen(), 10.0);
-        assert_eq!(x, 1670.0);
-        assert_eq!(y, 1022.0);
+        assert_eq!(x, 1650.0);
+        assert_eq!(y, 1006.0);
     }
 
     #[test]
     fn calculate_pill_position_defaults_to_bottom_center() {
         let (x, y) = calculate_pill_position("unknown", full_screen(), 10.0);
-        assert_eq!(x, 840.0);
-        assert_eq!(y, 1022.0);
+        assert_eq!(x, 830.0);
+        assert_eq!(y, 1006.0);
     }
 
     #[test]
@@ -919,22 +919,22 @@ mod tests {
         // Test with 50px offset
         let (x, y) = calculate_pill_position("bottom-left", full_screen(), 50.0);
         assert_eq!(x, 50.0);
-        assert_eq!(y, 982.0); // 1080 - 48 - 50
+        assert_eq!(y, 966.0); // 1080 - 64 - 50
     }
 
     #[test]
     fn toast_is_centered_and_below_top_pill() {
         assert_eq!(
             calculate_toast_position("top-left", 10.0, 10.0),
-            (-70.0, 66.0)
+            (-60.0, 82.0)
         );
     }
 
     #[test]
     fn toast_is_centered_and_above_bottom_pill() {
         assert_eq!(
-            calculate_toast_position("bottom-right", 1670.0, 1022.0),
-            (1590.0, 934.0)
+            calculate_toast_position("bottom-right", 1650.0, 1006.0),
+            (1580.0, 918.0)
         );
     }
 
@@ -944,7 +944,7 @@ mod tests {
         let visible_area = DesktopArea::new(0.0, 25.0, 1024.0, 696.0);
         assert_eq!(
             calculate_pill_position("bottom-center", visible_area, 10.0),
-            (392.0, 663.0)
+            (382.0, 647.0)
         );
     }
 
@@ -953,7 +953,7 @@ mod tests {
         let visible_area = DesktopArea::new(-1440.0, 20.0, 1440.0, 840.0);
         assert_eq!(
             calculate_pill_position("bottom-right", visible_area, 50.0),
-            (-290.0, 762.0)
+            (-310.0, 746.0)
         );
     }
 
@@ -961,15 +961,15 @@ mod tests {
     fn toast_is_constrained_to_visible_area_edges() {
         let visible_area = DesktopArea::new(0.0, 25.0, 1024.0, 696.0);
         let left = calculate_toast_position("top-left", 10.0, 35.0);
-        let right = calculate_toast_position("bottom-right", 774.0, 663.0);
+        let right = calculate_toast_position("bottom-right", 754.0, 647.0);
 
         assert_eq!(
             constrain_window_position(left, (TOAST_WIDTH, TOAST_HEIGHT), visible_area),
-            (0.0, 91.0)
+            (0.0, 107.0)
         );
         assert_eq!(
             constrain_window_position(right, (TOAST_WIDTH, TOAST_HEIGHT), visible_area),
-            (624.0, 575.0)
+            (624.0, 559.0)
         );
     }
 

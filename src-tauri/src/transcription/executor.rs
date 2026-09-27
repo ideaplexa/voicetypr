@@ -22,19 +22,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempPath};
 
-const LOCAL_ENGINE_TIMEOUT_GRACE: Duration = Duration::from_secs(2);
+pub(crate) const LOCAL_ENGINE_TIMEOUT_GRACE: Duration = Duration::from_secs(2);
 
-use crate::commands::audio::{
-    compile_parakeet_custom_vocabulary_for_transcription,
-    parakeet_segments_to_transcription_segments, resolve_engine_for_model,
-    transcribe_whisper_with_acceleration, transcription_watchdog_budget, ActiveEngineSelection,
-};
 use crate::parakeet::manager::{ParakeetManager, ParakeetTranscriptionOptions};
 use crate::parakeet::messages::ParakeetResponse;
 use crate::provider_capabilities::ProviderEngine;
 use crate::secure_store::secure_get;
+use crate::transcription::engines::{
+    parakeet_segments_to_transcription_segments, resolve_engine_for_model,
+    transcribe_whisper_with_acceleration, transcription_watchdog_budget, ActiveEngineSelection,
+};
 use crate::transcription::error::{
     from_local_engine_string, from_stt_error, TranscriptionError, TranscriptionErrorCode,
 };
@@ -151,7 +150,7 @@ fn deferred_executor_route_error(
 /// so the caller never receives mislabeled output. An engine that genuinely
 /// supports the task passes through unchanged (none of the cloud engines do
 /// today).
-fn ensure_cloud_task_supported(
+pub(crate) fn ensure_cloud_task_supported(
     provider: crate::cloud_stt::CloudProvider,
     translate: bool,
     source: TranscriptionSource,
@@ -194,16 +193,29 @@ async fn route_once(
                 language,
                 translate,
                 request.initial_prompt.as_deref(),
+                request.audio_ctx,
+                request.speed_mode_override,
                 move || token.is_cancelled(),
             )
             .await
             .map_err(|e| from_local_engine_string(&e, source))?;
 
-            Ok(TranscriptionResult::new(job, output.raw_text)
+            let result = TranscriptionResult::new(job, output.raw_text)
                 .with_transcript_language(output.transcript_language)
                 .with_segments(output.segments)
                 .with_audio_duration_ms(Some(output.audio_duration_ms))
-                .with_processing_duration_ms(Some(output.processing_duration_ms)))
+                .with_processing_duration_ms(Some(output.processing_duration_ms));
+            let result = if matches!(source, TranscriptionSource::AudioFile) {
+                result.with_span_timings_ms(serde_json::json!({
+                    "preprocessing": output.timings.preprocessing_ms,
+                    "inference": output.timings.inference_ms,
+                    "extraction": output.timings.extraction_ms,
+                    "total": output.timings.total_ms,
+                }))
+            } else {
+                result
+            };
+            Ok(result)
         }
         ActiveEngineSelection::Parakeet { model_name } => {
             let manager = app.state::<ParakeetManager>();
@@ -225,13 +237,15 @@ async fn route_once(
                 return Err(cancelled(source));
             }
 
-            let custom_vocabulary =
-                compile_parakeet_custom_vocabulary_for_transcription(app, language);
-            let options = ParakeetTranscriptionOptions {
-                language: request.spoken_language.clone(),
-                translate,
-                custom_vocabulary,
-                cancel_flag: Some(cancel),
+            let custom_vocabulary = if model_name.starts_with("parakeet-tdt-") {
+                crate::writing::load_writing_settings(app)
+                    .map(|settings| crate::writing::compile_parakeet_custom_vocabulary(
+                        &settings,
+                        request.spoken_language.as_deref(),
+                    ))
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
             };
 
             match manager
@@ -239,7 +253,12 @@ async fn route_once(
                     app,
                     model_name,
                     input_path.to_path_buf(),
-                    options,
+                    ParakeetTranscriptionOptions {
+                        language: request.spoken_language.clone(),
+                        translate,
+                        custom_vocabulary,
+                        cancel_flag: Some(cancel),
+                    },
                 )
                 .await
             {
@@ -248,10 +267,25 @@ async fn route_once(
                     segments,
                     language,
                     duration,
-                }) => Ok(TranscriptionResult::new(job, text)
-                    .with_transcript_language(language)
-                    .with_segments(parakeet_segments_to_transcription_segments(segments))
-                    .with_audio_duration_ms(effective_parakeet_audio_duration_ms(duration, input_path))),
+                }) => {
+                    let timings = manager.latest_timing_snapshot();
+                    let result = TranscriptionResult::new(job, text)
+                        .with_transcript_language(language)
+                        .with_segments(parakeet_segments_to_transcription_segments(segments))
+                        .with_audio_duration_ms(effective_parakeet_audio_duration_ms(
+                            duration, input_path,
+                        ));
+                    let result = if matches!(source, TranscriptionSource::AudioFile) {
+                        result.with_span_timings_ms(serde_json::json!({
+                            "model_load": timings.model_load_ms,
+                            "inference": timings.inference_ms,
+                            "total": timings.total_ms,
+                        }))
+                    } else {
+                        result
+                    };
+                    Ok(result)
+                }
                 Ok(ParakeetResponse::Error { code, message, .. }) => Err(TranscriptionError::new(
                     TranscriptionErrorCode::EngineFailed,
                     source,
@@ -283,7 +317,8 @@ async fn route_once(
                     ))
                 }
             };
-            match provider.transcribe_typed(app, &key, input_path, language).await {
+            let model = provider.selected_model(app).id;
+            match provider.transcribe_typed(app, &key, model, input_path, language).await {
                 Ok(text) => Ok(TranscriptionResult::new(job, text)),
                 Err(e) => Err(from_stt_error(&e, source)),
             }
@@ -315,7 +350,7 @@ async fn run_with_policy(
     // need a 16 kHz mono WAV; cloud/remote take the input path as-is.
     let prepared = match active {
         ActiveEngineSelection::Whisper { .. } | ActiveEngineSelection::Parakeet { .. } => {
-            Some(prepare_normalized_input(app, input_path, source).await?)
+            Some(prepare_normalized_input(input_path, source).await?)
         }
         ActiveEngineSelection::Cloud { .. } | ActiveEngineSelection::Remote { .. } => None,
     };
@@ -402,31 +437,38 @@ async fn run_with_policy(
 /// A 16 kHz mono WAV ready for a local engine: either a temp we normalized into
 /// (deleted on drop) or a borrow of a caller input that already conforms.
 enum PreparedInput {
-    Owned(NamedTempFile),
+    // A `TempPath` (not a live `NamedTempFile`): the decoder atomically renames its
+    // result onto this path, and on Windows you cannot rename over an *open* file. We
+    // keep only the path (handle closed) so the replace succeeds, while still deleting
+    // the normalized WAV on drop.
+    Owned(TempPath),
     AlreadyNormalized(PathBuf),
 }
 
 impl PreparedInput {
     fn path(&self) -> &Path {
         match self {
-            PreparedInput::Owned(temp) => temp.path(),
+            PreparedInput::Owned(temp) => temp.as_ref(),
             PreparedInput::AlreadyNormalized(path) => path.as_path(),
         }
     }
 }
 
-/// Prepare a 16 kHz mono WAV for a local engine, skipping ffmpeg when the input
-/// already conforms (e.g. the desktop pre-normalizes before dispatch).
+/// Prepare a 16 kHz mono WAV for a local engine, skipping the (CPU-bound) decode
+/// step when the input already conforms (e.g. the desktop pre-normalizes).
 async fn prepare_normalized_input(
-    app: &AppHandle,
     input_path: &Path,
     source: TranscriptionSource,
 ) -> Result<PreparedInput, TranscriptionError> {
     if is_normalized_wav(input_path) {
         return Ok(PreparedInput::AlreadyNormalized(input_path.to_path_buf()));
     }
-    let out = NamedTempFile::new().map_err(|e| stage_error(source, "temp create", e))?;
-    crate::ffmpeg::normalize_streaming(app, input_path, out.path())
+    // Reserve a temp path but release the file handle: the decoder finalizes by
+    // renaming onto this path, and Windows refuses to replace a still-open file.
+    let out = NamedTempFile::new()
+        .map_err(|e| stage_error(source, "temp create", e))?
+        .into_temp_path();
+    crate::audio::decode::normalize_to_wav_async(input_path.to_path_buf(), out.to_path_buf())
         .await
         .map_err(|e| from_local_engine_string(&e, source))?;
     Ok(PreparedInput::Owned(out))
@@ -468,7 +510,7 @@ fn wav_duration_ms(path: &Path) -> Option<u64> {
 /// The Parakeet sidecar's `duration` field is often `0.0` (a known FluidAudio
 /// bug). When `sidecar_secs` is `Some(s)` with `s > 0.0` we trust it; otherwise
 /// we fall back to reading the WAV header of `input_path` directly.
-fn effective_parakeet_audio_duration_ms(
+pub(crate) fn effective_parakeet_audio_duration_ms(
     sidecar_secs: Option<f32>,
     input_path: &std::path::Path,
 ) -> Option<u64> {
@@ -482,7 +524,7 @@ fn effective_parakeet_audio_duration_ms(
 }
 
 /// The watchdog/timeout budget for an attempt, or `None` to run unbounded.
-fn watchdog_budget_for(attempt_path: &Path, policy: &TimeoutPolicy) -> Option<Duration> {
+pub(crate) fn watchdog_budget_for(attempt_path: &Path, policy: &TimeoutPolicy) -> Option<Duration> {
     match policy {
         TimeoutPolicy::None => None,
         TimeoutPolicy::Explicit(deadline) => Some(*deadline),

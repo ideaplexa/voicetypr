@@ -38,7 +38,9 @@ use super::providers::{
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+#[cfg(any(unix, test))]
+use std::ffi::OsStr;
+use std::ffi::OsString;
 #[cfg(test)]
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -53,6 +55,7 @@ use tokio::sync::{Mutex, Semaphore};
 
 /// Login shells commonly initialize language managers and may take several
 /// seconds during app startup. This runs once and remains strictly bounded.
+#[cfg(unix)]
 const LOGIN_SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(15);
 /// Hard wall-clock cap for any single cold-spawn agent-CLI polish. Cold process
 /// startup and remote inference are provider-independent sources of latency, so
@@ -1067,7 +1070,6 @@ fn claude_capabilities_from_help(help: &[u8]) -> ClaudeCapabilities {
 fn apply_no_window(command: &mut Command) {
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt as _;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
@@ -1755,6 +1757,7 @@ fn merge_resolved_paths(
 
 /// Minimal fallback PATH when the login-shell probe fails or times out.
 /// Covers the common user-bin locations so a typical install is still found.
+#[cfg(any(unix, test))]
 fn fallback_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let mut entries: Vec<String> = vec![
@@ -3640,13 +3643,17 @@ mod tests {
 
     #[test]
     fn resolver_continues_after_unsafe_candidate() {
-        let candidates = vec![
-            PathBuf::from("/tmp/claude.cmd"),
-            PathBuf::from("/tmp/claude"),
-        ];
+        // Windows only accepts native `.exe` launchers; Unix accepts any
+        // non-script candidate.
+        let safe = if cfg!(target_os = "windows") {
+            PathBuf::from("C:\\Tools\\claude.exe")
+        } else {
+            PathBuf::from("/tmp/claude")
+        };
+        let candidates = vec![PathBuf::from("/tmp/claude.cmd"), safe.clone()];
         assert_eq!(
             select_safe_candidate(candidates),
-            BinaryResolution::Found(PathBuf::from("/tmp/claude"))
+            BinaryResolution::Found(safe)
         );
         assert_eq!(
             select_safe_candidate([PathBuf::from("/tmp/claude.ps1")]),

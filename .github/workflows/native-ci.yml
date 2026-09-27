@@ -68,16 +68,6 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
-        uses: actions/cache@v5
-        with:
-          path: |
-            sidecar/ffmpeg/dist/ffmpeg
-            sidecar/ffmpeg/dist/ffprobe
-            sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
-            sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
-          key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
-
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -90,6 +80,11 @@ jobs:
           corepack prepare pnpm@10.13.1 --activate
           pnpm --version
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: clippy
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -98,9 +93,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Ensure FFmpeg sidecar
-        run: pnpm run sidecar:ensure-ffmpeg
-
       - name: Build frontend
         run: pnpm build
 
@@ -108,7 +100,7 @@ jobs:
         run: cd src-tauri && cargo test
 
       - name: Clippy
-        run: cd src-tauri && cargo clippy -- -D warnings
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build Tauri (release)
         run: cd src-tauri && cargo build --release
@@ -150,6 +142,11 @@ jobs:
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: clippy
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -168,9 +165,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Ensure FFmpeg sidecar
-        run: pnpm run sidecar:ensure-ffmpeg
 
       - name: Build Whisper Vulkan sidecar
         shell: pwsh
@@ -214,8 +208,13 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
-      - name: Rust tests (compile-only on Windows runner)
-        run: cd src-tauri && cargo test --no-run
+      - name: Clippy
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build and run Rust tests on Windows
+        shell: pwsh
+        working-directory: src-tauri
+        run: ./run-tests.ps1
 
       - name: Build Tauri (release, CPU-safe main app)
         run: cd src-tauri && cargo build --release

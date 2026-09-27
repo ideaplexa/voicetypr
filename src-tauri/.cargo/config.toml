@@ -13,3 +13,9 @@
 # must be set as a real build environment variable here. Ignored on non-macOS.
 [env]
 MACOSX_DEPLOYMENT_TARGET = "14.0"
+
+# audiopus_sys bundles an old libopus whose CMakeLists uses cmake_minimum_required
+# < 3.5, which cmake >= 4 refuses ("Compatibility with CMake < 3.5 has been removed").
+# This relaxes the policy floor so libopus builds on both old (CI) and new (local
+# homebrew) cmake. Build-time only; irrelevant to users, who get the prebuilt binary.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

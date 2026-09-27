@@ -22,7 +22,7 @@ pub(super) async fn validate_key(key: &str) -> Result<(), String> {
 /// Returns true for the Nova-3 model family, the only Deepgram models that
 /// accept the repeatable `keyterm` query param. Nova-2 exposes a different
 /// `keywords` knob (out of scope), so vocabulary terms are emitted only here.
-fn is_nova3(model: &str) -> bool {
+pub(super) fn is_nova3(model: &str) -> bool {
     model.eq_ignore_ascii_case("nova-3") || model.to_lowercase().starts_with("nova-3-")
 }
 

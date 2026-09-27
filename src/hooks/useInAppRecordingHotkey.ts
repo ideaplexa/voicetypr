@@ -59,17 +59,34 @@ function hasOtherModifierHeld(event: KeyboardEvent, spec: ModifierSpec): boolean
   );
 }
 
+function hasAltGraph(event: KeyboardEvent): boolean {
+  return event.getModifierState?.("AltGraph") === true;
+}
+
+function isAltGraphSecondKey(event: KeyboardEvent): boolean {
+  return hasAltGraph(event) || event.code === "AltRight" || event.key === "AltGraph";
+}
+
+type BareModifierFallback = {
+  modifier: ModifierSpec;
+  kind: "isolated_tap" | "modifier_hold";
+};
+
 /**
- * Resolve a bare-modifier primary we can emulate with a DOM tap: it must be an
- * isolated-tap toggle binding (push-to-talk "hold" has different keydown-start /
- * keyup-stop semantics and is intentionally out of scope here).
+ * Resolve a bare-modifier primary we can emulate with DOM key events:
+ * isolated-tap toggles on clean keydown->keyup, while modifier-hold mirrors the
+ * native hold_to_record path by starting on keydown and stopping on keyup.
  */
-function tapToggleModifier(binding: ShortcutBinding | null): ModifierSpec | null {
+function bareModifierFallback(binding: ShortcutBinding | null): BareModifierFallback | null {
   if (!binding?.modifier) return null;
   if (!binding.enabled) return null;
-  if (binding.action !== "toggle_recording") return null;
-  if (binding.trigger_kind !== "isolated_tap") return null;
-  return binding.modifier;
+  if (binding.action === "toggle_recording" && binding.trigger_kind === "isolated_tap") {
+    return { modifier: binding.modifier, kind: "isolated_tap" };
+  }
+  if (binding.action === "hold_to_record" && binding.trigger_kind === "modifier_hold") {
+    return { modifier: binding.modifier, kind: "modifier_hold" };
+  }
+  return null;
 }
 
 /**
@@ -94,44 +111,48 @@ export function useInAppRecordingHotkey(): void {
   const recording = useRecording();
   const lastToggleRef = useRef(0);
 
-  // Active bare-modifier isolated-tap primary. Loaded only on Windows and only
+  // Active bare-modifier primary fallback. Loaded only on Windows and only
   // when no combo hotkey is set: macOS's native engine handles bare-modifier
-  // taps in our own windows, where this keyup-based detector could stutter
+  // bindings in our own windows, where this detector could stutter
   // against it; and a combo primary leaves the bare-modifier binding inactive.
-  const bareModifierRef = useRef<ModifierSpec | null>(null);
+  const bareModifierRef = useRef<BareModifierFallback | null>(null);
   // Monotonic load token: only the most recent reload wins, so an in-flight
   // load whose result resolves late can't clobber a fresher binding (e.g. a
   // combo hotkey just set, or a second shortcut-settings-changed event).
   const bareModifierLoadTokenRef = useRef(0);
 
   /**
-   * Re-resolve the active bare-modifier isolated-tap primary from the backend.
-   * No-op on macOS and when a combo hotkey is set: macOS's native engine
-   * handles bare-modifier taps in our own windows (where this keyup-based
-   * detector could stutter against it), and a combo primary leaves the
-   * bare-modifier binding inactive. Called on mount and whenever `hotkey`
-   * changes, and again when the backend reports shortcut settings changed —
-   * so an in-session binding save refreshes the cached spec without an app
-   * restart (settings.hotkey alone may not change, since it can already be "").
+   * Re-resolve the active bare-modifier primary from the backend.
+   * No-op on macOS. Also no-op when a combo hotkey is set unless the backend
+   * shortcut-settings signal explicitly asks for a reload; that signal can arrive
+   * before the cached settings hotkey has refreshed during onboarding's bare-
+   * modifier save. Called on mount and whenever `hotkey` changes, and again when
+   * the backend reports shortcut settings changed, so an in-session binding save
+   * refreshes the cached spec without an app restart.
    */
-  const reloadBareModifier = useCallback((currentHotkey: string | undefined): void => {
-    if (currentHotkey || isMacOS) {
-      bareModifierRef.current = null;
-      return;
-    }
-    const token = ++bareModifierLoadTokenRef.current;
-    invoke<ShortcutSettings>("get_shortcut_settings")
-      .then((settings) => {
-        if (token === bareModifierLoadTokenRef.current) {
-          bareModifierRef.current = tapToggleModifier(findActivePrimaryBinding(settings.bindings));
-        }
-      })
-      .catch(() => {
-        if (token === bareModifierLoadTokenRef.current) {
-          bareModifierRef.current = null;
-        }
-      });
-  }, []);
+  const reloadBareModifier = useCallback(
+    (currentHotkey: string | undefined, force = false): void => {
+      if ((!force && currentHotkey) || isMacOS) {
+        bareModifierRef.current = null;
+        return;
+      }
+      const token = ++bareModifierLoadTokenRef.current;
+      invoke<ShortcutSettings>("get_shortcut_settings")
+        .then((settings) => {
+          if (token === bareModifierLoadTokenRef.current) {
+            bareModifierRef.current = bareModifierFallback(
+              findActivePrimaryBinding(settings.bindings),
+            );
+          }
+        })
+        .catch(() => {
+          if (token === bareModifierLoadTokenRef.current) {
+            bareModifierRef.current = null;
+          }
+        });
+    },
+    [],
+  );
 
   useEffect(() => {
     reloadBareModifier(hotkey);
@@ -154,7 +175,7 @@ export function useInAppRecordingHotkey(): void {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen("shortcut-settings-changed", () => {
-      reloadBareModifier(latest.current.hotkey);
+      reloadBareModifier(latest.current.hotkey, true);
     }).then((unlistenFn) => {
       // listen() resolved after unmount → unlisten right away to avoid a leak;
       // otherwise hold the unlisten fn for cleanup.
@@ -175,6 +196,10 @@ export function useInAppRecordingHotkey(): void {
     // other key + the recording state at keydown. Cleared on completion, on any
     // intervening key, or on focus/visibility loss.
     let pendingTap: { code: string; stateAtDown: string } | null = null;
+    let activeHoldCode: string | null = null;
+    let pendingHoldStart: number | null = null;
+    let holdStartDispatched = false;
+    let holdStartPromise: Promise<boolean> | null = null;
 
     // Toggle recording, mirroring the native state machine (handle_toggle_mode):
     // act only on settled states, ignore transitional ones, and debounce.
@@ -193,11 +218,122 @@ export function useInAppRecordingHotkey(): void {
       }
     };
 
+    const startHold = (): boolean => {
+      const { recording: currentRecording } = latest.current;
+      const state = currentRecording.state;
+      if (state === "idle" || state === "error") {
+        log.debug("In-app bare-modifier hold in editable field — starting recording");
+        // Keep the start promise so a stop that races this in-flight start can
+        // chain after it — a stop_recording that reaches the backend before the
+        // start publishes `Starting` is silently dropped, and the start also
+        // clears pending_stop_after_start before Starting (stale-flag hygiene),
+        // so backend-side queueing cannot cover this window.
+        holdStartPromise = currentRecording.startRecording();
+        return true;
+      }
+      return false;
+    };
+
+    const clearPendingHoldStart = (): void => {
+      if (pendingHoldStart !== null) {
+        window.clearTimeout(pendingHoldStart);
+        pendingHoldStart = null;
+      }
+    };
+
+    const armHoldStart = (code: string): void => {
+      clearPendingHoldStart();
+      pendingHoldStart = window.setTimeout(() => {
+        pendingHoldStart = null;
+        if (activeHoldCode === code) {
+          holdStartDispatched = startHold();
+        }
+      }, 0);
+    };
+
+    const cancelHoldBeforeStart = (): void => {
+      clearPendingHoldStart();
+      // The hold-start timer can fire between AltGr's synthesized Control
+      // keydown and the AltGraph keydown that reveals it was never a bare
+      // hold — if the start already dispatched, stop it or the recording
+      // sticks with no keyup owner.
+      if (holdStartDispatched) {
+        stopHold();
+      }
+      activeHoldCode = null;
+      holdStartDispatched = false;
+    };
+
+    const stopHold = (): void => {
+      const { recording: currentRecording } = latest.current;
+      const state = currentRecording.state;
+      const startInFlight = holdStartPromise;
+      holdStartPromise = null;
+      if (startInFlight) {
+        log.debug("In-app bare-modifier hold — stop chained after in-flight start");
+        void startInFlight.then(
+          (started) => {
+            // startRecording reports its own outcome — React state can be
+            // stale at settle time (events/re-renders lag the invoke), so it
+            // must not gate this. Stop only a start that actually took; a
+            // failed start keeps its error state instead of being reset.
+            if (started) {
+              void latest.current.recording.stopRecording();
+            }
+          },
+          () => {},
+        );
+        return;
+      }
+      if (state === "recording" || state === "starting" || activeHoldCode) {
+        log.debug("In-app bare-modifier hold in editable field — stopping recording");
+        void currentRecording.stopRecording();
+      }
+    };
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       if (!isEditableTarget(event.target)) return;
 
       const currentHotkey = latest.current.hotkey;
+      const bareModifier = bareModifierRef.current;
+
+      if (bareModifier) {
+        if (eventMatchesBareModifier(event, bareModifier.modifier)) {
+          if (event.repeat) return; // held modifier auto-repeats; keep the pending tap/hold
+          if (hasOtherModifierHeld(event, bareModifier.modifier) || hasAltGraph(event)) {
+            pendingTap = null;
+            cancelHoldBeforeStart();
+            return;
+          }
+          if (bareModifier.kind === "modifier_hold") {
+            if (activeHoldCode !== null || holdStartPromise !== null) {
+              // A hold is already live (duplicate keydown without repeat —
+              // lost keyup, focus churn). Rebind to the latest physical key so
+              // its keyup owns the stop, but preserve the dispatched state and
+              // in-flight start: re-arming here would clobber
+              // holdStartDispatched and orphan the recording.
+              activeHoldCode = event.code;
+              return;
+            }
+            activeHoldCode = event.code;
+            holdStartDispatched = false;
+            armHoldStart(event.code);
+            return;
+          }
+          pendingTap = { code: event.code, stateAtDown: latest.current.recording.state };
+          return;
+        }
+        if (!currentHotkey) {
+          // Any non-matching key while the modifier is held → it's a chord/combo,
+          // not a clean tap (covers Ctrl+C/V and AltGr's synthesized second key).
+          pendingTap = null;
+          if (activeHoldCode && isAltGraphSecondKey(event)) {
+            cancelHoldBeforeStart();
+          }
+          return;
+        }
+      }
 
       // ── Combo path (e.g. Ctrl+Space) ─────────────────────────────────────
       if (currentHotkey) {
@@ -206,36 +342,38 @@ export function useInAppRecordingHotkey(): void {
         // and Shift/Alt-only combos to the field's normal typing.
         if (!event.ctrlKey && !event.metaKey) return;
         // AltGr is reported as Ctrl+Alt on Windows and produces typed chars.
-        if (event.getModifierState?.("AltGraph")) return;
+        if (hasAltGraph(event)) return;
         if (!eventMatchesShortcut(event, currentHotkey)) return;
         event.preventDefault();
         performToggle("hotkey");
         return;
       }
-
-      // ── Bare-modifier isolated-tap path (e.g. Control alone) ─────────────
-      const bareModifier = bareModifierRef.current;
-      if (!bareModifier) return;
-
-      if (!eventMatchesBareModifier(event, bareModifier)) {
-        // Any non-matching key while the modifier is held → it's a chord/combo,
-        // not a clean tap (covers Ctrl+C/V and AltGr's synthesized second key).
-        pendingTap = null;
-        return;
-      }
-      if (event.repeat) return; // held modifier auto-repeats; keep the pending tap
-      if (hasOtherModifierHeld(event, bareModifier)) {
-        pendingTap = null;
-        return;
-      }
-      pendingTap = { code: event.code, stateAtDown: latest.current.recording.state };
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
+      if (activeHoldCode && event.code === activeHoldCode) {
+        clearPendingHoldStart();
+        if (event.isComposing) {
+          activeHoldCode = null;
+          holdStartDispatched = false;
+          return;
+        }
+        if (!isEditableTarget(event.target)) {
+          activeHoldCode = null;
+          holdStartDispatched = false;
+          return;
+        }
+        if (holdStartDispatched || holdStartPromise !== null) {
+          stopHold();
+        }
+        activeHoldCode = null;
+        holdStartDispatched = false;
+        return;
+      }
       const pending = pendingTap;
       if (!pending || event.code !== pending.code) return;
       pendingTap = null;
-      if (event.isComposing || event.getModifierState?.("AltGraph")) return;
+      if (event.isComposing || hasAltGraph(event)) return;
       if (!isEditableTarget(event.target)) return;
       // Bail if the recording state moved since keydown (e.g. the native hook
       // did fire) — avoids a start→stop stutter.
@@ -244,6 +382,14 @@ export function useInAppRecordingHotkey(): void {
     };
 
     const clearPending = () => {
+      clearPendingHoldStart();
+      if (activeHoldCode) {
+        if (holdStartDispatched) {
+          stopHold();
+        }
+        activeHoldCode = null;
+        holdStartDispatched = false;
+      }
       pendingTap = null;
     };
 
@@ -254,6 +400,7 @@ export function useInAppRecordingHotkey(): void {
     document.addEventListener("visibilitychange", clearPending);
 
     return () => {
+      clearPending();
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("blur", clearPending, true);

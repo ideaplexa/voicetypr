@@ -64,6 +64,13 @@ mod tray_menu_tests;
 #[cfg(test)]
 mod shortcut_bindings;
 
+/// Serializes every unit test that touches the process-global recording-lifecycle
+/// statics (`RECORDING_GENERATION`, `IN_FLIGHT_TRANSCRIPTION_AUDIO` in `commands::audio`).
+/// These statics are shared across the whole test binary; without one common lock,
+/// per-file schemes only serialize within a file and races leak across files. Every
+/// such test must take this guard as its FIRST line.
+pub(crate) static RECORDING_LIFECYCLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod integration_tests {
     use crate::whisper::manager::{ModelSize, WhisperManager};

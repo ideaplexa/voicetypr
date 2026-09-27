@@ -1087,7 +1087,7 @@ pub async fn open_purchase_page() -> Result<(), String> {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         std::process::Command::new("cmd")
-            .args(&["/C", "start", "https://voicetypr.com/#pricing"])
+            .args(["/C", "start", "https://voicetypr.com/#pricing"])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to open browser: {}", e))?;

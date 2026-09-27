@@ -11,7 +11,19 @@
 //! `cfg(windows)` hook is a thin caller.
 
 use crate::engine::ConsumeSet;
-use crate::types::{KeySpec, ModSet, Side};
+use crate::types::{KeySpec, ModSet, NamedKey, Side};
+
+const VK_SHIFT: u32 = 0x10;
+const VK_CONTROL: u32 = 0x11;
+const VK_MENU: u32 = 0x12;
+const VK_LSHIFT: u32 = 0xA0;
+const VK_RSHIFT: u32 = 0xA1;
+const VK_LCONTROL: u32 = 0xA2;
+const VK_RCONTROL: u32 = 0xA3;
+const VK_LMENU: u32 = 0xA4;
+const VK_RMENU: u32 = 0xA5;
+const LLKHF_EXTENDED: u32 = 0x01;
+const RIGHT_SHIFT_SCAN_CODE: u32 = 0x36;
 
 /// Whether a Windows virtual-key code is a modifier: the side-agnostic base
 /// codes (`VK_SHIFT`/`VK_CONTROL`/`VK_MENU`) plus the left/right and Windows
@@ -24,8 +36,50 @@ use crate::types::{KeySpec, ModSet, Side};
 pub(crate) fn is_modifier_vk(vk: u32) -> bool {
     matches!(
         vk,
-        0x10 | 0x11 | 0x12 | 0x5B | 0x5C | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5
+        VK_SHIFT
+            | VK_CONTROL
+            | VK_MENU
+            | 0x5B
+            | 0x5C
+            | VK_LSHIFT
+            | VK_RSHIFT
+            | VK_LCONTROL
+            | VK_RCONTROL
+            | VK_LMENU
+            | VK_RMENU
     )
+}
+
+/// Normalize Windows modifier VKs to side-specific [`NamedKey`] values.
+///
+/// Low-level hooks can report either side-specific modifier VKs (`0xA0..=0xA5`)
+/// or generic `VK_SHIFT`/`VK_CONTROL`/`VK_MENU` (`0x10..=0x12`). Generic Control
+/// and Alt use `LLKHF_EXTENDED` for the right-hand key; generic Shift uses scan
+/// code `0x36` for right Shift. If those hints are absent or indeterminate, the
+/// mapping defaults to the left side so a modifier event never falls through as
+/// `KeySpec::Raw` and bypasses the matcher.
+pub(crate) fn map_modifier_vk(
+    vk: u32,
+    scan_code: u32,
+    flags: u32,
+) -> Option<(KeySpec, Option<Side>)> {
+    let extended = (flags & LLKHF_EXTENDED) != 0;
+    let mapped = match vk {
+        VK_LSHIFT => (NamedKey::ShiftLeft, Side::Left),
+        VK_RSHIFT => (NamedKey::ShiftRight, Side::Right),
+        VK_LCONTROL => (NamedKey::ControlLeft, Side::Left),
+        VK_RCONTROL => (NamedKey::ControlRight, Side::Right),
+        VK_LMENU => (NamedKey::AltLeft, Side::Left),
+        VK_RMENU => (NamedKey::AltRight, Side::Right),
+        VK_SHIFT if scan_code == RIGHT_SHIFT_SCAN_CODE => (NamedKey::ShiftRight, Side::Right),
+        VK_SHIFT => (NamedKey::ShiftLeft, Side::Left),
+        VK_CONTROL if extended => (NamedKey::ControlRight, Side::Right),
+        VK_CONTROL => (NamedKey::ControlLeft, Side::Left),
+        VK_MENU if extended => (NamedKey::AltRight, Side::Right),
+        VK_MENU => (NamedKey::AltLeft, Side::Left),
+        _ => return None,
+    };
+    Some((KeySpec::Named(mapped.0), Some(mapped.1)))
 }
 
 /// Pure consume decision for a single key event.
@@ -86,6 +140,62 @@ mod tests {
         for vk in [0xA0u32, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5] {
             assert!(is_modifier_vk(vk), "0x{:X} should be a modifier", vk);
         }
+    }
+
+    #[test]
+    fn generic_modifier_vks_map_to_side_specific_keys() {
+        assert_eq!(
+            map_modifier_vk(VK_SHIFT, 0x2A, 0),
+            Some((KeySpec::Named(NamedKey::ShiftLeft), Some(Side::Left))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_SHIFT, RIGHT_SHIFT_SCAN_CODE, 0),
+            Some((KeySpec::Named(NamedKey::ShiftRight), Some(Side::Right))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_CONTROL, 0x1D, 0),
+            Some((KeySpec::Named(NamedKey::ControlLeft), Some(Side::Left))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_CONTROL, 0x1D, LLKHF_EXTENDED),
+            Some((KeySpec::Named(NamedKey::ControlRight), Some(Side::Right))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_MENU, 0x38, 0),
+            Some((KeySpec::Named(NamedKey::AltLeft), Some(Side::Left))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_MENU, 0x38, LLKHF_EXTENDED),
+            Some((KeySpec::Named(NamedKey::AltRight), Some(Side::Right))),
+        );
+    }
+
+    #[test]
+    fn side_specific_modifier_vks_still_map_directly() {
+        assert_eq!(
+            map_modifier_vk(VK_LSHIFT, 0, 0),
+            Some((KeySpec::Named(NamedKey::ShiftLeft), Some(Side::Left))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_RSHIFT, 0, 0),
+            Some((KeySpec::Named(NamedKey::ShiftRight), Some(Side::Right))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_LCONTROL, 0, 0),
+            Some((KeySpec::Named(NamedKey::ControlLeft), Some(Side::Left))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_RCONTROL, 0, 0),
+            Some((KeySpec::Named(NamedKey::ControlRight), Some(Side::Right))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_LMENU, 0, 0),
+            Some((KeySpec::Named(NamedKey::AltLeft), Some(Side::Left))),
+        );
+        assert_eq!(
+            map_modifier_vk(VK_RMENU, 0, 0),
+            Some((KeySpec::Named(NamedKey::AltRight), Some(Side::Right))),
+        );
     }
 
     #[test]

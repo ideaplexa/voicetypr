@@ -117,7 +117,10 @@ pub fn from_local_engine_string(raw: &str, source: TranscriptionSource) -> Trans
         TranscriptionErrorCode::AudioInvalid
     } else if lower.contains("timed out") {
         TranscriptionErrorCode::Timeout
-    } else if lower.contains("no speech recognition models") || lower.contains("model") {
+    } else if lower.contains("no speech recognition models") || lower.contains("downloaded") {
+        // "downloaded" catches the genuine model-unavailable runtime strings
+        // ("... is not downloaded", "no model downloaded", "not found or not downloaded")
+        // WITHOUT re-catching transient failures like "failed to load model tensors".
         TranscriptionErrorCode::ModelUnavailable
     } else {
         TranscriptionErrorCode::EngineFailed
@@ -322,8 +325,8 @@ mod tests {
             ),
             (
                 "model download required",
-                TranscriptionErrorCode::ModelUnavailable,
-                false,
+                TranscriptionErrorCode::EngineFailed,
+                true,
             ),
             ("decoder failed", TranscriptionErrorCode::EngineFailed, true),
         ];
@@ -331,6 +334,25 @@ mod tests {
         for (raw, code, retryable) in cases {
             assert_error(from_local_engine_string(raw, SOURCE), code, retryable);
         }
+    }
+
+    #[test]
+    fn not_downloaded_model_is_non_retryable_model_unavailable() {
+        let error = from_local_engine_string("Parakeet model is not downloaded", SOURCE);
+        assert_eq!(error.code, TranscriptionErrorCode::ModelUnavailable);
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn transient_local_model_word_is_retryable_engine_failure() {
+        let error = from_local_engine_string("failed to load model tensors", SOURCE);
+
+        assert_eq!(error.code, TranscriptionErrorCode::EngineFailed);
+        assert!(error.retryable);
+        assert_eq!(
+            error.detail.as_deref(),
+            Some("failed to load model tensors")
+        );
     }
 
     #[test]

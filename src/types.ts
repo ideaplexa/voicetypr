@@ -37,6 +37,7 @@ interface BaseModelInfo {
   size?: number;
   url?: string;
   sha256?: string;
+  supported_languages?: string[] | null;
 }
 
 export interface LocalModelInfo extends BaseModelInfo {
@@ -79,6 +80,24 @@ export type PillIndicatorPosition =
   | "bottom-right";
 export type TranscriptionAcceleration = "auto" | "gpu" | "cpu";
 export type UpdateChannel = "stable" | "beta";
+export type TranscriptionMode = "regular" | "live_preview";
+
+export interface EngineStreamCapabilities {
+  supports_streaming: boolean;
+  supports_committed_prefix: boolean;
+  supports_tentative_tail: boolean;
+  supports_endpointing: boolean;
+  final_only: boolean;
+}
+
+export interface ActiveStreamCapabilities {
+  active_engine: string;
+  capabilities: EngineStreamCapabilities;
+  eou_model_downloaded: boolean;
+  eou_model_path?: string | null;
+  eou_chunk_ms: number;
+  transcription_mode: TranscriptionMode;
+}
 
 export interface AppSettings {
   hotkey: string;
@@ -103,6 +122,7 @@ export interface AppSettings {
   play_sound_on_recording?: boolean;
   play_sound_on_transcription_complete?: boolean;
   play_sound_on_paste_success?: boolean;
+  settings_mode?: string;
   // Pill indicator visibility mode
   pill_indicator_mode?: PillIndicatorMode;
   // Pill indicator detail level
@@ -111,6 +131,7 @@ export interface AppSettings {
   pill_indicator_position?: PillIndicatorPosition;
   // Pill indicator offset from screen edge in pixels (10-50)
   pill_indicator_offset?: number;
+  pill_position?: [number, number] | null;
   // Pause system media during recording
   pause_media_during_recording?: boolean;
   // Network sharing settings
@@ -123,6 +144,8 @@ export interface AppSettings {
   transcription_acceleration?: TranscriptionAcceleration;
   // Direct-install update feed (Store/MSIX ignores this setting)
   update_channel?: UpdateChannel;
+  whisper_speed_mode?: boolean;
+  transcription_mode?: TranscriptionMode;
 }
 
 /** Writing-step outcome attached to a history row (mirrors the backend `writing` metadata blob). */

@@ -541,10 +541,6 @@ mod recording_persist_and_cancel_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    // Serialize tests that touch the process-global IN_FLIGHT_TRANSCRIPTION_AUDIO
-    // slot, so parallel test threads cannot steal each other's tracked path.
-    static IN_FLIGHT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn retryable_failure() -> TranscriptionFailure {
         TranscriptionFailure::Remote(RemoteClientError::Timeout {
             endpoint: RemoteEndpoint::Transcribe,
@@ -626,7 +622,9 @@ mod recording_persist_and_cancel_tests {
     fn cancel_removes_task_owned_temp_recording_after_abort() {
         // JoinHandle::abort skips the task's own remove_file, so cancel_recording
         // now takes the tracked path and deletes it. This verifies that mechanism.
-        let _guard = IN_FLIGHT_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         let path = unique_temp_wav("cancel");
         std::fs::write(&path, b"audio").unwrap();
@@ -655,7 +653,9 @@ mod recording_persist_and_cancel_tests {
         // When the task reaches its own remove_file first, it clears the tracker;
         // a subsequent cancel takes None (no double-remove; a NotFound on the
         // already-removed file is tolerated by cancel_recording).
-        let _guard = IN_FLIGHT_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         let path = unique_temp_wav("cleanup");
         std::fs::write(&path, b"audio").unwrap();
@@ -685,7 +685,9 @@ mod recording_persist_and_cancel_tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // process-wide test serialization lock; current-thread test runtime
     async fn pre_spawn_cancel_and_early_cancel_remove_task_owned_audio() {
-        let _guard = IN_FLIGHT_TEST_LOCK.lock().unwrap();
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         let path = unique_temp_wav("prespawn");
         std::fs::write(&path, b"audio").unwrap();

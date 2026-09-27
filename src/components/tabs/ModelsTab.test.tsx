@@ -1,9 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ModelsTab } from "./ModelsTab";
+import type { ModelInfo } from "@/types";
 const mockDeleteModel = vi.fn();
 const mockUpdateSettings = vi.fn();
 let capturedOnDelete: (name: string) => Promise<void> = () => Promise.resolve();
+let capturedOnSelect: (name: string) => Promise<void> | void = () => Promise.resolve();
+let mockSettings = {
+  current_model: "base.en",
+  current_model_engine: "whisper" as const,
+  speech_language: "ja",
+};
 
 // Mock sonner
 vi.mock("sonner", () => ({
@@ -18,16 +25,13 @@ vi.mock("sonner", () => ({
 // Mock contexts
 vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({
-    settings: {
-      current_model: "base.en",
-      current_model_engine: "whisper",
-    },
+    settings: mockSettings,
     updateSettings: mockUpdateSettings,
   }),
 }));
 
 // Mock hooks
-let mockModels = {
+let mockModels: Record<string, ModelInfo> = {
   "base.en": {
     name: "base.en",
     display_name: "Base English",
@@ -55,6 +59,36 @@ let mockModels = {
     engine: "whisper",
     kind: "local" as const,
     requires_setup: false,
+  },
+  "parakeet-unified-640ms": {
+    name: "parakeet-unified-640ms",
+    display_name: "Parakeet Unified (English)",
+    size: 620,
+    url: "",
+    sha256: "",
+    downloaded: true,
+    speed_score: 9,
+    accuracy_score: 10,
+    recommended: true,
+    engine: "parakeet",
+    kind: "local",
+    requires_setup: false,
+    supported_languages: ["en"],
+  },
+  "nemotron-multilingual-1120ms": {
+    name: "nemotron-multilingual-1120ms",
+    display_name: "Nemotron Multilingual",
+    size: 665,
+    url: "",
+    sha256: "",
+    downloaded: true,
+    speed_score: 8,
+    accuracy_score: 9,
+    recommended: true,
+    engine: "parakeet",
+    kind: "local",
+    requires_setup: false,
+    supported_languages: ["en", "ja", "vi"],
   },
 };
 
@@ -91,8 +125,9 @@ vi.mock("@/hooks/useEventCoordinator", () => ({
 
 // Mock ModelsSection component
 vi.mock("@/components/sections/ModelsSection", () => ({
-  ModelsSection: ({ models, currentModel, downloadErrors, isLoading, onDelete }: any) => {
+  ModelsSection: ({ models, currentModel, downloadErrors, isLoading, onDelete, onSelect }: any) => {
     capturedOnDelete = onDelete;
+    capturedOnSelect = onSelect;
     return (
       <div data-testid="models-section">
         <div>Current Model: {currentModel}</div>
@@ -108,12 +143,17 @@ describe("ModelsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (window as any).__testEventCallbacks = {};
+    mockSettings = {
+      current_model: "base.en",
+      current_model_engine: "whisper",
+      speech_language: "ja",
+    };
   });
 
   it("displays current model and available models", () => {
     render(<ModelsTab />);
     expect(screen.getByText("Current Model: base.en")).toBeInTheDocument();
-    expect(screen.getByText("Models Count: 2")).toBeInTheDocument();
+    expect(screen.getByText("Models Count: 4")).toBeInTheDocument();
   });
 
   it("passes hook-owned errors and loading state to ModelsSection", () => {
@@ -136,5 +176,24 @@ describe("ModelsTab", () => {
 
     expect(mockDeleteModel).toHaveBeenCalledWith("base.en");
     expect(mockUpdateSettings).not.toHaveBeenCalled();
+  });
+
+  it("preserves a supported language when selecting Nemotron", async () => {
+    render(<ModelsTab />);
+    await capturedOnSelect("nemotron-multilingual-1120ms");
+    expect(mockUpdateSettings).toHaveBeenCalledWith({
+      current_model: "nemotron-multilingual-1120ms",
+      current_model_engine: "parakeet",
+    });
+  });
+
+  it("resets language for an English-only native model", async () => {
+    render(<ModelsTab />);
+    await capturedOnSelect("parakeet-unified-640ms");
+    expect(mockUpdateSettings).toHaveBeenCalledWith({
+      current_model: "parakeet-unified-640ms",
+      current_model_engine: "parakeet",
+      speech_language: "en",
+    });
   });
 });

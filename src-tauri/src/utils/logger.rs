@@ -238,6 +238,10 @@ pub fn log_failed(operation: &str, error: &str) {
 
 /// Simple contextual logging without HashMap overhead
 pub fn log_with_context(level: log::Level, operation: &str, context: &[(&str, &str)]) {
+    if !log::log_enabled!(level) {
+        return;
+    }
+
     let ctx_str: Vec<String> = context
         .iter()
         .map(|(k, v)| format!("{}={}", k, v))
