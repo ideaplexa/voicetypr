@@ -32,6 +32,8 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
+Plan 077 — SPEC — Claude 2026-09-28: smaller Whisper models (official q8_0/q5_0 ggml: turbo 1.6 GB → 874/574 MB) chosen by a CI model-bench workflow on macOS + Windows. See `077-whisper-quantized-catalog.md`.
+
 Plan 076 — SPIKE — Claude 2026-09-28: Parakeet on Windows via ONNX in-process (`parakeet-rs` on `ort`, int8 TDT v3 ≈ 670 MB); spike measures WER/speed vs the macOS sidecar before integration. See `076-parakeet-on-windows.md`.
 
 Plan 075 — SPEC — Claude 2026-09-27: desktop E2E dictation harness — BlackHole 2ch virtual mic, isolated HOME profile, cliclick hotkeys, TextEdit target, stop→text/WER/first-word metrics. Runs before every 2.1 beta. See `075-desktop-e2e-harness.md`.
