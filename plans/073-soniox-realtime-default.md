@@ -44,6 +44,18 @@ REST (the WS config never translates) — but then do not open the WS at all for
 translate jobs (no double billing). Cancel drops the WS and bills only the
 streamed audio. The 4 s WS-final timeout and REST fallback stay.
 
+## Review outcomes (gpt-6-astra medium + Claude, 2026-09-27)
+
+- Fixed: an online remote server wins at stop, so no Soniox/Deepgram WS opens
+  while one is online (deliberate for Deepgram too: its preview would bill a
+  stream whose result the remote replaces).
+- Fixed: translate jobs don't enable the tap for Soniox.
+- Fixed: WS finals are tagged with their provider; a Soniox → Deepgram switch
+  mid-recording can no longer paste Soniox text as Deepgram's result.
+- Accepted: switching engine mid-recording, or a recording later discarded as
+  no-speech, wastes the (short) stream already sent — cents per hour at most.
+  Pinning the engine for the whole recording belongs to the clean core (0.4a).
+
 ## Tests (must exist before merge)
 
 - Factory eligibility is a pure function (mirror `parakeet_preview_sink_eligible`):
