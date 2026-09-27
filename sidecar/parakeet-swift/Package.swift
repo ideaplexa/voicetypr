@@ -9,7 +9,7 @@ let package = Package(
         .macOS(.v14)  // FluidAudio 0.14+ diarization/offline APIs require macOS 14+
     ],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.2")
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.4")
     ],
     targets: [
         .executableTarget(
