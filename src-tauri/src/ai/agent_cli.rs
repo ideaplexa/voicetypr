@@ -3643,13 +3643,17 @@ mod tests {
 
     #[test]
     fn resolver_continues_after_unsafe_candidate() {
-        let candidates = vec![
-            PathBuf::from("/tmp/claude.cmd"),
-            PathBuf::from("/tmp/claude"),
-        ];
+        // Windows only accepts native `.exe` launchers; Unix accepts any
+        // non-script candidate.
+        let safe = if cfg!(target_os = "windows") {
+            PathBuf::from("C:\\Tools\\claude.exe")
+        } else {
+            PathBuf::from("/tmp/claude")
+        };
+        let candidates = vec![PathBuf::from("/tmp/claude.cmd"), safe.clone()];
         assert_eq!(
             select_safe_candidate(candidates),
-            BinaryResolution::Found(PathBuf::from("/tmp/claude"))
+            BinaryResolution::Found(safe)
         );
         assert_eq!(
             select_safe_candidate([PathBuf::from("/tmp/claude.ps1")]),
