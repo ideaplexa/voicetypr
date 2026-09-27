@@ -32,6 +32,8 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
+Plan 073 — IN PROGRESS — Claude 2026-09-27 (gpt-6-sol implements): Soniox streams every recording over the realtime WS (preview only controls the pill); REST stays the fallback. Target 2.1.0-beta.2. See `073-soniox-realtime-default.md`.
+
 Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
 
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
