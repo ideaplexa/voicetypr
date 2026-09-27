@@ -100,8 +100,7 @@ fn try_passthrough_canonical_wav(input: &Path, output: &Path) -> Result<bool, St
         && spec.bits_per_sample == TARGET_BITS
         && spec.sample_format == SampleFormat::Int
     {
-        std::fs::copy(input, output)
-            .map_err(|e| format!("WAV passthrough copy failed: {e}"))?;
+        std::fs::copy(input, output).map_err(|e| format!("WAV passthrough copy failed: {e}"))?;
         Ok(true)
     } else {
         Ok(false)
@@ -114,11 +113,8 @@ type WavFileWriter = WavWriter<std::io::BufWriter<std::fs::File>>;
 /// Probe the container and return the format reader, the first non-null audio
 /// track id, and an owned copy of its codec params (so the borrow of `format`
 /// via `track` is released before packet iteration begins).
-fn open_format(
-    input: &Path,
-) -> Result<(Box<dyn FormatReader>, u32, CodecParameters), String> {
-    let file = std::fs::File::open(input)
-        .map_err(|e| format!("Failed to open audio file: {e}"))?;
+fn open_format(input: &Path) -> Result<(Box<dyn FormatReader>, u32, CodecParameters), String> {
+    let file = std::fs::File::open(input).map_err(|e| format!("Failed to open audio file: {e}"))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
@@ -127,7 +123,12 @@ fn open_format(
     }
 
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .map_err(|e| format!("Failed to probe audio format: {e}"))?;
     let format = probed.format;
 

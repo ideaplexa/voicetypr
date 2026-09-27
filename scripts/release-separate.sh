@@ -14,6 +14,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+GITHUB_REPOSITORY="ideaplexa/voicetypr"
 
 # Parse arguments
 BUILD_ONLY=false
@@ -68,7 +69,15 @@ require_file() {
     fi
 }
 
-# Load .env file FIRST if it exists
+# Match the minimum Node version used by release CI before reading credentials
+# or starting builds (the frontend toolchain also needs a modern Node runtime).
+require_cmd node
+if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)'; then
+    echo -e "${RED}Error: Release builds require Node.js 22.19.0 or newer.${NC}"
+    exit 1
+fi
+
+# Load .env file if it exists
 if [ -f .env ]; then
     echo -e "${YELLOW}Loading environment variables from .env...${NC}"
     set -a
@@ -213,7 +222,7 @@ if [[ "$BUILD_ONLY" == true ]]; then
     echo -e "${GREEN}✓ Tag v${NEW_VERSION} exists${NC}"
     
     # Verify draft release exists
-    if ! gh release view "v${NEW_VERSION}" &>/dev/null; then
+    if ! gh release view "v${NEW_VERSION}" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
         echo -e "${RED}Error: GitHub release v${NEW_VERSION} does not exist${NC}"
         exit 1
     fi
@@ -484,14 +493,14 @@ printf '{
   "platforms": {
     "darwin-aarch64": {
       "signature": "%s",
-      "url": "https://github.com/moinulmoin/voicetypr/releases/download/v%s/Voicetypr_%s_aarch64.app.tar.gz"
+      "url": "https://github.com/%s/releases/download/v%s/Voicetypr_%s_aarch64.app.tar.gz"
     },
     "darwin-x86_64": {
       "signature": "%s",
-      "url": "https://github.com/moinulmoin/voicetypr/releases/download/v%s/Voicetypr_%s_x86_64.app.tar.gz"
+      "url": "https://github.com/%s/releases/download/v%s/Voicetypr_%s_x86_64.app.tar.gz"
     }
   }
-}\n' "$NEW_VERSION" "$NEW_VERSION" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$AARCH64_SIGNATURE" "$NEW_VERSION" "$NEW_VERSION" "$X86_64_SIGNATURE" "$NEW_VERSION" "$NEW_VERSION" > "$OUTPUT_DIR/latest.json"
+}\n' "$NEW_VERSION" "$NEW_VERSION" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$AARCH64_SIGNATURE" "$GITHUB_REPOSITORY" "$NEW_VERSION" "$NEW_VERSION" "$X86_64_SIGNATURE" "$GITHUB_REPOSITORY" "$NEW_VERSION" "$NEW_VERSION" > "$OUTPUT_DIR/latest.json"
 
 # Verify notarization
 echo -e "${BLUE}✅ Verifying notarization...${NC}"
@@ -526,9 +535,10 @@ if [[ "$BUILD_ONLY" == false ]]; then
         exit 1
     fi
 
-    # Generate changelog only after successful build/sign verification
-    echo -e "${YELLOW}Generating changelog...${NC}"
-    npx conventional-changelog -p angular -i CHANGELOG.md -s
+    # Generate changelog only after successful build/sign verification.
+    # Resolves the pinned local conventional-changelog-cli (no network fetch); -r 1 -u is
+    # required: without them the pre-tag run silently emits an empty changelog.
+    pnpm exec conventional-changelog -p angular -i CHANGELOG.md -s -r 1 -u
 
     # Commit, tag, push
     echo -e "${YELLOW}Committing and tagging...${NC}"
@@ -540,16 +550,16 @@ if [[ "$BUILD_ONLY" == false ]]; then
 
     # Create draft GitHub release
     echo -e "${YELLOW}Creating draft GitHub release...${NC}"
-    gh release create "v${NEW_VERSION}" --draft --title "Voicetypr v${NEW_VERSION}" --generate-notes
+    gh release create "v${NEW_VERSION}" --repo "$GITHUB_REPOSITORY" --draft --title "Voicetypr v${NEW_VERSION}" --generate-notes
     echo -e "${GREEN}✓ Draft release v${NEW_VERSION} created${NC}"
 fi
 
 # Upload artifacts to the release
 echo -e "${YELLOW}Uploading artifacts to GitHub release v${NEW_VERSION}...${NC}"
-gh release view "v${NEW_VERSION}" >/dev/null
+gh release view "v${NEW_VERSION}" --repo "$GITHUB_REPOSITORY" >/dev/null
 for file in "$OUTPUT_DIR"/*; do
     echo -e "  Uploading: $(basename "$file")"
-    gh release upload "v${NEW_VERSION}" "$file" --clobber
+    gh release upload "v${NEW_VERSION}" "$file" --repo "$GITHUB_REPOSITORY" --clobber
 done
 echo -e "${GREEN}✓ All artifacts uploaded successfully${NC}"
 
@@ -572,5 +582,5 @@ echo -e "${YELLOW}📝 Intel Mac Notes:${NC}"
 echo "   - Parakeet models are NOT available (requires Apple Neural Engine)"
 echo "   - Intel Mac users can only use Whisper (CPU-only mode)"
 echo ""
-echo -e "${GREEN}🔗 Release URL: https://github.com/moinulmoin/voicetypr/releases/tag/v${NEW_VERSION}${NC}"
+echo -e "${GREEN}🔗 Release URL: https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${NEW_VERSION}${NC}"
 echo -e "${GREEN}🎉 Both Apple Silicon and Intel Mac apps are now fully notarized and ready for distribution!${NC}"

@@ -551,7 +551,10 @@ mod recording_persist_and_cancel_tests {
 
     fn non_retryable_failure() -> TranscriptionFailure {
         // "too short" is explicitly treated as non-retryable by is_retryable_failure.
-        TranscriptionFailure::Local("Audio too short".to_string())
+        TranscriptionFailure::Local {
+            message: "Audio too short".to_string(),
+            code: None,
+        }
     }
 
     fn unique_temp_wav(label: &str) -> PathBuf {

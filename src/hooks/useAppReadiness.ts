@@ -1,8 +1,8 @@
-import { useAccessibilityPermission } from './useAccessibilityPermission';
-import { useMicrophonePermission } from './useMicrophonePermission';
-import { useModelAvailabilityContext } from '@/contexts/ModelAvailabilityContext';
-import { useLicenseStatus } from './useLicenseStatus';
-import { useSettings } from '@/contexts/SettingsContext';
+import { useAccessibilityPermission } from "./useAccessibilityPermission";
+import { useMicrophonePermission } from "./useMicrophonePermission";
+import { useModelAvailabilityContext } from "@/contexts/ModelAvailabilityContext";
+import { useLicenseStatus } from "./useLicenseStatus";
+import { useSettings } from "@/contexts/SettingsContext";
 
 /**
  * Computed hook that combines all domain-specific hooks to provide derived readiness values.
@@ -19,11 +19,11 @@ export function useAppReadiness() {
 
   // Compute derived values
   const canRecord = Boolean(
-    microphone.hasPermission && 
-    models.hasModels && 
+    microphone.hasPermission &&
+    models.hasModels &&
     models.selectedModelAvailable &&
     license.isValid &&
-    !license.isChecking
+    !license.isChecking,
   );
 
   const canAutoInsert = Boolean(accessibility.hasPermission);
@@ -34,11 +34,11 @@ export function useAppReadiness() {
     models.hasModels &&
     models.selectedModelAvailable &&
     license.isValid &&
-    !license.isChecking
+    !license.isChecking,
   );
 
   // Check if any hook is still loading
-  const isLoading = (
+  const isLoading =
     accessibility.isChecking ||
     microphone.isChecking ||
     models.isChecking ||
@@ -46,8 +46,7 @@ export function useAppReadiness() {
     accessibility.hasPermission === null ||
     microphone.hasPermission === null ||
     models.hasModels === null ||
-    license.licenseStatus === null
-  );
+    license.licenseStatus === null;
 
   return {
     // Individual states (for debugging/specific UI needs)

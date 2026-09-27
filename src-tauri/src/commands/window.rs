@@ -194,6 +194,7 @@ pub async fn focus_main_window(app: AppHandle) -> Result<(), String> {
         .ok_or("Window manager not initialized")?;
 
     if let Some(main_window) = window_manager.get_main_window() {
+        main_window.unminimize().map_err(|e| e.to_string())?;
         // Check if window is already visible to avoid duplicate animations
         let is_visible = main_window.is_visible().unwrap_or(false);
 

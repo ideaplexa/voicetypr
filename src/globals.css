@@ -49,9 +49,9 @@
   --shadow-xs: 0px 1px 2px 0px rgba(15, 23, 42, 0.06);
   --shadow-sm: 0px 1px 2px 0px rgba(15, 23, 42, 0.07), 0px 1px 2px -1px rgba(15, 23, 42, 0.07);
   --shadow: 0px 1px 2px 0px rgba(15, 23, 42, 0.08), 0px 1px 2px -1px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0px 2px 6px -1px rgba(15, 23, 42, 0.10), 0px 1px 2px -1px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0px 2px 6px -1px rgba(15, 23, 42, 0.1), 0px 1px 2px -1px rgba(15, 23, 42, 0.08);
   --shadow-lg: 0px 10px 30px -12px rgba(15, 23, 42, 0.16);
-  --shadow-xl: 0px 24px 60px -24px rgba(15, 23, 42, 0.20);
+  --shadow-xl: 0px 24px 60px -24px rgba(15, 23, 42, 0.2);
   --shadow-2xl: 0px 30px 90px -30px rgba(15, 23, 42, 0.24);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
@@ -146,7 +146,7 @@
   --color-sage-foreground: var(--sage-foreground);
   --color-sage-bg: var(--sage-bg);
 
-  --font-sans: 'Geist Variable', sans-serif;
+  --font-sans: "Geist Variable", sans-serif;
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
 
@@ -179,6 +179,29 @@
   html {
     @apply font-sans;
   }
+
+  /* Tailwind v4 defaults buttons to an arrow. Keep action affordances consistent
+     across shadcn/Base UI controls without modifying the component primitives. */
+  :where(
+    button,
+    [role="button"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="tab"],
+    input[type="checkbox"],
+    input[type="radio"],
+    select,
+    summary,
+    label[for]
+  ):where(:not(:disabled):not([aria-disabled="true"]):not([data-disabled])) {
+    cursor: pointer;
+  }
+
+  /* A Field owns one control; its label must not advertise a disabled action. */
+  [data-slot="field"]:has(:is(:disabled, [aria-disabled="true"], [data-disabled])) label {
+    cursor: default;
+  }
 }
 
 /* Windows transparency fix for pill window */
@@ -196,8 +219,12 @@ html body.bg-transparent {
 }
 
 @keyframes ios-spin {
-  0% { opacity: 1; }
-  100% { opacity: 0.15; }
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+  }
 }
 
 @keyframes fade-in {
@@ -212,7 +239,8 @@ html body.bg-transparent {
 }
 
 @keyframes pulse-once {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
   }
   50% {
@@ -220,21 +248,41 @@ html body.bg-transparent {
   }
 }
 
-@keyframes pill-soft-pulse {
-  0%, 100% {
-    opacity: 0.92;
+@keyframes pill-listening {
+  0%,
+  100% {
+    transform: scaleY(var(--listening-min, 0.16));
   }
   50% {
-    opacity: 1;
+    transform: scaleY(var(--listening-max, 1));
   }
 }
 
-@keyframes pill-wave {
-  0%, 100% {
-    transform: scaleY(var(--wave-min, 0.82));
+@keyframes pill-scan {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: translateX(0) scale(0.75);
   }
   50% {
-    transform: scaleY(var(--wave-max, 1.8));
+    opacity: 1;
+    transform: translateX(30px) scale(1);
+  }
+}
+
+@keyframes pill-spark {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: rotate(45deg) scale(0.35);
+  }
+  45% {
+    opacity: 1;
+    transform: rotate(45deg) scale(1);
+  }
+  68% {
+    opacity: 0.55;
+    transform: rotate(45deg) scale(0.72);
   }
 }
 
@@ -246,17 +294,22 @@ html body.bg-transparent {
   animation: pulse-once 0.5s ease-in-out;
 }
 
-.animate-pill-soft-pulse {
-  animation: pill-soft-pulse 1.1s ease-in-out infinite;
+.animate-pill-listening {
+  animation: pill-listening 650ms ease-in-out infinite;
 }
 
-.animate-pill-wave {
-  animation: pill-wave var(--wave-duration, 620ms) ease-in-out infinite;
+.animate-pill-scan {
+  animation: pill-scan 950ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.animate-pill-spark {
+  animation: pill-spark 1280ms cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-pill-soft-pulse,
-  .animate-pill-wave {
+  .animate-pill-listening,
+  .animate-pill-scan,
+  .animate-pill-spark {
     animation: none !important;
   }
 }

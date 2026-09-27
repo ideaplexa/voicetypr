@@ -111,6 +111,11 @@ where
         let should_try_gpu = mode == "gpu" || status.gpu_available != Some(false);
 
         if should_try_gpu {
+            // Plan 060.1: mark the ACTUAL attempt BEFORE the await. Success-only
+            // marking left the backend tag stale through the whole sidecar
+            // attempt, so a failure event (or a later read) could attribute this
+            // recording to whatever backend the PREVIOUS run used.
+            crate::whisper::transcriber::record_attempt_backend("sidecar");
             let gpu_result = gpu_client
                 .transcribe(
                     app,
@@ -138,7 +143,10 @@ where
                 }
                 Err(error) => {
                     preserve_gpu_status = true;
-                    log::warn!("GPU sidecar failed, falling back to CPU: {error}");
+                    log::warn!(
+                        "GPU sidecar failed, unloading sidecar before CPU fallback: {error}"
+                    );
+                    gpu_client.abort_active_process().await;
                     if mode == "gpu" {
                         crate::commands::audio::pill_toast(app, "GPU unavailable, using CPU", 4000);
                     }
@@ -150,11 +158,21 @@ where
         }
     }
 
+    // Plan 060.1: the CPU attempt's mark — placed BEFORE model init and the
+    // CPU transcription, so a failure anywhere below attributes "cpu" (or the
+    // sidecar above), never a previous recording's backend.
+    #[cfg(target_os = "windows")]
+    crate::whisper::transcriber::record_attempt_backend("cpu");
+
     let transcriber = {
         let cache_state = app.state::<AsyncMutex<TranscriberCache>>();
         let mut cache = cache_state.lock().await;
         cache.get_or_create(model_path, speed_mode)?
     };
+    // Plan 060.1: warm-cache attempts use the loaded instance's backend.
+    // Cold initialization records each selected backend before attempting it,
+    // so a failed initialization retains the final attempted backend as well.
+    crate::whisper::transcriber::record_attempt_backend(transcriber.backend());
 
     let audio_path = audio_path.to_path_buf();
     let language = language.map(str::to_owned);
@@ -215,6 +233,23 @@ impl ActiveEngineSelection {
             ActiveEngineSelection::Parakeet { .. } => "parakeet",
             ActiveEngineSelection::Cloud { provider, .. } => provider.id(),
             ActiveEngineSelection::Remote { .. } => "remote",
+        }
+    }
+
+    pub(crate) const fn analytics_kind(&self) -> crate::product_analytics::EngineKind {
+        match self {
+            Self::Whisper { .. } => crate::product_analytics::EngineKind::Whisper,
+            Self::Parakeet { .. } => crate::product_analytics::EngineKind::Parakeet,
+            Self::Cloud { .. } => crate::product_analytics::EngineKind::Cloud,
+            Self::Remote { .. } => crate::product_analytics::EngineKind::Remote,
+        }
+    }
+
+    pub(crate) const fn route(&self) -> &'static str {
+        match self {
+            Self::Whisper { .. } | Self::Parakeet { .. } => "local",
+            Self::Cloud { .. } => "cloud",
+            Self::Remote { .. } => "remote",
         }
     }
 
@@ -364,7 +399,36 @@ pub(crate) async fn resolve_engine_for_model(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_use_active_remote, transcription_watchdog_budget};
+    use super::{should_use_active_remote, transcription_watchdog_budget, ActiveEngineSelection};
+
+    #[test]
+    fn active_engine_routes_are_stable_for_evidence_logs() {
+        let selections = [
+            ActiveEngineSelection::Whisper {
+                model_name: "base".to_string(),
+                model_path: std::path::PathBuf::new(),
+            },
+            ActiveEngineSelection::Parakeet {
+                model_name: "parakeet".to_string(),
+            },
+            ActiveEngineSelection::Cloud {
+                provider: crate::cloud_stt::CloudProvider::Openai,
+                model_name: "gpt-4o-mini-transcribe".to_string(),
+            },
+            ActiveEngineSelection::Remote {
+                server_id: "server".to_string(),
+                server_name: "Remote".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 47842,
+                password: None,
+            },
+        ];
+
+        assert_eq!(selections[0].route(), "local");
+        assert_eq!(selections[1].route(), "local");
+        assert_eq!(selections[2].route(), "cloud");
+        assert_eq!(selections[3].route(), "remote");
+    }
 
     #[test]
     fn explicit_engine_hint_bypasses_active_remote() {

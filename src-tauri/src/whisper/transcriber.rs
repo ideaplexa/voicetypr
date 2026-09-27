@@ -1,4 +1,20 @@
 use std::path::Path;
+
+tokio::task_local! {
+    /// Backend selected for this transcription attempt, recorded before initialization.
+    /// A failed initialization retains its attempted backend; unrelated tasks cannot
+    /// overwrite it. Reads outside the recording's scope return `None`.
+    pub(crate) static ATTEMPT_BACKEND: std::cell::Cell<Option<&'static str>>;
+}
+
+pub(crate) fn record_attempt_backend(backend: &'static str) {
+    let _ = ATTEMPT_BACKEND.try_with(|slot| slot.set(Some(backend)));
+}
+
+pub(crate) fn attempt_backend() -> Option<&'static str> {
+    ATTEMPT_BACKEND.try_with(|slot| slot.get()).ok().flatten()
+}
+
 use std::time::Instant;
 use whisper_rs::{
     convert_integer_to_float_audio, convert_stereo_to_mono_audio, FullParams, SamplingStrategy,
@@ -12,8 +28,10 @@ use crate::utils::system_monitor;
 pub struct Transcriber {
     context: WhisperContext,
     cpu_profile: bool,
+    /// Acceleration this loaded instance serves ("cpu" | "metal"); the
+    /// attempt records it when the instance is used (plan 060.1).
+    backend: &'static str,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhisperTranscriptionOutput {
     pub raw_text: String,
@@ -33,6 +51,11 @@ pub struct WhisperTranscriptionTimings {
 }
 
 impl Transcriber {
+    /// Acceleration label this loaded instance serves (plan 060.1).
+    pub(crate) fn backend(&self) -> &'static str {
+        self.backend
+    }
+
     pub fn new(model_path: &Path, speed_mode: bool) -> Result<Self, String> {
         let init_start = Instant::now();
         let model_path_str = model_path
@@ -114,6 +137,8 @@ impl Transcriber {
                 ],
             );
 
+            // Retain the selected attempt even when context initialization fails.
+            record_attempt_backend(if is_apple_silicon { "metal" } else { "cpu" });
             match WhisperContext::new_with_params(model_path_str, ctx_params) {
                 Ok(ctx) => {
                     let cpu_profile = !is_apple_silicon;
@@ -150,9 +175,11 @@ impl Transcriber {
                         &[("backend", backend_type), ("model_path", model_path_str)],
                     );
 
+                    let backend = if cpu_profile { "cpu" } else { "metal" };
                     return Ok(Self {
                         context: ctx,
                         cpu_profile,
+                        backend,
                     });
                 }
                 Err(gpu_err) => {
@@ -185,6 +212,7 @@ impl Transcriber {
 
         // Create context (for Windows CPU fallback or other platforms)
         let cpu_start = Instant::now();
+        record_attempt_backend("cpu");
         let ctx = WhisperContext::new_with_params(model_path_str, ctx_params).map_err(|e| {
             log_failed("TRANSCRIBER_INIT", &e.to_string());
             log_with_context(
@@ -247,6 +275,7 @@ impl Transcriber {
         Ok(Self {
             context: ctx,
             cpu_profile: true,
+            backend: "cpu",
         })
     }
 
@@ -630,7 +659,7 @@ impl Transcriber {
         // Suppress blank outputs to avoid empty transcriptions
         params.set_suppress_blank(true);
 
-        // Don't suppress non-speech tokens - they help with timing and context
+        // Suppress annotation-like tokens while keeping commas and sentence-ending punctuation.
         params.set_suppress_nst(true);
 
         // Adjust speech detection threshold
@@ -685,8 +714,6 @@ impl Transcriber {
             error
         })?;
 
-        log_audio_metrics("WHISPER_INPUT", 0.0, 0.0, duration_seconds, None);
-
         let inference_start = Instant::now();
         log_start("WHISPER_INFERENCE");
         log_with_context(
@@ -703,11 +730,8 @@ impl Transcriber {
             ],
         );
 
-        let should_cancel_for_abort = should_cancel.clone();
-        params.set_abort_callback_safe(should_cancel_for_abort);
-
         let inference_ms;
-        match state.full(params, &resampled_audio) {
+        match full_with_cancel(&mut state, params, &resampled_audio, should_cancel.clone()) {
             Ok(_) => {
                 let inference_time = inference_start.elapsed();
                 inference_ms = inference_time.as_millis() as u64;
@@ -782,7 +806,8 @@ impl Transcriber {
             });
         }
 
-        let result = text.trim().to_string();
+        let trimmed = text.trim();
+        let result = transcript_text::normalize_transcript_spacing(trimmed).into_owned();
 
         // Log text extraction performance
         let extraction_time = text_extraction_start.elapsed().as_millis() as u64;
@@ -896,6 +921,32 @@ fn adaptive_audio_ctx(samples: usize) -> Option<i32> {
     }
 }
 
+unsafe extern "C" fn whisper_abort_callback<F: Fn() -> bool>(
+    user_data: *mut std::ffi::c_void,
+) -> bool {
+    // SAFETY: full_with_cancel passes a live F, not a boxed trait object's address.
+    let should_cancel = unsafe { &*user_data.cast::<F>() };
+    should_cancel()
+}
+
+fn full_with_cancel<F: Fn() -> bool + 'static>(
+    state: &mut whisper_rs::WhisperState,
+    mut params: FullParams<'_, '_>,
+    audio: &[f32],
+    should_cancel: F,
+) -> Result<(), whisper_rs::WhisperError> {
+    // whisper-rs 0.16.0's safe helper casts Box<dyn FnMut()> storage to F,
+    // causing undefined behavior (including spurious encoder -6) and leaking it.
+    // SAFETY: this concrete F stays alive and unmoved until synchronous full()
+    // returns. whisper.cpp polls on the calling thread and does not retain the
+    // callback beyond full(). Neither the callback nor its data escapes here.
+    unsafe {
+        params.set_abort_callback(Some(whisper_abort_callback::<F>));
+        params.set_abort_callback_user_data(std::ptr::from_ref(&should_cancel).cast_mut().cast());
+    }
+    state.full(params, audio)
+}
+
 /// Convert multi-channel audio to mono by averaging all channels
 ///
 /// # Arguments
@@ -973,6 +1024,85 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_abort_callback_reads_live_captured_token() {
+        use crate::transcription::request::CancellationToken;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        fn invoke<F: Fn() -> bool>(callback: &F) -> bool {
+            // SAFETY: the typed callback remains borrowed for this entire call.
+            unsafe { whisper_abort_callback::<F>(std::ptr::from_ref(callback).cast_mut().cast()) }
+        }
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::from_arc(flag.clone());
+        let callback = move || token.is_cancelled();
+        assert!(!invoke(&callback));
+        flag.store(true, Ordering::SeqCst);
+        assert!(invoke(&callback));
+        flag.store(false, Ordering::SeqCst);
+        assert!(!invoke(&callback));
+        drop(callback);
+        assert_eq!(Arc::strong_count(&flag), 1);
+    }
+
+    #[test]
+    #[ignore = "requires VOICETYPR_TEST_WHISPER_MODEL pointing to Base English weights"]
+    fn real_engine_captured_cancellation_and_context_reuse() {
+        use crate::transcription::request::CancellationToken;
+        use std::sync::{atomic::AtomicBool, Arc};
+
+        let model = std::env::var("VOICETYPR_TEST_WHISPER_MODEL").expect("set model path");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/audio-files/test-audio.wav");
+        let mut reader = hound::WavReader::open(fixture).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16000);
+        assert_eq!(reader.spec().channels, 1);
+        let audio: Vec<f32> = reader
+            .samples::<i16>()
+            .take(53931)
+            .map(|sample| sample.unwrap() as f32 / 32768.0)
+            .collect();
+        assert_eq!(audio.len(), 53931);
+        for use_gpu in [true, false] {
+            let mut context_params = WhisperContextParameters::default();
+            context_params.use_gpu(use_gpu);
+            let context = WhisperContext::new_with_params(&model, context_params).unwrap();
+            for cancelled in [false, true, false] {
+                let flag = Arc::new(AtomicBool::new(cancelled));
+                let token = CancellationToken::from_arc(flag.clone());
+                let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+                    beam_size: 5,
+                    patience: -1.0,
+                });
+                params.set_language(Some("en"));
+                params.set_n_threads(11);
+                params.set_print_progress(false);
+                params.set_print_realtime(false);
+                let mut state = context.create_state().unwrap();
+                let result =
+                    full_with_cancel(&mut state, params, &audio, move || token.is_cancelled());
+                if cancelled {
+                    assert!(
+                        matches!(result, Err(whisper_rs::WhisperError::GenericError(-6))),
+                        "{result:?}"
+                    );
+                } else {
+                    result.unwrap();
+                    let text: String = state
+                        .as_iter()
+                        .map(|segment| segment.to_str_lossy().unwrap().into_owned())
+                        .collect();
+                    assert!(text.to_lowercase().contains("testing"), "{text}");
+                }
+                assert_eq!(Arc::strong_count(&flag), 1, "callback capture leaked");
+            }
+        }
+    }
+
+    #[test]
     fn test_convert_multichannel_to_mono() {
         // Test 4-channel audio downmixing
         // Simulating interleaved 4-channel audio: [ch1, ch2, ch3, ch4, ch1, ch2, ...]
@@ -1008,5 +1138,80 @@ mod tests {
         let audio = vec![1.0, 2.0];
         let result = convert_multichannel_to_mono(&audio, 0);
         assert!(result.is_err());
+    }
+    #[test]
+    fn attempt_backend_is_none_outside_any_scope() {
+        // A failure event emitted without a scoped attempt (the scope wraps
+        // the spawned decode future) must observe NO backend — never a
+        // previous task's — so the report omits the tag instead of guessing.
+        assert_eq!(attempt_backend(), None);
+        record_attempt_backend("sidecar"); // no-op: no scope on this task
+        assert_eq!(attempt_backend(), None);
+    }
+
+    #[tokio::test]
+    async fn failed_cold_initialization_records_cpu_fallback() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing_model = directory.path().join("missing-model.bin");
+        // Whisper opens the model before initializing any device. A missing
+        // file exercises real initialization failure without GPU/model assets.
+        ATTEMPT_BACKEND
+            .scope(std::cell::Cell::new(None), async {
+                assert!(Transcriber::new(&missing_model, false).is_err());
+                // On Apple Silicon the Metal attempt fails first, then CPU;
+                // other platforms attempt CPU directly.
+                assert_eq!(attempt_backend(), Some("cpu"));
+            })
+            .await;
+        assert_eq!(attempt_backend(), None);
+    }
+
+    #[tokio::test]
+    async fn failed_unscoped_preload_does_not_change_recording_backend() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing_model = directory.path().join("missing-model.bin");
+        ATTEMPT_BACKEND
+            .scope(std::cell::Cell::new(Some("sidecar")), async {
+                tokio::spawn(async move {
+                    assert_eq!(attempt_backend(), None);
+                    assert!(Transcriber::new(&missing_model, false).is_err());
+                    assert_eq!(attempt_backend(), None);
+                })
+                .await
+                .unwrap();
+                assert_eq!(attempt_backend(), Some("sidecar"));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_scoped_attempts_have_isolated_tags() {
+        // Two overlapping transcription attempts must never observe each
+        // other's backend: the tag is task-local state, not process-global.
+        let first = tokio::spawn(ATTEMPT_BACKEND.scope(std::cell::Cell::new(None), async {
+            record_attempt_backend("sidecar");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            attempt_backend()
+        }));
+        let second = tokio::spawn(ATTEMPT_BACKEND.scope(std::cell::Cell::new(None), async {
+            record_attempt_backend("cpu");
+            attempt_backend()
+        }));
+
+        assert_eq!(first.await.unwrap(), Some("sidecar"));
+        assert_eq!(second.await.unwrap(), Some("cpu"));
+    }
+
+    #[tokio::test]
+    async fn scoped_attempt_starts_empty_and_records_before_read() {
+        // The scope starts empty; only an actual backend selection records it.
+        let outcome = ATTEMPT_BACKEND
+            .scope(std::cell::Cell::new(None), async {
+                let before = attempt_backend();
+                record_attempt_backend("metal");
+                (before, attempt_backend())
+            })
+            .await;
+        assert_eq!(outcome, (None, Some("metal")));
     }
 }

@@ -76,13 +76,9 @@ describe("formatPrimaryHotkeyLabel", () => {
   });
 
   it("formats the combo string when a hotkey is set", () => {
-    expect(formatPrimaryHotkeyLabel(null, "CommandOrControl+Shift+Space")).toBe(
-      "⌘+⇧+␣",
-    );
+    expect(formatPrimaryHotkeyLabel(null, "CommandOrControl+Shift+Space")).toBe("⌘+⇧+␣");
     platform.isMacOS = false;
-    expect(formatPrimaryHotkeyLabel(null, "CommandOrControl+Shift+Space")).toBe(
-      "Ctrl+Shift+Space",
-    );
+    expect(formatPrimaryHotkeyLabel(null, "CommandOrControl+Shift+Space")).toBe("Ctrl+Shift+Space");
   });
 
   it("formats a modifier-hold primary as a hold-to-talk phrase", () => {

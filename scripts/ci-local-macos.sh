@@ -49,8 +49,8 @@ else
   info "Skipping pnpm install (CI_SKIP_INSTALL=1)"
 fi
 
-info "Running quality gate (typecheck + lint + frontend tests + backend tests)…"
-pnpm quality-gate
+info "Running checks (typecheck + lint + frontend tests + backend tests)…"
+pnpm check
 
 info "Running Rust clippy (deny warnings)…"
 (cd src-tauri && cargo clippy -- -D warnings)

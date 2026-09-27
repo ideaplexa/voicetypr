@@ -37,7 +37,6 @@ pub struct ParakeetStreamPartial {
     pub confidence: Option<f32>,
 }
 
-
 pub struct ParakeetStreamHandle {
     chunk_tx: tokio::sync::mpsc::Sender<Vec<i16>>,
     terminal_tx: tokio::sync::mpsc::Sender<StreamTerminalControl>,
@@ -92,8 +91,7 @@ impl ParakeetStreamHandle {
                 message: "Stream finalization was already requested".to_string(),
             });
         };
-        self.stream_finalizing
-            .store(true, Ordering::SeqCst);
+        self.stream_finalizing.store(true, Ordering::SeqCst);
         self.terminal_tx
             .send(StreamTerminalControl::Finalize)
             .await
@@ -109,23 +107,21 @@ impl ParakeetStreamHandle {
     }
 
     pub fn cancel(&self) {
-        let _ = self
-            .terminal_tx
-            .try_send(StreamTerminalControl::Cancel);
+        let _ = self.terminal_tx.try_send(StreamTerminalControl::Cancel);
     }
 }
 
 impl Drop for ParakeetStreamHandle {
     fn drop(&mut self) {
-        let _ = self
-            .terminal_tx
-            .try_send(StreamTerminalControl::Cancel);
+        let _ = self.terminal_tx.try_send(StreamTerminalControl::Cancel);
     }
 }
 
 /// Every preview chunk already accepted into the bounded queue, in FIFO order,
 /// before `FinalizeStream` is written to the sidecar.
-fn drain_buffered_preview_chunks(chunk_rx: &mut tokio::sync::mpsc::Receiver<Vec<i16>>) -> Vec<Vec<i16>> {
+fn drain_buffered_preview_chunks(
+    chunk_rx: &mut tokio::sync::mpsc::Receiver<Vec<i16>>,
+) -> Vec<Vec<i16>> {
     let mut drained = Vec::new();
     while let Ok(samples) = chunk_rx.try_recv() {
         drained.push(samples);
@@ -177,7 +173,11 @@ fn log_parakeet_stderr(line: &str) {
         || lower.contains("rate limit")
         || lower.contains("huggingface")
         || line.contains('❌');
-    if looks_like_error {
+    if is_benign_coreml_shape_probe(line) {
+        log::info!(
+            "Parakeet sidecar: Core ML shape probe emitted a benign diagnostic; model loading continued"
+        );
+    } else if looks_like_error {
         warn!("Parakeet sidecar: {}", line);
     } else {
         log::info!("Parakeet sidecar: {}", line);
@@ -987,12 +987,19 @@ impl ParakeetClient {
     }
 }
 
+fn is_benign_coreml_shape_probe(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("e5rt encountered an stl exception")
+        && lower.contains("failed to propagateinputtensorshapes")
+        && lower.contains("zero shape error")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         dispatch_cancellable, drain_buffered_preview_chunks, extract_json_payload,
-        finalize_terminal_command_sequence, parse_response_line, request_with_timeout,
-        ParakeetStreamHandle, StreamTerminalControl,
+        finalize_terminal_command_sequence, is_benign_coreml_shape_probe, parse_response_line,
+        request_with_timeout, ParakeetStreamHandle, StreamTerminalControl,
     };
     use crate::parakeet::error::ParakeetError;
     use crate::parakeet::messages::{
@@ -1035,7 +1042,11 @@ mod tests {
 
     #[test]
     fn parse_response_line_recovers_json_after_noisy_prefix() {
-        let raw = r#"E5RT encountered an STL exception. {"type":"status","loadedModel":"parakeet-tdt-0.6b-v2","modelVersion":"v2"}"#;
+        let raw = r#"E5RT encountered an STL exception. msg = Failed to PropagateInputTensorShapes: std::runtime_error during type inference for ios17.slice_by_index: zero shape error. {"type":"status","loadedModel":"parakeet-tdt-0.6b-v2","modelVersion":"v2"}"#;
+        assert!(is_benign_coreml_shape_probe(raw));
+        assert!(!is_benign_coreml_shape_probe(
+            "downloadFailed: unauthorized"
+        ));
         let response = parse_response_line(raw).expect("expected recovered response");
 
         match response {
@@ -1229,7 +1240,10 @@ mod tests {
         assert_eq!(sequence.len(), 3);
         assert!(matches!(sequence[0], ParakeetCommand::AudioChunk { .. }));
         assert!(matches!(sequence[1], ParakeetCommand::AudioChunk { .. }));
-        assert!(matches!(sequence[2], ParakeetCommand::FinalizeStream { .. }));
+        assert!(matches!(
+            sequence[2],
+            ParakeetCommand::FinalizeStream { .. }
+        ));
         assert!(chunk_rx.try_recv().is_err());
         assert!(drain_buffered_preview_chunks(&mut chunk_rx).is_empty());
     }
@@ -1262,9 +1276,7 @@ mod tests {
             final_rx: tokio::sync::Mutex::new(None),
         };
 
-        let err = handle
-            .send_chunk(&[1])
-            .expect_err("closed chunk channel");
+        let err = handle.send_chunk(&[1]).expect_err("closed chunk channel");
         assert!(matches!(err, ParakeetError::Terminated));
     }
 
@@ -1280,7 +1292,9 @@ mod tests {
         };
 
         handle.send_chunk(&[1]).expect("first chunk queued");
-        handle.send_chunk(&[2]).expect("overflow drops without error");
+        handle
+            .send_chunk(&[2])
+            .expect("overflow drops without error");
 
         assert_eq!(chunk_rx.try_recv().unwrap(), vec![1]);
         assert!(chunk_rx.try_recv().is_err());
@@ -1310,8 +1324,7 @@ mod tests {
     async fn terminal_finalize_not_blocked_by_full_chunk_queue() {
         let (chunk_tx, _chunk_rx) = tokio::sync::mpsc::channel(1);
         let (terminal_tx, mut terminal_rx) = tokio::sync::mpsc::channel(8);
-        let (final_tx, final_rx) =
-            tokio::sync::oneshot::channel::<Result<String, ParakeetError>>();
+        let (final_tx, final_rx) = tokio::sync::oneshot::channel::<Result<String, ParakeetError>>();
         let handle = ParakeetStreamHandle {
             chunk_tx,
             terminal_tx,
@@ -1321,9 +1334,7 @@ mod tests {
 
         handle.send_chunk(&[1]).expect("fill preview queue");
 
-        let finalize_task = tokio::spawn(async move {
-            handle.finalize().await
-        });
+        let finalize_task = tokio::spawn(async move { handle.finalize().await });
         assert_eq!(
             terminal_rx.recv().await,
             Some(StreamTerminalControl::Finalize)
@@ -1336,8 +1347,7 @@ mod tests {
     async fn finalize_consumes_final_rx_once() {
         let (chunk_tx, _) = tokio::sync::mpsc::channel(4);
         let (terminal_tx, mut terminal_rx) = tokio::sync::mpsc::channel(8);
-        let (final_tx, final_rx) =
-            tokio::sync::oneshot::channel::<Result<String, ParakeetError>>();
+        let (final_tx, final_rx) = tokio::sync::oneshot::channel::<Result<String, ParakeetError>>();
         let handle = Arc::new(ParakeetStreamHandle {
             chunk_tx,
             terminal_tx,

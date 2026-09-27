@@ -13,16 +13,16 @@ export function EnhancementsTab() {
   useEffect(() => {
     const init = async () => {
       try {
-        // Listen for AI enhancement errors
+        // Listen for Polish provider errors
         registerEvent("ai-enhancement-auth-error", (payload) => {
           log.error("AI authentication error:", payload);
           toast.error(payload as string, {
-            description: "Please update your API key in the Formatting section",
+            description: "Please update your API key in the Polish section",
           });
         });
 
         registerEvent("ai-enhancement-error", (payload) => {
-          log.warn("AI formatting error:", payload);
+          log.warn("Polish error:", payload);
           toast.warning(payload as string);
         });
       } catch (error) {
@@ -33,5 +33,5 @@ export function EnhancementsTab() {
     init();
   }, [registerEvent]);
 
-  return <EnhancementsSection view="ai" />;
+  return <EnhancementsSection />;
 }

@@ -1,9 +1,9 @@
+use crate::writing::ContextHint;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-
 use tauri::{Emitter, Manager};
 
 use crate::state::unified_state::UnifiedRecordingState;
@@ -55,9 +55,11 @@ pub struct AppState {
     pub window_manager: Arc<Mutex<Option<WindowManager>>>,
     pub recording_config_cache:
         Arc<tokio::sync::RwLock<Option<crate::commands::audio::RecordingConfig>>>,
-    pub license_cache: Arc<tokio::sync::RwLock<Option<crate::commands::license::CachedLicense>>>,
+    pub license_cache: Arc<tokio::sync::RwLock<crate::commands::license::RuntimeLicenseCache>>,
+    pub license_validation_lock: Arc<tokio::sync::Mutex<()>>,
     pub pill_event_queue: Arc<Mutex<Vec<QueuedPillEvent>>>,
     pub last_toggle_press: Arc<Mutex<Option<Instant>>>,
+    pub recording_app_context: Arc<Mutex<Option<ContextHint>>>,
 }
 
 impl Default for AppState {
@@ -86,9 +88,11 @@ impl AppState {
             esc_timeout_handle: Arc::new(Mutex::new(None)),
             window_manager: Arc::new(Mutex::new(None)),
             recording_config_cache: Arc::new(tokio::sync::RwLock::new(None)),
-            license_cache: Arc::new(tokio::sync::RwLock::new(None)),
+            license_cache: Arc::new(tokio::sync::RwLock::new(Default::default())),
+            license_validation_lock: Arc::new(tokio::sync::Mutex::new(())),
             pill_event_queue: Arc::new(Mutex::new(Vec::new())),
             last_toggle_press: Arc::new(Mutex::new(None)),
+            recording_app_context: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -108,6 +112,17 @@ impl AppState {
                 None
             }
         }
+    }
+    pub fn set_recording_app_context(&self, hint: ContextHint) {
+        if let Ok(mut guard) = self.recording_app_context.lock() {
+            *guard = Some(hint);
+        }
+    }
+    pub fn take_recording_app_context(&self) -> Option<ContextHint> {
+        self.recording_app_context
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
     }
 
     pub fn transition_recording_state(&self, new_state: RecordingState) -> Result<(), String> {

@@ -4,14 +4,7 @@ export type ShortcutAction =
   | "cancel_recording"
   | "copy_last_transcription"
   | "paste_last_transcription"
-  | "cycle_formatting_mode"
   | "toggle_ai_formatting"
-  | "set_personal_dictation"
-  | "set_clean_dictation"
-  | "set_writing"
-  | "set_notes"
-  | "set_message"
-  | "set_code"
   | "open_dashboard";
 
 export type ShortcutTrigger = "pressed" | "hold";

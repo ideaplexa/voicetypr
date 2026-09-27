@@ -9,7 +9,7 @@ when done.
 
 Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 `pnpm exec vitest run`, `cd src-tauri && cargo test`, `cargo fmt --check`,
-`cargo clippy -- -D warnings`, `pnpm quality-gate`.
+`cargo clippy -- -D warnings`, `pnpm check`.
 
 ## Concurrency protocol (multiple agents/sessions work this repo)
 
@@ -32,6 +32,16 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
+Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
+
+Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
+
+Plan 066 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed Windows identity drift with protected persistence and authenticated legacy recovery; 1,576 Rust tests pass. Windows DPAPI/runtime and customer recovery remain unverified. Follow-up included in PR142. See `066-windows-license-identity.md`.
+
+Plan 065 — LOCAL FIXES VERIFIED / NEEDS-SMOKE — Amp 2026-09-19: quiet-input warning policy, failed-license recovery routing and native Windows cues implemented; 1,565 Rust and 732 frontend tests pass. Windows runtime and original license decryption/loss cause remain open. See `065-windows-customer-recovery.md`.
+
+Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified in rebuilt macOS packages, including Saved text punctuation and Dock-safe indicator placement. Engine limitations and external release gates remain open. See `063-macos-vm-qa.md`.
+
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 013  | *(reserved: close 004/008 smoke blockers — checklist, no plan file yet)* | P1 | S | 004, 008 | RESERVED — no executable plan file yet |
@@ -43,12 +53,65 @@ baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 | 026  | Wave 5 (F5) — actionable errors + feedback | P2 | S | 021 | DONE (code) — NEEDS-SMOKE 026-S1 |
 | 027  | Formatting & recording-pill UI/UX pass (naming, guidance, pill state legibility, app-category UI) | P2 | M | 016, 017 | TODO — captured 2026-06-19; backlog for post-2.0.0-smoke UAUX phase (notes only, not yet claimed) |
 | 028  | Transcription latency + streaming ("fast af" dictation) — investigation + phased design | P2 | XL | 015/020 smoke | TODO — drafted 2026-06-20; design/index only, not claimed. Phase 0 (insert-path plumbing tail + ffmpeg normalize) is S/LOW-risk and shippable alone; Phases 1–5 (decode-ahead, Parakeet/Whisper/cloud streaming, partial UX) graduate to 029+ |
-| 043  | Soniox WS streaming + final-result authority | P1 | L | 037–042 substrate + 046–048 (integration) | CODE PRESENT / NEEDS-VALIDATION — Soniox WS preview and authoritative final/fallback implemented through `cc5421a9`; Deepgram counterpart in `b2fcd18f`. Fresh validation, live-provider smoke, and main reconciliation remain pending; see `069-handy-informed-audio-streaming-recovery.md` |
-| 046  | Wave 0 correctness (too-short swallow, error misclass, hotkey overwrite, upload timeout) | P0 | M | — | DONE — `8b016ab`, merged to integrate |
-| 047  | Wave 1 dispatch surface (#18 dead bytes cmd, #21 engine layer out of audio.rs) | P1 | M | 046 | DONE — `7974cd0`, merged to integrate |
-| 048  | Wave 3a uploads through executor (#16-full) | P1 | L | 047 | DONE — `7514e26`, merged to integrate |
+| 043  | Soniox WS streaming + final-result authority | P1 | L | 037–042 substrate + 046b–048b (integration) | CODE PRESENT / NEEDS-VALIDATION — Soniox WS preview and authoritative final/fallback implemented through `cc5421a9`; Deepgram counterpart in `b2fcd18f`. Fresh validation, live-provider smoke, and main reconciliation remain pending; see `069-handy-informed-audio-streaming-recovery.md` |
+| 046b | Wave 0 correctness (too-short swallow, error misclass, hotkey overwrite, upload timeout) | P0 | M | — | DONE — `8b016ab`, merged to integrate |
+| 047b | Wave 1 dispatch surface (#18 dead bytes cmd, #21 engine layer out of audio.rs) | P1 | M | 046b | DONE — `7974cd0`, merged to integrate |
+| 048b | Wave 3a uploads through executor (#16-full) | P1 | L | 047b | DONE — `7514e26`, merged to integrate |
 | 050  | Structural refactor: god-file split + engine unification + settings hardening | P2 | XL | feat/049 merge; independent of 043 | TODO — authored 2026-07-06 from arch-roadmap remainder + 2026-07-06 deep-review; own branch `refactor/050-structure`; phases A(safe extractions)→B(engine unification)→C(settings)→D(monsters); planning only, awaiting owner greenlight |
 | 069  | Handy research consolidation + audio/streaming recovery map | P1 | M | Existing integration branch | DONE (research consolidation) — 2026-09-22; 15 sources preserved and mapped to code; main reconciliation and runtime recovery remain TODO. See `069-handy-informed-audio-streaming-recovery.md` |
+| 031  | GlitchTip observability — errors, symbols, curated logs, sampled traces | P0 | M | — | IN PROGRESS — claimed Main 2026-07-14; user approved stages 1–4 for next Beta |
+| 032  | Product analytics + automatic formatting corrections | P1 | XL | 031 core | TODO — backend approved 2026-07-16: PostHog Cloud EU + first-party Cloudflare Worker/R2; wait for unfinished 031 source changes |
+| 034  | Compact report problem page | P1 | S | 033 | DONE — reviewer pass; contact fields + system configuration preview; local macOS UI smoke and frontend checks passed 2026-07-23 |
+| 040  | Punctuation consistency + AI-formatting decision diagnostics | P1 | S | 027 | DONE — reviewer pass; focused checks + local UI smoke passed 2026-07-24 |
+| 041  | Paid-license validation resilience | P0 | M | — | DONE — reviewer PASS; focused/full gates + local Account UI smoke passed 2026-07-24 |
+| 042  | Release workflow speed — CI fast path, tested release logic, sidecar caches | P1 | M | — | DONE — reviewer PASS; workflow gates + cold/warm signed release dry-runs passed 2026-08-02 |
+| 043  | README + canonical AGPL license refresh | P1 | S | — | DONE — GitHub detects AGPL-3.0; README link + formatting validation passed 2026-08-03 |
+| 044  | Agent-CLI Polish hardening + model selection | P1 | L | 030 | DONE (code) — NEEDS-SMOKE; automated gates + adversarial review passed 2026-08-06 |
+| 045  | Privacy-safe PostHog product analytics | P1 | L | 031 | DONE (code) — NEEDS-SMOKE 045-S1..S6; full gate, release compile, local dev UI smoke, and adversarial reviews passed 2026-08-06 |
+| 046  | Polish workflow alignment — natural punctuation, Saved Text, app-first mode resolution | P1 | S | 016, 027, 040 | DONE (code) — NEEDS-SMOKE 046-S1..S6; full gate and local native/browser UI smokes passed; app context now persists without Polish, and distinct listening/transcribing/polishing pill states were browser-verified 2026-08-10 |
+| 047  | Polish provider UX + no-input fast path | P0 | M | 044, 046 | DONE — local-agent probe storm removed; stable rows, per-agent model dialog/search, supported thinking controls, and persisted CLI defaults verified 2026-08-10; warmup hardened 2026-08-13 (custom origins validated before HEAD, OpenRouter + OpenAI legacy-fallback origins warm, agent-CLI never warms; recording start prefetches the selected provider only — HTTP HEAD or CLI capability probe); shortcut zero-count chrome removed and curated, friendly-labeled cloud STT model selection verified 2026-08-14 |
+| 048  | Expanded local-agent CLI Polish adapters | P1 | L | 044, 047 | DONE — focused frontend/backend gates, exact installed-CLI smokes, and native CUA UI exercise passed 2026-08-10; droid isolation flag corrected to documented `--restrict-tools` + real droid round-trip smoke passed 2026-08-13 |
+| 051  | Polish tab component split (monolith → hooks + provider card) | P2 | M | 050 | DONE — 663 frontend tests + local macOS CUA smoke (expand/collapse, Cloud/Local tabs, agent rows, API-key modal) 2026-08-18 (`676eaa3f`) |
+| 052  | Effect-safety sweep (derived state, useSyncExternalStore, useTauriEvent) | P2 | M | — | DONE — react-doctor targets cleared (AdvancedSection flicker-sync, matchMedia store, source-tab snap); 663 tests + local CUA smoke (Sources tabs, Quick help permissions) 2026-08-19 |
+| 053  | Reset-on-prop & parent-notify effect elimination | P2 | M | 052 | DONE — react-doctor 55→62 (Critical→Needs work); 663 tests + Shortcuts smoke 2026-08-19 (see `053-effect-reset-elimination.md`) |
+| 054  | react-doctor full-court cleanup | P2 | L | 052, 053 | DONE — score 62→89 ("Great"), 93→1 finding (verified false positive); 15 giants split into ~60 modules; 663/663 tests + live click-through 2026-08-19 (see `054-react-doctor-cleanup.md`) |
+| 055  | Polish latency — fast-path defaults, speed guidance, measured-latency chips | P1 | M | 047 | TODO — brief filed 2026-08-20 from measured CLI autopsy (42K-token backpack, TTFT ~5s, no caching, $0.03/call); see `055-polish-fast-path.md` |
+| 056  | Local Polish model — Phase A s1-mini GGUF integration (no ML), Phase B LFM2.5-350M training | P1 | L | 055 | TODO — evidence filed 2026-08-20; Phase A uses public Apache-2.0+naming-clause weights, Phase B gated on license + eval; see `056-local-polish-model.md` |
+| 057  | cpal 0.18 stream resilience + auto device recovery (StreamInvalidated rebuild, stable IDs, busy/permission UX) | P1 | M | — | TODO — brief filed 2026-08-21 from upstream 0.17/0.18 changelog audit; see `057-cpal-stream-resilience.md` |
+| 058  | Media pause v2 — upgrade existing MediaPauseController to VoiceInk-grade (macOS perl MediaRemote bridge + enigo CGEvent key + resume delay + mute fallback; Windows session ledger + Store manifest capability) | P1 | M | — | IN PROGRESS — claimed Main 2026-08-21; macOS action layer landed + live-verified (MediaRemote pause→resume round trip confirmed in dev-app log 12:48; mute fallback exercised live via CoreAudio test binary). Remaining: resume-delay setting, perl-bridge fallback if JXA ever breaks, Windows session-ledger verification + MSIX \`globalMediaControl\` |
+| 059  | No-speech gate — pre-engine reject on strong absence evidence, all STT paths; kills hallucinate-and-polish | P0 | S | — | CODE COMPLETE — beta.8 candidate on `fix/no-speech-transient-windows`: calibrated quiet-silence gate plus fixed 5ms evidence windows for callback-size-independent transient rejection; deliberate punctuation preserved; two-wave adversarial review clear; 1395 backend tests + clippy `-D warnings` green. Packaged macOS/Windows smoke pending in `SMOKE.md`; Phase 2 engine-neutral neural VAD remains planned. |
+| 060  | Beta10 release remediation — migrated silent failures plus reviewed release fixes | P0 | L | 031 (pivot), 019 seam | MERGED / RELEASED AS `v2.0.6-beta.10` — published 2026-09-15; final integrated reviews cleared after corrections. Packaged 060-S1–S10 and existing release smoke remain unchecked. See `060-beta10-readiness.md` and `060-pr140-review-followup.md` for validation evidence. |
+| 061  | License preservation — non-destructive secure-store reads and payload-free recovery errors | P0 | S | 060 | MERGED / RELEASED AS `v2.0.6-beta.10` — published 2026-09-15; real-file/AES regressions and security review pass. Unreadable entries are preserved, not treated as absent. Original Windows decryption cause remains unknown; no restoration of already-deleted data. Packaged 061-S1/S2 pending; see `061-license-preservation.md`. |
+
+## PR #140 follow-up — 2026-09-06
+
+MERGED / RELEASED AS `v2.0.6-beta.10` (2026-09-15) — Codex follow-up on `fix/047-silent-failures` from `e97aa900`. Confirmed review defects fixed, including forced CLI model refresh and shared manual/automatic Soniox cleanup coordination; 731 frontend and 1,557 Rust tests pass (16 ignored), typecheck/lint/frontend build/Clippy green. Scoped macOS VM QA is complete in plan 063; external account and physical hardware smoke remain unchecked. See `060-pr140-review-followup.md` for findings, rejected feedback and evidence. Beta publication does not establish packaged smoke completion or Stable promotion.
+
+## Plan 062 — CI gating and compute policy
+
+IN PROGRESS — claimed Codex 2026-09-06 on `agent/062-ci-gating`, based on
+main `4f9e497d`. First ship cancellation and cheap-check prerequisites without
+weakening native validation; manual-only native builds require an enforced
+current-revision merge gate. See `062-ci-gating.md`.
+
+## Plan 064 — Depot runners + Intel legacy support
+
+COMPLETE — Depot was evaluated and deliberately rejected for routine use:
+warm GitHub CI achieves practical parity with the measured Depot pilots and
+free standard runners are sufficient, so every workflow now runs exclusively
+on GitHub-hosted standard runners and Depot remains an external, unused
+service. CI policy and canonical owner URLs are published on PR #140; the
+repository is now `ideaplexa/voicetypr`. GitHub Actions remains the control
+plane; Intel is a manual-only GitHub job and Store packaging is an immutable
+manual candidate check. The evaluation record stands: the portable fork-safe
+pilot (run `34785226804` at head `e9a022fc94a4978fc41218b177af368389bc9cb7`)
+passed every scheduled job on the pinned `native-ci.yml` — Depot
+`depot-macos-14` in 17m00s and `depot-windows-2022-16` in 17m29s versus
+GitHub-hosted 35m29s and 22m35s on the same head, Intel skipped — proving
+the lanes worked without justifying metered routine use. No routing
+variables, dispatch inputs, or allowlist dependencies remain; workflows pin
+literal `macos-14`, `windows-2022`, and manual-only `macos-15-intel`. No
+release occurred. See `064-depot-runners-intel-legacy.md`.
 
 ## Code-done, awaiting batched manual smoke (`plans/SMOKE.md`)
 
@@ -61,6 +124,9 @@ baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 | 019  | Cloud STT shortlist — Soniox + OpenAI/Groq/Deepgram/Cohere | `2026-06-12` (this session) | NEEDS-SMOKE — `cloud_stt` seam + 4 new providers + Soniox migration; clean cutover (no soniox-only residue); pre-merge reliability bar met (owned 120s/15s client, retry-once on transient, typed `SttError` categories, no raw provider bodies); Cohere language restricted to its 14; all automated gates green; real-key desktop smoke in `SMOKE.md` |
 | 017  | AI provider catalog + searchable breadth UI | `2026-06-13` (this session) | NEEDS-SMOKE — generated catalog (OpenAI / Anthropic / Google Gemini, 94 models from a pinned `models.dev` snapshot + overlay) replaces the hardcoded per-provider model table; data-driven genai dispatch (deliverable 1b), 016 reliability policy untouched; searchable/grouped picker UI; Custom stays the escape hatch for any other OpenAI-compatible endpoint; all automated gates green; real-key smoke in `SMOKE.md` |
 | 020  | Shared transcription contract — Stage 2 (desktop local/cloud → `transcribe_with_app`) | `6ac9b00` (this session) | NEEDS-SMOKE — desktop record→transcribe→insert hot path now runs through the shared executor for local+cloud (remote stays inline, Stage 5); plan 015's watchdog/retry/cancel moved to the executor seam (integrated path supersedes 015-S3/S4); behavior-preserving, reviewer-clean (8 never-lose-speech invariants verified); all automated gates green (clippy --all-targets, 927 tests incl. +5 seam tests); hot-path smoke in `SMOKE.md` (020-S1..S10) |
+| 030  | Windows crash dependencies — stale monitors + tray device-change paint loop | `2026-07-14` (this session) | NEEDS-SMOKE — `tao 0.34.6` + `tray-icon 0.21.2`; local quality gate and release clippy green; Windows CI/build + signed Beta 7 device-change/monitor-transition smoke remain |
+| 033  | Tray recovery + upload result accessibility | this PR | NEEDS-SMOKE 033-S1..S5 — bounded tray recovery/status/help + fixed-height upload speaker timeline; local quality gate, release clippy, production build, and live macOS first-attempt tray creation passed |
+| 045  | Privacy-safe PostHog product analytics | this PR | NEEDS-SMOKE 045-S1..S6 — closed Rust event/property contract; independent consent/IDs; no frontend SDK, replay, autocapture, identify, or PostHog error tracking; automated gates and adversarial reviews green; signed release network proof remains |
 
 ## Archived (closed — `plans/archive/`)
 
@@ -78,6 +144,7 @@ baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 | 012  | Shared transcription contract — design doc (no code) | DONE |
 | 014  | Shared transcription contract — Stage 1 (DTOs + executor) | DONE (2026-06-13) — additive `transcription/` contract module (request/error/capability DTOs + delegating executor); `Explicit`→Whisper/Parakeet/Cloud delegate to existing helpers; `HostDefault` (Stage 4) + Remote send (Stage 5) typed-deferred; cloud_stt typed-error seam added; no callsite rewired (zero runtime change); gates green (clippy --all-targets, 919 tests). Executor engine dispatch is exercised when a later stage ports callsites. Stages 2-6 are future plans. |
 | 018  | AI provider graduation — OpenRouter, Groq, xAI | DROPPED (2026-06-13) — Groq/OpenRouter (and earlier xAI/DeepSeek/Cohere) removed per user; OpenAI-compatible providers are served by the Custom escape hatch, so there is nothing to graduate |
+| 050  | Navigation ownership reorganization — dedicated Recording, direct settings routes, compact chrome, CLI onboarding, and Polish workflow | DONE (2026-08-17) — focused/full frontend gates and native macOS CUA smoke passed |
 
 Status values: TODO | IN PROGRESS — claimed <by> <date> | DONE | NEEDS-SMOKE
 (code done, manual smoke pending) | BLOCKED (one-line reason) | REJECTED
@@ -130,6 +197,15 @@ Status values: TODO | IN PROGRESS — claimed <by> <date> | DONE | NEEDS-SMOKE
     language normalization broader than provider contracts.
   - Merge order: reliability-fixed 019 lands first, then 017/018 adapt around
     the established `stt_*` namespace.
+- **032 after 031 core (hard)**: 032 splits the existing GlitchTip consent keys,
+  changes release-client initialization, and reuses the transcription telemetry
+  boundaries introduced by 031. Do not execute it concurrently with unfinished
+  031 source changes. Native symbolication may remain pending because 032 does
+  not depend on resolved GlitchTip frames.
+- **Plan-number collision (2026-08-20)**: branch `feat/049-pure-rust-audio`
+  commit `b8ff14cf` labels parakeet decode-ahead live preview as "plan 051",
+  while this branch's 051 is the Polish tab split. Both exist; renumber the
+  decode-ahead plan to a free number when that branch next lands.
 
 ## Execution review notes
 
@@ -185,10 +261,6 @@ Status values: TODO | IN PROGRESS — claimed <by> <date> | DONE | NEEDS-SMOKE
   contract work dominates. Revisit after 012's implementation.
 - **Mock-heavy frontend component tests** — acknowledged; add integration
   harnesses opportunistically per feature, not as a standalone refactor.
-- **Stale deferred-items doc** (Voice Commands listed as future work but
-  already shipped: `writing.rs:122-144`, `EnhancementSettings.tsx:411-424`,
-  tests) — folded into plan 012's doc (its maintenance note flags the
-  staleness); no separate plan.
 
 ## Audit coverage note
 

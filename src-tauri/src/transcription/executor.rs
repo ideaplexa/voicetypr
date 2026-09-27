@@ -26,7 +26,7 @@ use tempfile::{NamedTempFile, TempPath};
 
 pub(crate) const LOCAL_ENGINE_TIMEOUT_GRACE: Duration = Duration::from_secs(2);
 
-use crate::parakeet::manager::ParakeetManager;
+use crate::parakeet::manager::{ParakeetManager, ParakeetTranscriptionOptions};
 use crate::parakeet::messages::ParakeetResponse;
 use crate::provider_capabilities::ProviderEngine;
 use crate::secure_store::secure_get;
@@ -237,14 +237,28 @@ async fn route_once(
                 return Err(cancelled(source));
             }
 
+            let custom_vocabulary = if model_name.starts_with("parakeet-tdt-") {
+                crate::writing::load_writing_settings(app)
+                    .map(|settings| crate::writing::compile_parakeet_custom_vocabulary(
+                        &settings,
+                        request.spoken_language.as_deref(),
+                    ))
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
             match manager
-                .transcribe(
+                .transcribe_with_custom_vocabulary(
                     app,
                     model_name,
                     input_path.to_path_buf(),
-                    request.spoken_language.clone(),
-                    translate,
-                    Some(cancel),
+                    ParakeetTranscriptionOptions {
+                        language: request.spoken_language.clone(),
+                        translate,
+                        custom_vocabulary,
+                        cancel_flag: Some(cancel),
+                    },
                 )
                 .await
             {
@@ -303,7 +317,8 @@ async fn route_once(
                     ))
                 }
             };
-            match provider.transcribe_typed(app, &key, input_path, language).await {
+            let model = provider.selected_model(app).id;
+            match provider.transcribe_typed(app, &key, model, input_path, language).await {
                 Ok(text) => Ok(TranscriptionResult::new(job, text)),
                 Err(e) => Err(from_stt_error(&e, source)),
             }

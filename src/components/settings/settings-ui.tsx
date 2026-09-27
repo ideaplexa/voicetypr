@@ -8,20 +8,14 @@ interface IconProps {
 /**
  * Shared settings layout primitives — the Claude dashboard "settings card" pattern.
  * Every Configure/Account screen (Dictation, Transcription, Formatting, License,
- * Advanced…) composes these so the whole app reads as one system: a page header,
+ * Diagnostics…) composes these so the whole app reads as one system: a page header,
  * a stack of titled cards, and label/description + control rows inside each card.
  */
 
-export function SettingsPage({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+export function SettingsPage({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className="h-full min-h-0 overflow-auto">
-      <div className={cn("mx-auto flex w-full max-w-3xl flex-col gap-3.5 px-6 py-7 md:px-8", className)}>
+      <div className={cn("mx-auto flex w-full max-w-4xl flex-col gap-5 pb-4 pl-2 pr-4", className)}>
         {children}
       </div>
     </div>
@@ -38,15 +32,19 @@ export function SettingsHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-1 flex flex-wrap items-start gap-4">
+    <header className="flex flex-wrap items-start gap-4">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+        <h1 className="text-[1.75rem] font-semibold tracking-[-0.025em] text-foreground">
+          {title}
+        </h1>
         {description ? (
-          <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {description}
+          </p>
         ) : null}
       </div>
       {actions ? <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div> : null}
-    </div>
+    </header>
   );
 }
 
@@ -66,15 +64,20 @@ export function SettingsCard({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-border bg-card p-6 shadow-sm", className)}>
+    <section className={cn("rounded-xl border border-border/80 bg-card p-5", className)}>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             {Icon ? <Icon className="h-4 w-4 shrink-0 text-sage" /> : null}
-            <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
+            <h2 className="text-base font-semibold text-foreground">{title}</h2>
           </div>
           {description ? (
-            <p className={cn("mt-1 text-[13px] leading-relaxed text-muted-foreground", Icon && "ml-[26px]")}>
+            <p
+              className={cn(
+                "mt-1 text-sm leading-relaxed text-muted-foreground",
+                Icon && "ml-[26px]",
+              )}
+            >
               {description}
             </p>
           ) : null}
@@ -104,7 +107,7 @@ export function SettingRow({
   return (
     <div
       className={cn(
-        "flex items-center gap-4 border-t border-border pt-4 mt-4 first:mt-3 first:border-t-0 first:pt-0",
+        "flex flex-col items-start gap-3 border-t border-border/70 pt-4 mt-4 first:mt-3 first:border-t-0 first:pt-0 sm:flex-row sm:items-center sm:gap-6",
         className,
       )}
     >
@@ -117,10 +120,14 @@ export function SettingRow({
           <p className="text-[13.5px] font-semibold text-foreground">{title}</p>
         )}
         {description ? (
-          <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
+            {description}
+          </p>
         ) : null}
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">{control ?? children}</div>
+      <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto sm:shrink-0">
+        {control ?? children}
+      </div>
     </div>
   );
 }

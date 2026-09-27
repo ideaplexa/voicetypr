@@ -1,15 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { TranscriptionHistory } from "@/types";
-import {
-  applyHistoryFilters,
-  sourceLabel,
-  formatDurationMs,
-} from "./RecentRecordings";
+import { applyHistoryFilters, sourceLabel, formatDurationMs } from "./recentRecordingsHelpers";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
 
 function makeItem(
   overrides: Partial<TranscriptionHistory> & Pick<TranscriptionHistory, "id" | "text">,
@@ -230,8 +225,7 @@ describe("text search alongside structural filters", () => {
     const q = query.trim().toLowerCase();
     return structural.filter(
       (item) =>
-        item.text.toLowerCase().includes(q) ||
-        (item.model && item.model.toLowerCase().includes(q)),
+        item.text.toLowerCase().includes(q) || (item.model && item.model.toLowerCase().includes(q)),
     );
   }
 

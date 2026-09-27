@@ -39,9 +39,9 @@ describe("eventToShortcut", () => {
     expect(eventToShortcut(keydown({ metaKey: true, code: "Space", key: " " }))).toBe(
       "CommandOrControl+Space",
     );
-    expect(
-      eventToShortcut(keydown({ metaKey: true, ctrlKey: true, code: "KeyK", key: "k" })),
-    ).toBe("CommandOrControl+Control+K");
+    expect(eventToShortcut(keydown({ metaKey: true, ctrlKey: true, code: "KeyK", key: "k" }))).toBe(
+      "CommandOrControl+Control+K",
+    );
     platform.isMacOS = false;
   });
 
@@ -52,7 +52,9 @@ describe("eventToShortcut", () => {
   });
 
   it("returns null for a bare modifier press", () => {
-    expect(eventToShortcut(keydown({ ctrlKey: true, key: "Control", code: "ControlLeft" }))).toBeNull();
+    expect(
+      eventToShortcut(keydown({ ctrlKey: true, key: "Control", code: "ControlLeft" })),
+    ).toBeNull();
   });
 });
 
@@ -60,7 +62,10 @@ describe("eventMatchesShortcut", () => {
   it("matches Ctrl+Space against the stored CommandOrControl+Space", () => {
     platform.isMacOS = false;
     expect(
-      eventMatchesShortcut(keydown({ ctrlKey: true, code: "Space", key: " " }), "CommandOrControl+Space"),
+      eventMatchesShortcut(
+        keydown({ ctrlKey: true, code: "Space", key: " " }),
+        "CommandOrControl+Space",
+      ),
     ).toBe(true);
   });
 
@@ -89,6 +94,8 @@ describe("eventMatchesShortcut", () => {
   });
 
   it("returns false for an empty configured hotkey", () => {
-    expect(eventMatchesShortcut(keydown({ ctrlKey: true, code: "Space", key: " " }), "")).toBe(false);
+    expect(eventMatchesShortcut(keydown({ ctrlKey: true, code: "Space", key: " " }), "")).toBe(
+      false,
+    );
   });
 });

@@ -1,36 +1,116 @@
 name: CI
 
+# A manual dispatch validates the selected ref; Intel is an explicit legacy lane.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
+    inputs:
+      include_intel:
+        description: 'Include the legacy Intel macOS lane'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   # ===========================================
-  # Frontend (fast - no Rust)
+  # Change classification (workflow/docs fast path)
   # ===========================================
-  frontend:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      application_required: ${{ steps.classify.outputs.application_required }}
+      native_required: ${{ steps.classify.outputs.native_required }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "application_required=true" >> "$GITHUB_OUTPUT"
+            echo "native_required=true" >> "$GITHUB_OUTPUT"
+            echo "No usable base commit; running application checks conservatively."
+          else
+            changed_files="$RUNNER_TEMP/voicetypr-changed-files"
+            diff_range=("$BASE_SHA" "$HEAD_SHA")
+            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+              diff_range=("$BASE_SHA...$HEAD_SHA")
+            fi
+            if git diff --no-renames --name-only -z "${diff_range[@]}" > "$changed_files"; then
+              node .github/scripts/classify-ci-changes.mjs --null < "$changed_files"
+            else
+              echo "application_required=true" >> "$GITHUB_OUTPUT"
+              echo "native_required=true" >> "$GITHUB_OUTPUT"
+              echo "Diff classification failed; running application checks conservatively."
+            fi
+          fi
+
+  # ===========================================
+  # Workflow contracts (fast, no dependency install)
+  # ===========================================
+  workflow:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check workflow script syntax
+        run: |
+          for script in .github/scripts/*.mjs; do
+            node --check "$script"
+          done
+
+      - name: Test workflow helper contracts
+        run: node --test .github/scripts/*.node-test.mjs
+
+      - name: Validate GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+  # ===========================================
+  # Frontend (fast - no Rust)
+  # ===========================================
+  frontend:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.application_required != 'false') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.19.0'
+          package-manager-cache: false
 
       - name: Setup pnpm
         run: |
           corepack enable
           corepack prepare pnpm@10.13.1 --activate
           pnpm --version
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22.19.0'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -42,46 +122,84 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
-        run: pnpm test:frontend
+        run: pnpm exec vitest run src
 
-  # No Ubuntu Rust clippy job: the native Tauri crate targets macOS/Windows and
-  # Linux runners are not provisioned with the required native app dependencies.
+      - name: Build frontend
+        run: pnpm build
 
   # ===========================================
-  # Build macOS (full build = catches all issues)
+  # Native lanes (ARM macOS + Windows x64) via the same-repository reusable workflow
   # ===========================================
-  build-macos:
-    strategy:
-      matrix:
-        include:
-          - os: macos-14
-            arch: aarch64
-          - os: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.os }}
+  native:
+    needs: [changes, workflow, frontend]
+    if: >-
+      ${{ !cancelled() &&
+      needs.workflow.result == 'success' &&
+      needs.frontend.result == 'success' &&
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+      (needs.changes.result != 'success' || needs.changes.outputs.native_required != 'false') }}
+    uses: ./.github/workflows/native-ci.yml
+
+  # ===========================================
+  # Legacy Intel macOS lane (manual dispatch only; GitHub-hosted)
+  # ===========================================
+  build-macos-intel:
+    needs: [changes, workflow, frontend]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+      inputs.include_intel == true &&
+      !cancelled() &&
+      needs.workflow.result == 'success' &&
+      needs.frontend.result == 'success' &&
+      (needs.changes.result != 'success' || needs.changes.outputs.native_required != 'false') }}
+    runs-on: macos-15-intel
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      - name: Select Swift 6 toolchain (Parakeet sidecar needs Xcode 16+)
+      - name: Select Swift 6 toolchain and configure Clang runtime
         run: |
-          xcode=$(ls -d /Applications/Xcode_1[6-9]*.app /Applications/Xcode_[2-9][0-9]*.app 2>/dev/null | sort -V | tail -1)
+          xcode=$(
+            find /Applications -maxdepth 1 \( -type d -o -type l \) \
+              \( -name 'Xcode_1[6-9]*.app' -o -name 'Xcode_[2-9][0-9]*.app' \) \
+              | sort -V \
+              | tail -1
+          )
           if [ -z "$xcode" ]; then echo "No Xcode >=16 (Swift 6) found on runner" >&2; exit 1; fi
           echo "Selecting $xcode"
           sudo xcode-select -s "$xcode"
           swift --version
+          # Xcode 16.4 emits availability checks in whisper.cpp's Metal objects,
+          # but Rust's final link does not automatically include compiler-rt.
+          # Older toolchains (e.g. GitHub-hosted Xcode 16.2) may not ship or
+          # require the archive, so discovery is bundle-local and optional:
+          # link libclang_rt.osx.a only when the selected Xcode actually has one.
+          clang_runtime=$(
+            find "$xcode/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang" \
+              -type f -name 'libclang_rt.osx.a' 2>/dev/null \
+              | sort -V \
+              | tail -1
+          )
+          if [ -n "$clang_runtime" ]; then
+            echo "Linking compiler-rt archive: $clang_runtime"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+          else
+            echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.19.0'
+          package-manager-cache: false
 
       - name: Setup pnpm
         run: |
           corepack enable
           corepack prepare pnpm@10.13.1 --activate
           pnpm --version
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22.19.0'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.91.1
@@ -93,26 +211,13 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Cache Parakeet Swift build
-        uses: actions/cache@v4
-        with:
-          path: sidecar/parakeet-swift/.build
-          key: ${{ runner.os }}-${{ runner.arch }}-parakeet-swift-${{ hashFiles('sidecar/parakeet-swift/Package.swift', 'sidecar/parakeet-swift/Sources/**') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-parakeet-swift-
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build frontend
         run: pnpm build
 
-      - name: Rust tests (Apple Silicon)
-        if: matrix.arch == 'aarch64'
-        run: cd src-tauri && cargo test
-
       - name: Rust tests (Intel compile-only)
-        if: matrix.arch == 'x86_64'
         run: cd src-tauri && cargo test --no-run
 
       - name: Clippy
@@ -124,118 +229,6 @@ jobs:
       - name: Upload preview artifact
         uses: actions/upload-artifact@v6
         with:
-          name: ci-macos-${{ matrix.arch }}-preview
+          name: ci-macos-x86_64-preview
           path: src-tauri/target/release/voicetypr
-          retention-days: 30
-
-  # Build Windows (CPU-safe app + Vulkan sidecar)
-  # ===========================================
-  build-windows:
-    runs-on: windows-2022
-    env:
-      # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep dependency trees.
-      CARGO_TARGET_DIR: D:\cargo-target
-      VULKAN_RUNTIME_VERSION: 1.3.290.0
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.13.1 --activate
-          pnpm --version
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22.19.0'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Prepare cargo target dir
-        shell: pwsh
-        run: New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.91.1
-        with:
-          components: clippy
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1
-        with:
-          vulkan_version: 1.3.290.0
-          install_runtime: true
-          cache: true
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Whisper Vulkan sidecar
-        shell: pwsh
-        env:
-          RUSTFLAGS: -C target-feature=+crt-static
-        run: |
-          cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release
-          if ($LASTEXITCODE -ne 0) {
-            throw "Whisper Vulkan sidecar build failed with exit code $LASTEXITCODE"
-          }
-          New-Item -ItemType Directory -Force -Path "sidecar/whisper-vulkan/dist" | Out-Null
-          $targetDir = $env:CARGO_TARGET_DIR
-          if ([string]::IsNullOrWhiteSpace($targetDir)) {
-            $targetDir = "sidecar/whisper-vulkan/target"
-          }
-          $sidecarExe = Join-Path $targetDir "release/whisper-vulkan-sidecar.exe"
-          if (-not (Test-Path $sidecarExe)) {
-            throw "Whisper Vulkan sidecar binary not found: $sidecarExe"
-          }
-          Copy-Item $sidecarExe "sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe"
-
-      - name: Download Windows runtime installer resources
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "src-tauri/windows/resources" | Out-Null
-          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "src-tauri/windows/resources/vc_redist.x64.exe"
-          $vulkanVersion = $env:VULKAN_RUNTIME_VERSION
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            $vulkanVersion = $env:VULKAN_VERSION
-          }
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            $vulkanVersion = Split-Path -Leaf $env:VULKAN_SDK
-          }
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            throw "Cannot determine Vulkan version. Set VULKAN_RUNTIME_VERSION, VULKAN_VERSION, or VULKAN_SDK."
-          }
-          $vulkanRuntimeUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanRT-$vulkanVersion-Installer.exe"
-          Invoke-WebRequest -Uri $vulkanRuntimeUrl -OutFile "src-tauri/windows/resources/VulkanRT-Installer.exe"
-
-      - name: Build frontend
-        run: pnpm build
-
-      - name: Clippy
-        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Rust tests
-        shell: pwsh
-        working-directory: src-tauri
-        run: ./run-tests.ps1
-
-      - name: Build Tauri (release, CPU-safe main app)
-        run: cd src-tauri && cargo build --release
-
-      - name: Assert CPU build does not import vulkan-1.dll
-        shell: pwsh
-        run: |
-          & ./src-tauri/windows/assert-no-vulkan-import.ps1 -ExePath "$env:CARGO_TARGET_DIR/release/voicetypr.exe"
-
-      - name: Upload preview artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: ci-windows-x64-preview
-          path: D:/cargo-target/release/voicetypr.exe
           retention-days: 30

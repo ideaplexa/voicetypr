@@ -40,8 +40,7 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = {
 // like the console.* it replaced: no IPC, original args, all levels.
 const isTest = !!import.meta.env.VITEST || import.meta.env.MODE === "test";
 
-let threshold =
-  LEVEL_WEIGHT[isTest ? "trace" : import.meta.env.DEV ? "debug" : "info"];
+let threshold = LEVEL_WEIGHT[isTest ? "trace" : import.meta.env.DEV ? "debug" : "info"];
 
 /** Override the client-side log threshold at runtime (e.g. while debugging). */
 export function setLogLevel(level: LogLevel): void {

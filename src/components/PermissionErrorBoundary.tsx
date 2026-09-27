@@ -1,9 +1,9 @@
-import { Component, ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
-import { AlertCircle } from 'lucide-react';
-import { createLogger } from '@/lib/logger';
+import { Component, ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { AlertCircle } from "lucide-react";
+import { createLogger } from "@/lib/logger";
 
-const log = createLogger('permission-error-boundary');
+const log = createLogger("permission-error-boundary");
 
 interface Props {
   children: ReactNode;
@@ -26,7 +26,7 @@ export class PermissionErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    log.error('Permission component error:', error, errorInfo);
+    log.error("Permission component error:", error, errorInfo);
   }
 
   handleReset = () => {
@@ -44,9 +44,7 @@ export class PermissionErrorBoundary extends Component<Props, State> {
           <AlertCircle className="h-12 w-12 text-red-500" />
           <div className="text-center space-y-2">
             <h3 className="text-lg font-semibold">Something went wrong</h3>
-            <p className="text-sm text-muted-foreground">
-              Failed to check system permissions
-            </p>
+            <p className="text-sm text-muted-foreground">Failed to check system permissions</p>
           </div>
           <Button onClick={this.handleReset} variant="outline" size="sm">
             Try Again

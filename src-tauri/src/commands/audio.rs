@@ -2,8 +2,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::ai::error::{user_facing_message, AiProviderError};
-use crate::audio::recorder::AudioRecorder;
+use crate::audio::recorder::{AudioRecorder, STOP_POST_ROLL};
 use crate::audio::silence_detector::SilenceDetectorEvent;
+use crate::audio::speech_evidence::{
+    classify_speech_evidence, SpeechEvidenceAttempt, SpeechEvidenceOutcome,
+};
 use crate::audio::stream_tap::{StreamTapSink, StreamTapSinkFactory};
 use crate::cloud_stt::common::SttError;
 use crate::commands::settings::{
@@ -49,7 +52,7 @@ use serde_json;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::async_runtime::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
@@ -64,6 +67,13 @@ static TOAST_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Global media pause controller for pausing/resuming system media during recording
 static MEDIA_CONTROLLER: Lazy<MediaPauseController> = Lazy::new(MediaPauseController::new);
+
+/// Restore any output device the media pause controller muted before the
+/// application exits (macOS mute layer). Player pause state is untouched.
+#[cfg(target_os = "macos")]
+pub fn cleanup_media_pause_on_exit() {
+    MEDIA_CONTROLLER.cleanup_on_exit();
+}
 
 /// Monotonically increasing recording-generation counter. `start_recording`
 /// bumps it to open a new generation; a transcription task captures the value
@@ -835,6 +845,10 @@ fn build_deepgram_stream_sink_factory(
         let handle = crate::cloud_stt::deepgram_ws::open(
             crate::cloud_stt::deepgram_ws::DeepgramStreamConfig {
                 api_key,
+                model: crate::cloud_stt::CloudProvider::Deepgram
+                    .selected_model(&app_for_stream)
+                    .id
+                    .to_string(),
                 sample_rate,
                 channels,
                 language,
@@ -1032,6 +1046,116 @@ impl StopInFlightGuard {
 impl Drop for StopInFlightGuard {
     fn drop(&mut self) {
         self.0.store(false, AtomicOrdering::SeqCst);
+    }
+}
+/// Decode journey (PostHog) + terminal outcome. The GlitchTip log-funnel
+/// transaction/span plumbing was removed (plan 060 pivot: logs never alerted);
+/// failure events now go through `telemetry::capture_transcription_failure`.
+/// Cancellation (None) is the default so aborting the Tokio task during an
+/// await still emits a terminal journey event.
+struct DecodeJourneyGuard {
+    started: Instant,
+    /// None = cancelled/aborted before a terminal outcome was recorded.
+    succeeded: Option<bool>,
+    analytics_engine: crate::product_analytics::EngineKind,
+}
+
+impl DecodeJourneyGuard {
+    fn new(analytics_engine: crate::product_analytics::EngineKind) -> Self {
+        Self {
+            started: Instant::now(),
+            succeeded: None,
+            analytics_engine,
+        }
+    }
+
+    fn set_outcome(&mut self, succeeded: bool) {
+        self.succeeded = Some(succeeded);
+    }
+}
+
+impl Drop for DecodeJourneyGuard {
+    fn drop(&mut self) {
+        let duration_ms = self.started.elapsed().as_millis() as u64;
+        let outcome = match self.succeeded {
+            Some(true) => crate::product_analytics::JourneyOutcome::Succeeded,
+            Some(false) => crate::product_analytics::JourneyOutcome::Failed,
+            None => crate::product_analytics::JourneyOutcome::Cancelled,
+        };
+        crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
+            stage: crate::product_analytics::JourneyStage::Decode,
+            outcome,
+            duration_ms,
+            engine: Some(self.analytics_engine),
+        });
+    }
+}
+
+/// Delivery journey (PostHog). A task abandoned before delivery is cancelled;
+/// only an attempted paste or clipboard operation can succeed or fail.
+struct DeliveryJourneyGuard {
+    started: Instant,
+    succeeded: Option<bool>,
+}
+
+impl DeliveryJourneyGuard {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            succeeded: None,
+        }
+    }
+
+    fn mark_succeeded(&mut self) {
+        self.succeeded = Some(true);
+    }
+
+    fn mark_failed(&mut self) {
+        self.succeeded = Some(false);
+    }
+
+    fn outcome(&self) -> crate::product_analytics::JourneyOutcome {
+        match self.succeeded {
+            Some(true) => crate::product_analytics::JourneyOutcome::Succeeded,
+            Some(false) => crate::product_analytics::JourneyOutcome::Failed,
+            None => crate::product_analytics::JourneyOutcome::Cancelled,
+        }
+    }
+}
+
+impl Drop for DeliveryJourneyGuard {
+    fn drop(&mut self) {
+        let duration_ms = self.started.elapsed().as_millis() as u64;
+        crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
+            stage: crate::product_analytics::JourneyStage::Delivery,
+            outcome: self.outcome(),
+            duration_ms,
+            engine: None,
+        });
+    }
+}
+
+#[cfg(test)]
+mod delivery_journey_tests {
+    use super::DeliveryJourneyGuard;
+    use crate::product_analytics::JourneyOutcome;
+
+    #[test]
+    fn cancelled_or_stale_task_before_delivery_is_not_a_failure() {
+        assert_eq!(
+            DeliveryJourneyGuard::new().outcome(),
+            JourneyOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn attempted_delivery_records_its_result_even_if_history_is_cancelled() {
+        let mut delivered = DeliveryJourneyGuard::new();
+        delivered.mark_succeeded();
+        assert_eq!(delivered.outcome(), JourneyOutcome::Succeeded);
+        let mut failed = DeliveryJourneyGuard::new();
+        failed.mark_failed();
+        assert_eq!(failed.outcome(), JourneyOutcome::Failed);
     }
 }
 
@@ -1580,31 +1704,115 @@ pub(crate) fn is_duplicate_transcription(
 
     same_text && same_model && within_window
 }
+/// Closed-vocabulary engine label for failure-event tags (plan 060).
+fn engine_kind_label(selection: &ActiveEngineSelection) -> &'static str {
+    match selection {
+        ActiveEngineSelection::Whisper { .. } => "whisper",
+        ActiveEngineSelection::Parakeet { .. } => "parakeet",
+        ActiveEngineSelection::Cloud { provider, .. } => provider.id(),
+        ActiveEngineSelection::Remote { .. } => "remote",
+    }
+}
+
+/// Model name for failure-event tags; empty for engines without one
+/// (remote servers carry user-chosen names — never sent).
+fn engine_model_label(selection: &ActiveEngineSelection) -> String {
+    match selection {
+        ActiveEngineSelection::Whisper { model_name, .. }
+        | ActiveEngineSelection::Parakeet { model_name, .. }
+        | ActiveEngineSelection::Cloud { model_name, .. } => model_name.clone(),
+        ActiveEngineSelection::Remote { .. } => String::new(),
+    }
+}
+
+/// Closed failure-class vocabulary driving `flow.transcription.failed.*`
+/// event names. Executor failures retain their typed code; legacy desktop
+/// failures still use the string marker fallback.
+fn transcription_failure_class(failure: &TranscriptionFailure) -> String {
+    let class = match failure {
+        TranscriptionFailure::Local {
+            code: Some(code), ..
+        } => match code {
+            TranscriptionErrorCode::Timeout => "timeout",
+            TranscriptionErrorCode::StorageLimitExceeded => "cloud_storage_limit",
+            TranscriptionErrorCode::TransportFailed => "transport",
+            TranscriptionErrorCode::Unauthorized => "auth",
+            TranscriptionErrorCode::ModelUnavailable
+            | TranscriptionErrorCode::EngineUnavailable => "model_unavailable",
+            _ => "engine_failed",
+        },
+        TranscriptionFailure::Local {
+            message,
+            code: None,
+        } => {
+            let lower = message.to_ascii_lowercase();
+            if lower.contains("timed out") {
+                "timeout"
+            } else if lower.contains("storage limit") {
+                "cloud_storage_limit"
+            } else if lower.contains("could not reach")
+                || lower.contains("rate limit")
+                || lower.contains("network")
+            {
+                "transport"
+            } else if lower.contains("invalid api key") || lower.contains("authentication") {
+                "auth"
+            } else if lower.contains("model") {
+                "model_unavailable"
+            } else {
+                "engine_failed"
+            }
+        }
+        TranscriptionFailure::Remote(err) => match err {
+            RemoteClientError::AuthFailed { .. } => "remote_auth",
+            RemoteClientError::Timeout { .. } => "remote_timeout",
+            RemoteClientError::ConnectFailed { .. } => "remote_connect",
+            RemoteClientError::HttpStatus { .. } => "remote_http",
+            RemoteClientError::ResponseDecode { .. } | RemoteClientError::ResponseSchema { .. } => {
+                "remote_response"
+            }
+            RemoteClientError::RequestBuild { .. } | RemoteClientError::JoinFailed { .. } => {
+                "remote_internal"
+            }
+        },
+    };
+    class.to_string()
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum TranscriptionFailure {
-    Local(String),
+    Local {
+        message: String,
+        code: Option<TranscriptionErrorCode>,
+    },
     Remote(RemoteClientError),
 }
 
 impl TranscriptionFailure {
+    fn local(message: String) -> Self {
+        Self::Local {
+            message,
+            code: None,
+        }
+    }
+
     fn message(&self) -> String {
         match self {
-            Self::Local(message) => message.clone(),
+            Self::Local { message, .. } => message.clone(),
             Self::Remote(error) => error.to_string(),
         }
     }
 
     fn error_kind(&self) -> &'static str {
         match self {
-            Self::Local(_) => "local",
+            Self::Local { .. } => "local",
             Self::Remote(error) => remote_client_error_kind(error),
         }
     }
 
     fn server_error_body(&self) -> Option<&str> {
         match self {
-            Self::Local(_) => None,
+            Self::Local { .. } => None,
             Self::Remote(error) => error.server_error_body(),
         }
     }
@@ -1614,7 +1822,7 @@ impl TranscriptionFailure {
     fn is_retryable_failure(&self) -> bool {
         match self {
             Self::Remote(_) => true,
-            Self::Local(message) => {
+            Self::Local { message, .. } => {
                 !message.contains("cancelled")
                     && !message.contains("Cancelled")
                     && !message.contains("too short")
@@ -1739,7 +1947,7 @@ fn build_desktop_transcription_request(
     audio_path: PathBuf,
 ) -> Result<TranscriptionRequest, TranscriptionFailure> {
     let engine = ProviderEngine::from_engine_str(active.engine_name()).ok_or_else(|| {
-        TranscriptionFailure::Local(format!(
+        TranscriptionFailure::local(format!(
             "Unknown transcription engine: {}",
             active.engine_name()
         ))
@@ -1789,7 +1997,10 @@ fn desktop_failure_from_transcription_error(
             _ => error.user_message,
         },
     };
-    TranscriptionFailure::Local(message)
+    TranscriptionFailure::Local {
+        message,
+        code: Some(error.code),
+    }
 }
 
 fn is_non_speech_transcript(raw: &str) -> bool {
@@ -1957,11 +2168,35 @@ fn build_writing_history_metadata(
             "context_hint".into(),
             serde_json::to_value(&wr.context_hint).unwrap_or(serde_json::Value::Null),
         );
+        map.insert(
+            "stage_timings".into(),
+            serde_json::to_value(&wr.stage_timings).unwrap_or(serde_json::Value::Null),
+        );
         if wr.ai_applied && wr.raw_text != wr.final_text {
             map.insert("original_text".into(), wr.raw_text.clone().into());
         }
+        if let Some(execution) = wr.ai_execution.as_ref() {
+            if !execution.provider_id.is_empty() {
+                map.insert("ai_provider".into(), execution.provider_id.clone().into());
+            }
+            if !execution.model_id.is_empty() {
+                map.insert("ai_model".into(), execution.model_id.clone().into());
+            }
+        }
     }
     serde_json::Value::Object(map)
+}
+
+fn record_insertion_timing(metadata: &mut Option<serde_json::Value>, insertion_ms: u64) {
+    let Some(serde_json::Value::Object(map)) = metadata.as_mut() else {
+        return;
+    };
+    let stage_timings = map
+        .entry("stage_timings".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if let serde_json::Value::Object(stage_map) = stage_timings {
+        stage_map.insert("insertion_ms".to_string(), insertion_ms.into());
+    }
 }
 
 /// Metadata marking a history row whose required AI translation failed: the saved
@@ -1987,6 +2222,7 @@ fn ai_failure_category(error: &AiProviderError) -> &'static str {
         AiProviderError::Network => "network",
         AiProviderError::BadResponse => "bad_response",
         AiProviderError::Internal => "internal",
+        AiProviderError::AgentCli(_) => "cli_error",
     }
 }
 
@@ -2003,6 +2239,7 @@ fn ai_failure_notice(error: &AiProviderError) -> &'static str {
         AiProviderError::Network => "Couldn't reach the AI service",
         AiProviderError::BadResponse => "AI service error",
         AiProviderError::Internal => "AI formatting failed",
+        AiProviderError::AgentCli(_) => "Polish failed",
     }
 }
 
@@ -2068,21 +2305,12 @@ fn plan_desktop_writing_success(
     }
 }
 
-fn load_ai_enabled(app: &AppHandle) -> Result<bool, String> {
-    let store = app.store("settings").map_err(|e| e.to_string())?;
-    Ok(store
-        .get("ai_enabled")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false))
-}
-
 fn resolve_transcription_task_for_audio(
     app: &AppHandle,
-    ai_enabled: bool,
     legacy_translate_to_english: bool,
     stored_transcription_task: Option<&str>,
 ) -> Result<String, String> {
-    if crate::writing::effective_personal_dictation_mode(app, ai_enabled)? {
+    if crate::writing::effective_personal_dictation_mode(app)? {
         Ok(TRANSCRIPTION_TASK_TRANSCRIBE.to_string())
     } else {
         Ok(normalize_transcription_task(
@@ -2158,6 +2386,28 @@ fn transcription_task_header_value(task: crate::transcription::TranscriptionTask
     }
 }
 
+fn classify_polish_outcome(
+    polish_enabled: bool,
+    ai_failed: bool,
+    ai_applied: bool,
+    preset: crate::ai::prompts::EnhancementPreset,
+    ai_execution_recorded: bool,
+) -> crate::product_analytics::PolishOutcome {
+    if !polish_enabled {
+        crate::product_analytics::PolishOutcome::Disabled
+    } else if ai_failed {
+        crate::product_analytics::PolishOutcome::Fallback
+    } else if ai_applied {
+        crate::product_analytics::PolishOutcome::Applied
+    } else if preset == crate::ai::prompts::EnhancementPreset::PersonalDictation
+        || !ai_execution_recorded
+    {
+        crate::product_analytics::PolishOutcome::Skipped
+    } else {
+        crate::product_analytics::PolishOutcome::Unchanged
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2165,19 +2415,21 @@ mod tests {
         build_failed_transcription_row, build_remote_server_error_payload,
         build_remote_transcription_result, build_remote_upload_transcription_request,
         build_transcription_job, build_translation_failed_history_metadata,
-        build_writing_history_metadata, classify_local_failure, emit_recording_too_short_feedback,
-        finalize_in_flight_audio, is_ai_auth_error, is_non_speech_transcript,
-        parakeet_preview_sink_eligible, parakeet_stream_engine_for_model, persist_if_current,
-        plan_desktop_writing_success, recording_license_state, remote_server_error_pill_message,
+        build_writing_history_metadata, classify_local_failure, classify_polish_outcome,
+        emit_recording_too_short_feedback, finalize_in_flight_audio, is_ai_auth_error,
+        is_non_speech_transcript, parakeet_preview_sink_eligible, parakeet_stream_engine_for_model,
+        persist_if_current, plan_desktop_writing_success, recording_license_state,
+        recording_started_cue_eligible, remote_server_error_pill_message,
         set_in_flight_transcription_audio, should_hide_pill_when_idle, silence_event_runs_in_state,
         silence_timeout_disposition, stop_should_reset_to_idle,
         sync_retranscription_failure_metadata, take_in_flight_transcription_audio,
-        toast_clear_is_current, LocalFailureKind, NormalizedTempFile, PillToastEventPayload,
-        RecordingConfig, RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition,
-        StopInFlightGuard, TranscriptionFailure, TranscriptionStatus,
+        toast_clear_is_current, transcript_ready_cue_eligible, LocalFailureKind,
+        NormalizedTempFile, PillToastEventPayload, RecordingConfig, RecordingLicenseState,
+        SilenceDetectorEvent, SilenceTimeoutDisposition, StopInFlightGuard, TranscriptionFailure,
+        TranscriptionStatus,
     };
     use crate::cloud_stt::CloudProvider;
-    use crate::commands::license::CachedLicense;
+    use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
     use crate::license::{LicenseState, LicenseStatus};
     use crate::remote::client::{
         calculate_timeout_ms, RemoteClientError, RemoteEndpoint, TranscriptionSource,
@@ -2198,7 +2450,38 @@ mod tests {
             license_type: None,
             license_key: None,
             expires_at: None,
+            verification_state: None,
+            verification_expires_at: None,
         })
+    }
+
+    #[test]
+    fn recording_started_cue_requires_no_pending_stop() {
+        assert!(recording_started_cue_eligible(false));
+        assert!(!recording_started_cue_eligible(true));
+    }
+
+    #[test]
+    fn transcript_ready_cue_requires_successful_writing_and_delivery() {
+        assert!(transcript_ready_cue_eligible(true, true));
+        assert!(!transcript_ready_cue_eligible(false, true));
+        assert!(!transcript_ready_cue_eligible(true, false));
+        assert!(!transcript_ready_cue_eligible(false, false));
+    }
+
+    #[test]
+    fn polish_attempt_analytics_exclude_literal_preservation() {
+        use crate::ai::prompts::EnhancementPreset;
+        use crate::product_analytics::PolishOutcome;
+
+        assert_eq!(
+            classify_polish_outcome(true, false, false, EnhancementPreset::CleanDictation, false,),
+            PolishOutcome::Skipped
+        );
+        assert_eq!(
+            classify_polish_outcome(true, false, false, EnhancementPreset::CleanDictation, true,),
+            PolishOutcome::Unchanged
+        );
     }
 
     #[test]
@@ -2328,6 +2611,13 @@ mod tests {
             "The intro has [MUSIC] before speech."
         ));
     }
+
+    #[test]
+    fn is_non_speech_transcript_preserves_deliberate_punctuation_and_symbols() {
+        for transcript in [".", ". ", "-", "...", "?,", "@", "#", "✅", "42", "....."] {
+            assert!(!is_non_speech_transcript(transcript));
+        }
+    }
     #[test]
     fn remote_transcription_result_preserves_server_metadata() {
         let job = build_transcription_job(
@@ -2370,14 +2660,29 @@ mod tests {
             raw_text: "raw transcript".to_string(),
             final_text: "final transcript".to_string(),
             output_language: "en".to_string(),
-            mode: crate::writing::WritingMode::CleanDictation,
+            mode: crate::ai::prompts::EnhancementPreset::CleanDictation,
             ai_applied: true,
             applied_operations: vec![crate::writing::AppliedWritingOperation {
                 kind: crate::writing::WritingOperationKind::AiCleanup,
                 detail: "Applied cleanup".to_string(),
             }],
             warnings: vec![],
-            context_hint: None,
+            context_hint: Some(crate::writing::ContextHint {
+                app_name: Some("Slack".to_string()),
+                window_title: Some("Secret DM subject line".to_string()),
+                process_path: Some("/Applications/Slack.app".to_string()),
+                category: Some(crate::writing::AppCategory::Chat),
+            }),
+            stage_timings: crate::writing::WritingStageTimings {
+                deterministic_ms: 12,
+                ai_polish_ms: Some(34),
+                insertion_ms: None,
+            },
+            polish_enabled: true,
+            ai_execution: Some(crate::writing::AiExecutionMetadata {
+                provider_id: "pi".to_string(),
+                model_id: "gpt-5.6-luna".to_string(),
+            }),
             ai_error: None,
         };
 
@@ -2386,6 +2691,19 @@ mod tests {
         assert!(metadata.get("raw_text").is_none());
         assert!(metadata.get("final_text").is_none());
         assert_eq!(metadata["original_text"], "raw transcript");
+        assert_eq!(metadata["stage_timings"]["deterministic_ms"], 12);
+        assert_eq!(metadata["stage_timings"]["ai_polish_ms"], 34);
+
+        // Privacy: window_title must NEVER be serialized into history.
+        let hint = &metadata["context_hint"];
+        assert_eq!(hint["app_name"].as_str().unwrap(), "Slack");
+        assert_eq!(hint["category"].as_str().unwrap(), "chat");
+        assert!(
+            hint.get("window_title").is_none(),
+            "window_title must NOT be serialized into history"
+        );
+        assert_eq!(metadata["ai_provider"].as_str(), Some("pi"));
+        assert_eq!(metadata["ai_model"].as_str(), Some("gpt-5.6-luna"));
     }
 
     #[test]
@@ -2405,11 +2723,14 @@ mod tests {
             raw_text: "raw transcript".to_string(),
             final_text: "deterministic transcript".to_string(),
             output_language: "en".to_string(),
-            mode: crate::writing::WritingMode::CleanDictation,
+            mode: crate::ai::prompts::EnhancementPreset::CleanDictation,
             ai_applied: false,
             applied_operations: vec![],
             warnings: vec![],
             context_hint: None,
+            stage_timings: crate::writing::WritingStageTimings::default(),
+            polish_enabled: true,
+            ai_execution: None,
             ai_error: None,
         };
 
@@ -2434,11 +2755,14 @@ mod tests {
             raw_text: "same text".to_string(),
             final_text: "same text".to_string(),
             output_language: "en".to_string(),
-            mode: crate::writing::WritingMode::CleanDictation,
+            mode: crate::ai::prompts::EnhancementPreset::CleanDictation,
             ai_applied: true,
             applied_operations: vec![],
             warnings: vec![],
             context_hint: None,
+            stage_timings: crate::writing::WritingStageTimings::default(),
+            polish_enabled: true,
+            ai_execution: None,
             ai_error: None,
         };
 
@@ -2470,7 +2794,7 @@ mod tests {
             raw_text: "raw transcript".to_string(),
             final_text: "deterministic transcript".to_string(),
             output_language: "en".to_string(),
-            mode: crate::writing::WritingMode::CleanDictation,
+            mode: crate::ai::prompts::EnhancementPreset::CleanDictation,
             ai_applied: false,
             applied_operations: vec![crate::writing::AppliedWritingOperation {
                 kind: crate::writing::WritingOperationKind::Replacement,
@@ -2482,6 +2806,9 @@ mod tests {
                     .to_string(),
             }],
             context_hint: None,
+            stage_timings: crate::writing::WritingStageTimings::default(),
+            polish_enabled: true,
+            ai_execution: None,
             ai_error: Some(crate::ai::error::AiProviderError::Timeout),
         };
 
@@ -2711,8 +3038,16 @@ mod tests {
     #[test]
     fn recording_license_state_is_loading_when_cache_absent() {
         assert_eq!(
-            recording_license_state(None),
+            recording_license_state(&RuntimeLicenseCache::Loading),
             RecordingLicenseState::Loading
+        );
+    }
+
+    #[test]
+    fn recording_license_state_requires_recovery_after_failed_check() {
+        assert_eq!(
+            recording_license_state(&RuntimeLicenseCache::Failed),
+            RecordingLicenseState::CheckFailed
         );
     }
 
@@ -2720,8 +3055,20 @@ mod tests {
     fn recording_license_state_blocks_expired_license() {
         let cached = cached_license(LicenseState::Expired);
         assert_eq!(
-            recording_license_state(Some(&cached)),
+            recording_license_state(&RuntimeLicenseCache::Ready(cached)),
             RecordingLicenseState::Blocked
+        );
+    }
+
+    #[test]
+    fn recording_license_state_requires_verification_after_offline_deadline() {
+        let mut cached = cached_license(LicenseState::Licensed);
+        cached.status.verification_state = Some(crate::license::LicenseVerificationState::Verified);
+        cached.status.verification_expires_at =
+            Some(chrono::Utc::now() - chrono::Duration::seconds(1));
+        assert_eq!(
+            recording_license_state(&RuntimeLicenseCache::Ready(cached)),
+            RecordingLicenseState::VerificationRequired
         );
     }
 
@@ -2729,7 +3076,7 @@ mod tests {
     fn recording_license_state_blocks_missing_license() {
         let cached = cached_license(LicenseState::None);
         assert_eq!(
-            recording_license_state(Some(&cached)),
+            recording_license_state(&RuntimeLicenseCache::Ready(cached)),
             RecordingLicenseState::Blocked
         );
     }
@@ -2739,11 +3086,11 @@ mod tests {
         let trial = cached_license(LicenseState::Trial);
         let licensed = cached_license(LicenseState::Licensed);
         assert_eq!(
-            recording_license_state(Some(&trial)),
+            recording_license_state(&RuntimeLicenseCache::Ready(trial)),
             RecordingLicenseState::Ready
         );
         assert_eq!(
-            recording_license_state(Some(&licensed)),
+            recording_license_state(&RuntimeLicenseCache::Ready(licensed)),
             RecordingLicenseState::Ready
         );
     }
@@ -2838,7 +3185,7 @@ mod tests {
     #[test]
     fn failed_history_row_supports_local_engine_failures() {
         let row = build_failed_transcription_row(
-            &TranscriptionFailure::Local("Transcription timed out".to_string()),
+            &TranscriptionFailure::local("Transcription timed out".to_string()),
             "base.en",
             "recordings/failure.wav",
         );
@@ -2855,16 +3202,16 @@ mod tests {
     #[test]
     fn is_retryable_failure_excludes_cancellation_and_too_short() {
         assert!(
-            TranscriptionFailure::Local("Transcription timed out".to_string())
+            TranscriptionFailure::local("Transcription timed out".to_string())
                 .is_retryable_failure()
         );
-        assert!(TranscriptionFailure::Local("OpenAI error: 500".to_string()).is_retryable_failure());
+        assert!(TranscriptionFailure::local("OpenAI error: 500".to_string()).is_retryable_failure());
         assert!(
-            !TranscriptionFailure::Local("Transcription cancelled".to_string())
+            !TranscriptionFailure::local("Transcription cancelled".to_string())
                 .is_retryable_failure()
         );
         assert!(
-            !TranscriptionFailure::Local("Recording too short".to_string()).is_retryable_failure()
+            !TranscriptionFailure::local("Recording too short".to_string()).is_retryable_failure()
         );
     }
 
@@ -2895,13 +3242,17 @@ mod tests {
             raw_text: "hello world".into(),
             final_text: "hello world".into(),
             output_language: "en".into(),
-            mode: crate::writing::WritingMode::PersonalDictation,
+            mode: crate::ai::prompts::EnhancementPreset::PersonalDictation,
             ai_applied: true,
             applied_operations: vec![],
             warnings: vec![],
             context_hint: Some(crate::writing::ContextHint {
                 app_name: Some("Finder".into()),
+                ..Default::default()
             }),
+            stage_timings: crate::writing::WritingStageTimings::default(),
+            polish_enabled: true,
+            ai_execution: None,
             ai_error: None,
         }
     }
@@ -2969,7 +3320,7 @@ mod tests {
         assert!(!obj["diarized"].as_bool().unwrap());
 
         // Writing fields present
-        assert_eq!(obj["mode"].as_str().unwrap(), "personal_dictation");
+        assert_eq!(obj["mode"].as_str().unwrap(), "PersonalDictation");
         assert_eq!(obj["output_language"].as_str().unwrap(), "en");
         assert!(obj["ai_applied"].as_bool().unwrap());
         assert!(obj.contains_key("applied_operations"));
@@ -3248,7 +3599,7 @@ mod tests {
         let app_state = Arc::new(AppState::new());
         let history_path = unique_side_effect_path("failed-history");
         let row = build_failed_transcription_row(
-            &TranscriptionFailure::Local("Transcription timed out".to_string()),
+            &TranscriptionFailure::local("Transcription timed out".to_string()),
             "base.en",
             "recording.wav",
         );
@@ -3355,7 +3706,7 @@ mod tests {
     // ── Cloud WS-final authority (plans 043b + 044) ──────────────────────
     // All tests below touch the global CLOUD_WS_FINAL map, so they serialize and
     // use disjoint generation keys as belt-and-braces.
-    static CLOUD_WS_FINAL_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static CLOUD_WS_FINAL_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn insert_ws_final(
         generation: u64,
@@ -3366,7 +3717,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_final_returns_text_on_matching_generation() {
-        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = tx.send(Ok("hello".to_string()));
         insert_ws_final(42, rx);
@@ -3380,7 +3731,7 @@ mod tests {
     async fn ws_final_mismatched_take_never_consumes_another_generations_entry() {
         // Codex 043b finding: a delayed OLDER task must not consume-and-discard a
         // NEWER recording's receiver. take(200) leaves generation 100's entry alone.
-        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
         let (tx, rx) = tokio::sync::oneshot::channel();
         insert_ws_final(100, rx);
         assert_eq!(super::take_cloud_ws_final(200).await, None);
@@ -3398,7 +3749,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_final_none_on_error_result() {
-        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = tx.send(Err(crate::cloud_stt::common::SttError::Network));
         insert_ws_final(7, rx);
@@ -3407,7 +3758,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_final_none_on_whitespace_only_text() {
-        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = tx.send(Ok("   ".to_string()));
         insert_ws_final(9, rx);
@@ -3416,7 +3767,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_final_none_quickly_when_sender_dropped() {
-        let _guard = CLOUD_WS_FINAL_GUARD.lock().unwrap();
+        let _guard = CLOUD_WS_FINAL_GUARD.lock().await;
         let (tx, rx) = tokio::sync::oneshot::channel();
         insert_ws_final(11, rx);
         drop(tx);
@@ -3520,67 +3871,6 @@ mod tests {
         config.current_model = String::new();
         config
     }
-}
-
-/// Play a system sound to confirm recording start (macOS only)
-#[cfg(target_os = "macos")]
-fn play_recording_start_sound() {
-    std::thread::spawn(|| {
-        let _ = std::process::Command::new("afplay")
-            .arg("/System/Library/Sounds/Tink.aiff")
-            .spawn();
-    });
-}
-
-/// Play a system sound to confirm recording start (Windows)
-#[cfg(target_os = "windows")]
-fn play_recording_start_sound() {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    std::thread::spawn(|| {
-        // Use PowerShell to play a system sound on Windows (hidden console)
-        let _ = std::process::Command::new("powershell")
-            .args(["-c", "[console]::beep(800, 100)"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
-    });
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn play_recording_start_sound() {
-    // No-op on other platforms
-}
-
-/// Play a system sound to confirm recording end (macOS only)
-#[cfg(target_os = "macos")]
-fn play_recording_end_sound() {
-    std::thread::spawn(|| {
-        // Use a different sound for recording end - Pop sound
-        let _ = std::process::Command::new("afplay")
-            .arg("/System/Library/Sounds/Pop.aiff")
-            .spawn();
-    });
-}
-
-/// Play a system sound to confirm recording end (Windows)
-#[cfg(target_os = "windows")]
-fn play_recording_end_sound() {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    std::thread::spawn(|| {
-        // Use PowerShell with a lower frequency tone for recording end (hidden console)
-        let _ = std::process::Command::new("powershell")
-            .args(["-c", "[console]::beep(600, 100)"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
-    });
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn play_recording_end_sound() {
-    // No-op on other platforms
 }
 
 /// Cached recording configuration to avoid repeated store access during transcription flow
@@ -4113,14 +4403,24 @@ fn select_best_fallback_model(
 enum RecordingLicenseState {
     Ready,
     Loading,
+    CheckFailed,
     Blocked,
+    VerificationRequired,
 }
 
 fn recording_license_state(
-    cache: Option<&crate::commands::license::CachedLicense>,
+    cache: &crate::commands::license::RuntimeLicenseCache,
 ) -> RecordingLicenseState {
+    use crate::commands::license::RuntimeLicenseCache;
     match cache {
-        Some(cached)
+        RuntimeLicenseCache::Ready(cached)
+            if cached
+                .status
+                .verification_window_expired(chrono::Utc::now()) =>
+        {
+            RecordingLicenseState::VerificationRequired
+        }
+        RuntimeLicenseCache::Ready(cached)
             if matches!(
                 cached.status.status,
                 LicenseState::Expired | LicenseState::None
@@ -4128,8 +4428,9 @@ fn recording_license_state(
         {
             RecordingLicenseState::Blocked
         }
-        Some(_) => RecordingLicenseState::Ready,
-        None => RecordingLicenseState::Loading,
+        RuntimeLicenseCache::Ready(_) => RecordingLicenseState::Ready,
+        RuntimeLicenseCache::Loading => RecordingLicenseState::Loading,
+        RuntimeLicenseCache::Failed => RecordingLicenseState::CheckFailed,
     }
 }
 /// Pre-recording validation using the readiness state
@@ -4185,13 +4486,40 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
 
     // Check cached license status (warmed during startup/license transitions - no network call)
     let app_state = app.state::<AppState>();
-    let cache = app_state.license_cache.read().await;
+    let license_state = recording_license_state(&*app_state.license_cache.read().await);
 
-    match recording_license_state(cache.as_ref()) {
+    match license_state {
+        RecordingLicenseState::CheckFailed => {
+            log::warn!("Recording blocked: license check failed; recovery required");
+            let message = "License check failed. Open License and retry, or re-enter your existing license key to activate it again.";
+            let _ = crate::commands::window::focus_main_window(app.clone()).await;
+            let _ = emit_to_all(
+                app,
+                "license-required",
+                serde_json::json!({
+                    "title": "License Check Failed",
+                    "message": message,
+                    "action": "restore"
+                }),
+            );
+            return Err(message.to_string());
+        }
+        RecordingLicenseState::VerificationRequired => {
+            log::warn!("Recording blocked: offline license verification window has ended");
+            let _ = crate::commands::window::focus_main_window(app.clone()).await;
+            let _ = emit_to_all(
+                app,
+                "license-required",
+                serde_json::json!({
+                    "title": "License Verification Required",
+                    "message": "Connect to the internet and revalidate your license to continue recording.",
+                    "action": "revalidate"
+                }),
+            );
+            return Err("License verification required to record".to_string());
+        }
         RecordingLicenseState::Blocked => {
-            if let Some(cached) = cache.as_ref() {
-                log::warn!("Recording blocked: license is {:?}", cached.status.status);
-            }
+            log::warn!("Recording blocked: no active license or trial");
 
             let _ = crate::commands::window::focus_main_window(app.clone()).await;
 
@@ -4200,8 +4528,8 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
                 "license-required",
                 serde_json::json!({
                     "title": "License Required",
-                    "message": "Your trial has expired. Please purchase a license to continue",
-                    "action": "purchase"
+                    "message": "No active license or trial was found. If you already purchased a license, re-enter your existing key here to activate it again.",
+                    "action": "restore"
                 }),
             );
             return Err("License required to record".to_string());
@@ -4238,6 +4566,14 @@ pub(crate) fn clear_pending_stop_after_start(app_state: &AppState) {
         .store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
+fn recording_started_cue_eligible(pending_stop_consumed: bool) -> bool {
+    !pending_stop_consumed
+}
+
+fn transcript_ready_cue_eligible(writing_succeeded: bool, should_deliver: bool) -> bool {
+    writing_succeeded && should_deliver
+}
+
 fn silence_event_runs_in_state(state: RecordingState) -> bool {
     matches!(state, RecordingState::Recording)
 }
@@ -4247,10 +4583,9 @@ fn silence_event_runs_in_state(state: RecordingState) -> bool {
 /// unit-testable without an `AppHandle`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SilenceTimeoutDisposition {
-    /// Speech was captured before the timeout → stop normally so it is
-    /// transcribed. NEVER discarded.
+    /// Speech or uncertain audio was captured → stop normally and transcribe.
     StopAndTranscribe,
-    /// No speech for the entire timeout window → cancel and discard.
+    /// No finite nonzero signal for the entire timeout window → cancel.
     CancelAndDiscard,
 }
 
@@ -4276,7 +4611,7 @@ async fn stop_recording_after_long_silence(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> Result<String, String> {
-    stop_recording(app, state).await
+    stop_recording_with_mode(app, state, Duration::ZERO).await
 }
 
 fn spawn_silence_event_listener(
@@ -4339,7 +4674,7 @@ fn spawn_silence_event_listener(
                             });
                         }
                         Some(SilenceTimeoutDisposition::CancelAndDiscard) => {
-                            // No speech the whole window → cancel and discard.
+                            // No signal the whole window → cancel and discard.
                             let app_for_cancel = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 match cancel_recording(app_for_cancel.clone()).await {
@@ -4506,6 +4841,11 @@ pub async fn start_recording(
         app_state.clear_cancellation();
         clear_pending_stop_after_start(&app_state);
     }
+    if let Some(hint) = crate::writing::capture_active_app_context() {
+        if let Some(app_state) = app.try_state::<AppState>() {
+            app_state.set_recording_app_context(hint);
+        }
+    }
     update_recording_state(&app, RecordingState::Starting, None);
     // Ensure transition actually happened; if blocked, abort early
     if !matches!(
@@ -4515,23 +4855,6 @@ pub async fn start_recording(
         return Err("Cannot start recording in current state".to_string());
     }
 
-    // Play sound on recording start if enabled
-    log::debug!(
-        "⏱️ [REC TIMING] about to play sound (+{}ms)",
-        recording_start.elapsed().as_millis()
-    );
-    if let Ok(store) = app.store("settings") {
-        let play_sound = store
-            .get("play_sound_on_recording")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true); // Default to true
-        if play_sound {
-            play_recording_start_sound();
-            // Capture first: play the chime concurrently with microphone/device initialization
-            // so we do not lose the first word. Users can disable the sound if a Bluetooth
-            // chime clips the start of capture.
-        }
-    }
     let (streaming_tap_enabled, streaming_engine_enabled, live_preview_mode) = app
         .store("settings")
         .ok()
@@ -4615,16 +4938,13 @@ pub async fn start_recording(
             }
         });
     }
-    // Warm the LLM enhancement connection too (runs post-transcription regardless of the STT engine).
+    // Prefetch the LLM polish path too (runs post-transcription regardless of the STT engine):
+    // HTTP providers get a pooled HEAD, agent-CLI providers a binary + capability probe.
     if config.ai_enabled && !config.ai_provider.is_empty() {
         let app = app.clone();
         let provider_id = config.ai_provider.clone();
         tokio::spawn(async move {
-            if provider_id == crate::ai::providers::PROVIDER_CUSTOM
-                || crate::commands::ai::ai_provider_has_key(&provider_id)
-            {
-                crate::commands::ai::warm_ai_provider(app, provider_id).await;
-            }
+            crate::commands::ai::prefetch_ai_provider(app, provider_id).await;
         });
     }
     // Get app data directory for recordings
@@ -5038,15 +5358,16 @@ pub async fn start_recording(
 
     // Update state to recording
     update_recording_state(&app, RecordingState::Recording, None);
+    crate::product_analytics::capture(crate::product_analytics::ProductEvent::RecordingStarted);
 
     // If a stop was requested while starting (toggle or PTT), honor it immediately
     // after entering Recording state. For PTT, key-up in Starting state sets this flag.
     // The second PTT guard above handles key-up during audio init; this handles the
     // narrow window between Starting transition and this point.
-    if app_state
+    let pending_stop_consumed = app_state
         .pending_stop_after_start
-        .swap(false, std::sync::atomic::Ordering::SeqCst)
-    {
+        .swap(false, std::sync::atomic::Ordering::SeqCst);
+    if pending_stop_consumed {
         log::info!("Toggle: pending stop triggered right after start; stopping now");
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -5055,6 +5376,11 @@ pub async fn start_recording(
                 log::error!("Toggle: pending stop failed: {}", e);
             }
         });
+    } else if recording_started_cue_eligible(pending_stop_consumed) {
+        crate::commands::audio_feedback::play_audio_feedback(
+            &app,
+            crate::commands::audio_feedback::AudioFeedbackCue::RecordingStarted,
+        );
     }
     if let Some(silence_event_rx) = silence_event_rx_to_spawn {
         spawn_silence_event_listener(app.clone(), silence_event_rx);
@@ -5152,6 +5478,14 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> Result<String, String> {
+    stop_recording_with_mode(app, state, STOP_POST_ROLL).await
+}
+
+async fn stop_recording_with_mode(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+    post_roll: Duration,
+) -> Result<String, String> {
     #[cfg(debug_assertions)]
     let stop_start = Instant::now();
 
@@ -5178,6 +5512,7 @@ pub async fn stop_recording(
     // DO NOT request cancellation here - we want transcription to complete!
     // Cancellation should only happen in cancel_recording command
 
+    let capture_metrics;
     let mut stop_unfinalized = false;
     let mut stop_integrity_failure = false;
     // Stop recording (lock only within this scope to stay Send)
@@ -5232,7 +5567,9 @@ pub async fn stop_recording(
             return Ok(String::new());
         }
 
-        let stop_message = match recorder.stop_recording() {
+        // Escape can wait up to STOP_POST_ROLL before drain begins because this
+        // command holds the recorder mutex; that bounded cancel delay is accepted.
+        let stop_message = match recorder.stop_recording_with_post_roll(post_roll) {
             Ok(msg) => msg,
             Err(e) => {
                 log::error!("Recorder stop returned error: {}", e);
@@ -5244,17 +5581,15 @@ pub async fn stop_recording(
                 format!("Recorder stop error: {}", e)
             }
         };
+        capture_metrics = recorder.take_last_capture_metrics();
         log::info!("{}", stop_message);
-
-        // Play sound on recording end if enabled
-        if let Ok(store) = app.store("settings") {
-            let play_sound = store
-                .get("play_sound_on_recording_end")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true); // Default to true
-            if play_sound {
-                play_recording_end_sound();
-            }
+        if let Some(metrics) = capture_metrics {
+            log::info!(
+                "Stop post-roll: post_roll_ms={}, post_roll_interrupted={}, post_roll_speech_detected={}",
+                metrics.post_roll_ms,
+                metrics.post_roll_interrupted,
+                metrics.post_roll_speech_detected
+            );
         }
 
         // Resume system media if we paused it
@@ -5422,6 +5757,59 @@ pub async fn stop_recording(
             update_recording_state(&app, RecordingState::Idle, None);
             return Ok("".to_string());
         }
+    }
+    crate::product_analytics::capture(crate::product_analytics::ProductEvent::RecordingStopped {
+        duration_ms: capture_metrics.as_ref().map(|metrics| metrics.duration_ms),
+    });
+
+    let evidence_class = classify_speech_evidence(capture_metrics, None);
+    if evidence_class.would_skip_engine() {
+        let mut speech_evidence_attempt =
+            SpeechEvidenceAttempt::new("none".to_string(), "pre_engine", capture_metrics);
+        if evidence_class
+            == crate::audio::speech_evidence::SpeechEvidenceClass::HighConfidenceNoSpeech
+        {
+            speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::SkippedNoSpeech);
+            log::info!(
+                "Skipping speech engine: capture below calibrated no-speech floor (no sustained speech, negligible energy)"
+            );
+            if let Err(error) = std::fs::remove_file(&audio_path) {
+                log::debug!("Failed to remove no-speech recording: {}", error);
+            }
+            update_recording_state(&app, RecordingState::Idle, None);
+            pill_toast_with_suggestion(
+                &app,
+                "No speech detected",
+                "Try speaking closer to the microphone",
+                1500,
+                None,
+            );
+            if should_hide_pill(&app).await {
+                if let Err(error) = crate::commands::window::hide_pill_widget(app.clone()).await {
+                    log::error!(
+                        "Failed to hide pill window after no-speech recording: {}",
+                        error
+                    );
+                }
+            }
+            return Ok(String::new());
+        }
+
+        speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::SkippedNoInput);
+        log::info!("Skipping speech engine: capture contained only exact digital zero samples");
+        if let Err(error) = std::fs::remove_file(&audio_path) {
+            log::debug!("Failed to remove no-input recording: {}", error);
+        }
+        update_recording_state(&app, RecordingState::Idle, None);
+        if should_hide_pill(&app).await {
+            if let Err(error) = crate::commands::window::hide_pill_widget(app.clone()).await {
+                log::error!(
+                    "Failed to hide pill window after no-input recording: {}",
+                    error
+                );
+            }
+        }
+        return Ok(String::new());
     }
 
     // Decide engine early to optionally skip normalization for cloud providers
@@ -5657,7 +6045,14 @@ pub async fn stop_recording(
             }
         }
     };
+    let engine_route = engine_selection.route();
+    let mut speech_evidence_attempt = SpeechEvidenceAttempt::new(
+        engine_selection.engine_name().to_string(),
+        engine_route,
+        capture_metrics,
+    );
 
+    let mut prepared_metrics = None;
     // For Whisper/Parakeet: normalize and duration gate; for Cloud/Remote: skip both
     let audio_path = match &engine_selection {
         ActiveEngineSelection::Cloud { provider, .. } => {
@@ -5675,6 +6070,7 @@ pub async fn stop_recording(
             audio_path
         }
         _ => {
+            let normalization_started = std::time::Instant::now();
             // Normalize captured audio to Whisper contract (WAV PCM s16, mono, 16k):
             // try in-process first (off the async runtime), fall back to the streaming decoder.
             let parent_dir = audio_path
@@ -5686,11 +6082,14 @@ pub async fn stop_recording(
                 let a = audio_path.clone();
                 let d = parent_dir.clone();
                 let in_proc = tokio::task::spawn_blocking(move || {
-                    crate::audio::normalizer::normalize_to_whisper_wav(&a, &d)
+                    crate::audio::normalizer::normalize_to_whisper_wav_with_metrics(&a, &d)
                 })
                 .await;
                 match in_proc {
-                    Ok(Ok(path)) => path,
+                    Ok(Ok(normalized)) => {
+                        prepared_metrics = Some(normalized.metrics);
+                        normalized.path
+                    }
                     other => {
                         let other_err = match &other {
                             Ok(Ok(_)) => unreachable!(),
@@ -5709,6 +6108,8 @@ pub async fn stop_recording(
                         )
                         .await
                         {
+                            speech_evidence_attempt
+                                .set_outcome(SpeechEvidenceOutcome::PreparationFailure);
                             log::error!("Audio normalization (decode) failed: {}", e);
                             update_recording_state(
                                 &app,
@@ -5722,6 +6123,11 @@ pub async fn stop_recording(
                     }
                 }
             };
+            log::info!(
+                "transcription_stage_timing stage=audio_preparation duration_ms={}",
+                normalization_started.elapsed().as_millis()
+            );
+            speech_evidence_attempt.set_prepared(prepared_metrics);
 
             // Remove raw capture after successful normalization
             if let Err(e) = std::fs::remove_file(&audio_path) {
@@ -5768,6 +6174,7 @@ pub async fn stop_recording(
             })();
 
             if matches!(duration_gate, Ok((true, _))) {
+                speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::RecordingTooShort);
                 emit_recording_too_short_feedback(&app, &min_duration_label);
                 if let Err(e) = std::fs::remove_file(&normalized_path) {
                     log::debug!("Failed to remove short normalized audio: {}", e);
@@ -5809,7 +6216,6 @@ pub async fn stop_recording(
     };
     let transcription_task = resolve_transcription_task_for_audio(
         &app,
-        config.ai_enabled,
         false,
         Some(config.transcription_task.as_str()),
     )?;
@@ -5846,9 +6252,14 @@ pub async fn stop_recording(
     let language_for_task = language.clone();
     let selected_model_name_for_task = selected_model_name.clone();
     let transcription_job_for_task = transcription_job.clone();
+    let speech_evidence_attempt_for_task = speech_evidence_attempt;
     // Spawn and track the transcription task
     let app_for_task = app.clone();
-    let task_handle = tokio::spawn(async move {
+    let task_handle = tokio::spawn(
+        crate::whisper::transcriber::ATTEMPT_BACKEND.scope(
+            std::cell::Cell::new(None),
+            async move {
+        let mut speech_evidence_attempt = speech_evidence_attempt_for_task;
         log::debug!("Transcription task started");
 
         // Update state to transcribing
@@ -5861,6 +6272,7 @@ pub async fn stop_recording(
         // Check for cancellation before loading model
         let app_state = app_for_task.state::<AppState>();
         if app_state.is_cancellation_requested() {
+            speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::CancelledBeforeEngine);
             log::info!("Transcription cancelled before model loading");
             // The task observed cancellation itself (cancel set the flag but
             // either did not, or could not, abort this handle in time). Remove
@@ -5882,6 +6294,10 @@ pub async fn stop_recording(
             update_recording_state(&app_for_task, RecordingState::Idle, None);
             return;
         }
+
+        let mut decode_journey =
+            DecodeJourneyGuard::new(engine_selection_for_task.analytics_kind());
+        let decode_started = Instant::now();
 
         let transcription_result: Result<TranscriptionResult, TranscriptionFailure> =
             match &engine_selection_for_task {
@@ -5958,7 +6374,7 @@ pub async fn stop_recording(
                         );
 
                         let audio_data = std::fs::read(&audio_path_clone).map_err(|e| {
-                            TranscriptionFailure::Local(format!("Failed to read audio file: {}", e))
+                            TranscriptionFailure::local(format!("Failed to read audio file: {}", e))
                         })?;
 
                         let audio_size_kb = audio_data.len() as f64 / 1024.0;
@@ -6021,6 +6437,47 @@ pub async fn stop_recording(
                     .await
                 }
             };
+        // Plan 060: terminal decode failures become alertable GlitchTip
+        // events (fixed class-suffixed message + closed-vocabulary tags).
+        // Cancelled dictations are user intent, not failures — never sent.
+        // The PostHog decode journey records success/failure/cancel.
+        {
+            let cancelled = match &transcription_result {
+                Err(TranscriptionFailure::Local { message, .. }) => {
+                    message.contains("cancelled") || message.contains("Cancelled")
+                }
+                _ => false,
+            };
+            if !cancelled {
+                decode_journey.set_outcome(transcription_result.is_ok());
+            }
+            if let Err(failure) = &transcription_result {
+                if !cancelled {
+                    let backend = if matches!(
+                        engine_selection_for_task,
+                        ActiveEngineSelection::Whisper { .. }
+                    ) {
+                        crate::whisper::transcriber::attempt_backend()
+                    } else {
+                        None
+                    };
+                    crate::telemetry::capture_transcription_failure(
+                        engine_kind_label(&engine_selection_for_task),
+                        &engine_model_label(&engine_selection_for_task),
+                        backend,
+                        &transcription_failure_class(failure),
+                        Some(decode_started.elapsed().as_millis() as u64),
+                    );
+                }
+            }
+        }
+        drop(decode_journey);
+
+        speech_evidence_attempt.set_outcome(if transcription_result.is_ok() {
+            SpeechEvidenceOutcome::EngineSuccess
+        } else {
+            SpeechEvidenceOutcome::EngineFailure
+        });
 
         // Decide persistence BEFORE touching the file. PRIVACY: a cancelled
         // dictation — or one whose recording generation has gone stale (a newer
@@ -6137,18 +6594,10 @@ pub async fn stop_recording(
                     return;
                 }
 
-                let ai_enabled = config.ai_enabled;
-                let should_emit_enhancing = if ai_enabled {
-                    crate::commands::ai::get_enhancement_options_for_ai_enabled(
-                        app_for_task.clone(),
-                        ai_enabled,
-                    )
-                    .await
-                    .map(|options| options.preset.requires_ai_formatting())
-                    .unwrap_or(false)
-                } else {
-                    false
-                };
+                let should_emit_enhancing =
+                    crate::writing::effective_pipeline_config(&app_for_task)
+                        .map(|config| config.preset.requires_ai_formatting() && config.ai_effective)
+                        .unwrap_or(false);
 
                 if should_emit_enhancing {
                     let _ = app_for_task.emit("enhancing-started", ());
@@ -6159,21 +6608,22 @@ pub async fn stop_recording(
                 let text_for_process = transcription.raw_text.clone();
                 let model_for_process = transcription.model.clone();
                 let transcription_for_process = transcription.clone();
-                let ai_enabled_for_task = ai_enabled;
                 let should_emit_enhancing_for_task = should_emit_enhancing;
                 let recording_file_for_task = recording_file.clone();
 
-                tokio::spawn(async move {
+                (async move {
+                    let formatting_started = Instant::now();
+
                     // 1. Process the transcription and enhancement
-                    let (final_text, writing_metadata, should_deliver) =
+                    let (final_text, mut writing_metadata, should_deliver, writing_succeeded) =
                         match crate::writing::process_transcription(
                             app_for_process.clone(),
                             transcription_for_process.clone(),
-                            ai_enabled_for_task,
                         )
                         .await
                         {
                             Ok(writing_result) => {
+                                let writing_succeeded = writing_result.ai_error.is_none();
                                 if let Some(error) = writing_result.ai_error.as_ref() {
                                     log::warn!(
                                         "AI polish failed with {}; delivering deterministic text",
@@ -6202,15 +6652,45 @@ pub async fn stop_recording(
 
                                 if writing_result.ai_applied {
                                     log::info!("AI enhancement applied successfully");
-                                } else if !ai_enabled_for_task {
+                                } else if !writing_result.polish_enabled {
                                     log::debug!("AI enhancement is disabled, using original text");
                                 }
+                                let polish_outcome = classify_polish_outcome(
+                                    writing_result.polish_enabled,
+                                    writing_result.ai_error.is_some(),
+                                    writing_result.ai_applied,
+                                    writing_result.mode,
+                                    writing_result.ai_execution.is_some(),
+                                );
+                                let (provider_id, model_id) = writing_result
+                                    .ai_execution
+                                    .as_ref()
+                                    .map(|execution| {
+                                        (
+                                            execution.provider_id.clone(),
+                                            execution.model_id.clone(),
+                                        )
+                                    })
+                                    .unwrap_or_default();
+                                crate::product_analytics::capture(
+                                    crate::product_analytics::ProductEvent::PolishFinished {
+                                        outcome: polish_outcome,
+                                        preset: writing_result.mode.into(),
+                                        provider_id,
+                                        model_id,
+                                    },
+                                );
                                 let plan = plan_desktop_writing_success(
                                     &transcription_for_process,
                                     &writing_result,
                                 );
                                 debug_assert_eq!(plan.save_history_entries, 1);
-                                (plan.final_text, plan.writing_metadata, plan.should_deliver)
+                                (
+                                    plan.final_text,
+                                    plan.writing_metadata,
+                                    plan.should_deliver,
+                                    writing_succeeded,
+                                )
                             }
                             Err(crate::writing::WritingError::TranslationFailed {
                                 target_language,
@@ -6280,7 +6760,7 @@ pub async fn stop_recording(
                                     }
                                 }
 
-                                (text_for_process.clone(), None, false)
+                                (text_for_process.clone(), None, false, false)
                             }
                             Err(crate::writing::WritingError::OutputLanguageRequiresAi) => {
                                 log::warn!("Formatting failed: Final output language requires AI enhancement or native translation");
@@ -6294,7 +6774,7 @@ pub async fn stop_recording(
                                     1500,
                                 );
 
-                                (text_for_process.clone(), None, false)
+                                (text_for_process.clone(), None, false, false)
                             }
                             Err(crate::writing::WritingError::Config(e)) => {
                                 log::warn!("Formatting failed: {}", e);
@@ -6304,9 +6784,20 @@ pub async fn stop_recording(
 
                                 pill_toast(&app_for_process, "Formatting failed", 1500);
 
-                                (text_for_process.clone(), None, false)
+                                (text_for_process.clone(), None, false, false)
                             }
                         };
+                    // PostHog formatting journey (telemetry funnel removed, plan 047).
+                    crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
+                        stage: crate::product_analytics::JourneyStage::Formatting,
+                        outcome: if writing_succeeded {
+                            crate::product_analytics::JourneyOutcome::Succeeded
+                        } else {
+                            crate::product_analytics::JourneyOutcome::Failed
+                        },
+                        duration_ms: formatting_started.elapsed().as_millis() as u64,
+                        engine: None,
+                    });
 
                     // 2. Hide pill window first, then insert text with reduced delay
                     let app_state = app_for_process.state::<AppState>();
@@ -6357,6 +6848,8 @@ pub async fn stop_recording(
                         return;
                     }
 
+                    let mut delivery_journey = DeliveryJourneyGuard::new();
+
                     // Now handle text insertion or clipboard copy based on auto_paste_transcription.
                     // Missing setting keys default inside get_settings; actual settings-read failures fail closed
                     // to avoid surprising paste into the wrong app.
@@ -6382,6 +6875,26 @@ pub async fn stop_recording(
                         return;
                     }
 
+                    if transcript_ready_cue_eligible(writing_succeeded, should_deliver) {
+                        let cue_committed = persist_if_current(&app_state, task_generation, || {
+                            crate::commands::audio_feedback::play_audio_feedback(
+                                &app_for_process,
+                                crate::commands::audio_feedback::AudioFeedbackCue::TranscriptReady,
+                            );
+                        });
+                        if cue_committed.is_none() {
+                            log::info!(
+                                "Skipped transcript-ready cue for stale/cancelled generation {}",
+                                task_generation
+                            );
+                            if let Some(saved) = &recording_file_for_task {
+                                revoke_saved_recording(&app_for_process, saved).await;
+                            }
+                            update_recording_state(&app_for_process, RecordingState::Idle, None);
+                            return;
+                        }
+                    }
+
                     if auto_paste {
                         // Auto-paste enabled: insert text at cursor
                         let insert_result = persist_if_current(&app_state, task_generation, || {
@@ -6401,10 +6914,17 @@ pub async fn stop_recording(
                             update_recording_state(&app_for_process, RecordingState::Idle, None);
                             return;
                         };
+                        let insertion_start = Instant::now();
                         match insert_future.await {
-                            Ok(_) => log::debug!("Text inserted at cursor successfully"),
+                            Ok(_) => {
+                                delivery_journey.mark_succeeded();
+                                log::debug!("Text inserted at cursor successfully");
+                            }
                             Err(e) => {
+                                delivery_journey.mark_failed();
                                 log::error!("Failed to insert text: {}", e);
+                                crate::telemetry::capture_paste_failure("insert");
+
 
                                 // Check if it's an accessibility permission issue
                                 if e.contains("accessibility") || e.contains("permission") {
@@ -6428,6 +6948,16 @@ pub async fn stop_recording(
                                 }
                             }
                         }
+                        let insertion_ms = insertion_start
+                            .elapsed()
+                            .as_millis()
+                            .min(u128::from(u64::MAX))
+                            as u64;
+                        log::info!(
+                            "transcription_stage_timing stage=insertion method=auto_paste duration_ms={}",
+                            insertion_ms
+                        );
+                        record_insertion_timing(&mut writing_metadata, insertion_ms);
                     } else {
                         // Auto-paste disabled: copy to clipboard and notify
                         let copy_result = persist_if_current(&app_state, task_generation, || {
@@ -6444,16 +6974,30 @@ pub async fn stop_recording(
                             update_recording_state(&app_for_process, RecordingState::Idle, None);
                             return;
                         };
+                        let insertion_start = Instant::now();
                         match copy_future.await {
                             Ok(_) => {
+                                delivery_journey.mark_succeeded();
                                 log::debug!("Text copied to clipboard (auto-paste disabled)");
                                 pill_toast(&app_for_process, "Transcription copied", 1500);
                             }
                             Err(e) => {
+                                delivery_journey.mark_failed();
                                 log::error!("Failed to copy text to clipboard: {}", e);
+                                crate::telemetry::capture_paste_failure("clipboard");
                                 pill_toast(&app_for_process, "Copy failed", 1500);
                             }
                         }
+                        let insertion_ms = insertion_start
+                            .elapsed()
+                            .as_millis()
+                            .min(u128::from(u64::MAX))
+                            as u64;
+                        log::info!(
+                            "transcription_stage_timing stage=insertion method=clipboard duration_ms={}",
+                            insertion_ms
+                        );
+                        record_insertion_timing(&mut writing_metadata, insertion_ms);
                     }
 
                     // Recheck (Race 3) IMMEDIATELY before history save: a cancel
@@ -6508,11 +7052,12 @@ pub async fn stop_recording(
 
                     // 6. Transition to idle state
                     update_recording_state(&app_for_process, RecordingState::Idle, None);
-                });
+                })
+                .await;
             }
             Err(failure) => {
                 match &failure {
-                    TranscriptionFailure::Local(e)
+                    TranscriptionFailure::Local { message: e, .. }
                         if e.contains("cancelled") || e.contains("Cancelled") =>
                     {
                         log::info!("Handling transcription cancellation");
@@ -6530,7 +7075,7 @@ pub async fn stop_recording(
                         }
                         update_recording_state(&app_for_task, RecordingState::Idle, None);
                     }
-                    TranscriptionFailure::Local(e) if e.contains("too short") => {
+                    TranscriptionFailure::Local { message: e, .. } if e.contains("too short") => {
                         // Handle "too short" errors with specific user feedback
                         log::info!("Recording was too short: {}", e);
 
@@ -6626,7 +7171,7 @@ pub async fn stop_recording(
                             update_recording_state(&app_for_reset, RecordingState::Idle, None);
                         });
                     }
-                    TranscriptionFailure::Local(e) => {
+                    TranscriptionFailure::Local { message: e, .. } => {
                         // Genuine local/cloud failure. If the recording was preserved
                         // (save_recordings on), write a retryable failed row so the user
                         // can re-transcribe from History instead of losing the dictation.
@@ -6721,7 +7266,9 @@ pub async fn stop_recording(
                 }
             }
         }
-    });
+            },
+        ),
+    );
 
     // Track the transcription task
     let app_state = app.state::<AppState>();
@@ -7259,16 +7806,11 @@ async fn transcribe_audio_file_impl(
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or(legacy_speech_language)
     });
-    let ai_enabled = store
-        .get("ai_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
     let stored_transcription_task = store
         .get("transcription_task")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
     let transcription_task = resolve_transcription_task_for_audio(
         &app,
-        ai_enabled,
         legacy_translate_to_english,
         stored_transcription_task.as_deref(),
     )?;
@@ -7440,14 +7982,10 @@ async fn transcribe_audio_file_impl(
         "[UPLOAD] Completed transcription, {} characters",
         transcription_result.raw_text.len()
     );
-    let ai_enabled = load_ai_enabled(&app)?;
-    let writing_result = crate::writing::process_transcription(
-        app.clone(),
-        transcription_result.clone(),
-        ai_enabled,
-    )
-    .await
-    .map_err(|e| e.user_message())?;
+    let writing_result =
+        crate::writing::process_transcription(app.clone(), transcription_result.clone())
+            .await
+            .map_err(|e| e.user_message())?;
     if let Some(error) = writing_result.ai_error.as_ref() {
         log::warn!(
             "AI polish failed with {}; returning deterministic upload text",
@@ -7539,38 +8077,46 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     }
 
     // Stop recording if active
+    //
+    // Plan 060.1 — restoration before propagation: the stop outcome is
+    // COLLECTED, not propagated with `?`. Every cancellation cleanup below
+    // (media resume, ESC state, pill, state transitions) must run even when
+    // the recorder stop fails, and the error is surfaced only AFTER the
+    // user's paused media is restored — a failed ESC-cancel must never
+    // strand a paused track or a stuck recording state.
     let recorder_state = app.state::<RecorderState>();
-    let is_recording = {
-        let guard = recorder_state
+    let stop_error: Option<String> = (|| -> Result<(), String> {
+        let mut guard = recorder_state
             .inner()
             .0
             .lock()
             .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?;
-        guard.is_recording()
-    };
-
-    if is_recording {
+        if !guard.is_recording() {
+            return Ok(());
+        }
         log::info!("Stopping recorder");
-        // Just stop the recorder, don't do full stop_recording flow
-        {
-            let mut recorder = recorder_state
-                .inner()
-                .0
-                .lock()
-                .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?;
-            let _ = recorder.stop_recording()?;
-        }
+        // Just stop the recorder, don't do full stop_recording flow.
+        // A stop error keeps the WAV on disk for the orphan cleanup when the
+        // worker never finalized (same policy as stop_unfinalized); only a
+        // clean stop may delete the cancelled recording.
+        match guard.stop_recording() {
+            Ok(_) => {
+                // Clean up audio file if it exists
+                if let Ok(path_guard) = app_state.current_recording_path.lock() {
+                    if let Some(audio_path) = path_guard.as_ref() {
+                        log::info!("Removing cancelled recording file");
 
-        // Clean up audio file if it exists
-        if let Ok(path_guard) = app_state.current_recording_path.lock() {
-            if let Some(audio_path) = path_guard.as_ref() {
-                log::info!("Removing cancelled recording file");
-                if let Err(e) = std::fs::remove_file(audio_path) {
-                    log::warn!("Failed to remove cancelled recording: {}", e);
+                        if let Err(e) = std::fs::remove_file(audio_path) {
+                            log::warn!("Failed to remove cancelled recording: {}", e);
+                        }
+                    }
                 }
+                Ok(())
             }
+            Err(e) => Err(e),
         }
-    }
+    })()
+    .err();
 
     // Resume system media if we paused it
     MEDIA_CONTROLLER.resume_if_we_paused();
@@ -7623,6 +8169,13 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
         }
     }
     crate::trigger::engine_host::rebuild_engine_bindings(&app);
+
+    // Plan 060.1: restoration is complete (media resumed, ESC state cleared,
+    // state machine landed on Idle/Error) — NOW surface the stop failure.
+    if let Some(e) = stop_error {
+        log::error!("Cancellation stop failed after cleanup: {}", e);
+        return Err(e);
+    }
 
     log::info!("=== CANCEL RECORDING COMPLETED ===");
     Ok(())
@@ -8030,5 +8583,90 @@ mod diarization_tests {
         ];
         let result = group_words_into_speaker_text(&words);
         assert_eq!(result, "Speaker 0: Hello there.\n\nSpeaker 1: How are you?");
+    }
+}
+
+#[cfg(test)]
+mod failure_class_tests {
+    use super::*;
+
+    #[test]
+    fn typed_failure_class_is_independent_of_display_text_and_detail() {
+        use crate::transcription::error::TranscriptionError;
+        for (code, class) in [
+            (TranscriptionErrorCode::Unauthorized, "auth"),
+            (TranscriptionErrorCode::TransportFailed, "transport"),
+            (
+                TranscriptionErrorCode::StorageLimitExceeded,
+                "cloud_storage_limit",
+            ),
+            (
+                TranscriptionErrorCode::ModelUnavailable,
+                "model_unavailable",
+            ),
+            (
+                TranscriptionErrorCode::EngineUnavailable,
+                "model_unavailable",
+            ),
+            (TranscriptionErrorCode::Timeout, "timeout"),
+            (TranscriptionErrorCode::EngineFailed, "engine_failed"),
+        ] {
+            let error = TranscriptionError::new(
+                code,
+                TranscriptionSource::DesktopRecording,
+                "Display copy changed",
+            )
+            .with_detail("network model authentication timed out");
+            let failure = desktop_failure_from_transcription_error(error);
+            assert_eq!(transcription_failure_class(&failure), class);
+        }
+    }
+
+    #[test]
+    fn typed_failure_keeps_desktop_cancellation_and_history_messages() {
+        use crate::transcription::error::TranscriptionError;
+        for (code, message, retryable) in [
+            (
+                TranscriptionErrorCode::Cancelled,
+                "Transcription cancelled",
+                false,
+            ),
+            (
+                TranscriptionErrorCode::Timeout,
+                "Transcription timed out",
+                true,
+            ),
+            (
+                TranscriptionErrorCode::Unauthorized,
+                "Display copy: provider detail",
+                true,
+            ),
+        ] {
+            let failure = desktop_failure_from_transcription_error(
+                TranscriptionError::new(
+                    code,
+                    TranscriptionSource::DesktopRecording,
+                    "Display copy",
+                )
+                .with_detail("provider detail"),
+            );
+            assert_eq!(failure.message(), message);
+            assert_eq!(failure.is_retryable_failure(), retryable);
+            assert_eq!(failure.error_kind(), "local");
+        }
+    }
+
+    #[test]
+    fn legacy_failures_keep_string_classification() {
+        assert_eq!(
+            transcription_failure_class(&TranscriptionFailure::local(
+                "Transcription timed out".into()
+            )),
+            "timeout"
+        );
+        assert_eq!(
+            transcription_failure_class(&TranscriptionFailure::local("network error".into())),
+            "transport"
+        );
     }
 }

@@ -1,0 +1,29 @@
+{
+  "migrations": [
+    { "raw": "PersonalDictation", "aiEnabled": false, "expected": "PersonalDictation" },
+    { "raw": "CleanDictation", "aiEnabled": false, "expected": "CleanDictation" },
+    { "raw": "Writing", "aiEnabled": false, "expected": "Writing" },
+    { "raw": "Notes", "aiEnabled": false, "expected": "Notes" },
+    { "raw": "Message", "aiEnabled": false, "expected": "Message" },
+    { "raw": "Code", "aiEnabled": false, "expected": "Code" },
+    { "raw": "Coding", "aiEnabled": false, "expected": "Code" },
+    { "raw": "Prompts", "aiEnabled": false, "expected": "Code" },
+    { "raw": "Commit", "aiEnabled": false, "expected": "Code" },
+    { "raw": "Email", "aiEnabled": false, "expected": "Writing" },
+    { "raw": "Default", "aiEnabled": false, "expected": "PersonalDictation" },
+    { "raw": "Default", "aiEnabled": true, "expected": "CleanDictation" },
+    { "raw": "CustomLegacyPreset", "aiEnabled": false, "expected": "PersonalDictation" }
+  ],
+  "requiresAiFormatting": [
+    { "preset": "PersonalDictation", "expected": false },
+    { "preset": "CleanDictation", "expected": true },
+    { "preset": "Writing", "expected": true },
+    { "preset": "Notes", "expected": true },
+    { "preset": "Message", "expected": true },
+    { "preset": "Code", "expected": true }
+  ],
+  "defaults": [
+    { "aiEnabled": false, "expected": "PersonalDictation" },
+    { "aiEnabled": true, "expected": "CleanDictation" }
+  ]
+}

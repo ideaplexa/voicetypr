@@ -1,17 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
-import { useLicenseStatus } from './useLicenseStatus';
+import { describe, it, expect, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { useLicenseStatus } from "./useLicenseStatus";
 
 const mockUseLicense = vi.fn();
 
-vi.mock('@/contexts/LicenseContext', () => ({
+vi.mock("@/contexts/LicenseContext", () => ({
   useLicense: () => mockUseLicense(),
 }));
 
-describe('useLicenseStatus', () => {
-  it('treats licensed status as valid', () => {
+describe("useLicenseStatus", () => {
+  it("treats licensed status as valid", () => {
     mockUseLicense.mockReturnValue({
-      status: { status: 'licensed' },
+      status: { status: "licensed" },
       isLoading: false,
       checkStatus: vi.fn(),
     });
@@ -22,9 +22,9 @@ describe('useLicenseStatus', () => {
     expect(result.current.isChecking).toBe(false);
   });
 
-  it('treats expired status as invalid', () => {
+  it("treats expired status as invalid", () => {
     mockUseLicense.mockReturnValue({
-      status: { status: 'expired' },
+      status: { status: "expired" },
       isLoading: false,
       checkStatus: vi.fn(),
     });

@@ -14,7 +14,9 @@ use parking_lot::Mutex;
 
 use crate::backend::platform_source;
 use crate::matcher::Matcher;
-use crate::types::{EngineError, KeySpec, ModSet, NamedKey, RawKeyEvent, Trigger, TriggerEvent, TriggerId};
+use crate::types::{
+    EngineError, KeySpec, ModSet, NamedKey, RawKeyEvent, Trigger, TriggerEvent, TriggerId,
+};
 
 /// Messages flowing to the dispatcher thread. Raw events and control messages
 /// share one channel so they are processed in order.
@@ -442,6 +444,40 @@ mod tests {
         );
         assert!(!engine.is_running());
     }
+
+    #[test]
+    fn concurrent_start_installs_only_one_event_source() {
+        let engine = Arc::new(TriggerEngine::new());
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+
+        let start = |engine: Arc<TriggerEngine>, barrier: Arc<std::sync::Barrier>| {
+            std::thread::spawn(move || {
+                barrier.wait();
+                engine.start_with_source(Arc::new(MockSource::new(Vec::new())), |_| {})
+            })
+        };
+
+        let first = start(Arc::clone(&engine), Arc::clone(&barrier));
+        let second = start(Arc::clone(&engine), Arc::clone(&barrier));
+        barrier.wait();
+
+        let outcomes = [
+            first.join().expect("first starter"),
+            second.join().expect("second starter"),
+        ];
+        assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|result| matches!(result, Err(EngineError::AlreadyRunning)))
+                .count(),
+            1
+        );
+
+        engine.stop();
+        assert!(!engine.is_running());
+    }
+
     fn j() -> KeySpec {
         KeySpec::Named(NamedKey::J)
     }
@@ -594,10 +630,7 @@ mod tests {
         // Only the non-modifier single survives into the set.
         assert_eq!(set.singles, vec![KeySpec::Named(NamedKey::F8)]);
         // The filtered modifier is not consumed even with zero mods held.
-        assert!(!set.consumes(
-            KeySpec::Named(NamedKey::ControlLeft),
-            ModSet::empty()
-        ));
+        assert!(!set.consumes(KeySpec::Named(NamedKey::ControlLeft), ModSet::empty()));
         // The non-modifier single is consumed as before.
         assert!(set.consumes(KeySpec::Named(NamedKey::F8), ModSet::empty()));
     }

@@ -12,5 +12,8 @@ onlyBuiltDependencies:
   - geckodriver
   - sharp
 
+minimumReleaseAge: 1440
+blockExoticSubdeps: true
+
 overrides:
   hono: 4.12.21

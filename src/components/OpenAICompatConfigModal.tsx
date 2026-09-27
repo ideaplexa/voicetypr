@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -34,8 +34,12 @@ export function OpenAICompatConfigModal({
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<null | { ok: boolean; message: string }>(null);
-  const [testedPayload, setTestedPayload] = useState<null | { baseUrl: string; model: string; apiKey: string }>(null);
-  const testOk = useMemo(() => testResult?.ok === true, [testResult]);
+  const [testedPayload, setTestedPayload] = useState<null | {
+    baseUrl: string;
+    model: string;
+    apiKey: string;
+  }>(null);
+  const testOk = testResult?.ok === true;
   const inputsMatchTest = useMemo(() => {
     if (!testedPayload) return false;
     return (
@@ -45,7 +49,13 @@ export function OpenAICompatConfigModal({
     );
   }, [testedPayload, baseUrl, model, apiKey]);
 
-  useEffect(() => {
+  // Sync form state when the dialog (re)opens or defaults change while open —
+  // adjusted during render so no post-paint flash; Base UI keeps its close
+  // animation because the component stays mounted.
+  const [appliedOpenState, setAppliedOpenState] = useState<string | null>(null);
+  const openStateKey = isOpen ? `open\u0000${defaultBaseUrl}\u0000${defaultModel}` : "closed";
+  if (appliedOpenState !== openStateKey) {
+    setAppliedOpenState(openStateKey);
     if (isOpen) {
       setBaseUrl(defaultBaseUrl);
       setModel(defaultModel);
@@ -58,14 +68,18 @@ export function OpenAICompatConfigModal({
       setTestResult(null);
       setTestedPayload(null);
     }
-  }, [isOpen, defaultBaseUrl, defaultModel]);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!baseUrl.trim() || !model.trim()) return;
     try {
       setSubmitting(true);
-      onSubmit({ baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() || undefined });
+      onSubmit({
+        baseUrl: baseUrl.trim(),
+        model: model.trim(),
+        apiKey: apiKey.trim() || undefined,
+      });
     } finally {
       // Keep spinner controlled by parent isLoading if needed; here we reset
       setSubmitting(false);
@@ -75,13 +89,11 @@ export function OpenAICompatConfigModal({
   const handleTest = async () => {
     setTestResult(null);
     setTesting(true);
+    const trimmedBase = baseUrl.trim();
+    const trimmedModel = model.trim();
+    const trimmedKey = apiKey.trim();
     try {
-      const trimmedBase = baseUrl.trim();
-      const trimmedModel = model.trim();
-      const trimmedKey = apiKey.trim();
       const noAuth = !trimmedKey;
-
-      // Note: Tauri's JS invoke supports camelCase keys and maps them to the Rust command args (snake_case).
       await invoke("test_openai_endpoint", {
         baseUrl: trimmedBase,
         model: trimmedModel,
@@ -90,17 +102,15 @@ export function OpenAICompatConfigModal({
       });
       setTestResult({ ok: true, message: "Connection successful" });
       setTestedPayload({ baseUrl: trimmedBase, model: trimmedModel, apiKey: trimmedKey });
-    } catch (e: any) {
+    } catch (e: unknown) {
       setTestResult({ ok: false, message: String(e) });
+      setTestedPayload({ baseUrl: trimmedBase, model: trimmedModel, apiKey: trimmedKey });
     } finally {
       setTesting(false);
     }
   };
 
-  // Reset test status when inputs change
-  useEffect(() => {
-    setTestResult(null);
-  }, [baseUrl, model, apiKey]);
+  // Test-result freshness is derived (inputsMatchTest) — no reset effect.
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -109,7 +119,8 @@ export function OpenAICompatConfigModal({
           <DialogHeader>
             <DialogTitle>Configure OpenAI-Compatible Provider</DialogTitle>
             <DialogDescription>
-              Set the API base URL, model ID, and optional API key for any OpenAI-compatible endpoint.
+              Set the API base URL, model ID, and optional API key for any OpenAI-compatible
+              endpoint.
             </DialogDescription>
           </DialogHeader>
 
@@ -150,7 +161,12 @@ export function OpenAICompatConfigModal({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={submitting || testing}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={submitting || testing}
+            >
               Cancel
             </Button>
             <Button
@@ -170,7 +186,9 @@ export function OpenAICompatConfigModal({
             </Button>
             <Button
               type="submit"
-              disabled={!baseUrl.trim() || !model.trim() || submitting || !testOk || !inputsMatchTest}
+              disabled={
+                !baseUrl.trim() || !model.trim() || submitting || !testOk || !inputsMatchTest
+              }
               title={!testOk || !inputsMatchTest ? "Run Test and pass before saving" : undefined}
             >
               {submitting ? (
@@ -183,7 +201,7 @@ export function OpenAICompatConfigModal({
               )}
             </Button>
           </DialogFooter>
-          {testResult && (
+          {testResult && inputsMatchTest && (
             <div className={`mt-2 text-sm ${testResult.ok ? "text-green-600" : "text-red-600"}`}>
               {testResult.message}
             </div>

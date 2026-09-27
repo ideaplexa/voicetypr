@@ -1,12 +1,12 @@
 [package]
 name = "voicetypr"
-version = "2.0.4"
+version = "2.0.6"
 description = "open source voice to text transcription app"
 authors = ["moinulmoin"]
 edition = "2021"
 
 [workspace]
-members = [".", "crates/keytrigger"]
+members = [".", "crates/keytrigger", "crates/transcript-text", "crates/vulkan-device-select"]
 resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -27,6 +27,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 keytrigger = { path = "crates/keytrigger" }
+transcript-text = { path = "crates/transcript-text" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
@@ -53,7 +54,6 @@ arboard = { version = "3.6.0", features = ["image"] }
 clipboard-rs = "0.2"
 dirs = "5"
 log = "0.4"
-env_logger = "0.11"
 tauri-plugin-log = { version = "2", features = ["colored"] }
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-updater = "2.9.0"
@@ -75,6 +75,8 @@ tauri-plugin-notification = "2.3.3"
 warp = "0.3"
 bytes = "1"
 tempfile = "3.10"
+command-group = { version = "5.0.1", features = ["with-tokio"] }
+libc = "0.2"
 hostname = "0.4"
 local-ip-address = "0.6"
 uuid = { version = "1", features = ["v4"] }
@@ -82,14 +84,20 @@ active-win-pos-rs = "0.10.1"
 clap = { version = "4.5", features = ["derive"] }
 genai = "=0.6.0"
 tokio-util = "0.7"
-sentry = { version = "0.42", default-features = false, features = ["backtrace", "panic", "transport", "rustls"] }
+sentry = { version = "0.42", default-features = false, features = ["backtrace", "panic", "transport", "rustls", "debug-images"] }
+which = "4.4.2"
+posthog-rs = { version = "0.22.0", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
 tauri-plugin-macos-permissions = "2"
 core-graphics = "0.24"
+coreaudio-sys = "0.2"
 media-remote = "0.3"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSBitmapImageRep", "NSButton", "NSControl", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDictionary", "NSString", "NSGeometry"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
@@ -105,6 +113,8 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_LibraryLoader",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Security_Cryptography",
     "Media_Control",
     "Foundation",
     "Win32_Graphics_Dxgi",
@@ -128,11 +138,21 @@ tauri-plugin-store = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-os = "2"
 tauri-plugin-single-instance = "2"
+[profile.dev]
+# Keep development transcriptions responsive without paying full release-build
+# compile times. Audio preparation is CPU-heavy and otherwise runs unoptimized.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
-# Client-side crash symbolication for Bugsink (which does NOT symbolicate native
-# server-side): line tables give function + file:line resolved in-process at
-# capture (sentry `backtrace`); strip = "none" keeps the symbol table so macOS
-# resolves names. Windows additionally emits voicetypr.pdb, shipped beside the
-# exe (see windows/installer-hooks.nsh) so dbghelp can resolve at runtime.
+# Client-side crash symbolication for GlitchTip (server-side symbolication via
+# uploaded PDB/dSYM/debug files): line tables give function + file:line resolved
+# in-process at capture (sentry `backtrace`); strip = "none" keeps the symbol
+# table so macOS resolves names. Windows additionally emits voicetypr.pdb,
+# shipped beside the exe (see windows/installer-hooks.nsh) so dbghelp can
+# resolve at runtime. Debug-image metadata is scrubbed to basenames in
+# `telemetry::scrub_debug_meta` before egress.
 debug = "line-tables-only"
 strip = "none"

@@ -33,25 +33,49 @@ pub async fn clear_old_logs(app: tauri::AppHandle, days_to_keep: u32) -> Result<
                 .unwrap_or("")
                 .to_string();
 
-            if file_name.starts_with("voicetypr-") && file_name.ends_with(".log") {
-                let date_str = file_name
-                    .strip_prefix("voicetypr-")
-                    .and_then(|s| s.strip_suffix(".log"))
-                    .unwrap_or("");
-
-                if let Ok(file_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                    if file_date < cutoff_date {
-                        fs::remove_file(&path)
-                            .map_err(|e| format!("Failed to delete log file: {}", e))?;
-                        deleted_count += 1;
-                        log::info!("Deleted old log file: {}", file_name);
-                    }
+            if let Some(file_date) = voicetypr_log_date(&file_name) {
+                if file_date < cutoff_date {
+                    fs::remove_file(&path)
+                        .map_err(|e| format!("Failed to delete log file: {}", e))?;
+                    deleted_count += 1;
+                    log::info!("Deleted old log file: {}", file_name);
                 }
             }
         }
     }
 
     Ok(deleted_count)
+}
+
+/// Strict Voicetypr log-name shape: `voicetypr-YYYY-MM-DD.log` or a rotation
+/// `voicetypr-YYYY-MM-DD.log.N` with a NUMERIC suffix only. Anything else
+/// sharing the prefix (e.g. `voicetypr-2026-01-01.log.1.exe`) is NOT a log
+/// and must never be deleted or attached to a report. Returns the date
+/// as a validated calendar date.
+pub(crate) fn voicetypr_log_date(file_name: &str) -> Option<NaiveDate> {
+    let stem = file_name.strip_prefix("voicetypr-")?;
+    let date = if let Some(date) = stem.strip_suffix(".log") {
+        date
+    } else {
+        let (date, rotation) = stem.split_once(".log.")?;
+        if rotation.is_empty() || !rotation.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        date
+    };
+    // Chrono accepts variable-width fields; the on-disk contract does not.
+    if date.len() != 10
+        || !date.bytes().enumerate().all(|(index, byte)| {
+            if index == 4 || index == 7 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+    {
+        return None;
+    }
+    NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
 }
 
 #[tauri::command]
@@ -101,6 +125,8 @@ pub async fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Maximum bytes to read from the tail of the latest log for bug reports.
 const MAX_TAIL_BYTES: u64 = 40_960; // ~40KB
+/// Maximum bytes of the in-memory DEBUG ring to attach to bug reports.
+const MAX_RING_BYTES: usize = 64 * 1024; // ~64KB
 
 /// Response for the latest-log bug-report attachment command.
 #[derive(Debug, Serialize)]
@@ -114,6 +140,10 @@ pub struct LatestLogAttachment {
     pub truncated: bool,
     /// Human-readable status for the frontend (empty when log exists).
     pub status_note: String,
+    /// Redacted dump of the in-memory DEBUG ring (plan 060): timings,
+    /// budgets, and backend decisions that never reach the Info-filtered
+    /// file log in release builds.
+    pub debug_ring: String,
 }
 
 /// Find the newest `voicetypr-*.log` file in the given directory.
@@ -138,7 +168,7 @@ pub fn find_newest_log(log_dir: &std::path::Path) -> Option<std::path::PathBuf> 
         let path = entry.path();
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-        if file_name.starts_with("voicetypr-") && file_name.ends_with(".log") {
+        if voicetypr_log_date(file_name).is_some() {
             if let Ok(meta) = entry.metadata() {
                 if let Ok(modified) = meta.modified() {
                     match &newest {
@@ -204,23 +234,32 @@ pub fn redact_log_content(content: &str) -> String {
     static EMAIL_RE: OnceLock<regex::Regex> = OnceLock::new();
     static HOME_RE: OnceLock<regex::Regex> = OnceLock::new();
     static ABSOLUTE_PATH_RE: OnceLock<regex::Regex> = OnceLock::new();
+    static UNC_PATH_RE: OnceLock<regex::Regex> = OnceLock::new();
 
     let mut result = content.to_string();
 
-    // Key/value secret patterns. Keep the field name, redact the value.
+    // Quoted values close only at their matching, unescaped delimiter. Treat
+    // backslash + the next character as a pair so escaped quotes/backslashes
+    // in JSON or Rust Debug output cannot expose the remainder of a secret.
     let wrapped_secret_re = WRAPPED_SECRET_RE.get_or_init(|| {
         regex::Regex::new(
-            r#"(?i)([\"']?\b(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|license[_-]?key)\b[\"']?\s*[:=]\s*(?:Some\(|String\()?['\"])[^'\"]+(['\"]\)?)"#,
+            r#"(?i)(["']?\b(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|license[_-]?key|password|passwd)\b["']?\s*[:=]\s*(?:Some\(|String\()?)("(?:\\(?s:.)|[^"\\])*"|'(?:\\(?s:.)|[^'\\])*')(\)?)"#,
         )
         .unwrap()
     });
     result = wrapped_secret_re
-        .replace_all(&result, "$1[REDACTED]$2")
+        .replace_all(&result, |captures: &regex::Captures<'_>| {
+            let delimiter = &captures[2][..1];
+            format!(
+                "{}{delimiter}[REDACTED]{delimiter}{}",
+                &captures[1], &captures[3]
+            )
+        })
         .to_string();
 
     let unquoted_secret_re = UNQUOTED_SECRET_RE.get_or_init(|| {
         regex::Regex::new(
-            r#"(?i)(\b(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|license[_-]?key)\b\s*[:=]\s*)[^\s,;}]+"#,
+            r#"(?i)(\b(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|license[_-]?key|password|passwd)\b\s*[:=]\s*)[^\s,;}]+"#,
         )
         .unwrap()
     });
@@ -277,6 +316,15 @@ pub fn redact_log_content(content: &str) -> String {
         .replace_all(&result, "$1[PATH_REDACTED]")
         .to_string();
 
+    // UNC paths (\\server\share\...): the drive-letter and unix roots above
+    // do not match these; user-selected save targets can be on network shares.
+    let unc_path_re = UNC_PATH_RE.get_or_init(|| {
+        regex::Regex::new(r#"\\\\[^\\/\"\s]+\\[^\\/\r\n\"',)]+(?:\\[^\r\n\"',)]+)*"#).unwrap()
+    });
+    result = unc_path_re
+        .replace_all(&result, "[PATH_REDACTED]")
+        .to_string();
+
     result
 }
 
@@ -293,6 +341,8 @@ pub async fn get_latest_log_for_bug_report(
 
     let newest = find_newest_log(&log_dir);
 
+    let debug_ring = redact_log_content(&crate::utils::ring_log::snapshot_joined(MAX_RING_BYTES));
+
     let Some(log_path) = newest else {
         return Ok(LatestLogAttachment {
             file_name: None,
@@ -300,6 +350,7 @@ pub async fn get_latest_log_for_bug_report(
             truncated: false,
             status_note: "No log file found. Logs will be included automatically when available."
                 .to_string(),
+            debug_ring,
         });
     };
 
@@ -317,6 +368,7 @@ pub async fn get_latest_log_for_bug_report(
                 redacted_content: String::new(),
                 truncated: false,
                 status_note: "Found a log file, but it could not be read.".to_string(),
+                debug_ring,
             });
         }
     };
@@ -328,5 +380,6 @@ pub async fn get_latest_log_for_bug_report(
         redacted_content: redacted,
         truncated,
         status_note: String::new(),
+        debug_ring,
     })
 }

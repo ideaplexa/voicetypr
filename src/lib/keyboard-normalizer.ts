@@ -3,14 +3,27 @@
  * This should match the Rust key_normalizer implementation
  */
 
+const MODIFIER_KEYS: Record<string, true> = {
+  CommandOrControl: true,
+  Super: true,
+  Shift: true,
+  Alt: true,
+  Control: true,
+  Command: true,
+  Cmd: true,
+  Ctrl: true,
+  Option: true,
+  Meta: true,
+};
+
 /**
  * Normalize a complete shortcut string (e.g., "Cmd+Shift+A")
  */
 export function normalizeShortcutKeys(shortcut: string): string {
   return shortcut
-    .split('+')
-    .map(key => normalizeSingleKey(key))
-    .join('+');
+    .split("+")
+    .map((key) => normalizeSingleKey(key))
+    .join("+");
 }
 
 /**
@@ -19,21 +32,21 @@ export function normalizeShortcutKeys(shortcut: string): string {
 function normalizeSingleKey(key: string): string {
   // Handle special key mappings (case-insensitive for common modifiers)
   const keyMapLower: Record<string, string> = {
-    'return': 'Enter',
-    'arrowup': 'Up',
-    'arrowdown': 'Down',
-    'arrowleft': 'Left',
-    'arrowright': 'Right',
-    'cmd': 'CommandOrControl',
-    'ctrl': 'CommandOrControl',
-    'control': 'Control',  // Keep Control as Control for macOS Cmd+Ctrl support
-    'command': 'CommandOrControl',
-    'option': 'Alt',
-    'meta': 'CommandOrControl',
-    'alt': 'Alt',
-    'shift': 'Shift',
-    'space': 'Space',
-    'super': 'Super',  // Keep Super as Super for macOS Command key
+    return: "Enter",
+    arrowup: "Up",
+    arrowdown: "Down",
+    arrowleft: "Left",
+    arrowright: "Right",
+    cmd: "CommandOrControl",
+    ctrl: "CommandOrControl",
+    control: "Control", // Keep Control as Control for macOS Cmd+Ctrl support
+    command: "CommandOrControl",
+    option: "Alt",
+    meta: "CommandOrControl",
+    alt: "Alt",
+    shift: "Shift",
+    space: "Space",
+    super: "Super", // Keep Super as Super for macOS Command key
   };
 
   // Check lowercase version first for common keys
@@ -44,18 +57,18 @@ function normalizeSingleKey(key: string): string {
 
   // Handle exact case matches for special formatting
   const keyMap: Record<string, string> = {
-    'Return': 'Enter',
-    'ArrowUp': 'Up',
-    'ArrowDown': 'Down',
-    'ArrowLeft': 'Left',
-    'ArrowRight': 'Right',
-    'Cmd': 'CommandOrControl',
-    'Ctrl': 'CommandOrControl',
-    'Control': 'Control',  // Keep Control as Control for macOS Cmd+Ctrl support
-    'Command': 'CommandOrControl',
-    'Super': 'Super',  // Keep Super as Super for macOS Command key
-    'Option': 'Alt',
-    'Meta': 'CommandOrControl',
+    Return: "Enter",
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    Cmd: "CommandOrControl",
+    Ctrl: "CommandOrControl",
+    Control: "Control", // Keep Control as Control for macOS Cmd+Ctrl support
+    Command: "CommandOrControl",
+    Super: "Super", // Keep Super as Super for macOS Command key
+    Option: "Alt",
+    Meta: "CommandOrControl",
   };
 
   return keyMap[key] || key;
@@ -82,7 +95,7 @@ export const ValidationPresets = {
     requireModifier: true,
     requireModifierForMultiKey: true,
   }),
-  
+
   /** Custom rules */
   custom: (rules: Partial<KeyValidationRules>): KeyValidationRules => ({
     minKeys: 1,
@@ -105,9 +118,9 @@ export function validateKeyCombination(shortcut: string): { valid: boolean; erro
  */
 export function validateKeyCombinationWithRules(
   shortcut: string,
-  rules: KeyValidationRules
+  rules: KeyValidationRules,
 ): { valid: boolean; error?: string } {
-  const parts = shortcut.split('+').filter(Boolean);
+  const parts = shortcut.split("+").filter(Boolean);
 
   // Check minimum keys
   if (parts.length < rules.minKeys) {
@@ -120,27 +133,32 @@ export function validateKeyCombinationWithRules(
   }
 
   // Check modifier requirements
-  const modifierKeys = ['CommandOrControl', 'Super', 'Shift', 'Alt', 'Control', 'Command', 'Cmd', 'Ctrl', 'Option', 'Meta'];
-  const hasModifier = parts.some(key => modifierKeys.includes(key));
-  const isModifier = (key: string) => modifierKeys.includes(key);
+  const hasModifier = parts.some((key) => MODIFIER_KEYS[key]);
 
   if (rules.requireModifier && !hasModifier) {
-    return { valid: false, error: 'At least one modifier key is required' };
+    return { valid: false, error: "At least one modifier key is required" };
   }
 
   // Check that the shortcut starts with a modifier
-  if (rules.requireModifier && parts.length > 0 && !isModifier(parts[0])) {
-    return { valid: false, error: 'Keyboard shortcuts must start with a modifier key (Cmd/Ctrl, Alt, or Shift)' };
+  if (rules.requireModifier && parts.length > 0 && !MODIFIER_KEYS[parts[0]]) {
+    return {
+      valid: false,
+      error: "Keyboard shortcuts must start with a modifier key (Cmd/Ctrl, Alt, or Shift)",
+    };
   }
 
   if (rules.requireModifierForMultiKey && !hasModifier && parts.length > 1) {
-    return { valid: false, error: 'Multi-key shortcuts must include at least one modifier key' };
+    return { valid: false, error: "Multi-key shortcuts must include at least one modifier key" };
   }
 
   // Check that at least one key is NOT a modifier (library requirement)
-  const hasNonModifier = parts.some(key => !isModifier(key));
+  const hasNonModifier = parts.some((key) => !MODIFIER_KEYS[key]);
   if (!hasNonModifier) {
-    return { valid: false, error: 'Hotkey must include at least one non-modifier key (e.g., a letter, number, or function key)' };
+    return {
+      valid: false,
+      error:
+        "Hotkey must include at least one non-modifier key (e.g., a letter, number, or function key)",
+    };
   }
 
   // Validate each key
@@ -161,13 +179,13 @@ function isValidKey(key: string): boolean {
   if (!key || key.length === 0) {
     return false;
   }
-  
+
   // ESC/Escape key is allowed (backend handles validation for recording cancellation)
   const normalizedKey = key.toLowerCase();
-  if (normalizedKey === 'escape' || normalizedKey === 'esc') {
+  if (normalizedKey === "escape" || normalizedKey === "esc") {
     return true; // Let backend handle the validation context
   }
-  
+
   // Allow any non-empty string as a potential key
   // The actual validation will happen when we try to register the shortcut
   // This allows for maximum flexibility with different keyboard layouts,
@@ -180,12 +198,26 @@ function isValidKey(key: string): boolean {
  */
 export function isSingleModifierKey(key: string): boolean {
   const singleModifiers = [
-    'Alt', 'Shift', 'Control', 'Ctrl', 'Command', 'Cmd', 'Option', 'Meta', 'Super',
-    'LeftAlt', 'RightAlt', 'LeftShift', 'RightShift',
-    'LeftControl', 'RightControl', 'LeftMeta', 'RightMeta'
+    "Alt",
+    "Shift",
+    "Control",
+    "Ctrl",
+    "Command",
+    "Cmd",
+    "Option",
+    "Meta",
+    "Super",
+    "LeftAlt",
+    "RightAlt",
+    "LeftShift",
+    "RightShift",
+    "LeftControl",
+    "RightControl",
+    "LeftMeta",
+    "RightMeta",
   ];
 
-  return singleModifiers.some(m => m.toLowerCase() === key.toLowerCase());
+  return singleModifiers.some((m) => m.toLowerCase() === key.toLowerCase());
 }
 
 /**
@@ -193,87 +225,86 @@ export function isSingleModifierKey(key: string): boolean {
  * Note: This function now accepts platform as parameter for consistent behavior
  */
 export function formatKeyForDisplay(key: string, isMac: boolean = false): string {
-
   const displayMap: Record<string, string> = {
-    'CommandOrControl': isMac ? '⌘' : 'Ctrl',
-    'Super': isMac ? '⌘' : 'Win',  // Super is Command on Mac, Windows key on PC
-    'Cmd': isMac ? '⌘' : 'Ctrl',
-    'Ctrl': isMac ? '⌃' : 'Ctrl',  // Use proper Control symbol on Mac
-    'Control': isMac ? '⌃' : 'Ctrl',
-    'Command': isMac ? '⌘' : 'Ctrl',
-    'Shift': isMac ? '⇧' : 'Shift',
-    'Alt': isMac ? '⌥' : 'Alt',
-    'LeftAlt': isMac ? '⌥' : 'Alt',
-    'RightAlt': isMac ? '⌥' : 'Alt',
-    'Option': isMac ? '⌥' : 'Alt',
-    'Meta': isMac ? '⌘' : 'Ctrl',
-    'Enter': isMac ? '⏎' : 'Enter',
-    'Return': isMac ? '⏎' : 'Enter',
-    'Tab': isMac ? '⇥' : 'Tab',
-    'Backspace': isMac ? '⌫' : 'Backspace',
-    'Delete': isMac ? '⌦' : 'Delete',
-    'Space': isMac ? '␣' : 'Space',
-    'Escape': 'Esc',
-    'ArrowUp': '↑',
-    'ArrowDown': '↓',
-    'ArrowLeft': '←',
-    'ArrowRight': '→',
-    'Up': '↑',
-    'Down': '↓',
-    'Left': '←',
-    'Right': '→',
-    'PageUp': '⇞',
-    'PageDown': '⇟',
-    'Home': '⇱',
-    'End': '⇲',
+    CommandOrControl: isMac ? "⌘" : "Ctrl",
+    Super: isMac ? "⌘" : "Win", // Super is Command on Mac, Windows key on PC
+    Cmd: isMac ? "⌘" : "Ctrl",
+    Ctrl: isMac ? "⌃" : "Ctrl", // Use proper Control symbol on Mac
+    Control: isMac ? "⌃" : "Ctrl",
+    Command: isMac ? "⌘" : "Ctrl",
+    Shift: isMac ? "⇧" : "Shift",
+    Alt: isMac ? "⌥" : "Alt",
+    LeftAlt: isMac ? "⌥" : "Alt",
+    RightAlt: isMac ? "⌥" : "Alt",
+    Option: isMac ? "⌥" : "Alt",
+    Meta: isMac ? "⌘" : "Ctrl",
+    Enter: isMac ? "⏎" : "Enter",
+    Return: isMac ? "⏎" : "Enter",
+    Tab: isMac ? "⇥" : "Tab",
+    Backspace: isMac ? "⌫" : "Backspace",
+    Delete: isMac ? "⌦" : "Delete",
+    Space: isMac ? "␣" : "Space",
+    Escape: "Esc",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    Up: "↑",
+    Down: "↓",
+    Left: "←",
+    Right: "→",
+    PageUp: "⇞",
+    PageDown: "⇟",
+    Home: "⇱",
+    End: "⇲",
     // Punctuation and symbols
-    'Slash': '/',
-    'Backslash': '\\',
-    'Period': '.',
-    'Comma': ',',
-    'Semicolon': ';',
-    'Quote': "'",
-    'BracketLeft': '[',
-    'BracketRight': ']',
-    'Minus': '-',
-    'Equal': '=',
-    'Plus': '+',
-    'Backquote': '`',
+    Slash: "/",
+    Backslash: "\\",
+    Period: ".",
+    Comma: ",",
+    Semicolon: ";",
+    Quote: "'",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Minus: "-",
+    Equal: "=",
+    Plus: "+",
+    Backquote: "`",
     // Numpad keys
-    'Numpad0': 'Num0',
-    'Numpad1': 'Num1',
-    'Numpad2': 'Num2',
-    'Numpad3': 'Num3',
-    'Numpad4': 'Num4',
-    'Numpad5': 'Num5',
-    'Numpad6': 'Num6',
-    'Numpad7': 'Num7',
-    'Numpad8': 'Num8',
-    'Numpad9': 'Num9',
-    'NumpadMultiply': 'Num*',
-    'NumpadAdd': 'Num+',
-    'NumpadSubtract': 'Num-',
-    'NumpadDecimal': 'Num.',
-    'NumpadDivide': 'Num/',
-    'NumpadEnter': 'NumEnter',
+    Numpad0: "Num0",
+    Numpad1: "Num1",
+    Numpad2: "Num2",
+    Numpad3: "Num3",
+    Numpad4: "Num4",
+    Numpad5: "Num5",
+    Numpad6: "Num6",
+    Numpad7: "Num7",
+    Numpad8: "Num8",
+    Numpad9: "Num9",
+    NumpadMultiply: "Num*",
+    NumpadAdd: "Num+",
+    NumpadSubtract: "Num-",
+    NumpadDecimal: "Num.",
+    NumpadDivide: "Num/",
+    NumpadEnter: "NumEnter",
     // Lock keys
-    'CapsLock': 'CapsLock',
-    'NumLock': 'NumLock',
-    'ScrollLock': 'ScrollLock',
+    CapsLock: "CapsLock",
+    NumLock: "NumLock",
+    ScrollLock: "ScrollLock",
     // Media keys
-    'AudioVolumeUp': 'Vol+',
-    'AudioVolumeDown': 'Vol-',
-    'AudioVolumeMute': 'Mute',
-    'MediaPlayPause': 'Play/Pause',
-    'MediaStop': 'Stop',
-    'MediaTrackNext': 'Next',
-    'MediaTrackPrevious': 'Previous',
+    AudioVolumeUp: "Vol+",
+    AudioVolumeDown: "Vol-",
+    AudioVolumeMute: "Mute",
+    MediaPlayPause: "Play/Pause",
+    MediaStop: "Stop",
+    MediaTrackNext: "Next",
+    MediaTrackPrevious: "Previous",
     // System keys
-    'PrintScreen': 'PrtScn',
-    'Insert': 'Ins',
-    'Pause': 'Pause',
-    'ContextMenu': 'Menu',
+    PrintScreen: "PrtScn",
+    Insert: "Ins",
+    Pause: "Pause",
+    ContextMenu: "Menu",
   };
-  
+
   return displayMap[key] || key;
 }

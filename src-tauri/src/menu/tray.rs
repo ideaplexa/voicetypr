@@ -80,6 +80,14 @@ pub fn format_tray_model_label(
     }
 }
 
+pub fn format_tray_polish_label(enabled: bool) -> &'static str {
+    if enabled {
+        "Polish: On"
+    } else {
+        "Polish: Off"
+    }
+}
+
 fn is_copyable_transcription_entry(entry: &serde_json::Value) -> bool {
     let status = entry
         .get("status")
@@ -113,7 +121,7 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
     let build_start = Instant::now();
     log::debug!("⏱️ [TRAY BUILD TIMING] build_tray_menu called");
 
-    let (current_model, selected_microphone, onboarding_done) = {
+    let (current_model, selected_microphone, onboarding_done, polish_enabled) = {
         match app.store("settings") {
             Ok(store) => {
                 let model = store
@@ -127,9 +135,13 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
                     .get("onboarding_completed")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                (model, microphone, onboarding_done)
+                let polish_enabled = store
+                    .get("ai_enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                (model, microphone, onboarding_done, polish_enabled)
             }
-            Err(_) => ("".to_string(), None, false),
+            Err(_) => ("".to_string(), None, false, false),
         }
     };
     log::debug!(
@@ -442,6 +454,23 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
         None
     };
 
+    let polish_on_item = tauri::menu::CheckMenuItem::with_id(
+        app,
+        "polish_on",
+        "On",
+        true,
+        polish_enabled,
+        None::<&str>,
+    )?;
+    let polish_off_item = tauri::menu::CheckMenuItem::with_id(
+        app,
+        "polish_off",
+        "Off",
+        true,
+        !polish_enabled,
+        None::<&str>,
+    )?;
+
     let mut recent_owned: Vec<tauri::menu::MenuItem<R>> = Vec::new();
     let mut latest_copyable_id: Option<String> = None;
     {
@@ -555,6 +584,17 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
     if let Some(microphone_submenu) = microphone_submenu {
         menu_builder = menu_builder.item(&microphone_submenu);
     }
+
+    let polish_items: Vec<&dyn tauri::menu::IsMenuItem<_>> =
+        vec![&polish_on_item, &polish_off_item];
+    let polish_submenu = Submenu::with_id_and_items(
+        app,
+        "polish",
+        format_tray_polish_label(polish_enabled),
+        true,
+        &polish_items,
+    )?;
+    menu_builder = menu_builder.item(&polish_submenu);
 
     menu_builder = menu_builder.item(&copy_last_i);
     if !recent_refs.is_empty() {

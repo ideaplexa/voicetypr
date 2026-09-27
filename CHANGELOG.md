@@ -1,3 +1,30 @@
+## Unreleased
+
+### Features
+
+* **ai:** harden Claude Code, pi, and oh-my-pi subscription-based Polish with isolated, deadline-bounded processes; add curated/discovered model selection in Advanced settings
+
+### Improvements
+
+* **formatting:** explain that speech models infer punctuation, document Clean Dictation's AI correction role, and add privacy-safe decision diagnostics showing whether AI formatting ran or was skipped
+* **ci:** keep routine PR feedback cheap on GitHub-hosted runners, make Intel a manual/release-only legacy lane, and reserve Store packaging for immutable release-candidate commits on `main`
+
+### Bug Fixes
+
+* **ai:** reject truncated or nonzero-exit CLI output, preserve raw dictation on every CLI failure, kill entire CLI process groups on timeout or cancellation, and safely resolve native executables without running Windows script shims
+* **tray:** recover from transient system-tray startup failures, keep the dashboard reachable, expose retry help, and attach tray diagnostics to support reports
+* **uploads:** constrain long speaker timelines so Copy and Save remain reachable, and keep an in-flight transcript bound to its original file when another file is dropped
+* **licensing:** preserve paid access through temporary verification outages, retry validation three times, repair stale device activation automatically, show a revalidation warning instead of `Trial expired`, and keep loading owned by the latest overlapping status request
+* **support:** replace the cramped problem-report modal with a dedicated page that collects a reply email, previews attached system configuration, gathers diagnostics automatically, and keeps copy/support-email fallbacks
+* **updater:** default direct-install prerelease builds to the Beta update channel when no channel preference has been saved, and preserve the post-update announcement when automatic relaunch fails
+* **recording:** include final recorder buffers in speech evidence and restore paused or muted media even when stopping a recording fails
+* **ai:** preserve standalone “Sure” and other user-authored text, refresh CLI capabilities and model lists, and allow ready CLI providers to be enabled from tray and shortcut controls
+* **soniox:** delete transcription records and uploaded files independently, return transcripts before background cleanup, preserve unknown and active/shared records, and retry storage failures once after capacity frees, cleanup finishes, or an eight-second wait expires
+* **licensing:** preserve unreadable saved licenses and credentials instead of deleting them or treating them as absent; report recovery errors without exposing stored contents
+* **diagnostics:** isolate backend attribution per recording, show restart requirements when enabling crash reporting, and retain collected diagnostics in copied report fallbacks
+* **settings:** complete Polish initialization under React StrictMode and restore model-picker refresh behavior
+* **release:** pin the Tauri CLI to 2.6.2 and restore the changelog command used by the local release script
+
 ## [2.0.4](https://github.com/moinulmoin/voicetypr/compare/v2.0.3...v2.0.4) (2026-07-01)
 
 ### Features

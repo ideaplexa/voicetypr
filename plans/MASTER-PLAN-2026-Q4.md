@@ -70,7 +70,7 @@ released without the founder's OK.
 | 0.4a | **Clean core:** split the god files (on main: `commands/audio.rs` 8,145 lines, `cloud_stt/soniox.rs` 4,609, `lib.rs` 2,424, `commands/remote.rs` 2,196) into one dictation pipeline with explicit stages (capture → preprocess → recognize → vocabulary → Polish → deliver); Tauri commands and CLI become thin adapters. SOLID-style single-purpose modules, typed errors, explicit state. Behaviour-preserving slices behind tests; architecture gets a gpt-6-astra xhigh second opinion; plan 050 + the July architecture review are inputs, re-derived from merged code | Same tests green before/after each slice; no god files |
 | 0.4b | **CLI parity:** every feature reachable from the CLI with `--json` — full pipeline incl. vocabulary + Polish, settings, vocabulary, providers, per-stage timings. Today `cli.rs` has 4 commands and `transcribe` skips vocabulary and Polish | Phase 1 scorecard harness runs entirely through the CLI |
 | 0.5 | [Plan 070](070-parakeet-full-context-preview.md): Parakeet full-context live preview | Plan 070 acceptance (preview WER ≈ batch, no dropped audio) |
-| 0.6 | Hide Parakeet Unified English and Nemotron until they pass Phase 1 tests | Not selectable; existing selections migrate to TDT |
+| 0.6 | ~~Hide Unified/Nemotron~~ REVERSED 2026-09-27: on real speech (jfk.wav + LibriSpeech + MLS de/es) Unified and Nemotron are good and stream clean live text from ~1 s; the "broken" verdict came from the synthetic TTS corpus. Make them the recommended live-preview engines; retire `perf-corpus/synthetic` for engine decisions | Real-speech suite green (see below) |
 | 0.7 | Soniox: realtime WebSocket as the default transport for every dictation, REST upload only as fallback | Stop → text p50/p95 before/after on real clips |
 | 0.8 | Quick wins: pre-roll audio buffer (first words not clipped), import vocabulary from Wispr Flow / Handy | Verified on Mac + Windows |
 | 0.9 | Windows signing for website downloads (Store MSIX is already Microsoft-signed): apply to SignPath Foundation; fallback Azure Artifact Signing ($9.99/mo, US/CA/EU/UK only) or route Windows downloads to the Store | No SmartScreen warning on the direct installer |
@@ -133,6 +133,40 @@ Goal: VoiceTypr gets the user's words right, local or cloud.
 3. **New cloud engines:** test Muse Voice Transcribe (cheapest, push-to-talk
    mode) and Gemini 3.5 Transcribe (smart cleanup + vocabulary, 85+ languages)
    on the recording set; winners become BYOK options and Plus managed engines.
+
+4. **Back-to-back (pipelined) dictation** (founder idea, 2026-09-27): start the
+   next recording while earlier dictations are still transcribing/polishing.
+   Today `recording/hotkeys.rs` only starts from Idle/Error, so the hotkey is
+   dead during Transcribing/Polish. Design: split capture state (idle/recording)
+   from a processing-job queue; one ordered delivery worker (no clipboard/paste
+   collisions); queue cap; pill shows "Recording · N processing"; Escape cancels
+   only the current capture; text goes where the cursor is when each result is
+   ready. The 0.4a clean-core design must model this from the start.
+
+## Live preview for every engine (researched 2026-09-27)
+
+Default ON for free/local engines and engines whose streaming costs about the
+same; opt-in for metered engines where streaming costs more.
+
+| Engine | Preview | How | Effort | Default |
+|---|---|---|---|---|
+| Parakeet Unified (EN) / Nemotron (multi) | Native streaming, clean on real speech | Built | Done | On |
+| Parakeet TDT | After plan 070 | Full-context re-decode | M | On after 070 |
+| Whisper local | Decode-ahead | Built, GPU-gated | Done | On with GPU |
+| Soniox | Realtime WS (also faster final) | Default-transport switch | M | On |
+| Deepgram | Realtime WS | Built | Done | On |
+| Remote LAN | WS route on host (`/api/v1/transcribe/stream`), relay `TranscriptionStreamEvent`, reuse keychain-backed `X-Voicetypr-Key`, `supports_streaming` in `/api/v1/status` for old-host fallback | New | M | On |
+| Muse (Meta) | `wss://api.meta.ai/v1/asr/realtime`, cumulative partials + final, PTT mode, auth in handshake frame | New engine | S | On |
+| Gemini 3.5 Transcribe Live | Live API interim/final; 10-min session cap → reconnect; no guaranteed message ordering → client sequencing | New engine | M | Opt-in (~1.8x batch) |
+| OpenAI | Realtime transcription sessions (24 kHz PCM, client commits turns) | New path | M | Opt-in (~3–4x batch, unverified) |
+| Apple SpeechTranscriber (macOS 26) | Volatile/final results; Swift bridge; per-locale OS-managed assets | New engine | M | On where available |
+| Groq, Cohere | No streaming API exists | Hybrid local draft preview later | — | Off |
+| R2T2 | Stock llama.cpp doesn't stream it | Watch list | L | — |
+
+Rules: identical normalization for preview and final; preview styled as a
+draft (mismatch complaints: EnviousWispr #2575, Google live-caption stability
+research). Order: Parakeet + Soniox (2.1 beta.2) → Remote LAN + Muse → Apple
+on-device, Gemini Live, OpenAI.
 
 ## Phase 4 — Plus launch
 
@@ -202,6 +236,20 @@ Needed later:
 6. Plus: 3 devices or unlimited?
 7. Opt-in recording sharing as described in Phase 1.4?
 8. API keys to test Muse, Gemini 3.5 Transcribe and JEV; R2T2 license when we test it.
+
+## Validation pass (2026-09-27)
+
+Real speech, streamed in real time through the sidecar (FluidAudio 0.15.5), word error rate batch / live-stream final:
+
+| Engine | English (5 clips: JFK + 4 LibriSpeech) | German (2 MLS) | Spanish (2 MLS) | First live text |
+|---|---|---|---|---|
+| TDT batch + decode-ahead preview | 0–8.8% / 0–6.7% | 7.4–18.8% / **28–59%** | 0–2.4% / 4.9–6.5% | 0.8–2.9 s |
+| Unified English (native streaming) | 0–2.9% / 0–2.9% | — | — | 1.0–1.8 s |
+| Nemotron multilingual (native streaming) | 0–6.7% / 0–6.7% | 11–28% / 15–34% | 0–4.9% / 0–4.9% | 1.0–2.1 s |
+
+Reads: the synthetic corpus was misleading (Unified/Nemotron are fine); TDT decode-ahead still degrades non-English live text badly → plan 070 stays; MLS references are normalized book text, so German numbers are partly normalization.
+
+Re-verified facts: post-roll 250 ms is defensible (Handy uses 450 ms offline hangover + 450 ms pre-roll; tune from the new post-roll metric); FluidAudio latest is 0.17.4, Parakeet Ultra beats v3 everywhere (int8 ~595 MB, same 25 languages); S1-mini naming clause confirmed; llama.cpp supports Qwen3-ASR (PR #19441) but R2T2's streaming mode may need its own runtime — test before planning on it; ggml duplicate-symbol issue unresolved → sidecar; Soniox realtime $0.12/h vs async $0.10/h, same context/vocabulary support, 5 h sessions; Gemini 3.5 Transcribe GA 2026-09-25; Muse zero-data-retention; Apple SpeechAnalyzer language list and vocabulary support must be verified on a macOS 26 build. Distribution: Store installs are Microsoft-signed (link the site's Windows button to the Store); Azure signing is US/Canada-only for individuals and no signing clears SmartScreen instantly; SignPath for a paid AGPL binary is untested — apply and ask; the EULA's anti-redistribution clauses likely conflict with AGPL (legal review).
 
 ## Evidence index (this session)
 

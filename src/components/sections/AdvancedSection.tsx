@@ -1,5 +1,5 @@
 import { PermissionErrorBoundary } from "@/components/PermissionErrorBoundary";
-import { TelemetrySection } from "./TelemetrySection";
+import { ResetSection } from "@/components/sections/ResetSection";
 import {
   SettingsCard,
   SettingsHeader,
@@ -15,40 +15,79 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useReadiness } from "@/contexts/ReadinessContext";
-import { useSettings } from "@/contexts/SettingsContext";
 import { isMacOS } from "@/lib/platform";
-import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
-import { relaunch } from "@tauri-apps/plugin-process";
 import {
   CheckCircle,
+  ChevronDown,
+  Download,
   Keyboard,
   HelpCircle,
   Loader2,
   Mic,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
-  Trash2
+  Type,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
-import { createLogger } from "@/lib/logger";
+import { useState } from "react";
 
-const log = createLogger("advanced");
+interface QuickFix {
+  id: string;
+  title: string;
+  icon: LucideIcon;
+  issue: string;
+  solution: () => string;
+}
+
+const QUICK_FIXES: QuickFix[] = [
+  {
+    id: "recording",
+    title: "Recording not working",
+    icon: Mic,
+    issue: "Voice recording does not start from the shortcut.",
+    solution: () =>
+      isMacOS
+        ? "Check microphone permission in Quick help. Also confirm a recording device is selected in Recording."
+        : "In Windows Settings, allow desktop apps to use the microphone. Also confirm a recording device is selected in Recording.",
+  },
+  {
+    id: "hotkey",
+    title: "Shortcut not responding",
+    icon: Keyboard,
+    issue: "The global shortcut does not trigger recording.",
+    solution: () =>
+      isMacOS
+        ? "Open Quick help and grant Accessibility permission so the global shortcut can work."
+        : "Open Shortcuts, and choose another shortcut if the current one is reserved by another app.",
+  },
+  {
+    id: "insertion",
+    title: "Text not inserting",
+    icon: Type,
+    issue: "The transcript does not appear at the cursor.",
+    solution: () =>
+      isMacOS
+        ? "Place the cursor in an editable text field. Check Accessibility permission under Quick help."
+        : "Place the cursor in an editable text field, then confirm Auto-paste after transcription is enabled in Settings.",
+  },
+  {
+    id: "download",
+    title: "Model download stuck",
+    icon: Download,
+    issue: "A local model download is not progressing.",
+    solution: () =>
+      "Open Models, cancel the current download, and try again. Check your internet connection before retrying.",
+  },
+];
 
 export function AdvancedSection() {
-  const { updateSettings } = useSettings();
-  const [isResetting, setIsResetting] = useState(false);
   const [isRequestingPermission, setIsRequestingPermission] = useState<string | null>(null);
-  const [showAccessibility, setShowAccessibility] = useState(true);
+  const showAccessibility = isMacOS;
+  const [openQuickFixes, setOpenQuickFixes] = useState<string[]>([]);
   const {
     hasAccessibilityPermission,
     hasMicrophonePermission,
@@ -56,12 +95,8 @@ export function AdvancedSection() {
     requestAccessibilityPermission,
     requestMicrophonePermission,
     checkAccessibilityPermission,
-    checkMicrophonePermission
+    checkMicrophonePermission,
   } = useReadiness();
-
-  useEffect(() => {
-    setShowAccessibility(isMacOS);
-  }, []);
 
   const handleRequestPermission = async (type: "microphone" | "accessibility") => {
     setIsRequestingPermission(type);
@@ -77,10 +112,7 @@ export function AdvancedSection() {
   };
 
   const refresh = async () => {
-    await Promise.all([
-      checkAccessibilityPermission(),
-      checkMicrophonePermission()
-    ]);
+    await Promise.all([checkAccessibilityPermission(), checkMicrophonePermission()]);
   };
 
   const permissionData = [
@@ -89,15 +121,19 @@ export function AdvancedSection() {
       icon: Mic,
       title: "Microphone",
       description: "To record your voice for transcription",
-      status: hasMicrophonePermission ? "granted" : isLoading ? "checking" : "denied"
+      status: hasMicrophonePermission ? "granted" : isLoading ? "checking" : "denied",
     },
-    ...(showAccessibility ? [{
-      type: "accessibility" as const,
-      icon: Keyboard,
-      title: "Accessibility",
-      description: "For global hotkeys to trigger recording",
-      status: hasAccessibilityPermission ? "granted" : isLoading ? "checking" : "denied"
-    }] : [])
+    ...(showAccessibility
+      ? [
+          {
+            type: "accessibility" as const,
+            icon: Keyboard,
+            title: "Accessibility",
+            description: "For global hotkeys to trigger recording",
+            status: hasAccessibilityPermission ? "granted" : isLoading ? "checking" : "denied",
+          },
+        ]
+      : []),
     // Automation permission removed for now
     // Can be re-enabled later if needed:
     // {
@@ -109,50 +145,49 @@ export function AdvancedSection() {
     // }
   ];
 
-
-  const handleResetOnboarding = async () => {
-    try {
-      await updateSettings({
-        onboarding_completed: false,
-      });
-      toast.success("Onboarding reset!");
-      // No need to reload - the settings update will trigger the UI change
-    } catch (error) {
-      log.error('Failed to reset onboarding:', error);
-      toast.error("Failed to reset onboarding");
-    }
-  };
-
   return (
     <PermissionErrorBoundary>
       <SettingsPage>
         <SettingsHeader
           title={
             <span className="flex items-center gap-2">
-              Advanced
+              Quick help
               <Dialog>
-                <DialogTrigger asChild>
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label="Advanced guide" className="size-7 rounded-full text-muted-foreground">
-                    <HelpCircle className="h-4 w-4" />
-                  </Button>
+                <DialogTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Quick help guide"
+                      className="size-7 rounded-full text-muted-foreground"
+                    />
+                  }
+                >
+                  <HelpCircle className="h-4 w-4" />
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-lg">
                   <DialogHeader>
-                    <DialogTitle>Advanced guide</DialogTitle>
+                    <DialogTitle>Quick help guide</DialogTitle>
                     <DialogDescription>
-                      Advanced settings are for permissions, onboarding recovery, and clearing app state.
+                      Quick help covers permissions, troubleshooting, and reset tools.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-3 text-sm leading-6 text-muted-foreground">
-                    <p><strong className="text-foreground">Permissions</strong> refreshes microphone and accessibility access after macOS changes.</p>
-                    <p><strong className="text-foreground">Onboarding reset</strong> reruns setup without deleting your transcript history.</p>
-                    <p><strong className="text-foreground">Factory reset</strong> is destructive and should only be used when you want to clear local app data.</p>
+                    <p>
+                      <strong className="text-foreground">Permissions</strong> refreshes microphone
+                      and accessibility access after macOS changes.
+                    </p>
+                    <p>
+                      <strong className="text-foreground">Reset</strong> lets you repeat onboarding
+                      or erase app data.
+                    </p>
                   </div>
                 </DialogContent>
               </Dialog>
             </span>
           }
-          description="Permissions, diagnostics, and resetting the app."
+          description="Permissions, troubleshooting, and reset tools."
         />
 
         {/* Permissions Section - Only show on macOS */}
@@ -164,20 +199,22 @@ export function AdvancedSection() {
             action={
               <TooltipProvider>
                 <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => refresh()}
-                      disabled={isLoading}
-                      className="h-8 px-2"
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                    </Button>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => refresh()}
+                        disabled={isLoading}
+                        className="h-8 px-2"
+                      />
+                    }
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>Refresh permission status</p>
@@ -221,97 +258,75 @@ export function AdvancedSection() {
               </SettingRow>
             ))}
 
-            {(hasMicrophonePermission === false || (showAccessibility && hasAccessibilityPermission === false)) && (
+            {(hasMicrophonePermission === false ||
+              (showAccessibility && hasAccessibilityPermission === false)) && (
               <div className="mt-4 border-t border-border pt-4 text-xs text-muted-foreground space-y-1">
                 <p className="font-medium">Missing permissions:</p>
                 <ul className="list-disc list-inside space-y-0.5 ml-2">
-                  {hasMicrophonePermission === false && <li>Microphone: Required for voice recording</li>}
-                  {showAccessibility && hasAccessibilityPermission === false && <li>Accessibility: Required for global hotkeys</li>}
+                  {hasMicrophonePermission === false && (
+                    <li>Microphone: Required for voice recording</li>
+                  )}
+                  {showAccessibility && hasAccessibilityPermission === false && (
+                    <li>Accessibility: Required for global hotkeys</li>
+                  )}
                 </ul>
               </div>
             )}
           </SettingsCard>
         )}
 
-        <TelemetrySection />
-
-        {/* Reset Options Section */}
         <SettingsCard
-          icon={RotateCcw}
-          title="Reset options"
-          description="Re-run setup or wipe Voicetypr back to a clean state."
+          icon={Wrench}
+          title="Quick fixes"
+          description="Common issues you can check yourself before reporting."
         >
-          <SettingRow
-            title="Reset Onboarding"
-            description="Re-run the initial setup wizard"
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleResetOnboarding}
-            >
-              <RefreshCw className="h-3 w-3" />
-              Reset
-            </Button>
-          </SettingRow>
+          <div className="mt-4 space-y-2">
+            {QUICK_FIXES.map((fix) => {
+              const Icon = fix.icon;
+              const isOpen = openQuickFixes.includes(fix.id);
 
-          <div className="mt-4 border-t border-border pt-4">
-            <p className="text-[13.5px] font-semibold text-foreground mb-1">Reset App Data</p>
-            <p className="text-[12.5px] text-muted-foreground mb-2">
-              Completely reset Voicetypr to its initial state
-            </p>
-            <ul className="text-xs text-muted-foreground list-disc list-inside mb-3 space-y-0.5">
-              <li>Delete all transcription history</li>
-              <li>Remove all downloaded models</li>
-              <li>Clear all settings and preferences</li>
-              <li>Reset system permissions</li>
-            </ul>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={isResetting}
-              onClick={async () => {
-                const confirmed = await ask(
-                  "This action cannot be undone. This will permanently delete all your Voicetypr data.\n\nThe app will restart after reset.\n\nAre you absolutely sure?",
-                  {
-                    title: "Reset App Data",
-                    okLabel: "Reset Everything",
-                    cancelLabel: "Cancel",
-                    kind: "warning"
+              return (
+                <Collapsible
+                  key={fix.id}
+                  open={isOpen}
+                  onOpenChange={() =>
+                    setOpenQuickFixes((current) =>
+                      current.includes(fix.id)
+                        ? current.filter((id) => id !== fix.id)
+                        : [...current, fix.id],
+                    )
                   }
-                );
-
-                if (confirmed) {
-                  setIsResetting(true);
-                  try {
-                    await invoke("reset_app_data");
-                    toast.success("App data reset successfully. Restarting...");
-                    setTimeout(() => {
-                      relaunch();
-                    }, 1000);
-                  } catch (error) {
-                    log.error("Failed to reset app data:", error);
-                    toast.error("Failed to reset app data");
-                    setIsResetting(false);
-                  }
-                }
-              }}
-              className="w-full"
-            >
-              {isResetting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Resetting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Reset App Data
-                </>
-              )}
-            </Button>
+                >
+                  <div className="overflow-hidden rounded-lg border border-border/50 bg-card">
+                    <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-accent/50">
+                      <span className="flex items-center gap-3">
+                        <Icon className="size-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">{fix.title}</span>
+                      </span>
+                      <ChevronDown
+                        className={`size-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+                      />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-3 border-t border-border/50 px-4 pb-4 pt-3">
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">Issue</p>
+                          <p className="mt-1 text-sm">{fix.issue}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">Solution</p>
+                          <p className="mt-1 text-sm">{fix.solution()}</p>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
+              );
+            })}
           </div>
         </SettingsCard>
+
+        <ResetSection />
       </SettingsPage>
     </PermissionErrorBoundary>
   );

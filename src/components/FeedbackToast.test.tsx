@@ -145,7 +145,9 @@ describe("FeedbackToast", () => {
 
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent("Microphone access denied");
-    expect(status).toHaveTextContent("Open System Settings > Privacy & Security > Microphone to grant access.");
+    expect(status).toHaveTextContent(
+      "Open System Settings > Privacy & Security > Microphone to grant access.",
+    );
   });
 
   it("renders only the message when suggestion is absent", () => {

@@ -12,10 +12,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <AppErrorBoundary
       onError={(error, errorInfo) => {
-        log.error('Root error boundary caught:', error, errorInfo);
+        log.error("Root error boundary caught:", error, errorInfo);
         // Forward to opt-in diagnostics; the backend scrubs + gates (no-op when off).
         const err = error as Error;
-        void invoke('report_frontend_error', {
+        void invoke("report_frontend_error", {
           name: err?.name,
           message: err?.message ?? String(error),
         }).catch(() => {});

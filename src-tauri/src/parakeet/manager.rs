@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::error::ParakeetError;
 use super::messages::{
     ParakeetCommand, ParakeetResponse, ParakeetStreamConfig, ParakeetStreamEngine,
+    ParakeetVocabularyTerm,
 };
 #[cfg(target_os = "macos")]
 use super::models::get_available_models;
@@ -43,6 +44,35 @@ pub struct ParakeetEouModelStatus {
 }
 
 const EOU_MODEL_SIZE_BYTES: u64 = 250 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+pub struct ParakeetTranscriptionOptions {
+    pub language: Option<String>,
+    pub translate: bool,
+    pub custom_vocabulary: Vec<ParakeetVocabularyTerm>,
+    pub cancel_flag: Option<Arc<AtomicBool>>,
+}
+
+impl ParakeetTranscriptionOptions {
+    pub fn new(
+        language: Option<String>,
+        translate: bool,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    ) -> Self {
+        Self {
+            language,
+            translate,
+            custom_vocabulary: Vec::new(),
+            cancel_flag,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ParakeetVocabularyStatus {
+    pub supported: bool,
+    pub ready: bool,
+}
 
 pub struct ParakeetManager {
     client: ParakeetClient,
@@ -612,6 +642,34 @@ impl ParakeetManager {
         }
     }
 
+    pub fn vocabulary_status_from_response(
+        response: &ParakeetResponse,
+    ) -> Option<ParakeetVocabularyStatus> {
+        match response {
+            ParakeetResponse::Status {
+                custom_vocabulary_supported,
+                custom_vocabulary_ready,
+                ..
+            } => Some(ParakeetVocabularyStatus {
+                supported: *custom_vocabulary_supported,
+                ready: *custom_vocabulary_ready,
+            }),
+            _ => None,
+        }
+    }
+
+    pub async fn status(&self, app: &AppHandle) -> Result<ParakeetResponse, ParakeetError> {
+        self.send_command(app, &ParakeetCommand::Status {}).await
+    }
+
+    pub async fn download_ctc_models(
+        &self,
+        app: &AppHandle,
+    ) -> Result<ParakeetResponse, ParakeetError> {
+        self.send_command(app, &ParakeetCommand::DownloadCtcModels {})
+            .await
+    }
+
     pub async fn transcribe(
         &self,
         app: &AppHandle,
@@ -621,22 +679,40 @@ impl ParakeetManager {
         translate: bool,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<ParakeetResponse, ParakeetError> {
+        self.transcribe_with_custom_vocabulary(
+            app,
+            model_name,
+            audio_path,
+            ParakeetTranscriptionOptions::new(language, translate, cancel_flag),
+        )
+        .await
+    }
+
+    pub async fn transcribe_with_custom_vocabulary(
+        &self,
+        app: &AppHandle,
+        model_name: &str,
+        audio_path: PathBuf,
+        options: ParakeetTranscriptionOptions,
+    ) -> Result<ParakeetResponse, ParakeetError> {
         let _active_guard = self.mark_real_transcription_active();
         let inference_start = Instant::now();
         let command = ParakeetCommand::Transcribe {
             audio_path: audio_path.to_string_lossy().to_string(),
-            language,
-            translate_to_english: translate,
+            language: options.language,
+            translate_to_english: options.translate,
             prompt: None,
             use_word_timestamps: Some(true),
             chunk_duration: None,
             overlap_duration: None,
             attention: None,
             local_attention_context: None,
+            custom_vocabulary: (!options.custom_vocabulary.is_empty())
+                .then_some(options.custom_vocabulary),
         };
 
         let result = self
-            .send_command_with_progress_and_cancel(app, &command, cancel_flag, |_, _| {})
+            .send_command_with_progress_and_cancel(app, &command, options.cancel_flag, |_, _| {})
             .await;
         if matches!(result, Ok(ParakeetResponse::Transcription { .. })) {
             let elapsed_ms = inference_start.elapsed().as_millis() as u64;

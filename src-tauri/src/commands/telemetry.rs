@@ -1,17 +1,16 @@
-//! Tauri commands backing the Diagnostics (opt-out error reporting) consent
-//! toggle and the frontend error-capture bridge.
-//!
-//! Consent is stored as dedicated keys in the `settings` store (read at startup
-//! by a raw, opt-out-default reader in `crate::telemetry`) and is owned exclusively
-//! by these commands — never by the generic `save_settings` flow.
+//! Tauri commands for independent GlitchTip diagnostics and PostHog product
+//! analytics consent. Each category owns dedicated store keys; generic settings
+//! saves never mutate consent.
 
-use crate::telemetry;
+use crate::{product_analytics, telemetry};
 use serde::Serialize;
 use serde_json::json;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 const SETTINGS_STORE_FILE: &str = "settings";
+
+static CONSENT_MUTATION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[derive(Serialize)]
 pub struct TelemetryStatus {
@@ -27,6 +26,19 @@ pub struct TelemetryConsentResult {
     /// Enabling mid-session needs a restart to actually wire the Sentry client
     /// (it is only initialized at startup). Disabling takes effect immediately.
     pub restart_required: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProductAnalyticsStatus {
+    /// The stored preference. Egress remains blocked while consent is required.
+    pub enabled: bool,
+    pub available: bool,
+    pub consent_required: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProductAnalyticsConsentResult {
+    pub enabled: bool,
 }
 
 /// Returns the current consent + whether reporting is possible in this build.
@@ -50,10 +62,11 @@ pub async fn set_telemetry_consent(
     app: AppHandle,
     enabled: bool,
 ) -> Result<TelemetryConsentResult, String> {
-    // On opt-out, stop egress IMMEDIATELY — before any (possibly failing) store
-    // write — so no in-flight error can slip through after the user said no.
+    let _guard = CONSENT_MUTATION_LOCK.lock();
+    // Close the gate and discard queued envelopes before touching persistence.
+    // A request already handed to the HTTP stack may still complete.
     if !enabled {
-        telemetry::set_enabled(false);
+        telemetry::disable_and_drop_queued();
     }
 
     let store = app.store(SETTINGS_STORE_FILE).map_err(|e| e.to_string())?;
@@ -66,7 +79,11 @@ pub async fn set_telemetry_consent(
     if enabled {
         let has_id = store
             .get(telemetry::KEY_TELEMETRY_INSTALL_ID)
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            })
             .is_some();
         if !has_id {
             store.set(
@@ -90,6 +107,87 @@ pub async fn set_telemetry_consent(
         enabled,
         restart_required,
     })
+}
+
+#[tauri::command]
+pub async fn get_product_analytics_status(
+    app: AppHandle,
+) -> Result<ProductAnalyticsStatus, String> {
+    let store = app.store(SETTINGS_STORE_FILE).map_err(|e| e.to_string())?;
+    let enabled = store
+        .get(product_analytics::KEY_ANALYTICS_ENABLED)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(product_analytics::ANALYTICS_DEFAULT_ENABLED);
+    let consent_version = store
+        .get(product_analytics::KEY_PRIVACY_CONSENT_VERSION)
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    Ok(ProductAnalyticsStatus {
+        enabled,
+        available: product_analytics::is_available(),
+        consent_required: consent_version < product_analytics::PRIVACY_CONSENT_VERSION,
+    })
+}
+
+#[tauri::command]
+pub async fn set_product_analytics_consent(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<ProductAnalyticsConsentResult, String> {
+    let _guard = CONSENT_MUTATION_LOCK.lock();
+    if !enabled {
+        product_analytics::disable();
+    }
+
+    let store = app.store(SETTINGS_STORE_FILE).map_err(|e| e.to_string())?;
+    store.set(
+        product_analytics::KEY_PRIVACY_CONSENT_VERSION,
+        json!(product_analytics::PRIVACY_CONSENT_VERSION),
+    );
+    store.set(product_analytics::KEY_ANALYTICS_ENABLED, json!(enabled));
+
+    let install_id = if enabled {
+        let existing = store
+            .get(product_analytics::KEY_ANALYTICS_INSTALL_ID)
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            })
+            .map(|value| value.to_string());
+        let install_id = existing.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        store.set(
+            product_analytics::KEY_ANALYTICS_INSTALL_ID,
+            json!(install_id),
+        );
+        Some(install_id)
+    } else {
+        store.delete(product_analytics::KEY_ANALYTICS_INSTALL_ID);
+        None
+    };
+    store.save().map_err(|e| e.to_string())?;
+
+    if let Some(install_id) = install_id {
+        product_analytics::enable(install_id);
+    }
+
+    Ok(ProductAnalyticsConsentResult { enabled })
+}
+
+/// Keeps unacknowledged product analytics paused for this process. Existing
+/// diagnostics retain their independently persisted behavior.
+#[tauri::command]
+pub async fn defer_privacy_consent_for_session() -> Result<(), String> {
+    let _guard = CONSENT_MUTATION_LOCK.lock();
+    product_analytics::disable();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn record_onboarding_completed() -> Result<(), String> {
+    product_analytics::capture(product_analytics::ProductEvent::OnboardingCompleted);
+    Ok(())
 }
 
 /// Bridges a frontend-reported error (e.g. from the React error boundary) into

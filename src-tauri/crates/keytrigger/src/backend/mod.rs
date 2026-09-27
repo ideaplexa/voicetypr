@@ -7,8 +7,6 @@
 
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "windows")]
-mod windows;
 /// Pure, platform-neutral Windows virtual-key + consume-decision helpers.
 /// Compiled on Windows (the `cfg(windows)` hook, its sole non-test caller) and
 /// under `cfg(test)` on every target, so the consume logic unit-tests on macOS
@@ -16,6 +14,8 @@ mod windows;
 /// modifier VK is never consumed.
 #[cfg(any(target_os = "windows", test))]
 mod vk;
+#[cfg(target_os = "windows")]
+mod windows;
 
 use crate::engine::KeyEventSource;
 

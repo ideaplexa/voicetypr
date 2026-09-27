@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("permissions");
@@ -18,11 +18,11 @@ export function useAccessibilityPermission(options?: AccessibilityPermissionOpti
   const checkPermission = useCallback(async () => {
     setIsChecking(true);
     try {
-      const result = await invoke<boolean>('check_accessibility_permission');
+      const result = await invoke<boolean>("check_accessibility_permission");
       setHasPermission(result);
       return result;
     } catch (error) {
-      log.error('Failed to check accessibility permission:', error);
+      log.error("Failed to check accessibility permission:", error);
       setHasPermission(false);
       return false;
     } finally {
@@ -32,19 +32,18 @@ export function useAccessibilityPermission(options?: AccessibilityPermissionOpti
 
   const requestPermission = useCallback(async () => {
     try {
-      const result = await invoke<boolean>('request_accessibility_permission');
+      const result = await invoke<boolean>("request_accessibility_permission");
       setHasPermission(result);
       return result;
     } catch (error) {
-      log.error('Failed to request accessibility permission:', error);
+      log.error("Failed to request accessibility permission:", error);
       return false;
     }
   }, []);
 
-
   const checkPermissionSilently = useCallback(async () => {
     try {
-      const result = await invoke<boolean>('check_accessibility_permission');
+      const result = await invoke<boolean>("check_accessibility_permission");
       setHasPermission(result);
     } catch {
       // Silently ignore errors during background polling
@@ -53,7 +52,10 @@ export function useAccessibilityPermission(options?: AccessibilityPermissionOpti
   // Optionally check permission on mount
   useEffect(() => {
     if (!checkOnMount) return;
-    checkPermission();
+    void (async () => {
+      await Promise.resolve();
+      await checkPermission();
+    })();
   }, [checkPermission, checkOnMount]);
 
   // Poll for permission changes when permission is not granted
@@ -71,19 +73,19 @@ export function useAccessibilityPermission(options?: AccessibilityPermissionOpti
 
   // Listen for permission changes
   useEffect(() => {
-    const unlistenGranted = listen('accessibility-granted', () => {
-      log.info('[useAccessibilityPermission] Permission granted event received');
+    const unlistenGranted = listen("accessibility-granted", () => {
+      log.info("[useAccessibilityPermission] Permission granted event received");
       setHasPermission(true);
     });
 
-    const unlistenDenied = listen('accessibility-denied', () => {
-      log.info('[useAccessibilityPermission] Permission denied event received');
+    const unlistenDenied = listen("accessibility-denied", () => {
+      log.info("[useAccessibilityPermission] Permission denied event received");
       setHasPermission(false);
     });
 
     return () => {
-      Promise.all([unlistenGranted, unlistenDenied]).then(unsubs => {
-        unsubs.forEach(unsub => unsub());
+      Promise.all([unlistenGranted, unlistenDenied]).then((unsubs) => {
+        unsubs.forEach((unsub) => unsub());
       });
     };
   }, []);
@@ -92,6 +94,6 @@ export function useAccessibilityPermission(options?: AccessibilityPermissionOpti
     hasPermission,
     isChecking,
     checkPermission,
-    requestPermission
+    requestPermission,
   };
 }

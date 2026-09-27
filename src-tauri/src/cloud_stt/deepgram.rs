@@ -8,8 +8,6 @@ use super::common::{self, AuthScheme};
 use std::path::Path;
 use tauri::AppHandle;
 
-pub(super) const MODEL: &str = "nova-3";
-
 // /v1/auth/token validates any key; /v1/projects needs `project:read`, absent on default tokens.
 pub(super) async fn validate_key(key: &str) -> Result<(), String> {
     common::get_validate(
@@ -74,6 +72,7 @@ fn compile_keyterms(app: &AppHandle, language: Option<&str>) -> Vec<String> {
 pub(super) async fn transcribe_typed(
     app: &AppHandle,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
 ) -> Result<String, common::SttError> {
@@ -81,9 +80,9 @@ pub(super) async fn transcribe_typed(
     transcribe_at(
         "https://api.deepgram.com",
         key,
+        model,
         audio_path,
         language,
-        MODEL,
         &keyterms,
     )
     .await
@@ -92,9 +91,9 @@ pub(super) async fn transcribe_typed(
 pub(super) async fn transcribe_at(
     base_url: &str,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
-    model: &str,
     keyterms: &[String],
 ) -> Result<String, common::SttError> {
     use tokio::fs;
@@ -143,6 +142,7 @@ pub(super) async fn transcribe_at(
 pub(super) async fn transcribe_typed_diarized(
     app: &AppHandle,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
 ) -> Result<super::CloudTranscript, common::SttError> {
@@ -150,9 +150,9 @@ pub(super) async fn transcribe_typed_diarized(
     transcribe_at_diarized(
         "https://api.deepgram.com",
         key,
+        model,
         audio_path,
         language,
-        MODEL,
         &keyterms,
     )
     .await
@@ -161,9 +161,9 @@ pub(super) async fn transcribe_typed_diarized(
 pub(super) async fn transcribe_at_diarized(
     base_url: &str,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
-    model: &str,
     keyterms: &[String],
 ) -> Result<super::CloudTranscript, common::SttError> {
     use tokio::fs;
@@ -285,16 +285,9 @@ mod tests {
             .await;
         let audio = audio_file();
 
-        let text = transcribe_at(
-            &server.uri(),
-            "k",
-            audio.path(),
-            Some("en"),
-            super::MODEL,
-            &[],
-        )
-        .await
-        .unwrap();
+        let text = transcribe_at(&server.uri(), "k", "nova-3", audio.path(), Some("en"), &[])
+            .await
+            .unwrap();
 
         assert_eq!(text, "hi");
         let requests = server.received_requests().await.unwrap();
@@ -317,7 +310,7 @@ mod tests {
             .await;
         let audio = audio_file();
 
-        let error = transcribe_at(&server.uri(), "k", audio.path(), None, super::MODEL, &[])
+        let error = transcribe_at(&server.uri(), "k", "nova-3", audio.path(), None, &[])
             .await
             .unwrap_err();
 
@@ -343,9 +336,9 @@ mod tests {
         transcribe_at(
             &server.uri(),
             "k",
+            "nova-3",
             audio.path(),
             Some("en"),
-            super::MODEL,
             &keyterms,
         )
         .await
@@ -389,9 +382,9 @@ mod tests {
         transcribe_at(
             &server.uri(),
             "k",
+            "nova-2",
             audio.path(),
             Some("en"),
-            "nova-2",
             &keyterms,
         )
         .await
@@ -432,9 +425,9 @@ mod tests {
         transcribe_at_diarized(
             &server.uri(),
             "k",
+            "nova-3",
             audio.path(),
             Some("en"),
-            super::MODEL,
             &keyterms,
         )
         .await

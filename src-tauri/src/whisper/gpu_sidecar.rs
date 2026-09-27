@@ -316,6 +316,11 @@ impl GpuSidecarClient {
             }
             guard.take();
             self.abort_requested.store(false, Ordering::SeqCst);
+        } else {
+            log::warn!(
+                "abort_active_process: timed out acquiring process lock after 250ms; \
+                 GPU sidecar may remain resident (CPU fallback could double-load the model)"
+            );
         }
     }
 
@@ -358,8 +363,9 @@ impl GpuSidecarClient {
             }
             Err(error) => {
                 log::warn!(
-                    "Whisper Vulkan sidecar warm on preload failed; CPU fallback remains available: {error}"
+                    "Whisper Vulkan sidecar warm on preload failed; unloading sidecar before CPU preload: {error}"
                 );
+                self.abort_active_process().await;
                 false
             }
         }

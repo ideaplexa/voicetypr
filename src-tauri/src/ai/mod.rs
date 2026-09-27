@@ -1,3 +1,4 @@
+pub mod agent_cli;
 pub mod catalog;
 pub mod contract;
 pub mod error;

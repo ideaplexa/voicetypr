@@ -14,9 +14,19 @@ type BackendRecordingState =
 type PillState = "idle" | "listening" | "transcribing" | "formatting";
 type VisibleState = PillState | "error";
 type PillIndicatorMode = "never" | "always" | "when_recording";
+type PillIndicatorStyle = "compact" | "full";
+type PillIndicatorPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
 
 interface SettingsPayload {
   pill_indicator_mode?: PillIndicatorMode;
+  pill_indicator_style?: PillIndicatorStyle;
+  pill_indicator_position?: PillIndicatorPosition;
   transcription_mode?: "regular" | "live_preview";
   streaming_preview_enabled?: boolean;
   streaming_preview_demo?: boolean;
@@ -57,6 +67,7 @@ interface PillDom {
   barSpans: HTMLSpanElement[];
   listening: HTMLDivElement;
   listeningControls: HTMLDivElement;
+  listeningLabel: HTMLSpanElement;
   preview: HTMLDivElement;
   committed: HTMLSpanElement;
   tentative: HTMLSpanElement;
@@ -119,10 +130,27 @@ function createTextPair(primaryText: string) {
   return { wrapper, primary, secondary };
 }
 
-function createSpinner() {
-  const spinner = createEl("span", "pill-spinner");
-  spinner.setAttribute("aria-hidden", "true");
-  return spinner;
+function createProcessingActivity(state: "transcribing" | "formatting") {
+  const activity = createEl("div", "pill-activity");
+  activity.dataset.testid = "pill-activity";
+  activity.dataset.state = state;
+  activity.setAttribute("aria-hidden", "true");
+
+  if (state === "transcribing") {
+    const scan = createEl("div", "pill-scan");
+    scan.dataset.visual = "transcribing";
+    scan.append(createEl("span", "pill-scan-track"), createEl("span", "pill-scan-dot"));
+    activity.append(scan);
+  } else {
+    const sparkles = createEl("div", "pill-sparkles");
+    sparkles.dataset.visual = "formatting";
+    for (let index = 0; index < 3; index += 1) {
+      sparkles.append(createEl("span", `pill-spark pill-spark-${index + 1}`));
+    }
+    activity.append(sparkles);
+  }
+
+  return activity;
 }
 
 function createPillDom(rootElement: HTMLElement): PillDom {
@@ -151,24 +179,26 @@ function createPillDom(rootElement: HTMLElement): PillDom {
   tentative.dataset.testid = "pill-tentative";
   preview.append(committed, tentative);
   const listeningControls = createEl("div", "pill-listening-controls");
+  const listeningLabel = createEl("span", "pill-text-primary");
+  listeningLabel.textContent = "Listening";
   const timer = createEl("span", "pill-timer");
   timer.setAttribute("aria-label", "Recording elapsed time");
   const cancel = createEl("button", "pill-cancel");
   cancel.type = "button";
   cancel.setAttribute("aria-label", "Cancel recording");
   cancel.textContent = "×";
-  listeningControls.append(bars, timer, cancel);
+  listeningControls.append(bars, listeningLabel, timer, cancel);
   listening.append(preview, listeningControls);
 
   const transcribing = createEl("div", "pill-status pill-status-label");
   transcribing.setAttribute("role", "status");
   const transcribingText = createTextPair("Transcribing…");
-  transcribing.append(createSpinner(), transcribingText.wrapper);
+  transcribing.append(createProcessingActivity("transcribing"), transcribingText.wrapper);
 
   const formatting = createEl("div", "pill-status pill-status-label");
   formatting.setAttribute("role", "status");
   const formattingText = createTextPair("Polishing…");
-  formatting.append(createSpinner(), formattingText.wrapper);
+  formatting.append(createProcessingActivity("formatting"), formattingText.wrapper);
 
   const error = createEl("div", "pill-status pill-status-error");
   error.setAttribute("role", "status");
@@ -187,6 +217,7 @@ function createPillDom(rootElement: HTMLElement): PillDom {
     barSpans,
     listening,
     listeningControls,
+    listeningLabel,
     preview,
     committed,
     tentative,
@@ -215,9 +246,7 @@ function setBars(dom: PillDom, level: number, state: PillState) {
   dom.barSpans.forEach((bar, index) => {
     const envelope = LEVEL_ENVELOPE[index] ?? 0.42;
     const scale =
-      state === "listening"
-        ? 0.22 + clampedLevel * envelope * 0.78
-        : 0.2 + envelope * 0.12;
+      state === "listening" ? 0.22 + clampedLevel * envelope * 0.78 : 0.2 + envelope * 0.12;
     bar.style.transform = `scaleY(${scale.toFixed(3)})`;
   });
 }
@@ -233,6 +262,8 @@ export function createRecordingPill(
   const dom = createPillDom(rootElement);
 
   let mode: PillIndicatorMode = "when_recording";
+  let style: PillIndicatorStyle = "compact";
+  let position: PillIndicatorPosition = "bottom-center";
   let streamingPreviewEnabled = false;
   let streamingPreviewDemo = false;
   let pillState: PillState = "idle";
@@ -269,6 +300,8 @@ export function createRecordingPill(
     const visible = isVisible(state);
     dom.root.dataset.state = state;
     dom.root.dataset.visible = String(visible);
+    dom.root.dataset.pillStyle = style;
+    dom.root.dataset.pillPosition = position;
     setHidden(dom.surface, !visible);
 
     setHidden(dom.idle, state !== "idle");
@@ -276,12 +309,20 @@ export function createRecordingPill(
     setHidden(dom.transcribing, state !== "transcribing");
     setHidden(dom.formatting, state !== "formatting");
     setHidden(dom.error, state !== "error");
+    setHidden(dom.transcribingPrimary.parentElement as HTMLElement, style !== "full");
+    setHidden(dom.formattingPrimary.parentElement as HTMLElement, style !== "full");
     setHidden(dom.preview, state !== "listening" || !streamPreviewVisible);
 
     dom.timer.textContent = formatElapsed(elapsedSeconds);
+    setHidden(dom.timer, style !== "full" || state !== "listening");
+    setHidden(dom.listeningLabel, style !== "full" || state !== "listening");
     dom.cancel.disabled = isCancelling;
     dom.errorPrimary.textContent = errorMessage ?? "";
-    setBars(dom, state === "listening" ? audioLevel : 0, state === "listening" ? "listening" : "idle");
+    setBars(
+      dom,
+      state === "listening" ? audioLevel : 0,
+      state === "listening" ? "listening" : "idle",
+    );
   };
 
   const stopAudioListener = () => {
@@ -297,16 +338,18 @@ export function createRecordingPill(
       if (isDestroyed || visibleState() !== "listening") return;
       audioLevel = event.payload;
       render();
-    }).then((unlisten) => {
-      audioListenPending = false;
-      if (audioUnlisten || isDestroyed || visibleState() !== "listening") {
-        unlisten();
-      } else {
-        audioUnlisten = unlisten;
-      }
-    }).catch(() => {
-      audioListenPending = false;
-    });
+    })
+      .then((unlisten) => {
+        audioListenPending = false;
+        if (audioUnlisten || isDestroyed || visibleState() !== "listening") {
+          unlisten();
+        } else {
+          audioUnlisten = unlisten;
+        }
+      })
+      .catch(() => {
+        audioListenPending = false;
+      });
   };
 
   const stopTimer = () => {
@@ -392,14 +435,85 @@ export function createRecordingPill(
     const staleSessionId = sessionId + 1;
     const steps: Array<{ delay: number; event: TranscriptionStreamEvent }> = [
       { delay: 0, event: { type: "started", session_id: sessionId, engine: "demo", revision: 0 } },
-      { delay: 90, event: { type: "partial", session_id: sessionId, revision: 1, committed: "Launch", tentative: "ing" } },
-      { delay: 180, event: { type: "partial", session_id: sessionId, revision: 2, committed: "Launching ", tentative: "the" } },
-      { delay: 270, event: { type: "partial", session_id: sessionId, revision: 4, committed: "Launching the ", tentative: "stream" } },
-      { delay: 360, event: { type: "partial", session_id: sessionId, revision: 3, committed: "ignored", tentative: "stale" } },
-      { delay: 450, event: { type: "partial", session_id: staleSessionId, revision: 5, committed: "ignored session", tentative: "" } },
-      { delay: 540, event: { type: "partial", session_id: sessionId, revision: 5, committed: "Launching the stream ", tentative: "preview" } },
-      { delay: 630, event: { type: "partial", session_id: sessionId, revision: 6, committed: "Launching the stream preview", tentative: "" } },
-      { delay: 720, event: { type: "final", session_id: sessionId, revision: 7, text: "Launching the stream preview" } },
+      {
+        delay: 90,
+        event: {
+          type: "partial",
+          session_id: sessionId,
+          revision: 1,
+          committed: "Launch",
+          tentative: "ing",
+        },
+      },
+      {
+        delay: 180,
+        event: {
+          type: "partial",
+          session_id: sessionId,
+          revision: 2,
+          committed: "Launching ",
+          tentative: "the",
+        },
+      },
+      {
+        delay: 270,
+        event: {
+          type: "partial",
+          session_id: sessionId,
+          revision: 4,
+          committed: "Launching the ",
+          tentative: "stream",
+        },
+      },
+      {
+        delay: 360,
+        event: {
+          type: "partial",
+          session_id: sessionId,
+          revision: 3,
+          committed: "ignored",
+          tentative: "stale",
+        },
+      },
+      {
+        delay: 450,
+        event: {
+          type: "partial",
+          session_id: staleSessionId,
+          revision: 5,
+          committed: "ignored session",
+          tentative: "",
+        },
+      },
+      {
+        delay: 540,
+        event: {
+          type: "partial",
+          session_id: sessionId,
+          revision: 5,
+          committed: "Launching the stream ",
+          tentative: "preview",
+        },
+      },
+      {
+        delay: 630,
+        event: {
+          type: "partial",
+          session_id: sessionId,
+          revision: 6,
+          committed: "Launching the stream preview",
+          tentative: "",
+        },
+      },
+      {
+        delay: 720,
+        event: {
+          type: "final",
+          session_id: sessionId,
+          revision: 7,
+          text: "Launching the stream preview",
+        },
+      },
     ];
 
     demoTimeouts = steps.map(({ delay, event }) =>
@@ -426,16 +540,18 @@ export function createRecordingPill(
     streamListenPending = true;
     void tauriListen<TranscriptionStreamEvent>(TRANSCRIPTION_STREAM_EVENT, (event) => {
       handleStreamEvent(event.payload);
-    }).then((unlisten) => {
-      streamListenPending = false;
-      if (streamUnlisten || isDestroyed || !streamingPreviewEnabled) {
-        unlisten();
-      } else {
-        streamUnlisten = unlisten;
-      }
-    }).catch(() => {
-      streamListenPending = false;
-    });
+    })
+      .then((unlisten) => {
+        streamListenPending = false;
+        if (streamUnlisten || isDestroyed || !streamingPreviewEnabled) {
+          unlisten();
+        } else {
+          streamUnlisten = unlisten;
+        }
+      })
+      .catch(() => {
+        streamListenPending = false;
+      });
   };
 
   const startTimer = () => {
@@ -494,6 +610,8 @@ export function createRecordingPill(
       const settings = await tauriInvoke<SettingsPayload>("get_settings");
       if (isDestroyed) return;
       mode = normalizeMode(settings.pill_indicator_mode);
+      style = settings.pill_indicator_style === "full" ? "full" : "compact";
+      position = settings.pill_indicator_position ?? "bottom-center";
       streamingPreviewEnabled =
         settings.transcription_mode === "live_preview" ||
         settings.streaming_preview_enabled === true;
@@ -501,6 +619,8 @@ export function createRecordingPill(
     } catch {
       if (isDestroyed) return;
       mode = "when_recording";
+      style = "compact";
+      position = "bottom-center";
       streamingPreviewEnabled = false;
       streamingPreviewDemo = false;
     }
@@ -520,8 +640,7 @@ export function createRecordingPill(
 
   const readInitialRecordingState = async () => {
     try {
-      const currentState =
-        await tauriInvoke<RecordingStatePayload>("get_current_recording_state");
+      const currentState = await tauriInvoke<RecordingStatePayload>("get_current_recording_state");
       if (isDestroyed || !currentState || typeof currentState.state !== "string") return;
       applyRecordingState(currentState);
     } catch {

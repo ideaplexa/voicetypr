@@ -48,7 +48,6 @@ claudedocs/
 # Swift build artifacts
 .build/
 
-sidecar/ffmpeg/vendor
 opencodetmp
 
 # Git worktrees for parallel development
@@ -62,8 +61,13 @@ opencodetmp
 .claude/skills/
 skills-lock.json
 
+# Separate local launch-video work and its authoring tools
+/videos/
+/agent/
+
 # bv (beads viewer) local config and caches
 .bv/
 pi-session-*.html
 # Whisper Vulkan sidecar build artifacts
 sidecar/whisper-vulkan/target/
+.pi/extensions/emdash-hook.ts

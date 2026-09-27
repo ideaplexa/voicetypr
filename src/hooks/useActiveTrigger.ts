@@ -52,10 +52,7 @@ export function useActiveTrigger(hotkey: string | undefined): ActiveTrigger {
   // binding still in state from a previous empty-hotkey load.
   const effectiveBinding = hotkey ? null : binding;
   const kbdLabel =
-    hotkey ??
-    (effectiveBinding?.modifier
-      ? formatModifierLabel(effectiveBinding.modifier)
-      : null);
+    hotkey ?? (effectiveBinding?.modifier ? formatModifierLabel(effectiveBinding.modifier) : null);
 
   return {
     label: formatPrimaryHotkeyLabel(effectiveBinding, hotkey),

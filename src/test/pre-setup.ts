@@ -3,12 +3,12 @@
 
 // Mock Tauri OS plugin BEFORE any modules import it
 (window as any).__TAURI_OS_PLUGIN_INTERNALS__ = {
-  os_type: 'macos',
-  arch: 'aarch64',
-  exe_extension: '',
-  family: 'unix',
-  version: '14.0.0',
-  platform: 'darwin'
+  os_type: "macos",
+  arch: "aarch64",
+  exe_extension: "",
+  family: "unix",
+  version: "14.0.0",
+  platform: "darwin",
 };
 
 // NOTE: Do NOT manually set __TAURI_INTERNALS__ here

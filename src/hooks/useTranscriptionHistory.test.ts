@@ -5,12 +5,10 @@ import { useTranscriptionHistory } from "./useTranscriptionHistory";
 
 const eventHarness = vi.hoisted(() => {
   const callbacks = new Map<string, (payload?: unknown) => void>();
-  const registerEvent = vi.fn(
-    (event: string, callback: (payload?: unknown) => void) => {
-      callbacks.set(event, callback);
-      return vi.fn();
-    },
-  );
+  const registerEvent = vi.fn((event: string, callback: (payload?: unknown) => void) => {
+    callbacks.set(event, callback);
+    return vi.fn();
+  });
 
   return { callbacks, registerEvent };
 });
@@ -55,6 +53,9 @@ describe("useTranscriptionHistory", () => {
       useTranscriptionHistory({ limit: 500, includeTotalCount: true }),
     );
 
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.loadError).toBeNull();
+
     await waitFor(() => {
       expect(result.current.history).toHaveLength(1);
     });
@@ -64,6 +65,8 @@ describe("useTranscriptionHistory", () => {
     });
     expect(invoke).toHaveBeenCalledWith("get_transcription_count");
     expect(result.current.totalCount).toBe(7);
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.loadError).toBeNull();
     expect(result.current.history[0]).toMatchObject({
       id: "2026-05-18T10:00:00.000Z",
       text: "hello world",
@@ -184,5 +187,77 @@ describe("useTranscriptionHistory", () => {
     await waitFor(() => {
       expect(result.current.history[0]?.text).toBe("after");
     });
+  });
+
+  it("surfaces load errors and clears them on retry", async () => {
+    let shouldFail = true;
+    (invoke as ReturnType<typeof vi.fn>).mockImplementation((command: string) => {
+      if (command === "get_transcription_history") {
+        if (shouldFail) {
+          return Promise.reject(new Error("db locked"));
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`Unknown command: ${command}`));
+    });
+
+    const { result } = renderHook(() => useTranscriptionHistory({ limit: 50 }));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.loadError).toBe("Couldn't load history");
+    expect(result.current.history).toHaveLength(0);
+
+    shouldFail = false;
+    await act(async () => {
+      await result.current.refreshHistory();
+    });
+
+    expect(result.current.loadError).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.history).toHaveLength(0);
+  });
+
+  it("a slow stale failure cannot re-set the error after a newer retry succeeds", async () => {
+    let rejectSlow!: (reason: Error) => void;
+    const slowFail = new Promise<void>((_, reject) => {
+      rejectSlow = reject;
+    });
+    (invoke as ReturnType<typeof vi.fn>).mockImplementation((command: string) => {
+      if (command === "get_transcription_history") {
+        // First call: slow, will fail after the retry already resolved.
+        if (callCount === 0) {
+          callCount += 1;
+          return slowFail.then(() => {
+            throw new Error("slow failure");
+          });
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`Unknown command: ${command}`));
+    });
+    let callCount = 0;
+
+    const { result } = renderHook(() => useTranscriptionHistory({ limit: 50 }));
+
+    // Fire the retry while the first request is still pending.
+    await act(async () => {
+      void result.current.refreshHistory();
+    });
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.loadError).toBeNull();
+    });
+
+    // The stale request finally fails — it must not resurrect the error.
+    await act(async () => {
+      rejectSlow(new Error("slow failure"));
+      await Promise.resolve();
+    });
+
+    expect(result.current.loadError).toBeNull();
+    expect(result.current.history).toHaveLength(0);
   });
 });

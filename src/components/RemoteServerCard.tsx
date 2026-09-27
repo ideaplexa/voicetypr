@@ -12,10 +12,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { getModelDisplayName } from "@/lib/model-display";
-import {
-  RemoteModelControlSnapshot,
-  SpeechModelEngine,
-} from "@/types";
+import { RemoteModelControlSnapshot, SpeechModelEngine } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
@@ -97,7 +94,6 @@ function remoteControlErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-
 function remoteControlUnavailableMessage(error: unknown, fallback: string) {
   const raw = remoteControlErrorMessage(error, fallback);
   if (raw.includes("disabled on this device") || raw.includes("model_control_disabled")) {
@@ -143,15 +139,27 @@ function RemoteTranscriptionModelControl({
   const [updating, setUpdating] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // Clear remote control state when the selected server becomes unavailable.
+  const [previousServer, setPreviousServer] = useState({
+    id: server.id,
+    status: server.status,
+  });
+  if (previousServer.id !== server.id || previousServer.status !== server.status) {
+    setPreviousServer({ id: server.id, status: server.status });
+    if (server.status !== "Online") {
+      setControl(null);
+      setFetchError(null);
+    }
+  }
+
   const loadControl = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
 
     try {
-      const result = await invoke<RemoteModelControlSnapshot>(
-        "get_remote_transcription_control",
-        { serverId: server.id },
-      );
+      const result = await invoke<RemoteModelControlSnapshot>("get_remote_transcription_control", {
+        serverId: server.id,
+      });
       setControl(result);
     } catch (error) {
       log.error("Failed to load remote transcription control:", error);
@@ -168,13 +176,12 @@ function RemoteTranscriptionModelControl({
   }, [server.id]);
 
   useEffect(() => {
-    if (server.status !== "Online") {
-      setControl(null);
-      setFetchError(null);
-      return;
-    }
+    if (server.status !== "Online") return;
 
-    void loadControl();
+    const timeoutId = window.setTimeout(() => {
+      void loadControl();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [server.id, server.status, loadControl]);
 
   const selectedValue = useMemo(() => {
@@ -202,10 +209,7 @@ function RemoteTranscriptionModelControl({
     } catch (error) {
       log.error("Failed to update remote transcription control:", error);
       toast.error("Failed to update remote shared transcription model", {
-        description: remoteControlUnavailableMessage(
-          error,
-          "The host model could not be changed.",
-        ),
+        description: remoteControlUnavailableMessage(error, "The host model could not be changed."),
       });
     } finally {
       setUpdating(false);
@@ -271,9 +275,7 @@ function RemoteTranscriptionModelControl({
 
   const models = control.available;
   const currentLabel =
-    control.current.display_name ||
-    getModelDisplayName(control.current.id) ||
-    control.current.id;
+    control.current.display_name || getModelDisplayName(control.current.id) || control.current.id;
   const hasCurrentOption = models.some(
     (model) => model.id === control.current.id && model.engine === control.current.engine,
   );
@@ -290,9 +292,13 @@ function RemoteTranscriptionModelControl({
         </div>
         {selectableModels.length > 0 ? (
           <Select
+            items={selectableModels.map((model) => ({
+              value: modelOptionKey(model.id, model.engine),
+              label: model.display_name || getModelDisplayName(model.id) || model.id,
+            }))}
             value={selectedValue}
             onValueChange={(value) => {
-              void handleModelChange(value);
+              if (value != null) void handleModelChange(value);
             }}
             disabled={updating}
           >
@@ -391,13 +397,23 @@ export function RemoteServerCard({
 
   // Map backend ConnectionStatus to display status
   // Status is now from cached data on server prop
-  const getDisplayStatus = (): "unknown" | "online" | "auth_failed" | "offline" | "self_connection" => {
+  const getDisplayStatus = ():
+    | "unknown"
+    | "online"
+    | "auth_failed"
+    | "offline"
+    | "self_connection" => {
     switch (server.status) {
-      case "Online": return "online";
-      case "Offline": return "offline";
-      case "AuthFailed": return "auth_failed";
-      case "SelfConnection": return "self_connection";
-      default: return "unknown";
+      case "Online":
+        return "online";
+      case "Offline":
+        return "offline";
+      case "AuthFailed":
+        return "auth_failed";
+      case "SelfConnection":
+        return "self_connection";
+      default:
+        return "unknown";
     }
   };
   const status = getDisplayStatus();
@@ -441,7 +457,7 @@ export function RemoteServerCard({
             ? "border-sage/50 bg-sage-bg/40"
             : isSelectable
               ? "hover:border-sage/40 hover:bg-muted/30"
-              : ""
+              : "",
       )}
       onClick={() => isSelectable && !isActive && onSelect(server.id)}
     >
@@ -456,7 +472,7 @@ export function RemoteServerCard({
                   ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
                   : status === "auth_failed" || status === "self_connection"
                     ? "border-amber-500/20 bg-amber-500/10 text-amber-700"
-                    : "border-border bg-muted/60 text-muted-foreground"
+                    : "border-border bg-muted/60 text-muted-foreground",
             )}
           >
             <Server className="size-4" />
@@ -466,7 +482,7 @@ export function RemoteServerCard({
               <h3
                 className={cn(
                   "truncate text-sm font-semibold tracking-tight",
-                  isActive && "text-sage"
+                  isActive && "text-sage",
                 )}
               >
                 {displayName}
@@ -489,7 +505,12 @@ export function RemoteServerCard({
                   ) : (
                     <>
                       <AlertTriangle className="size-3" />
-                      Routing risk: {status === "auth_failed" ? "Auth failed" : status === "offline" ? "Offline" : "Status unknown"}
+                      Routing risk:{" "}
+                      {status === "auth_failed"
+                        ? "Auth failed"
+                        : status === "offline"
+                          ? "Offline"
+                          : "Status unknown"}
                     </>
                   )}
                 </Badge>
@@ -518,22 +539,14 @@ export function RemoteServerCard({
               ) : status === "online" ? (
                 <>
                   <Wifi className="size-3 text-emerald-600" />
-                  <span className="text-emerald-700 dark:text-emerald-400">
-                    Online
-                  </span>
-                  {modelDisplayName && (
-                    <span>
-                      • {modelDisplayName}
-                    </span>
-                  )}
+                  <span className="text-emerald-700 dark:text-emerald-400">Online</span>
+                  {modelDisplayName && <span>• {modelDisplayName}</span>}
                   {isRefreshing && <Spinner className="size-3" />}
                 </>
               ) : status === "auth_failed" ? (
                 <>
                   <KeyRound className="size-3 text-amber-600" />
-                  <span className="text-amber-700 dark:text-amber-400">
-                    Password incorrect
-                  </span>
+                  <span className="text-amber-700 dark:text-amber-400">Password incorrect</span>
                   <button
                     type="button"
                     className="text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
@@ -546,19 +559,13 @@ export function RemoteServerCard({
               ) : status === "self_connection" ? (
                 <>
                   <AlertTriangle className="size-3 text-amber-600" />
-                  <span className="text-amber-700 dark:text-amber-400">
-                    This Machine
-                  </span>
-                  <span>
-                    • This is the same device
-                  </span>
+                  <span className="text-amber-700 dark:text-amber-400">This Machine</span>
+                  <span>• This is the same device</span>
                 </>
               ) : (
                 <>
                   <WifiOff className="size-3 text-destructive" />
-                  <span className="text-destructive">
-                    Offline
-                  </span>
+                  <span className="text-destructive">Offline</span>
                   {isRefreshing && <Spinner className="size-3" />}
                 </>
               )}
@@ -568,11 +575,7 @@ export function RemoteServerCard({
 
         <div className="flex shrink-0 items-center gap-1.5">
           {isActive && onDeselect && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleDeselect}
-            >
+            <Button size="sm" variant="outline" onClick={handleDeselect}>
               Stop routing
             </Button>
           )}
@@ -597,11 +600,7 @@ export function RemoteServerCard({
               title="Remove server"
               aria-label={`Remove ${displayName}`}
             >
-              {removing ? (
-                <Spinner className="size-4" />
-              ) : (
-                <Trash2 className="size-4" />
-              )}
+              {removing ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
             </Button>
           </ButtonGroup>
         </div>

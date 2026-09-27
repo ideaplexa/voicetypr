@@ -118,6 +118,12 @@ impl TranscriberCache {
             }
             Err(e) => {
                 log::error!("[TRANSCRIPTION_DEBUG] Failed to load model: {}", e);
+                crate::telemetry::capture_model_load_failure(
+                    model_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown"),
+                );
                 return Err(e);
             }
         };

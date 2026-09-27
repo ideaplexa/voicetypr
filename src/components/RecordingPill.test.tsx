@@ -1,4 +1,11 @@
-import { fireEvent, getByRole, getByTestId, getByText, queryByText, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  getByRole,
+  getByTestId,
+  getByText,
+  queryByText,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecordingPill, type RecordingPillController } from "@/pill";
 
@@ -8,6 +15,8 @@ type Handler = (event: { payload: unknown }) => void;
 let root: HTMLDivElement;
 let controller: RecordingPillController | undefined;
 let pillIndicatorMode: PillIndicatorMode;
+let pillIndicatorStyle: "compact" | "full";
+let pillIndicatorPosition: "top-left" | "bottom-center" | "bottom-right";
 let listeners: Map<string, Set<Handler>>;
 let invokeMock: ReturnType<typeof vi.fn>;
 let currentRecordingState: { state: string; error: string | null };
@@ -47,10 +56,16 @@ describe("RecordingPill", () => {
     vi.useRealTimers();
     listeners = new Map();
     pillIndicatorMode = "when_recording";
+    pillIndicatorStyle = "compact";
+    pillIndicatorPosition = "bottom-center";
     currentRecordingState = { state: "idle", error: null };
     invokeMock = vi.fn((command: string) => {
       if (command === "get_settings") {
-        return Promise.resolve({ pill_indicator_mode: pillIndicatorMode });
+        return Promise.resolve({
+          pill_indicator_mode: pillIndicatorMode,
+          pill_indicator_style: pillIndicatorStyle,
+          pill_indicator_position: pillIndicatorPosition,
+        });
       }
 
       if (command === "get_current_recording_state") {
@@ -112,9 +127,12 @@ describe("RecordingPill", () => {
     });
   });
 
-  it("shows listening bars, timer, and cancel button while recording", () => {
+  it("shows listening bars, timer, and cancel button while recording", async () => {
+    pillIndicatorStyle = "full";
     vi.useFakeTimers();
     createTestPill();
+    await Promise.resolve();
+    await Promise.resolve();
 
     emitMockEvent("recording-state-changed", { state: "recording", error: null });
 
@@ -125,6 +143,23 @@ describe("RecordingPill", () => {
     vi.advanceTimersByTime(3000);
 
     expect(getByText(root, "0:03")).toBeVisible();
+  });
+
+  it("keeps compact listening content icon-only", async () => {
+    createTestPill();
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_settings"));
+    emitMockEvent("recording-state-changed", { state: "recording", error: null });
+    expect(getByTestId(root, "pill-bars")).toBeVisible();
+    expect(root.querySelector(".pill-timer")).not.toBeVisible();
+    expect(root.querySelector(".pill-listening-controls .pill-text-primary")).not.toBeVisible();
+  });
+
+  it("reads the configured style and edge position", async () => {
+    pillIndicatorStyle = "full";
+    pillIndicatorPosition = "top-left";
+    createTestPill();
+    await waitFor(() => expect(pillRoot()).toHaveAttribute("data-pill-position", "top-left"));
+    expect(pillRoot()).toHaveAttribute("data-pill-style", "full");
   });
 
   it("hydrates the current recording state on startup", async () => {
@@ -215,13 +250,17 @@ describe("RecordingPill", () => {
     expect(cancelButton).toBeDisabled();
   });
 
-  it("maps stopping and transcribing to the transcribing label", () => {
+  it("maps stopping and transcribing to the transcribing label", async () => {
+    pillIndicatorStyle = "full";
     createTestPill();
+    await waitFor(() => expect(pillRoot()).toHaveAttribute("data-pill-style", "full"));
 
     emitMockEvent("recording-state-changed", { state: "stopping", error: null });
 
     expect(getByText(root, "Transcribing…")).toBeVisible();
-    expect(root.querySelector(".pill-text-primary")).toHaveTextContent("Transcribing…");
+    expect(root.querySelector(".pill-status-label .pill-text-primary")).toHaveTextContent(
+      "Transcribing…",
+    );
     expect(root.querySelector(".pill-text-secondary")).toHaveTextContent("");
 
     emitMockEvent("recording-state-changed", { state: "transcribing", error: null });
@@ -229,8 +268,44 @@ describe("RecordingPill", () => {
     expect(getByText(root, "Transcribing…")).toBeVisible();
   });
 
-  it("gives formatting feedback precedence until enhancement completes", () => {
+  it.each(["compact", "full"] as const)(
+    "renders distinct processing activity in %s style",
+    async (indicatorStyle) => {
+      pillIndicatorStyle = indicatorStyle;
+      createTestPill();
+      await waitFor(() => expect(pillRoot()).toHaveAttribute("data-pill-style", indicatorStyle));
+
+      emitMockEvent("transcription-started");
+      const transcribing = root.querySelector(
+        '.pill-status:not([hidden]) [data-testid="pill-activity"]',
+      );
+      expect(transcribing).toHaveAttribute("data-state", "transcribing");
+      expect(
+        transcribing?.querySelector('[data-visual="transcribing"] .pill-scan-dot'),
+      ).toBeVisible();
+      expect(transcribing?.querySelector(".pill-spark")).not.toBeInTheDocument();
+
+      emitMockEvent("enhancing-started");
+      const formatting = root.querySelector(
+        '.pill-status:not([hidden]) [data-testid="pill-activity"]',
+      );
+      expect(formatting).toHaveAttribute("data-state", "formatting");
+      expect(formatting?.querySelector('[data-visual="formatting"]')).toBeVisible();
+      expect(formatting?.querySelectorAll(".pill-spark")).toHaveLength(3);
+      expect(formatting?.querySelector(".pill-scan-dot")).not.toBeInTheDocument();
+
+      if (indicatorStyle === "full") {
+        expect(getByText(root, "Polishing…")).toBeVisible();
+      } else {
+        expect(getByText(root, "Polishing…")).not.toBeVisible();
+      }
+    },
+  );
+
+  it("gives formatting feedback precedence until enhancement completes", async () => {
+    pillIndicatorStyle = "full";
     createTestPill();
+    await waitFor(() => expect(pillRoot()).toHaveAttribute("data-pill-style", "full"));
 
     emitMockEvent("transcription-started");
     expect(getByText(root, "Transcribing…")).toBeVisible();

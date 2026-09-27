@@ -7,8 +7,6 @@ use super::common::{self, AuthScheme};
 use std::path::Path;
 use tauri::AppHandle;
 
-pub(super) const MODEL: &str = "cohere-transcribe-03-2026";
-
 pub(super) async fn validate_key(key: &str) -> Result<(), String> {
     common::get_validate(
         "https://api.cohere.com/v1/models",
@@ -23,15 +21,17 @@ pub(super) async fn validate_key(key: &str) -> Result<(), String> {
 pub(super) async fn transcribe_typed(
     _app: &AppHandle,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
 ) -> Result<String, common::SttError> {
-    transcribe_at("https://api.cohere.com", key, audio_path, language).await
+    transcribe_at("https://api.cohere.com", key, model, audio_path, language).await
 }
 
 pub(super) async fn transcribe_at(
     base_url: &str,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
 ) -> Result<String, common::SttError> {
@@ -61,6 +61,7 @@ pub(super) async fn transcribe_at(
         let client = client.clone();
         let filename = filename.clone();
         let lang = lang.clone();
+        let model = model.to_string();
         let url = url.clone();
         async move {
             let file_part = Part::bytes(bytes)
@@ -69,7 +70,7 @@ pub(super) async fn transcribe_at(
                 .map_err(|_| common::SttError::BadResponse)?;
             let form = Form::new()
                 .part("file", file_part)
-                .text("model", MODEL)
+                .text("model", model)
                 .text("language", lang);
 
             let resp = client
@@ -114,9 +115,15 @@ mod tests {
             .await;
         let audio = audio_file();
 
-        let text = transcribe_at(&server.uri(), "k", audio.path(), None)
-            .await
-            .unwrap();
+        let text = transcribe_at(
+            &server.uri(),
+            "k",
+            "cohere-transcribe-03-2026",
+            audio.path(),
+            None,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(text, "ok");
         let requests = server.received_requests().await.unwrap();
@@ -130,6 +137,8 @@ mod tests {
         let body = String::from_utf8_lossy(&requests[0].body);
         assert!(body.contains("name=\"language\""));
         assert!(body.contains("\r\n\r\nen\r\n"));
+        assert!(body.contains("name=\"model\""));
+        assert!(body.contains("\r\n\r\ncohere-transcribe-03-2026\r\n"));
     }
 
     #[tokio::test]
@@ -143,9 +152,15 @@ mod tests {
             .await;
         let audio = audio_file();
 
-        let error = transcribe_at(&server.uri(), "k", audio.path(), None)
-            .await
-            .unwrap_err();
+        let error = transcribe_at(
+            &server.uri(),
+            "k",
+            "cohere-transcribe-03-2026",
+            audio.path(),
+            None,
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(error, common::SttError::Auth));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);

@@ -27,3 +27,12 @@ pub use types::{
     EngineError, KeyPhase, KeySpec, ModSet, Modifier, ModifierSpec, NamedKey, RawKeyEvent, Side,
     TapKey, Trigger, TriggerEvent, TriggerId,
 };
+
+/// Sentinel written to a synthetic keystroke's `dwExtraInfo` (Windows) to mark it
+/// as VoiceTypr's OWN injection — currently the post-transcription Ctrl+V paste in
+/// `commands::text::paste_windows`. The low-level keyboard hook ignores keystrokes
+/// carrying this value (so our paste can't re-trigger a hotkey), while external
+/// tools' injected input (Stream Deck, AutoHotkey, PowerToys) carries a different
+/// `dwExtraInfo` and passes through to trigger hotkeys normally. Value is arbitrary
+/// but must be non-zero; both the injector and the hook reference this one constant.
+pub const INJECTED_SIGNATURE: usize = 0x5654_5950; // "VTYP"

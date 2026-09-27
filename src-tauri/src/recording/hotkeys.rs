@@ -306,16 +306,6 @@ pub(crate) fn dispatch_action(
                 });
             }
         }
-        ShortcutAction::CycleFormattingMode => {
-            if event_state == KeyPhase::Pressed {
-                let app_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = shortcuts::cycle_formatting_preset(app_handle).await {
-                        log::error!("Shortcut cycle_formatting_mode failed: {}", error);
-                    }
-                });
-            }
-        }
         ShortcutAction::ToggleAiFormatting => {
             if event_state == KeyPhase::Pressed {
                 let app_handle = app.clone();
@@ -324,25 +314,6 @@ pub(crate) fn dispatch_action(
                         log::error!("Shortcut toggle_ai_formatting failed: {e}");
                     }
                 });
-            }
-        }
-        ShortcutAction::SetPersonalDictation
-        | ShortcutAction::SetCleanDictation
-        | ShortcutAction::SetWriting
-        | ShortcutAction::SetNotes
-        | ShortcutAction::SetMessage
-        | ShortcutAction::SetCode => {
-            if event_state == KeyPhase::Pressed {
-                if let Some(preset) = shortcuts::action_preset(action) {
-                    let app_handle = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(error) =
-                            shortcuts::set_formatting_preset(app_handle, preset).await
-                        {
-                            log::error!("Shortcut set formatting mode failed: {}", error);
-                        }
-                    });
-                }
             }
         }
         ShortcutAction::OpenDashboard => {
@@ -356,6 +327,7 @@ pub(crate) fn dispatch_action(
                 });
             }
         }
+        ShortcutAction::Unknown => {}
     }
 }
 

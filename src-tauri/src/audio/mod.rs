@@ -6,6 +6,7 @@ pub mod recorder;
 pub mod recorder_watchdog;
 pub mod resampler;
 pub mod silence_detector;
+pub mod speech_evidence;
 pub mod stream_tap;
 
 #[cfg(test)]

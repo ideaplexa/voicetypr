@@ -51,28 +51,6 @@ pub fn log_performance(operation: &str, duration_ms: u64, metadata: Option<&str>
 
 // REMOVED: HashMap-based wrappers - use log_start() with log_with_context() directly
 
-/// Log audio metrics in a structured way
-pub fn log_audio_metrics(
-    operation: &str,
-    energy: f64,
-    peak: f64,
-    duration: f32,
-    additional: Option<&HashMap<String, String>>,
-) {
-    log::info!(
-        "🔊 AUDIO {}: energy={:.4}, peak={:.4}, duration={:.2}s",
-        operation,
-        energy,
-        peak,
-        duration
-    );
-    if let Some(extra) = additional {
-        if !extra.is_empty() {
-            log::info!("   📊 Audio Metrics: {:?}", extra);
-        }
-    }
-}
-
 /// Log model operations with metadata
 pub fn log_model_operation(
     operation: &str,

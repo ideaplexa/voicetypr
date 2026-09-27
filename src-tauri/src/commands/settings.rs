@@ -4,6 +4,7 @@ use crate::commands::key_normalizer::{
 };
 use crate::commands::remote::{resolve_shareable_model_config, save_remote_settings};
 use crate::commands::shortcuts;
+use crate::commands::updater::{UpdateChannel, UPDATE_CHANNEL_EXPLICIT_KEY};
 use crate::menu::should_include_remote_connection_in_tray;
 use crate::parakeet::models::AVAILABLE_MODELS;
 use crate::parakeet::ParakeetManager;
@@ -33,6 +34,24 @@ pub const FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT: &str = "same_as_transcript";
 pub const TRANSCRIPTION_MODE_REGULAR: &str = "regular";
 pub const TRANSCRIPTION_MODE_LIVE_PREVIEW: &str = "live_preview";
 
+pub(crate) async fn persist_settings_and_invalidate<F, M>(
+    app: &AppHandle,
+    mutate: F,
+    map_save_error: M,
+) -> Result<(), String>
+where
+    F: FnOnce(&tauri_plugin_store::Store<tauri::Wry>) -> Result<(), String>,
+    M: FnOnce(String) -> String,
+{
+    let store = app.store("settings").map_err(|e| e.to_string())?;
+    mutate(&store)?;
+    store.save().map_err(|e| map_save_error(e.to_string()))?;
+    drop(store);
+
+    crate::commands::audio::invalidate_recording_config_cache(app).await;
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub hotkey: String,
@@ -42,6 +61,9 @@ pub struct Settings {
     pub transcription_task: String,
     pub final_text_language: String,
     pub theme: String,
+    // Settings disclosure mode. Post-cutover this is always "recommended".
+    #[serde(default = "default_settings_mode")]
+    pub settings_mode: String,
     pub transcription_cleanup_days: Option<u32>,
     pub pill_position: Option<(f64, f64)>,
     pub launch_at_startup: bool,
@@ -54,10 +76,17 @@ pub struct Settings {
     pub ptt_hotkey: Option<String>,
     pub keep_transcription_in_clipboard: bool,
     // Audio feedback
+    #[serde(default = "default_true")]
     pub play_sound_on_recording: bool,
-    pub play_sound_on_recording_end: bool,
+    #[serde(default = "default_true")]
+    pub play_sound_on_transcription_complete: bool,
+    #[serde(default = "default_true")]
+    pub play_sound_on_paste_success: bool,
     // Pill indicator visibility mode: "never", "always", or "when_recording"
     pub pill_indicator_mode: String,
+    // Pill indicator detail level: "compact" or "full"
+    #[serde(default = "default_pill_indicator_style")]
+    pub pill_indicator_style: String,
     // Pill indicator screen position
     pub pill_indicator_position: String,
     // Pill indicator offset from screen edge in pixels (10-50)
@@ -81,6 +110,9 @@ pub struct Settings {
     // Product-facing streaming preview mode: "regular" | "live_preview"
     #[serde(default = "default_transcription_mode")]
     pub transcription_mode: String,
+    // Direct-install updater channel: "stable" | "beta"
+    #[serde(default = "default_update_channel")]
+    pub update_channel: String,
 }
 
 impl Default for Settings {
@@ -93,6 +125,7 @@ impl Default for Settings {
             transcription_task: TRANSCRIPTION_TASK_TRANSCRIBE.to_string(),
             final_text_language: FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string(),
             theme: "system".to_string(),
+            settings_mode: default_settings_mode(),
             transcription_cleanup_days: None, // None means keep forever
             pill_position: None,              // No saved position initially
             launch_at_startup: false,         // Default to not launching at startup
@@ -103,9 +136,11 @@ impl Default for Settings {
             use_different_ptt_key: false,         // Default to using same key
             ptt_hotkey: Some("Alt+Space".to_string()), // Default PTT key
             keep_transcription_in_clipboard: false, // Default to restoring clipboard after paste
-            play_sound_on_recording: true,        // Default to playing sound on recording start
-            play_sound_on_recording_end: true,    // Default to playing sound on recording end
+            play_sound_on_recording: true,
+            play_sound_on_transcription_complete: true,
+            play_sound_on_paste_success: true,
             pill_indicator_mode: "when_recording".to_string(), // Default to showing only when recording
+            pill_indicator_style: default_pill_indicator_style(),
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
             pause_media_during_recording: false, // Default to off; user opts in
@@ -117,7 +152,48 @@ impl Default for Settings {
             transcription_acceleration: "auto".to_string(),
             whisper_speed_mode: false,
             transcription_mode: TRANSCRIPTION_MODE_REGULAR.to_string(),
+            update_channel: default_update_channel(),
         }
+    }
+}
+
+fn default_pill_indicator_style() -> String {
+    "compact".to_string()
+}
+
+fn default_settings_mode() -> String {
+    "recommended".to_string()
+}
+
+fn normalize_settings_mode(value: Option<&str>) -> String {
+    // Legacy adopter contract: pre-cutover stores may carry "advanced"; normalize it to "recommended".
+    match value {
+        Some("advanced") | Some("recommended") | None => default_settings_mode(),
+        Some(_) => default_settings_mode(),
+    }
+}
+
+fn resolve_pill_indicator_style(stored: Option<String>) -> String {
+    match stored.as_deref() {
+        Some("compact" | "full") => stored.unwrap_or_default(),
+        _ => default_pill_indicator_style(),
+    }
+}
+
+fn default_update_channel() -> String {
+    UpdateChannel::from_stored(None).as_str().to_string()
+}
+
+fn update_channel_to_persist(
+    stored_channel: Option<&str>,
+    stored_explicit: bool,
+    selected_now: bool,
+    requested: UpdateChannel,
+) -> Option<UpdateChannel> {
+    if stored_explicit || selected_now || stored_channel == Some("beta") {
+        Some(requested)
+    } else {
+        None
     }
 }
 
@@ -142,6 +218,17 @@ pub fn normalize_transcription_mode(value: Option<&str>) -> String {
         Some(TRANSCRIPTION_MODE_LIVE_PREVIEW) => TRANSCRIPTION_MODE_LIVE_PREVIEW.to_string(),
         _ => TRANSCRIPTION_MODE_REGULAR.to_string(),
     }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub fn resolve_transcription_complete_sound(
+    stored: Option<bool>,
+    legacy_recording_end: Option<bool>,
+) -> bool {
+    stored.or(legacy_recording_end).unwrap_or(true)
 }
 
 pub fn normalize_stored_transcription_acceleration(value: Option<&str>) -> String {
@@ -217,15 +304,14 @@ pub async fn validate_microphone_selection(app: AppHandle) -> Result<bool, Strin
 
     // Check if selected mic still exists
     if available_devices.contains(&selected_mic) {
-        log::debug!("Selected microphone '{}' is available", selected_mic);
+        log::debug!("Selected microphone is available");
         return Ok(false);
     }
 
     // Selected mic no longer exists - reset to default
     log::info!(
-        "Selected microphone '{}' is no longer available (available: {:?}), resetting to default",
-        selected_mic,
-        available_devices
+        "Selected microphone is no longer available ({} devices available), resetting to default",
+        available_devices.len()
     );
 
     // Clear the selection
@@ -389,6 +475,13 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         .and_then(|v| v.as_str().map(|s| s.to_string()));
     let final_text_language =
         normalize_final_text_language(stored_final_text_language.as_deref(), &transcription_task);
+    let stored_update_channel = store
+        .get("update_channel")
+        .and_then(|value| value.as_str().map(str::to_owned));
+    let stored_update_channel_explicit = store
+        .get(UPDATE_CHANNEL_EXPLICIT_KEY)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
 
     let settings = Settings {
         hotkey: store
@@ -410,6 +503,12 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             .get("theme")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| Settings::default().theme),
+        settings_mode: normalize_settings_mode(
+            store
+                .get("settings_mode")
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .as_deref(),
+        ),
         transcription_cleanup_days: store
             .get("transcription_cleanup_days")
             .and_then(|v| v.as_u64().map(|n| n as u32)),
@@ -460,10 +559,18 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             .get("play_sound_on_recording")
             .and_then(|v| v.as_bool())
             .unwrap_or_else(|| Settings::default().play_sound_on_recording),
-        play_sound_on_recording_end: store
-            .get("play_sound_on_recording_end")
+        play_sound_on_transcription_complete: resolve_transcription_complete_sound(
+            store
+                .get("play_sound_on_transcription_complete")
+                .and_then(|v| v.as_bool()),
+            store
+                .get("play_sound_on_recording_end")
+                .and_then(|v| v.as_bool()),
+        ),
+        play_sound_on_paste_success: store
+            .get("play_sound_on_paste_success")
             .and_then(|v| v.as_bool())
-            .unwrap_or_else(|| Settings::default().play_sound_on_recording_end),
+            .unwrap_or_else(|| Settings::default().play_sound_on_paste_success),
         // Migration: check for new pill_indicator_mode first, then fall back to old show_pill_indicator
         pill_indicator_mode: resolve_pill_indicator_mode(
             store
@@ -471,6 +578,11 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
                 .and_then(|v| v.as_str().map(|s| s.to_string())),
             store.get("show_pill_indicator").and_then(|v| v.as_bool()),
             Settings::default().pill_indicator_mode,
+        ),
+        pill_indicator_style: resolve_pill_indicator_style(
+            store
+                .get("pill_indicator_style")
+                .and_then(|v| v.as_str().map(str::to_owned)),
         ),
         pill_indicator_position: store
             .get("pill_indicator_position")
@@ -515,6 +627,12 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .as_deref(),
         ),
+        update_channel: UpdateChannel::from_preference(
+            stored_update_channel.as_deref(),
+            stored_update_channel_explicit,
+        )
+        .as_str()
+        .to_string(),
     };
     let normalized_speech_language = normalize_speech_language_for_model(
         &settings.current_model_engine,
@@ -570,7 +688,11 @@ async fn sync_running_sharing_server_to_model(
 }
 
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+pub async fn save_settings(
+    app: AppHandle,
+    settings: Settings,
+    update_channel_explicit: Option<bool>,
+) -> Result<(), String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
 
     // Check if model, recording mode, onboarding, and pill indicator mode changed
@@ -605,10 +727,18 @@ pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), Str
             .and_then(|v| v.as_str().map(str::to_owned))
             .as_deref(),
     );
+    let stored_update_channel = store
+        .get("update_channel")
+        .and_then(|value| value.as_str().map(str::to_owned));
+    let stored_update_channel_explicit = store
+        .get(UPDATE_CHANNEL_EXPLICIT_KEY)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     let normalized_transcription_acceleration =
         normalize_stored_transcription_acceleration(Some(&settings.transcription_acceleration));
     let normalized_transcription_mode =
         normalize_transcription_mode(Some(&settings.transcription_mode));
+    let normalized_update_channel = UpdateChannel::from_stored(Some(&settings.update_channel));
 
     let normalized_hotkey = normalize_shortcut_keys(&settings.hotkey);
     if !normalized_hotkey.is_empty() {
@@ -676,6 +806,10 @@ pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), Str
 
     store.set("theme", json!(settings.theme));
     store.set(
+        "settings_mode",
+        json!(normalize_settings_mode(Some(&settings.settings_mode))),
+    );
+    store.set(
         "transcription_cleanup_days",
         json!(settings.transcription_cleanup_days),
     );
@@ -705,10 +839,21 @@ pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), Str
         json!(settings.play_sound_on_recording),
     );
     store.set(
-        "play_sound_on_recording_end",
-        json!(settings.play_sound_on_recording_end),
+        "play_sound_on_transcription_complete",
+        json!(settings.play_sound_on_transcription_complete),
     );
+    store.set(
+        "play_sound_on_paste_success",
+        json!(settings.play_sound_on_paste_success),
+    );
+    store.delete("play_sound_on_recording_end");
     store.set("pill_indicator_mode", json!(settings.pill_indicator_mode));
+    store.set(
+        "pill_indicator_style",
+        json!(resolve_pill_indicator_style(Some(
+            settings.pill_indicator_style.clone()
+        ))),
+    );
     store.set(
         "pill_indicator_position",
         json!(settings.pill_indicator_position),
@@ -733,6 +878,21 @@ pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), Str
     );
     store.set("whisper_speed_mode", json!(settings.whisper_speed_mode));
     store.set("transcription_mode", json!(&normalized_transcription_mode));
+    match update_channel_to_persist(
+        stored_update_channel.as_deref(),
+        stored_update_channel_explicit,
+        update_channel_explicit.unwrap_or(false),
+        normalized_update_channel,
+    ) {
+        Some(channel) => {
+            store.set("update_channel", json!(channel.as_str()));
+            store.set(UPDATE_CHANNEL_EXPLICIT_KEY, json!(true));
+        }
+        None => {
+            store.delete("update_channel");
+            store.delete(UPDATE_CHANNEL_EXPLICIT_KEY);
+        }
+    }
 
     // Network sharing settings
     if let Some(port) = settings.sharing_port {
@@ -782,7 +942,7 @@ pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), Str
         );
     }
 
-    // Invalidate recording config cache when settings change
+    // This command reloads on save failure and rebuilds bindings after save; keep one explicit invalidation.
     crate::commands::audio::invalidate_recording_config_cache(&app).await;
 
     // Preload new model and update tray menu if model changed
@@ -1268,7 +1428,7 @@ pub async fn set_model_from_tray(app: AppHandle, model_name: String) -> Result<(
         settings.speech_language = "en".to_string();
     }
     // Save settings (this will also preload the model)
-    save_settings(app.clone(), settings).await?;
+    save_settings(app.clone(), settings, None).await?;
 
     // Keep a running sharing server truthful after the selected model changes
     sync_running_sharing_server_to_model(&app, &model_name, &engine).await?;
@@ -1413,7 +1573,7 @@ pub async fn set_audio_device(app: AppHandle, device_name: Option<String>) -> Re
     settings.selected_microphone = device_name.clone();
 
     // Save the updated settings
-    save_settings(app.clone(), settings).await?;
+    save_settings(app.clone(), settings, None).await?;
 
     // Update tray menu to reflect the change
     update_tray_menu(app.clone()).await?;
@@ -1548,7 +1708,11 @@ pub async fn test_transcription_acceleration(
         let mode =
             normalize_stored_transcription_acceleration(Some(&settings.transcription_acceleration));
         let client = app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>();
-        client.probe(&app, &model_path, &mode).await?;
+        // Unload the failed sidecar (mirror transcription/warm-preload) so its model doesn't stay resident.
+        if let Err(error) = client.probe(&app, &model_path, &mode).await {
+            client.abort_active_process().await;
+            return Err(error);
+        }
         Ok(client.status().await)
     }
 }
@@ -1556,9 +1720,11 @@ pub async fn test_transcription_acceleration(
 #[cfg(test)]
 mod tests {
     use super::{
-        get_autostart_status, recording_retention_days_from_legacy_count,
+        get_autostart_status, normalize_settings_mode, recording_retention_days_from_legacy_count,
         recording_retention_days_to_value, resolve_pill_indicator_mode, set_autostart,
+        update_channel_to_persist,
     };
+    use crate::commands::updater::UpdateChannel;
     use serde_json::json;
 
     #[test]
@@ -1591,6 +1757,14 @@ mod tests {
         let resolved = resolve_pill_indicator_mode(None, None, "when_recording".to_string());
 
         assert_eq!(resolved, "when_recording");
+    }
+
+    #[test]
+    fn settings_mode_accepts_advanced_and_falls_back_to_recommended() {
+        assert_eq!(normalize_settings_mode(Some("advanced")), "recommended");
+        assert_eq!(normalize_settings_mode(Some("recommended")), "recommended");
+        assert_eq!(normalize_settings_mode(Some("invalid")), "recommended");
+        assert_eq!(normalize_settings_mode(None), "recommended");
     }
 
     /// Verify the autostart command functions exist and compile.
@@ -1630,5 +1804,28 @@ mod tests {
         assert_eq!(recording_retention_days_from_legacy_count(0), None);
         assert_eq!(recording_retention_days_from_legacy_count(250), None);
         assert_eq!(recording_retention_days_from_legacy_count(1), None);
+    }
+    #[test]
+    fn legacy_implicit_stable_channel_is_removed() {
+        assert_eq!(
+            update_channel_to_persist(Some("stable"), false, false, UpdateChannel::Stable,),
+            None
+        );
+    }
+
+    #[test]
+    fn explicit_and_legacy_beta_channels_remain_authoritative() {
+        assert_eq!(
+            update_channel_to_persist(None, false, true, UpdateChannel::Stable),
+            Some(UpdateChannel::Stable)
+        );
+        assert_eq!(
+            update_channel_to_persist(Some("stable"), true, false, UpdateChannel::Stable,),
+            Some(UpdateChannel::Stable)
+        );
+        assert_eq!(
+            update_channel_to_persist(Some("beta"), false, false, UpdateChannel::Beta),
+            Some(UpdateChannel::Beta)
+        );
     }
 }

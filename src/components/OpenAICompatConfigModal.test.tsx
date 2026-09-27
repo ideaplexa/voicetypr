@@ -1,4 +1,3 @@
-
 import { render, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, Mock, vi } from "vitest";
@@ -18,13 +17,7 @@ describe("OpenAICompatConfigModal", () => {
   });
 
   it("renders correctly when open", () => {
-    render(
-      <OpenAICompatConfigModal
-        isOpen={true}
-        onClose={mockOnClose}
-        onSubmit={mockOnSubmit}
-      />
-    );
+    render(<OpenAICompatConfigModal isOpen={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
     expect(screen.getByText("Configure OpenAI-Compatible Provider")).toBeInTheDocument();
     expect(screen.getByLabelText("API Base URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Model ID")).toBeInTheDocument();
@@ -33,23 +26,13 @@ describe("OpenAICompatConfigModal", () => {
 
   it("does not render when closed", () => {
     render(
-      <OpenAICompatConfigModal
-        isOpen={false}
-        onClose={mockOnClose}
-        onSubmit={mockOnSubmit}
-      />
+      <OpenAICompatConfigModal isOpen={false} onClose={mockOnClose} onSubmit={mockOnSubmit} />,
     );
     expect(screen.queryByText("Configure OpenAI-Compatible Provider")).not.toBeInTheDocument();
   });
 
   it("calls onClose when the cancel button is clicked", () => {
-    render(
-      <OpenAICompatConfigModal
-        isOpen={true}
-        onClose={mockOnClose}
-        onSubmit={mockOnSubmit}
-      />
-    );
+    render(<OpenAICompatConfigModal isOpen={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
     fireEvent.click(screen.getByText("Cancel"));
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
@@ -59,13 +42,7 @@ describe("OpenAICompatConfigModal", () => {
     const { invoke } = await import("@tauri-apps/api/core");
     const invokeMock = invoke as unknown as Mock;
     invokeMock.mockResolvedValueOnce(undefined);
-    render(
-      <OpenAICompatConfigModal
-        isOpen={true}
-        onClose={mockOnClose}
-        onSubmit={mockOnSubmit}
-      />
-    );
+    render(<OpenAICompatConfigModal isOpen={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
     await user.clear(screen.getByLabelText("API Base URL"));
     await user.type(screen.getByLabelText("API Base URL"), "https://api.example.com/v1");
     await user.type(screen.getByLabelText("Model ID"), "test-model");
@@ -90,13 +67,7 @@ describe("OpenAICompatConfigModal", () => {
     const invokeMock = invoke as unknown as Mock;
     invokeMock.mockResolvedValueOnce(undefined);
 
-    render(
-      <OpenAICompatConfigModal
-        isOpen={true}
-        onClose={mockOnClose}
-        onSubmit={mockOnSubmit}
-      />
-    );
+    render(<OpenAICompatConfigModal isOpen={true} onClose={mockOnClose} onSubmit={mockOnSubmit} />);
 
     expect(screen.getByText("Save")).toBeDisabled();
 
@@ -121,12 +92,10 @@ describe("OpenAICompatConfigModal", () => {
         onSubmit={mockOnSubmit}
         defaultBaseUrl="https://initial.api.com/v1"
         defaultModel="initial-model"
-      />
+      />,
     );
 
-    expect(screen.getByLabelText("API Base URL")).toHaveValue(
-      "https://initial.api.com/v1"
-    );
+    expect(screen.getByLabelText("API Base URL")).toHaveValue("https://initial.api.com/v1");
     expect(screen.getByLabelText("Model ID")).toHaveValue("initial-model");
 
     rerender(
@@ -136,12 +105,10 @@ describe("OpenAICompatConfigModal", () => {
         onSubmit={mockOnSubmit}
         defaultBaseUrl="https://updated.api.com/v1"
         defaultModel="updated-model"
-      />
+      />,
     );
 
-    expect(screen.getByLabelText("API Base URL")).toHaveValue(
-      "https://updated.api.com/v1"
-    );
+    expect(screen.getByLabelText("API Base URL")).toHaveValue("https://updated.api.com/v1");
     expect(screen.getByLabelText("Model ID")).toHaveValue("updated-model");
   });
 });

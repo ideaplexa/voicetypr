@@ -156,31 +156,6 @@ mod performance_tests {
     }
 
     #[test]
-    fn test_audio_metrics_logging_performance() {
-        log::info!("Testing audio metrics logging performance");
-
-        let benchmark = PerformanceBenchmark::new("audio_metrics", 2000, 400);
-
-        let result = benchmark.run(|i| {
-            let additional_metrics = log_context! {
-                "iteration" => &i.to_string(),
-                "model" => "test_model",
-                "sample_rate" => "16000"
-            };
-
-            log_audio_metrics(
-                "PERFORMANCE_TEST",
-                0.75 + (i as f64 * 0.001),  // Varying energy
-                0.85 + (i as f64 * 0.0001), // Varying peak
-                2.5 + (i as f32 * 0.01),    // Varying duration
-                Some(&additional_metrics),
-            );
-        });
-
-        result.assert_performance();
-    }
-
-    #[test]
     fn test_structured_logging_performance() {
         log::info!("Testing structured logging with multiple fields");
 
@@ -456,20 +431,10 @@ mod stress_tests {
         let mut operations = 0;
 
         while start.elapsed() < duration {
-            let context = log_context! {
-                "stress_test" => "sustained",
-                "operation" => &operations.to_string(),
-                "elapsed_ms" => &start.elapsed().as_millis().to_string()
-            };
-
             log_start("STRESS_TEST");
 
             if operations % 100 == 0 {
                 log_performance("STRESS_BATCH", operations, Some("sustained_test"));
-            }
-
-            if operations % 50 == 0 {
-                log_audio_metrics("STRESS_AUDIO", 0.5, 0.8, 1.0, Some(&context));
             }
 
             log_complete("STRESS_TEST", 1);

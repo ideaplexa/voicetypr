@@ -122,6 +122,15 @@ impl KeyEventSource for WinKeyboardHook {
     }
 }
 
+/// Whether a hook event is one of VoiceTypr's OWN synthetic keystrokes: injected
+/// (`LLKHF_INJECTED`) AND carrying our [`crate::INJECTED_SIGNATURE`] in `dwExtraInfo`.
+/// External tools' injected input (Stream Deck, AutoHotkey, PowerToys) sets the
+/// injected flag but NOT our signature, so it returns false and is allowed through.
+#[inline]
+fn is_own_injection(flags: u32, extra_info: usize) -> bool {
+    (flags & LLKHF_INJECTED.0) != 0 && extra_info == crate::INJECTED_SIGNATURE
+}
+
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         // A panic unwinding out of an `extern "system"` (Win32) callback is UB
@@ -130,15 +139,17 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         // the key was consumed; a panic is treated as "not consumed" (pass through).
         let consumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-            // Ignore synthetic keystrokes (LLKHF_INJECTED). rdev's post-transcription
-            // paste is injected via SendInput, which sets this flag; forwarding it to
-            // the matcher could re-trigger a ModifierHold hotkey on Ctrl (the paste
-            // modifier), spuriously satisfy a DoubleTap/Chord, or wedge state if a
-            // synthetic key-up is missed. A WH_KEYBOARD_LL hook cannot see the
-            // injecting pid, so this also drops other tools' injected input (e.g.
-            // AutoHotkey firing the hotkey) — accepted: global hotkeys are physical
-            // input only. Still chain CallNextHookEx for pass-through.
-            if (kb.flags.0 & LLKHF_INJECTED.0) != 0 {
+            // Ignore only VoiceTypr's OWN synthetic keystrokes. The post-transcription
+            // paste (commands::text::paste_windows) injects Ctrl+V via SendInput stamped
+            // with crate::INJECTED_SIGNATURE in dwExtraInfo; forwarding it to the matcher
+            // could re-trigger a ModifierHold on Ctrl (the paste modifier), spuriously
+            // satisfy a DoubleTap/Chord, or wedge state if a synthetic key-up is missed. A
+            // WH_KEYBOARD_LL hook cannot see the injecting pid, so we distinguish by
+            // dwExtraInfo rather than a blanket LLKHF_INJECTED drop — that blanket drop
+            // regressed external tools (Stream Deck, AutoHotkey, PowerToys) that fire the
+            // hotkey via SendInput (which sets LLKHF_INJECTED). Their events carry a
+            // different dwExtraInfo and pass through. Still chain CallNextHookEx below.
+            if is_own_injection(kb.flags.0, kb.dwExtraInfo) {
                 return false;
             }
             let message = wparam.0 as u32;
@@ -360,4 +371,32 @@ fn modset_from_down(down: &HashSet<u32>) -> ModSet {
         m.insert(Modifier::Meta);
     }
     m
+}
+
+#[cfg(test)]
+mod injection_filter_tests {
+    use super::*;
+
+    #[test]
+    fn own_injection_is_ignored() {
+        // Injected flag + our signature => our own paste => ignored.
+        assert!(is_own_injection(
+            LLKHF_INJECTED.0,
+            crate::INJECTED_SIGNATURE
+        ));
+    }
+
+    #[test]
+    fn external_injection_passes_through() {
+        // Injected flag but NOT our signature (Stream Deck / AutoHotkey) => allowed.
+        assert!(!is_own_injection(LLKHF_INJECTED.0, 0));
+        assert!(!is_own_injection(LLKHF_INJECTED.0, 0xDEAD_BEEF));
+    }
+
+    #[test]
+    fn physical_key_passes_through() {
+        // No injected flag => physical key => allowed regardless of extra_info.
+        assert!(!is_own_injection(0, 0));
+        assert!(!is_own_injection(0, crate::INJECTED_SIGNATURE));
+    }
 }

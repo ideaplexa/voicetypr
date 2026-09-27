@@ -1,0 +1,132 @@
+name: Update Beta Channel
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published Stable/Beta release tag to replay'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-beta-channel
+  cancel-in-progress: false
+
+jobs:
+  update-beta-manifest:
+    # Creating the synthetic rolling `beta` release also emits `release.published`.
+    # Ignore it or the pointer workflow would recursively trigger itself.
+    if: ${{ (github.event_name == 'release' && github.event.release.tag_name != 'beta') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != 'beta') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout channel tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Load published updater manifest
+        run: |
+          RELEASE_METADATA="$(gh release view \
+            --repo "$REPOSITORY" \
+            --json isDraft,isPrerelease \
+            -- "$RELEASE_TAG")"
+          if [[ "$(jq -r '.isDraft' <<< "$RELEASE_METADATA")" == "true" ]]; then
+            echo "::error::Release $RELEASE_TAG is still a draft"
+            exit 1
+          fi
+          echo "RELEASE_IS_PRERELEASE=$(jq -r '.isPrerelease' <<< "$RELEASE_METADATA")" >> "$GITHUB_ENV"
+
+          mkdir -p candidate
+          gh release download \
+            --repo "$REPOSITORY" \
+            --pattern latest.json \
+            --dir candidate \
+            -- "$RELEASE_TAG"
+
+          CANDIDATE_VERSION="$(jq -r '.version' candidate/latest.json)"
+          if [[ -z "$CANDIDATE_VERSION" || "$CANDIDATE_VERSION" == "null" ]]; then
+            echo "::error::Published latest.json has no version"
+            exit 1
+          fi
+          echo "candidate_version=$CANDIDATE_VERSION" >> "$GITHUB_ENV"
+
+      - name: Validate release and immutable asset references
+        run: |
+          EXPECTED_TAG="$(node --input-type=module -e '
+            import { releaseTagForVersion } from "./.github/scripts/should-update-beta-manifest.mjs";
+            process.stdout.write(releaseTagForVersion(process.env.candidate_version));
+          ')"
+          if [[ "$RELEASE_TAG" != "$EXPECTED_TAG" ]]; then
+            echo "::error::Release tag $RELEASE_TAG does not match manifest version $candidate_version"
+            exit 1
+          fi
+
+          ACTUAL_CHANNEL="$(node --input-type=module -e '
+            import { releaseChannelForVersion } from "./.github/scripts/should-update-beta-manifest.mjs";
+            process.stdout.write(releaseChannelForVersion(process.env.candidate_version));
+          ')"
+          if [[ "$ACTUAL_CHANNEL" == "beta" && "$RELEASE_IS_PRERELEASE" != "true" ]]; then
+            echo "::error::Beta versions must be published as GitHub prereleases"
+            exit 1
+          fi
+          if [[ "$ACTUAL_CHANNEL" == "stable" && "$RELEASE_IS_PRERELEASE" == "true" ]]; then
+            echo "::error::Stable versions must be published as ordinary GitHub releases"
+            exit 1
+          fi
+
+          jq -e --arg tag "$RELEASE_TAG" --arg repository "$REPOSITORY" '
+            (.platforms | type == "object") and
+            (.platforms | length > 0) and
+            all(.platforms[];
+              (.url | startswith("https://github.com/\($repository)/releases/download/\($tag)/")) and
+              (.signature | type == "string" and length > 0)
+            )
+          ' candidate/latest.json >/dev/null || {
+            echo "::error::Manifest must reference canonical immutable version-tagged assets with signatures"
+            exit 1
+          }
+
+      - name: Decide whether candidate advances Beta
+        run: |
+          SHOULD_UPDATE=true
+          if gh release view beta --repo "$REPOSITORY" >/dev/null 2>&1; then
+            mkdir -p current
+            gh release download beta \
+              --repo "$REPOSITORY" \
+              --pattern latest.json \
+              --dir current
+            CURRENT_VERSION="$(jq -r '.version' current/latest.json)"
+            SHOULD_UPDATE="$(node .github/scripts/should-update-beta-manifest.mjs \
+              "$candidate_version" "$CURRENT_VERSION")"
+            echo "Current Beta pointer: $CURRENT_VERSION"
+          fi
+          echo "should_update=$SHOULD_UPDATE" >> "$GITHUB_ENV"
+
+      - name: Publish rolling Beta manifest
+        if: ${{ env.should_update == 'true' }}
+        run: |
+          if gh release view beta --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload beta candidate/latest.json \
+              --repo "$REPOSITORY" \
+              --clobber
+          else
+            gh release create beta candidate/latest.json \
+              --repo "$REPOSITORY" \
+              --prerelease \
+              --title "Voicetypr Beta Channel" \
+              --notes "Rolling updater manifest for opted-in Beta users. Install versioned releases from their own tags."
+          fi
+
+      - name: Keep newer Beta pointer
+        if: ${{ env.should_update != 'true' }}
+        run: echo "::notice::Published release $candidate_version does not advance the current Beta pointer."

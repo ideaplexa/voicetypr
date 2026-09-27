@@ -65,58 +65,10 @@ const actionDefinitions: ShortcutActionDefinition[] = [
     allows_single_key: true,
   },
   {
-    action: "cycle_formatting_mode",
-    label: "Cycle Formatting Mode",
-    description: "Move to the next formatting mode.",
-    section: "Formatting",
-    recommended_trigger: "pressed",
-    allows_single_key: true,
-  },
-  {
-    action: "set_personal_dictation",
-    label: "Personal Dictation",
-    description: "Switch to personal dictation.",
-    section: "Formatting",
-    recommended_trigger: "pressed",
-    allows_single_key: true,
-  },
-  {
-    action: "set_clean_dictation",
-    label: "Clean Dictation",
-    description: "Switch to clean dictation.",
-    section: "Formatting",
-    recommended_trigger: "pressed",
-    allows_single_key: true,
-  },
-  {
-    action: "set_writing",
-    label: "Writing",
-    description: "Switch to writing mode.",
-    section: "Formatting",
-    recommended_trigger: "pressed",
-    allows_single_key: true,
-  },
-  {
-    action: "set_notes",
-    label: "Notes",
-    description: "Switch to notes mode.",
-    section: "Formatting",
-    recommended_trigger: "pressed",
-    allows_single_key: true,
-  },
-  {
-    action: "set_message",
-    label: "Message",
-    description: "Switch to message mode.",
-    section: "Formatting",
-    recommended_trigger: "pressed",
-    allows_single_key: true,
-  },
-  {
-    action: "set_code",
-    label: "Code",
-    description: "Switch to code mode.",
-    section: "Formatting",
+    action: "toggle_ai_formatting",
+    label: "Toggle Polish",
+    description: "Turn Polish on or off.",
+    section: "Polish",
     recommended_trigger: "pressed",
     allows_single_key: true,
   },
@@ -132,7 +84,9 @@ const actionDefinitions: ShortcutActionDefinition[] = [
 
 function arrangeInvoke(
   settings: ShortcutSettings = { bindings: [] },
-  onUpdate: (submittedSettings: ShortcutSettings) => ShortcutSettings | Promise<ShortcutSettings> = (submittedSettings) => submittedSettings,
+  onUpdate: (
+    submittedSettings: ShortcutSettings,
+  ) => ShortcutSettings | Promise<ShortcutSettings> = (submittedSettings) => submittedSettings,
   options: { rejectSettings?: Error } = {},
 ) {
   const invokeMock = vi.mocked(invoke);
@@ -149,10 +103,12 @@ function arrangeInvoke(
     }
 
     if (command === "update_shortcut_settings") {
-      return Promise.resolve(onUpdate((args as { settings: ShortcutSettings }).settings)).then((updatedSettings) => {
-        settings = updatedSettings;
-        return settings;
-      });
+      return Promise.resolve(onUpdate((args as { settings: ShortcutSettings }).settings)).then(
+        (updatedSettings) => {
+          settings = updatedSettings;
+          return settings;
+        },
+      );
     }
 
     return Promise.resolve(undefined);
@@ -171,7 +127,7 @@ describe("ShortcutsSection", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Recording" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Formatting" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Polish" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "App" })).toBeInTheDocument();
     });
 
@@ -180,13 +136,19 @@ describe("ShortcutsSection", () => {
     expect(screen.queryByText("Toggle Recording")).not.toBeInTheDocument();
     expect(screen.queryByText("Hold to Record")).not.toBeInTheDocument();
     expect(screen.getByText("Cancel Recording")).toBeInTheDocument();
+    expect(
+      screen.getByText("Press Escape twice while recording to cancel the current take."),
+    ).toBeInTheDocument();
     expect(screen.getByText("Copy Last Transcription")).toBeInTheDocument();
+    expect(screen.getByText("Toggle Polish")).toBeInTheDocument();
     expect(screen.getByText("Open Dashboard")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Set shortcut" })).toHaveLength(
       actionDefinitions.filter(
         (a) => a.action !== "toggle_recording" && a.action !== "hold_to_record",
       ).length,
     );
+    expect(screen.queryByText("0 of 5 single-key shortcuts used.")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 bindings configured")).not.toBeInTheDocument();
   });
 
   it("adds a copy-last shortcut and sends the full settings object", async () => {
@@ -242,7 +204,9 @@ describe("ShortcutsSection", () => {
         description: "Alt+C is already assigned to Copy Last Transcription.",
       });
     });
-    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "update_shortcut_settings")).toHaveLength(0);
+    expect(
+      vi.mocked(invoke).mock.calls.filter(([command]) => command === "update_shortcut_settings"),
+    ).toHaveLength(0);
   });
 
   it("allows reusing a shortcut from a disabled binding", async () => {
@@ -318,8 +282,12 @@ describe("ShortcutsSection", () => {
     const copyRow = await screen.findByRole("group", { name: "Copy Last Transcription" });
     await user.click(within(copyRow).getByRole("button", { name: "Set shortcut" }));
 
-    expect(within(copyRow).queryByRole("switch", { name: "Use a single key" })).not.toBeInTheDocument();
-    expect(within(copyRow).queryByRole("switch", { name: "Hold to talk (push-to-talk)" })).not.toBeInTheDocument();
+    expect(
+      within(copyRow).queryByRole("switch", { name: "Use a single key" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(copyRow).queryByRole("switch", { name: "Hold to talk (push-to-talk)" }),
+    ).not.toBeInTheDocument();
   });
 
   it("saves a single-key F1 binding on a non-recording action", async () => {
@@ -400,5 +368,4 @@ describe("ShortcutsSection", () => {
     expect(within(copyRow).queryByRole("button", { name: "Add shortcut" })).not.toBeInTheDocument();
     expect(within(copyRow).getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
-
 });

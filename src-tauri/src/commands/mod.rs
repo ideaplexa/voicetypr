@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod audio;
+pub mod audio_feedback;
 pub mod cli_tool;
 pub mod clipboard;
 pub mod debug;
@@ -19,5 +20,6 @@ pub mod stt;
 pub mod system_info;
 pub mod telemetry;
 pub mod text;
+pub mod updater;
 pub mod utils;
 pub mod window;

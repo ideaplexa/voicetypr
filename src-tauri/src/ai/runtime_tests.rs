@@ -2,9 +2,9 @@
 mod tests {
     use super::super::contract::AiPolishRequest;
     use super::super::error::AiProviderError;
-    use super::super::executor::AiExecutor;
+    use super::super::executor::{AiExecutor, OpenAiCompatibleConfig};
     use super::super::genai_runtime::AiKeyResolver;
-    use super::super::providers::PROVIDER_CUSTOM;
+    use super::super::providers::{PROVIDER_CLAUDE_CODE, PROVIDER_CUSTOM, PROVIDER_OPENROUTER};
     use reqwest::header::AUTHORIZATION;
     use serde_json::json;
     use std::collections::HashMap;
@@ -252,6 +252,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ai_runtime_openrouter_routes_via_openai_compatible_with_attribution_headers() {
+        // OpenRouter must route through the OpenAI-compatible runtime (never the
+        // genai adapter), carrying its own bearer key plus the app-attribution
+        // headers. The embedded catalog marks `openrouter` as runtime
+        // "openai_compatible", so dispatch resolves it here.
+        let server = MockServer::start().await;
+        mount_sequence(
+            &server,
+            PROVIDER_OPENROUTER,
+            vec![ok_response(PROVIDER_OPENROUTER, "polished")],
+        )
+        .await;
+
+        let key_resolver: AiKeyResolver = Arc::new(|provider_id| {
+            if provider_id == PROVIDER_OPENROUTER {
+                Some("test-key".to_string())
+            } else {
+                None
+            }
+        });
+        let executor = AiExecutor::with_native_endpoint_overrides(
+            reqwest::Client::new(),
+            key_resolver,
+            OpenAiCompatibleConfig {
+                base_url: server.uri(),
+                no_auth: false,
+                key_provider_id: PROVIDER_OPENROUTER.to_string(),
+                extra_headers: vec![
+                    (
+                        "HTTP-Referer".to_string(),
+                        "https://voicetypr.com".to_string(),
+                    ),
+                    ("X-Title".to_string(), "VoiceTypr".to_string()),
+                ],
+            },
+            HashMap::new(),
+        );
+
+        let result = executor
+            .polish(
+                AiPolishRequest {
+                    provider_id: PROVIDER_OPENROUTER.to_string(),
+                    model_id: "google/gemini-2.5-flash-lite".to_string(),
+                    reasoning_level: None,
+                    fast_mode: false,
+                    input_text: "raw transcript".to_string(),
+                    prompt: "polish the transcript".to_string(),
+                    timeout_ms: 1_000,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.output_text, "polished");
+        assert_eq!(result.provider_id, PROVIDER_OPENROUTER);
+
+        let request = server.received_requests().await.unwrap().remove(0);
+        assert_eq!(
+            request
+                .headers
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer test-key")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("HTTP-Referer")
+                .and_then(|value| value.to_str().ok()),
+            Some("https://voicetypr.com")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("X-Title")
+                .and_then(|value| value.to_str().ok()),
+            Some("VoiceTypr")
+        );
+    }
+
+    #[tokio::test]
     async fn ai_runtime_maps_gemini_api_key_invalid_400_to_invalid_api_key() {
         let case = ProviderCase {
             id: PROVIDER_GEMINI,
@@ -338,6 +420,127 @@ mod tests {
         assert_eq!(result.output_text, "polished");
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
         assert!(started.elapsed() < Duration::from_millis(300));
+    }
+
+    #[tokio::test]
+    async fn ai_runtime_retries_once_on_refusal_content_then_succeeds() {
+        // Distinct from the HTTP-error retry path (should_retry): a 200-OK
+        // response whose content is a refusal fails validate_ai_output
+        // (BadResponse), triggering EXACTLY one retry. First call refuses,
+        // second call returns clean text — the executor must recover and have
+        // hit the server exactly twice.
+        let case = ProviderCase {
+            id: PROVIDER_CUSTOM,
+            model: "custom-model",
+        };
+        let server = MockServer::start().await;
+        mount_sequence(
+            &server,
+            case.id,
+            vec![
+                ok_response(case.id, "I'm sorry, I can't help with that."),
+                ok_response(case.id, "Polished transcript here."),
+            ],
+        )
+        .await;
+        let executor = executor_for(case, &server, true, false);
+
+        let result = executor
+            .polish(request(case, 1_000), CancellationToken::new())
+            .await
+            .unwrap();
+
+        assert_eq!(result.output_text, "Polished transcript here.");
+        // Exactly one retry → two total requests, no more, no fewer.
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ai_runtime_gives_up_after_one_retry_when_content_stays_malformed() {
+        // The validate-on-content retry fires ONCE: a persistently malformed
+        // response surfaces BadResponse after the single retry, never an
+        // infinite loop. Complements the success-recovery case to pin the retry
+        // ceiling at exactly one.
+        let case = ProviderCase {
+            id: PROVIDER_CUSTOM,
+            model: "custom-model",
+        };
+        let server = MockServer::start().await;
+        mount_sequence(
+            &server,
+            case.id,
+            vec![
+                ok_response(case.id, "I'm sorry, I can't do that."),
+                ok_response(case.id, "I cannot help with this request."),
+            ],
+        )
+        .await;
+        let executor = executor_for(case, &server, true, false);
+
+        let error = executor
+            .polish(request(case, 1_000), CancellationToken::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, AiProviderError::BadResponse);
+        // One attempt + one retry, then it stops: exactly two requests.
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ai_runtime_retries_once_on_truncated_content_then_succeeds() {
+        let case = ProviderCase {
+            id: PROVIDER_CUSTOM,
+            model: "custom-model",
+        };
+        let server = MockServer::start().await;
+        let truncated = "x".repeat(4097);
+        mount_sequence(
+            &server,
+            case.id,
+            vec![
+                ok_response(case.id, &truncated),
+                ok_response(case.id, "Polished transcript here."),
+            ],
+        )
+        .await;
+        let executor = executor_for(case, &server, true, false);
+
+        let result = executor
+            .polish(request(case, 1_000), CancellationToken::new())
+            .await
+            .unwrap();
+
+        assert_eq!(result.output_text, "Polished transcript here.");
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ai_runtime_gives_up_after_one_retry_when_content_stays_truncated() {
+        let case = ProviderCase {
+            id: PROVIDER_CUSTOM,
+            model: "custom-model",
+        };
+        let server = MockServer::start().await;
+        let truncated = "x".repeat(4097);
+        mount_sequence(
+            &server,
+            case.id,
+            vec![
+                ok_response(case.id, &truncated),
+                ok_response(case.id, &truncated),
+            ],
+        )
+        .await;
+        let executor = executor_for(case, &server, true, false);
+
+        let error = executor
+            .polish(request(case, 1_000), CancellationToken::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, AiProviderError::BadResponse);
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
     }
 
     #[tokio::test]
@@ -505,8 +708,7 @@ mod tests {
         AiExecutor::with_native_endpoint_overrides(
             reqwest::Client::new(),
             key_resolver,
-            server.uri(),
-            custom_no_auth,
+            OpenAiCompatibleConfig::custom(server.uri(), custom_no_auth),
             overrides,
         )
     }
@@ -515,6 +717,8 @@ mod tests {
         AiPolishRequest {
             provider_id: case.id.to_string(),
             model_id: case.model.to_string(),
+            reasoning_level: None,
+            fast_mode: false,
             input_text: "raw transcript".to_string(),
             prompt: "polish the transcript".to_string(),
             timeout_ms,
@@ -593,6 +797,76 @@ mod tests {
                     == Some("test-key")
             }
             _ => false,
+        }
+    }
+
+    // Ignored: on a machine where `claude` is installed this actually spawns the
+    // real CLI (and the first `resolve_binary` triggers the ~8s login-shell PATH
+    // probe), so it is neither hermetic nor free. Routing (claude-code ->
+    // AgentCliRuntime, not the HTTP paths) is proven hermetically by the catalog
+    // `claude_code_provider_is_agent_cli_runtime_and_not_native` test. Run this
+    // end-to-end variant manually with `--ignored` on a machine with the CLI.
+    #[tokio::test]
+    #[ignore = "spawns the real claude CLI + login-shell probe when installed; routing covered hermetically by the catalog runtime_kind test"]
+    async fn execute_once_routes_agent_cli_provider_and_fails_gracefully_when_binary_missing() {
+        // claude-code is an agent_cli provider. execute_once must route it to
+        // AgentCliRuntime (NOT the HTTP/openai-compatible path, NOT the
+        // UnsupportedProvider dispatch fallback). In CI the `claude` binary is
+        // absent, so the cold spawn fails — but gracefully (Err, not panic),
+        // proving the graceful spawn-failure path that backs the raw-transcript
+        // fallback. The short budget bounds the test so a slow login-shell PATH
+        // probe surfaces Timeout rather than hanging.
+        let executor = AiExecutor::with_native_endpoint_overrides(
+            reqwest::Client::new(),
+            Arc::new(|_| None),
+            OpenAiCompatibleConfig::custom(String::new(), true),
+            HashMap::new(),
+        );
+        let request = AiPolishRequest {
+            provider_id: PROVIDER_CLAUDE_CODE.to_string(),
+            model_id: String::new(),
+            reasoning_level: Some("low".to_string()),
+            fast_mode: false,
+            input_text: "raw transcript".to_string(),
+            prompt: "polish the transcript".to_string(),
+            timeout_ms: 2_000,
+        };
+        let result = executor.polish(request, CancellationToken::new()).await;
+        // claude-code must route to AgentCliRuntime (NOT the HTTP/openai-
+        // compatible path, NOT the UnsupportedProvider dispatch fallback).
+        // The graceful outcome depends on whether `claude` is installed
+        // locally: absent (CI) -> UnsupportedProvider/Timeout; present (a dev
+        // machine with the CLI actually launches now that the child PATH is
+        // restored) -> the spawn reaches the runtime and either succeeds (Ok)
+        // or fails with a real variant. All prove graceful routing; only a
+        // panic or an unexpected (wrong-runtime) variant fails the invariant.
+        match super::super::agent_cli::resolve_binary("claude").await {
+            None => {
+                let err = result.expect_err(
+                    "agent_cli cold spawn must fail gracefully when the binary is missing",
+                );
+                assert!(
+                    matches!(
+                        err,
+                        AiProviderError::UnsupportedProvider | AiProviderError::Timeout
+                    ),
+                    "expected graceful spawn failure (UnsupportedProvider/Timeout), got {err:?}",
+                );
+            }
+            Some(_) => {
+                if let Err(err) = result {
+                    assert!(
+                        matches!(
+                            err,
+                            AiProviderError::UnsupportedProvider
+                                | AiProviderError::Timeout
+                                | AiProviderError::BadResponse
+                                | AiProviderError::Internal
+                        ),
+                        "expected a graceful agent_cli outcome, got {err:?}",
+                    );
+                }
+            }
         }
     }
 }

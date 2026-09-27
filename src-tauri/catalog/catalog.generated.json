@@ -260,6 +260,7 @@
       ],
       "namespace": null,
       "requires_api_key": true,
+      "runtime": "genai_adapter",
       "status": "production",
       "supports_base_url": false,
       "supports_reasoning": true
@@ -469,6 +470,7 @@
       ],
       "namespace": null,
       "requires_api_key": true,
+      "runtime": "genai_adapter",
       "status": "production",
       "supports_base_url": false,
       "supports_reasoning": true
@@ -966,9 +968,54 @@
       ],
       "namespace": null,
       "requires_api_key": true,
+      "runtime": "genai_adapter",
       "status": "production",
       "supports_base_url": false,
       "supports_reasoning": true
+    },
+    {
+      "adapter": null,
+      "docs_url": null,
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "models": [
+        {
+          "label": "Gemini 2.5 Flash Lite",
+          "model_id": "google/gemini-2.5-flash-lite",
+          "reasoning": false,
+          "recommended": true
+        },
+        {
+          "label": "GPT-4.1 nano",
+          "model_id": "openai/gpt-4.1-nano",
+          "reasoning": false,
+          "recommended": true
+        },
+        {
+          "label": "Claude 3 Haiku",
+          "model_id": "anthropic/claude-3-haiku",
+          "reasoning": false,
+          "recommended": false
+        },
+        {
+          "label": "Llama 3.3 70B Instruct",
+          "model_id": "meta-llama/llama-3.3-70b-instruct",
+          "reasoning": false,
+          "recommended": false
+        },
+        {
+          "label": "GPT-4o mini",
+          "model_id": "openai/gpt-4o-mini",
+          "reasoning": false,
+          "recommended": false
+        }
+      ],
+      "namespace": null,
+      "requires_api_key": true,
+      "runtime": "openai_compatible",
+      "status": "production",
+      "supports_base_url": false,
+      "supports_reasoning": false
     }
   ]
 }

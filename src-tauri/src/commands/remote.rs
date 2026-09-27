@@ -1547,10 +1547,6 @@ pub async fn transcribe_remote(
     let timeout_ms = timeout_ms_for_wav_file(&audio_path, TranscriptionSource::Upload);
 
     let store = app.store("settings").map_err(|e| e.to_string())?;
-    let ai_enabled = store
-        .get("ai_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
     let legacy_speech_language = store
         .get("language")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
@@ -1567,8 +1563,7 @@ pub async fn transcribe_remote(
         .and_then(|v| v.as_str().map(|s| s.to_string()));
     drop(store);
 
-    let uses_personal_dictation =
-        crate::writing::effective_personal_dictation_mode(&app, ai_enabled)?;
+    let uses_personal_dictation = crate::writing::effective_personal_dictation_mode(&app)?;
     let transcription_task = if uses_personal_dictation {
         crate::commands::settings::TRANSCRIPTION_TASK_TRANSCRIBE.to_string()
     } else {
@@ -1609,10 +1604,9 @@ pub async fn transcribe_remote(
     let transcription = crate::transcription::TranscriptionResult::new(&job, response.text)
         .with_transcript_language(response.transcript_language)
         .with_processing_duration_ms(Some(response.duration_ms));
-    let writing_result =
-        crate::writing::process_transcription(app.clone(), transcription, ai_enabled)
-            .await
-            .map_err(|error| error.user_message())?;
+    let writing_result = crate::writing::process_transcription(app.clone(), transcription)
+        .await
+        .map_err(|error| error.user_message())?;
     Ok(writing_result.final_text)
 }
 
@@ -1698,10 +1692,8 @@ pub fn load_remote_settings(app: &AppHandle) -> RemoteSettings {
         remote_settings_connection_password_markers(raw_value.as_ref());
 
     let mut settings: RemoteSettings = raw_value
-        .and_then(|v| {
-            log::debug!("🔧 [REMOTE] Raw JSON: {:?}", v);
-            serde_json::from_value(v.clone()).ok()
-        })
+        // Legacy records can still contain plaintext passwords before migration.
+        .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
     let mut migrated_legacy_secret = false;
 

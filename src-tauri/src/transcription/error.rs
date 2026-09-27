@@ -13,6 +13,7 @@ pub enum TranscriptionErrorCode {
     Cancelled,
     Timeout,
     TransportFailed,
+    StorageLimitExceeded,
     Unauthorized,
     UnsupportedMediaType,
     ResponseInvalid,
@@ -96,6 +97,7 @@ pub(crate) fn from_stt_error(err: &SttError, source: TranscriptionSource) -> Tra
         E::Auth => TranscriptionErrorCode::Unauthorized,
         E::ModelUnavailable => TranscriptionErrorCode::ModelUnavailable,
         E::RateLimited | E::Network => TranscriptionErrorCode::TransportFailed,
+        E::LimitExceeded { .. } => TranscriptionErrorCode::StorageLimitExceeded,
         E::Timeout => TranscriptionErrorCode::Timeout,
         E::Server => TranscriptionErrorCode::EngineFailed,
         E::BadResponse => TranscriptionErrorCode::ResponseInvalid,
@@ -154,6 +156,9 @@ fn user_message_for_code(code: TranscriptionErrorCode) -> &'static str {
         }
         TranscriptionErrorCode::Unauthorized => {
             "Authentication failed for the transcription service."
+        }
+        TranscriptionErrorCode::StorageLimitExceeded => {
+            "Cloud storage limit reached. Delete stored files (Sources → Cloud → Clean up stored files, or your provider's console) and try again."
         }
         TranscriptionErrorCode::UnsupportedMediaType => "This audio format is not supported.",
         TranscriptionErrorCode::ResponseInvalid => {
@@ -276,7 +281,11 @@ mod tests {
                 TranscriptionErrorCode::TransportFailed,
                 true,
             ),
-            (SttError::Timeout, TranscriptionErrorCode::Timeout, true),
+            (
+                SttError::LimitExceeded { file_storage: true },
+                TranscriptionErrorCode::StorageLimitExceeded,
+                false,
+            ),
             (
                 SttError::Network,
                 TranscriptionErrorCode::TransportFailed,

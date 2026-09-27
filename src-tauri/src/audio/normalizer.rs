@@ -14,10 +14,49 @@ const STANDARD_MAX_GAIN: f32 = 10.0;
 const SPEECH_MAX_GAIN: f32 = 32.0;
 const SPEECH_RMS_FLOOR: f32 = crate::audio::silence_detector::VOICE_RMS_THRESHOLD;
 const SILENCE_RMS_THRESHOLD: f32 = 1e-4; // ~ -80 dBFS
+const TRIM_WINDOW_SAMPLES: usize = TARGET_RATE as usize / 50; // 20ms @16k = 320
+const REQUIRED_VOICE_WINDOWS: usize = 15; // 300ms sustained voice
+const TRAILING_SILENCE_RMS_THRESHOLD: f32 =
+    crate::audio::silence_detector::VOICE_RMS_THRESHOLD * 0.25; // 0.00125
+const MIN_TRAILING_SILENCE_TO_TRIM_WINDOWS: usize = 35; // 700ms
+const RETAIN_TRAILING_CONTEXT_WINDOWS: usize = 15; // keep 300ms after last speech
+const MIN_RETAINED_SAMPLES_AFTER_TRIM: usize = TARGET_RATE as usize / 2; // 0.5s floor
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NormalizationMetrics {
+    pub pre_gain_peak: f32,
+    pub speech_like_modulation: bool,
+    pub applied_gain: f32,
+    pub input_duration_ms: u64,
+    pub output_duration_ms: u64,
+    pub trimmed_duration_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct NormalizedAudio {
+    pub path: PathBuf,
+    pub metrics: NormalizationMetrics,
+}
+
+fn duration_ms(sample_count: usize) -> u64 {
+    (sample_count as u64)
+        .saturating_mul(1000)
+        .checked_div(u64::from(TARGET_RATE))
+        .unwrap_or(0)
+}
 
 /// Normalize any WAV (our recorder output) to the local engine contract:
 /// WAV PCM S16LE, mono, 16 kHz, peak-normalized with speech-gated quiet-clip gain and light dither.
 pub fn normalize_to_whisper_wav(input_wav: &Path, out_dir: &Path) -> Result<PathBuf, String> {
+    normalize_to_whisper_wav_with_metrics(input_wav, out_dir).map(|audio| audio.path)
+}
+
+/// Normalize audio and return evidence already computed while preparing the
+/// engine input. Metric collection adds no separate full-buffer traversal.
+pub fn normalize_to_whisper_wav_with_metrics(
+    input_wav: &Path,
+    out_dir: &Path,
+) -> Result<NormalizedAudio, String> {
     if !input_wav.exists() {
         return Err(format!("Input WAV does not exist: {:?}", input_wav));
     }
@@ -75,6 +114,7 @@ pub fn normalize_to_whisper_wav(input_wav: &Path, out_dir: &Path) -> Result<Path
     // (voiced energy AND genuine near-silent gaps); steady noise/tones stay at 10x.
     let peak = resampled.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
     let speech_like = has_speech_like_modulation(&resampled);
+    let input_duration_ms = duration_ms(resampled.len());
     let gain = peak_normalization_gain(peak, speech_like);
     let normalized: Vec<f32> = if (gain - 1.0).abs() > 1e-3 {
         resampled
@@ -85,10 +125,21 @@ pub fn normalize_to_whisper_wav(input_wav: &Path, out_dir: &Path) -> Result<Path
         resampled
     };
 
+    let trimmed = trim_trailing_silence_for_whisper(&normalized);
+    let output_duration_ms = duration_ms(trimmed.len());
+    let metrics = NormalizationMetrics {
+        pre_gain_peak: peak,
+        speech_like_modulation: speech_like,
+        applied_gain: gain,
+        input_duration_ms,
+        output_duration_ms,
+        trimmed_duration_ms: input_duration_ms.saturating_sub(output_duration_ms),
+    };
+
     // Quantize to i16 with TPDF dither
     let mut rng = rand::thread_rng();
-    let mut pcm_i16 = Vec::with_capacity(normalized.len());
-    for &x in &normalized {
+    let mut pcm_i16 = Vec::with_capacity(trimmed.len());
+    for &x in trimmed {
         // TPDF dither: add two independent uniform(-0.5,0.5) LSBs
         let dither = (rng.gen::<f32>() - 0.5) + (rng.gen::<f32>() - 0.5);
         let y = (x * i16::MAX as f32 + dither).clamp(i16::MIN as f32, i16::MAX as f32);
@@ -115,7 +166,10 @@ pub fn normalize_to_whisper_wav(input_wav: &Path, out_dir: &Path) -> Result<Path
         .finalize()
         .map_err(|e| format!("WAV finalize failed: {}", e))?;
 
-    Ok(out_path)
+    Ok(NormalizedAudio {
+        path: out_path,
+        metrics,
+    })
 }
 
 pub(crate) fn peak_normalization_gain(peak: f32, speech_like: bool) -> f32 {
@@ -130,6 +184,76 @@ pub(crate) fn peak_normalization_gain(peak: f32, speech_like: bool) -> f32 {
     };
 
     (TARGET_PEAK / peak).min(max_gain)
+}
+
+fn trim_trailing_silence_for_whisper(samples: &[f32]) -> &[f32] {
+    if samples.len() <= MIN_RETAINED_SAMPLES_AFTER_TRIM {
+        return samples;
+    }
+
+    let window_rms = collect_window_rms(samples);
+    if !has_sustained_voice_windows(&window_rms) {
+        return samples;
+    }
+
+    let silent_tail = trailing_silence_windows(&window_rms);
+    if silent_tail < MIN_TRAILING_SILENCE_TO_TRIM_WINDOWS {
+        return samples;
+    }
+
+    let total_windows = window_rms.len();
+    let silent_tail_start = total_windows.saturating_sub(silent_tail);
+    let cut_window = (silent_tail_start + RETAIN_TRAILING_CONTEXT_WINDOWS).min(total_windows);
+    let cut_samples = (cut_window * TRIM_WINDOW_SAMPLES).min(samples.len());
+    if cut_samples < MIN_RETAINED_SAMPLES_AFTER_TRIM {
+        return samples;
+    }
+
+    let removed_samples = samples.len().saturating_sub(cut_samples);
+    let kept_ms = cut_samples as f32 / TARGET_RATE as f32 * 1000.0;
+    let removed_ms = removed_samples as f32 / TARGET_RATE as f32 * 1000.0;
+    log::info!(
+        "Trimmed trailing digital silence for Whisper: kept {:.0}ms, removed {:.0}ms",
+        kept_ms,
+        removed_ms
+    );
+
+    &samples[..cut_samples]
+}
+
+fn collect_window_rms(samples: &[f32]) -> Vec<f32> {
+    samples
+        .chunks(TRIM_WINDOW_SAMPLES)
+        .filter(|window| !window.is_empty())
+        .map(|window| {
+            let sum_sq: f32 = window.iter().map(|&x| x * x).sum();
+            (sum_sq / window.len() as f32).sqrt()
+        })
+        .collect()
+}
+
+fn has_sustained_voice_windows(window_rms: &[f32]) -> bool {
+    let voice_threshold = crate::audio::silence_detector::VOICE_RMS_THRESHOLD;
+    let mut run = 0usize;
+    for &rms in window_rms {
+        if rms >= voice_threshold {
+            run += 1;
+            if run >= REQUIRED_VOICE_WINDOWS {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
+fn trailing_silence_windows(window_rms: &[f32]) -> usize {
+    window_rms
+        .iter()
+        .rev()
+        .take_while(|&&rms| rms <= TRAILING_SILENCE_RMS_THRESHOLD)
+        .count()
 }
 
 fn has_speech_like_modulation(samples: &[f32]) -> bool {

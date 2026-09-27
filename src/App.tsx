@@ -1,4 +1,4 @@
-import { Toaster } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppErrorBoundary } from "./components/ErrorBoundary";
 import { AppContainer } from "./components/AppContainer";
@@ -7,42 +7,49 @@ import { ReadinessProvider } from "./contexts/ReadinessContext";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { ModelManagementProvider } from "./contexts/ModelManagementContext";
 import { ModelAvailabilityProvider } from "./contexts/ModelAvailabilityContext";
+import { useTheme } from "@/hooks/useTheme";
+
+/** Applies the stored theme to the document root. Must live inside SettingsProvider. */
+function ThemeSync() {
+  useTheme();
+  return null;
+}
 
 export default function App() {
   return (
     <AppErrorBoundary>
       <LicenseProvider>
         <SettingsProvider>
+          <ThemeSync />
           <ModelAvailabilityProvider>
             <ReadinessProvider>
               <ModelManagementProvider>
-              <TooltipProvider>
-                <AppContainer />
-                <Toaster
-                  position="top-center"
-                  closeButton
-                  toastOptions={{
-                    classNames: {
-                      toast:
-                        "border-border/60 bg-card/95 text-card-foreground shadow-xl shadow-black/10 backdrop-blur supports-[backdrop-filter]:bg-card/90",
-                      title: "text-sm font-semibold",
-                      description: "text-sm text-muted-foreground",
-                      closeButton:
-                        "border-border/60 bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      success:
-                        "border-green-500/25 bg-green-500/10 text-green-900 dark:text-green-100",
-                      error:
-                        "border-red-500/25 bg-red-500/10 text-red-900 dark:text-red-100",
-                      warning:
-                        "border-amber-500/30 bg-amber-50/80 text-amber-800 dark:border-amber-400/25 dark:bg-amber-950/20 dark:text-amber-200",
-                      info:
-                        "border-blue-500/25 bg-blue-500/10 text-blue-900 dark:text-blue-100",
-                    },
-                  }}
-                />
-              </TooltipProvider>
-            </ModelManagementProvider>
-          </ReadinessProvider>
+                <TooltipProvider>
+                  <AppContainer />
+                  <Toaster
+                    position="top-center"
+                    closeButton
+                    expand
+                    visibleToasts={4}
+                    toastOptions={{
+                      duration: 5_000,
+                      classNames: {
+                        toast:
+                          "border-border bg-popover text-popover-foreground shadow-2xl shadow-black/20 ring-1 ring-black/5",
+                        title: "text-sm font-semibold",
+                        description: "text-sm leading-relaxed text-muted-foreground",
+                        closeButton:
+                          "border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground",
+                        success: "border-sage/50",
+                        error: "border-destructive/50",
+                        warning: "border-amber-500/50",
+                        info: "border-sky-500/50",
+                      },
+                    }}
+                  />
+                </TooltipProvider>
+              </ModelManagementProvider>
+            </ReadinessProvider>
           </ModelAvailabilityProvider>
         </SettingsProvider>
       </LicenseProvider>

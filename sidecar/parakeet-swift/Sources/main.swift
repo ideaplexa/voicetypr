@@ -133,6 +133,21 @@ func logSystemInfo() {
 
 
 
+struct IncomingVocabularyTerm: Decodable {
+    let text: String
+    let aliases: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case text, aliases
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        aliases = try container.decodeIfPresent([String].self, forKey: .aliases) ?? []
+    }
+}
+
 struct OkResponse: Encodable {
     let type: String = "ok"
     let command: String
@@ -176,6 +191,8 @@ struct StatusResponse: Encodable {
     let modelPath: String? = nil
     let precision: String? = nil
     let attention: String? = nil
+    let customVocabularySupported: Bool = true
+    let customVocabularyReady: Bool = ctcVocabularyReady()
 }
 
 struct ProgressResponse: Encodable {
@@ -294,6 +311,16 @@ enum SupportedModel: Hashable {
 @MainActor var isModelLoaded = false
 @MainActor var loadedModelVersion: SupportedModelVersion?
 @MainActor var downloadedVersions = Set<SupportedModelVersion>()
+@MainActor var cachedCtcModels: CtcModels?
+@MainActor var cachedCtcTokenizer: CtcTokenizer?
+
+func ctcVocabularyReady() -> Bool {
+    let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
+    let tokenizerURL = directory.appendingPathComponent("tokenizer.json")
+    return CtcModels.modelsExist(at: directory)
+        && FileManager.default.fileExists(atPath: tokenizerURL.path)
+}
+@MainActor var cachedCtcSpotter: CtcKeywordSpotter?
 @MainActor var loadedModel: SupportedModel?
 @MainActor var unifiedManager: StreamingUnifiedAsrManager?
 @MainActor var nemotronMultilingualManager: StreamingNemotronMultilingualAsrManager?
@@ -962,7 +989,7 @@ struct ParakeetSidecar {
             // Direct file mode for testing
             let audioPath = CommandLine.arguments[1]
             await loadModel(version: .v3, forceDownload: false, emitStatus: false, encoder: encoder)
-            await transcribeFile(audioPath, language: nil, translateToEnglish: false, encoder: encoder)
+            await transcribeFile(audioPath, language: nil, translateToEnglish: false, customVocabulary: [], encoder: encoder)
         } else {
             // JSON communication mode for Tauri
             await runEventLoop(encoder: encoder)
@@ -1022,11 +1049,15 @@ struct ParakeetSidecar {
                     if let audioPath = json["audio_path"] as? String {
                         let language = json["language"] as? String
                         let translateToEnglish = json["translate_to_english"] as? Bool ?? false
-                        await transcribeFile(audioPath, language: language, translateToEnglish: translateToEnglish, encoder: encoder)
+                        let customVocabulary = decodeCustomVocabulary(from: data)
+                        await transcribeFile(audioPath, language: language, translateToEnglish: translateToEnglish, customVocabulary: customVocabulary, encoder: encoder)
                     } else {
                         sendError("missing_audio_path", message: "audio_path is required", encoder: encoder)
                     }
 
+
+                case "download_ctc_models":
+                    await downloadCtcModels(encoder: encoder)
 
                 case "warmup":
                     await warmup(encoder: encoder)
@@ -1435,6 +1466,7 @@ struct ParakeetSidecar {
         _ audioPath: String,
         language: String? = nil,
         translateToEnglish: Bool = false,
+        customVocabulary: [IncomingVocabularyTerm] = [],
         encoder: JSONEncoder
     ) async {
         guard isModelLoaded, let selectedModel = loadedModel else {
@@ -1451,6 +1483,10 @@ struct ParakeetSidecar {
         }
 
         let fileURL = URL(fileURLWithPath: audioPath)
+        let languageHint = language.flatMap(Language.init(rawValue:))
+        if let language, languageHint == nil {
+            log("⚠️ Unsupported language hint: \(language)")
+        }
         do {
             let finalText: String
             let duration: Float
@@ -1462,9 +1498,11 @@ struct ParakeetSidecar {
                     decoderLayers: await manager.decoderLayerCount
                 )
                 let result = try await withLibraryStdoutRedirected {
-                    try await manager.transcribe(fileURL, decoderState: &decoderState)
+                    try await manager.transcribe(fileURL, decoderState: &decoderState, language: languageHint)
                 }
-                finalText = result.text
+                finalText = await rescoreTranscriptIfPossible(
+                    result: result, audioURL: fileURL, customVocabulary: customVocabulary
+                )
                 duration = Float(result.duration)
                 transcriptLanguage = language
 
@@ -1517,6 +1555,140 @@ struct ParakeetSidecar {
                 encoder: encoder
             )
         }
+    }
+
+    static func downloadCtcModels(encoder: JSONEncoder) async {
+        log("───────────────────────────────────────────────────────")
+        log("📥 DOWNLOAD CTC MODELS REQUEST")
+        log("───────────────────────────────────────────────────────")
+
+        do {
+            sendResponse(ProgressResponse(progress: 0.0, phase: "downloading ctc models"), encoder: encoder)
+            try await CtcModels.download(variant: .ctc110m)
+
+            guard ctcVocabularyReady() else {
+                sendError("ctc_model_download_failed", message: "CTC model download completed but required files are missing", encoder: encoder)
+                return
+            }
+
+            cachedCtcModels = nil
+            cachedCtcTokenizer = nil
+            cachedCtcSpotter = nil
+            sendResponse(ProgressResponse(progress: 1.0, phase: "ctc models ready"), encoder: encoder)
+            sendResponse(OkResponse(command: "download_ctc_models"), encoder: encoder)
+        } catch {
+            log("❌ CTC MODEL DOWNLOAD FAILED")
+            log("❌ Error type: \(type(of: error))")
+            log("❌ Error details: \(error)")
+            log("❌ Localized: \(error.localizedDescription)")
+            sendError("ctc_model_download_failed", message: "Failed to download CTC models: \(error.localizedDescription)", encoder: encoder)
+        }
+
+        log("───────────────────────────────────────────────────────")
+    }
+
+    static func rescoreTranscriptIfPossible(
+        result: ASRResult,
+        audioURL: URL,
+        customVocabulary: [IncomingVocabularyTerm]
+    ) async -> String {
+        guard !customVocabulary.isEmpty else {
+            return result.text
+        }
+
+        guard ctcVocabularyReady() else {
+            log("ℹ️ Custom vocabulary skipped: CTC models not ready")
+            return result.text
+        }
+
+        let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
+
+        guard let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty else {
+            log("ℹ️ Custom vocabulary skipped: token timings unavailable")
+            return result.text
+        }
+
+        do {
+            let tokenizer = try await cachedOrLoadCtcTokenizer(from: directory)
+            let terms = customVocabulary.compactMap { term -> CustomVocabularyTerm? in
+                let tokenIds = tokenizer.encode(term.text)
+                guard !tokenIds.isEmpty else { return nil }
+                return CustomVocabularyTerm(
+                    text: term.text,
+                    aliases: term.aliases.isEmpty ? nil : term.aliases,
+                    tokenIds: nil,
+                    ctcTokenIds: tokenIds
+                )
+            }
+
+            guard !terms.isEmpty else {
+                log("ℹ️ Custom vocabulary skipped: no tokenizable terms")
+                return result.text
+            }
+
+            let vocabulary = CustomVocabularyContext(terms: terms, minTermLength: 3)
+            let models = try await cachedOrLoadCtcModels(from: directory)
+            let spotter = cachedOrCreateCtcSpotter(models: models)
+            let samples = try AudioConverter().resampleAudioFile(audioURL)
+            let spot = try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: samples,
+                customVocabulary: vocabulary
+            )
+            // Term values must never be logged. FluidAudio exposes no runtime logger level;
+            // shipped sidecars are built in release so VocabularyRescorer DEBUG logs stay compiled out.
+            let rescorer = try await VocabularyRescorer.create(
+                spotter: spotter,
+                vocabulary: vocabulary,
+                ctcModelDirectory: directory
+            )
+            let output = rescorer.ctcTokenRescore(
+                transcript: result.text,
+                tokenTimings: tokenTimings,
+                logProbs: spot.logProbs,
+                frameDuration: spot.frameDuration
+            )
+
+            if output.wasModified {
+                log("✅ Custom vocabulary applied")
+                return output.text
+            }
+
+            log("ℹ️ Custom vocabulary produced no transcript changes")
+            return result.text
+        } catch {
+            log("⚠️ Custom vocabulary rescore failed; returning original transcript. Error type: \(type(of: error))")
+            return result.text
+        }
+    }
+
+    static func cachedOrLoadCtcModels(from directory: URL) async throws -> CtcModels {
+        if let models = cachedCtcModels {
+            return models
+        }
+
+        let models = try await CtcModels.load(from: directory, variant: .ctc110m)
+        cachedCtcModels = models
+        return models
+    }
+
+    static func cachedOrLoadCtcTokenizer(from directory: URL) async throws -> CtcTokenizer {
+        if let tokenizer = cachedCtcTokenizer {
+            return tokenizer
+        }
+
+        let tokenizer = try await CtcTokenizer.load(from: directory)
+        cachedCtcTokenizer = tokenizer
+        return tokenizer
+    }
+
+    static func cachedOrCreateCtcSpotter(models: CtcModels) -> CtcKeywordSpotter {
+        if let spotter = cachedCtcSpotter {
+            return spotter
+        }
+
+        let spotter = CtcKeywordSpotter(models: models, blankId: models.vocabulary.count)
+        cachedCtcSpotter = spotter
+        return spotter
     }
 
     static func warmup(encoder: JSONEncoder) async {
@@ -1634,7 +1806,7 @@ struct ParakeetSidecar {
 
     static func isHeavyCommandBlockedDuringStream(_ commandType: String?) -> Bool {
         switch commandType {
-        case "load_model", "download_model", "unload_model", "delete_model", "transcribe", "download_eou_model", "warmup", "warmup_eou", "diarize", "start_stream":
+        case "load_model", "download_model", "unload_model", "delete_model", "transcribe", "download_ctc_models", "download_eou_model", "warmup", "warmup_eou", "diarize", "start_stream":
             return true
         default:
             return false
@@ -2307,6 +2479,19 @@ struct ParakeetSidecar {
             return .nemotronMultilingual1120
         default:
             return parseModelVersion(modelVersion).map(SupportedModel.tdt)
+        }
+    }
+
+    static func decodeCustomVocabulary(from data: Data) -> [IncomingVocabularyTerm] {
+        struct TranscribeCommand: Decodable {
+            let custom_vocabulary: [IncomingVocabularyTerm]?
+        }
+
+        do {
+            return try JSONDecoder().decode(TranscribeCommand.self, from: data).custom_vocabulary ?? []
+        } catch {
+            log("⚠️ Custom vocabulary ignored: command vocabulary payload could not be decoded")
+            return []
         }
     }
 

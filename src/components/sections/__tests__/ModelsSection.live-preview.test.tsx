@@ -160,7 +160,7 @@ describe("ModelsSection live preview mode", () => {
     renderSection();
 
     expect(await screen.findByText("Transcription mode")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Live preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Live preview" })).toBeInTheDocument();
     expect(screen.getByText("en,ja,vi")).toBeInTheDocument();
     expect(screen.queryByText(/English-only for now/i)).not.toBeInTheDocument();
   });
@@ -169,7 +169,7 @@ describe("ModelsSection live preview mode", () => {
     mockCapabilities = makeCapabilities(true);
     renderSection();
 
-    await userEvent.click(await screen.findByRole("radio", { name: "Live preview" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(mocks.invoke).toHaveBeenCalledWith("activate_live_preview", undefined);
@@ -184,7 +184,7 @@ describe("ModelsSection live preview mode", () => {
     activateLivePreviewError = new Error("warmup failed");
     renderSection();
 
-    await userEvent.click(await screen.findByRole("radio", { name: "Live preview" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("warmup failed");
@@ -198,7 +198,7 @@ describe("ModelsSection live preview mode", () => {
     mockCapabilities = makeCapabilities(true);
     renderSection();
 
-    await userEvent.click(await screen.findByRole("radio", { name: "Regular" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Regular" }));
 
     await waitFor(() => {
       expect(mocks.updateSettings).toHaveBeenCalledWith({ transcription_mode: "regular" });

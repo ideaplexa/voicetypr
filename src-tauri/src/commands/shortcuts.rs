@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
 use keytrigger::KeyPhase;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
-use crate::ai::prompts::{EnhancementOptions, EnhancementPreset};
 pub use crate::commands::key_normalizer::is_single_key_shortcut;
 use crate::commands::key_normalizer::{
     normalize_shortcut_keys, validate_key_combination,
@@ -14,26 +13,67 @@ use crate::commands::key_normalizer::{
 use crate::AppState;
 
 const SHORTCUT_BINDINGS_KEY: &str = "shortcut_bindings";
+const RETIRED_FORMATTING_SHORTCUTS_NOTICE_KEY: &str = "retired_formatting_shortcuts_notice_shown";
 
 pub const MAX_SINGLE_KEY_BINDINGS: usize = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutAction {
     ToggleRecording,
     HoldToRecord,
     CancelRecording,
     CopyLastTranscription,
     PasteLastTranscription,
-    CycleFormattingMode,
     ToggleAiFormatting,
-    SetPersonalDictation,
-    SetCleanDictation,
-    SetWriting,
-    SetNotes,
-    SetMessage,
-    SetCode,
     OpenDashboard,
+    Unknown,
+}
+
+impl ShortcutAction {
+    fn from_persisted_action(action: &str) -> Self {
+        match action {
+            "toggle_recording" => Self::ToggleRecording,
+            "hold_to_record" => Self::HoldToRecord,
+            "cancel_recording" => Self::CancelRecording,
+            "copy_last_transcription" => Self::CopyLastTranscription,
+            "paste_last_transcription" => Self::PasteLastTranscription,
+            "toggle_ai_formatting" => Self::ToggleAiFormatting,
+            "open_dashboard" => Self::OpenDashboard,
+            _ => Self::Unknown,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ToggleRecording => "toggle_recording",
+            Self::HoldToRecord => "hold_to_record",
+            Self::CancelRecording => "cancel_recording",
+            Self::CopyLastTranscription => "copy_last_transcription",
+            Self::PasteLastTranscription => "paste_last_transcription",
+            Self::ToggleAiFormatting => "toggle_ai_formatting",
+            Self::OpenDashboard => "open_dashboard",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl Serialize for ShortcutAction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ShortcutAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let action = String::deserialize(deserializer)?;
+        Ok(Self::from_persisted_action(&action))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,18 +245,6 @@ pub fn normalized_custom_shortcut_conflict(
         .map(|binding| binding.id.clone())
 }
 
-pub fn action_preset(action: ShortcutAction) -> Option<EnhancementPreset> {
-    match action {
-        ShortcutAction::SetPersonalDictation => Some(EnhancementPreset::PersonalDictation),
-        ShortcutAction::SetCleanDictation => Some(EnhancementPreset::CleanDictation),
-        ShortcutAction::SetWriting => Some(EnhancementPreset::Writing),
-        ShortcutAction::SetNotes => Some(EnhancementPreset::Notes),
-        ShortcutAction::SetMessage => Some(EnhancementPreset::Message),
-        ShortcutAction::SetCode => Some(EnhancementPreset::Code),
-        _ => None,
-    }
-}
-
 pub async fn latest_copyable_transcription_text(app: &AppHandle) -> Result<Option<String>, String> {
     let store = app
         .store("transcriptions")
@@ -239,39 +267,6 @@ pub async fn latest_copyable_transcription_text(app: &AppHandle) -> Result<Optio
     )
 }
 
-pub async fn set_formatting_preset(
-    app: AppHandle,
-    preset: EnhancementPreset,
-) -> Result<(), String> {
-    let store = app.store("settings").map_err(|e| e.to_string())?;
-    store.set(
-        "enhancement_options",
-        serde_json::to_value(EnhancementOptions { preset })
-            .map_err(|e| format!("Failed to serialize enhancement options: {}", e))?,
-    );
-    store.save().map_err(|e| e.to_string())?;
-    drop(store);
-
-    let app_state = app.state::<AppState>();
-    *app_state.recording_config_cache.write().await = None;
-    let _ = app.emit("settings-changed", ());
-    log::info!("Shortcut updated formatting preset to {:?}", preset);
-    Ok(())
-}
-
-pub async fn cycle_formatting_preset(app: AppHandle) -> Result<(), String> {
-    let current = current_formatting_preset(&app).unwrap_or(EnhancementPreset::PersonalDictation);
-    let next = match current {
-        EnhancementPreset::PersonalDictation => EnhancementPreset::CleanDictation,
-        EnhancementPreset::CleanDictation => EnhancementPreset::Writing,
-        EnhancementPreset::Writing => EnhancementPreset::Notes,
-        EnhancementPreset::Notes => EnhancementPreset::Message,
-        EnhancementPreset::Message => EnhancementPreset::Code,
-        EnhancementPreset::Code => EnhancementPreset::PersonalDictation,
-    };
-    set_formatting_preset(app, next).await
-}
-
 /// Pure decision function: what should ai_enabled become?
 /// Returns None if enabling is refused (no usable AI setup).
 pub fn next_ai_enabled(current: bool, can_enable: bool) -> Option<bool> {
@@ -284,35 +279,99 @@ pub fn next_ai_enabled(current: bool, can_enable: bool) -> Option<bool> {
     }
 }
 
+fn clean_dictation_options() -> serde_json::Value {
+    serde_json::json!({ "preset": "CleanDictation" })
+}
+
+fn personal_dictation_options() -> serde_json::Value {
+    serde_json::json!({ "preset": "PersonalDictation" })
+}
+
+/// Pure decision: when enabling Polish, should the stored global preset be
+/// normalized to Clean? Clean is the only enabled global preset; reshaping is
+/// selected through per-app rules. Any stored preset that does not already
+/// resolve to Clean is normalized so a tray or shortcut enable cannot resurrect
+/// PersonalDictation or a legacy global reshaping preset.
+pub fn should_normalize_preset_to_clean_on_enable(stored_preset: Option<&str>) -> bool {
+    match stored_preset {
+        Some(preset) => {
+            crate::ai::prompts::migrate_preset_str(preset, true)
+                != crate::ai::prompts::EnhancementPreset::CleanDictation
+        }
+        None => false,
+    }
+}
+
+fn stored_global_preset_needs_clean_normalization(app: &AppHandle) -> Result<bool, String> {
+    let store = app.store("settings").map_err(|e| e.to_string())?;
+    let raw = store.get("enhancement_options").and_then(|value| {
+        value
+            .get("preset")
+            .and_then(|p| p.as_str().map(String::from))
+    });
+    Ok(should_normalize_preset_to_clean_on_enable(raw.as_deref()))
+}
+
 pub async fn toggle_ai_formatting(app: AppHandle) -> Result<(), String> {
-    use crate::commands::ai::get_ai_settings;
-    let ai_settings = get_ai_settings(app.clone()).await?;
-    let current = ai_settings.enabled;
-    let can_enable = ai_settings.has_api_key && !ai_settings.model.is_empty();
+    // Shared CLI-aware readiness — the same gate the Polish screen uses.
+    // Agent-CLI providers (Claude Code) are subscription-authenticated local
+    // CLIs with no API key and no catalog model, so the previous
+    // `has_api_key && !model.is_empty()` check permanently refused to enable
+    // Polish for them from the tray or the shortcut. Cloud providers keep
+    // their model + credential requirements.
+    let can_enable = crate::commands::ai::has_ai_model_and_key(&app)?;
+    let current = {
+        let store = app.store("settings").map_err(|e| e.to_string())?;
+        store
+            .get("ai_enabled")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    };
 
     match next_ai_enabled(current, can_enable) {
         Some(true) => {
-            let store = app.store("settings").map_err(|e| e.to_string())?;
-            store.set("ai_enabled", serde_json::Value::Bool(true));
-            store.save().map_err(|e| e.to_string())?;
-            drop(store);
-            crate::commands::audio::invalidate_recording_config_cache(&app).await;
-            crate::commands::audio::pill_toast(&app, "AI formatting on", 2500);
+            // Enabling ai_enabled alone is not enough to polish: the resolver
+            // only runs AI when the effective preset requires it. A preset left
+            // at PersonalDictation means "on but never polishing," and a stale
+            // global reshaping preset (Notes/Message/…) would silently reshape.
+            // Move the global preset in lockstep with the switch (mirrors the
+            // Polish screen toggle) — Clean is the only "on" global preset now,
+            // reshaping is per-app — so the tray/shortcut can't persist an
+            // inert or legacy-reshaping state without the screen's migration.
+            let normalize_to_clean = stored_global_preset_needs_clean_normalization(&app)?;
+            crate::commands::settings::persist_settings_and_invalidate(
+                &app,
+                move |store| {
+                    store.set("ai_enabled", serde_json::Value::Bool(true));
+                    if normalize_to_clean {
+                        store.set("enhancement_options", clean_dictation_options());
+                    }
+                    Ok(())
+                },
+                std::convert::identity,
+            )
+            .await?;
+            crate::commands::audio::pill_toast(&app, "Polish on", 2500);
             let _ = crate::emit_to_window(&app, "main", "ai-enabled-changed", true);
         }
         Some(false) => {
-            let store = app.store("settings").map_err(|e| e.to_string())?;
-            store.set("ai_enabled", serde_json::Value::Bool(false));
-            store.save().map_err(|e| e.to_string())?;
-            drop(store);
-            crate::commands::audio::invalidate_recording_config_cache(&app).await;
-            crate::commands::audio::pill_toast(&app, "AI formatting off", 2500);
+            crate::commands::settings::persist_settings_and_invalidate(
+                &app,
+                |store| {
+                    store.set("ai_enabled", serde_json::Value::Bool(false));
+                    store.set("enhancement_options", personal_dictation_options());
+                    Ok(())
+                },
+                std::convert::identity,
+            )
+            .await?;
+            crate::commands::audio::pill_toast(&app, "Polish off", 2500);
             let _ = crate::emit_to_window(&app, "main", "ai-enabled-changed", false);
         }
         None => {
             crate::commands::audio::pill_toast(
                 &app,
-                "Set up an AI model in Settings to use formatting",
+                "Set up an AI model in Settings to use Polish",
                 3500,
             );
         }
@@ -361,6 +420,10 @@ fn prepare_shortcut_settings(
 
     let mut prepared = Vec::with_capacity(settings.bindings.len());
     for binding in settings.bindings {
+        if binding.action == ShortcutAction::Unknown {
+            continue;
+        }
+
         let sanitized = ShortcutBinding {
             id: binding.id.trim().to_string(),
             shortcut: binding.shortcut.trim().to_string(),
@@ -460,21 +523,72 @@ pub(crate) fn load_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettings
     let store = app.store("settings").map_err(|e| e.to_string())?;
     match store.get(SHORTCUT_BINDINGS_KEY) {
         Some(value) => {
-            let mut raw = value.clone();
-            if migrate_legacy_tap_bindings(&mut raw) {
-                store.set(SHORTCUT_BINDINGS_KEY, raw.clone());
+            let loaded = decode_shortcut_settings_value(value.clone())?;
+            let should_notice = loaded.dropped_unknown_actions
+                && !store
+                    .get(RETIRED_FORMATTING_SHORTCUTS_NOTICE_KEY)
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+
+            if loaded.migrated_tap_bindings || loaded.dropped_unknown_actions {
+                store.set(
+                    SHORTCUT_BINDINGS_KEY,
+                    serde_json::to_value(&loaded.settings)
+                        .map_err(|e| format!("Failed to serialize shortcut settings: {}", e))?,
+                );
+            }
+            if should_notice {
+                store.set(
+                    RETIRED_FORMATTING_SHORTCUTS_NOTICE_KEY,
+                    serde_json::Value::Bool(true),
+                );
+            }
+            if loaded.migrated_tap_bindings || loaded.dropped_unknown_actions || should_notice {
                 store.save().map_err(|e| e.to_string())?;
             }
-            let settings_value = if raw.is_array() {
-                serde_json::json!({ "bindings": raw })
-            } else {
-                raw
-            };
-            serde_json::from_value(settings_value)
-                .map_err(|e| format!("Failed to parse shortcut settings: {}", e))
+            drop(store);
+
+            if should_notice {
+                let message = "Formatting-mode shortcuts were retired.";
+                crate::commands::audio::pill_toast(app, message, 3500);
+                let _ = app.emit("shortcut-bindings-retired", message);
+            }
+
+            Ok(loaded.settings)
         }
         None => Ok(ShortcutSettings::default()),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedShortcutSettings {
+    pub settings: ShortcutSettings,
+    pub migrated_tap_bindings: bool,
+    pub dropped_unknown_actions: bool,
+}
+
+pub(crate) fn decode_shortcut_settings_value(
+    mut raw: serde_json::Value,
+) -> Result<LoadedShortcutSettings, String> {
+    let migrated_tap_bindings = migrate_legacy_tap_bindings(&mut raw);
+    let settings_value = if raw.is_array() {
+        serde_json::json!({ "bindings": raw })
+    } else {
+        raw
+    };
+    let mut settings: ShortcutSettings = serde_json::from_value(settings_value)
+        .map_err(|e| format!("Failed to parse shortcut settings: {}", e))?;
+    let original_len = settings.bindings.len();
+    settings
+        .bindings
+        .retain(|binding| binding.action != ShortcutAction::Unknown);
+    let dropped_unknown_actions = settings.bindings.len() != original_len;
+
+    Ok(LoadedShortcutSettings {
+        settings,
+        migrated_tap_bindings,
+        dropped_unknown_actions,
+    })
 }
 
 fn migrate_legacy_tap_bindings(value: &mut serde_json::Value) -> bool {
@@ -513,7 +627,10 @@ fn migrate_legacy_tap_bindings(value: &mut serde_json::Value) -> bool {
     changed
 }
 
-pub(crate) fn save_shortcut_settings(app: &AppHandle, settings: &ShortcutSettings) -> Result<(), String> {
+pub(crate) fn save_shortcut_settings(
+    app: &AppHandle,
+    settings: &ShortcutSettings,
+) -> Result<(), String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
     store.set(
         SHORTCUT_BINDINGS_KEY,
@@ -650,66 +767,10 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
             allows_single_key: true,
         },
         ShortcutActionDefinition {
-            action: ShortcutAction::CycleFormattingMode,
-            label: "Cycle formatting mode",
-            description: "Switch to the next formatting mode.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
-            action: ShortcutAction::SetPersonalDictation,
-            label: "Personal dictation",
-            description: "Switch formatting to Personal Dictation.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
-            action: ShortcutAction::SetCleanDictation,
-            label: "Clean dictation",
-            description: "Switch formatting to Clean Dictation.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
-            action: ShortcutAction::SetWriting,
-            label: "Writing",
-            description: "Switch formatting to Writing.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
-            action: ShortcutAction::SetNotes,
-            label: "Notes",
-            description: "Switch formatting to Notes.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
-            action: ShortcutAction::SetMessage,
-            label: "Message",
-            description: "Switch formatting to Message.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
-            action: ShortcutAction::SetCode,
-            label: "Code",
-            description: "Switch formatting to Code.",
-            section: "Formatting",
-            recommended_trigger: ShortcutTrigger::Pressed,
-            allows_single_key: true,
-        },
-        ShortcutActionDefinition {
             action: ShortcutAction::ToggleAiFormatting,
-            label: "Toggle AI formatting",
-            description: "Turn AI formatting on or off.",
-            section: "Formatting",
+            label: "Toggle Polish",
+            description: "Turn Polish on or off.",
+            section: "Polish",
             recommended_trigger: ShortcutTrigger::Pressed,
             allows_single_key: true,
         },
@@ -722,19 +783,4 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
             allows_single_key: true,
         },
     ]
-}
-
-fn current_formatting_preset(app: &AppHandle) -> Option<EnhancementPreset> {
-    let store = app.store("settings").ok()?;
-    let value = store.get("enhancement_options")?;
-    let preset = value.get("preset")?.as_str()?;
-    Some(match preset {
-        "PersonalDictation" => EnhancementPreset::PersonalDictation,
-        "CleanDictation" => EnhancementPreset::CleanDictation,
-        "Writing" => EnhancementPreset::Writing,
-        "Notes" => EnhancementPreset::Notes,
-        "Message" => EnhancementPreset::Message,
-        "Code" | "Coding" | "Prompts" | "Commit" => EnhancementPreset::Code,
-        _ => EnhancementPreset::PersonalDictation,
-    })
 }

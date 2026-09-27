@@ -20,9 +20,11 @@ mod license;
 mod media;
 mod menu;
 mod parakeet;
+mod product_analytics;
 pub mod provider_capabilities;
 mod recognition;
 mod recording;
+mod release_channel;
 mod remote;
 mod secure_store;
 mod simple_cache;
@@ -30,6 +32,7 @@ mod state;
 mod state_machine;
 mod telemetry;
 pub mod transcription;
+mod tray_status;
 mod trigger;
 mod utils;
 mod whisper;
@@ -51,12 +54,68 @@ pub fn hide_dock_icon(app: &tauri::AppHandle) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     log::debug!("Dock icon hidden (ActivationPolicy::Accessory)");
 }
+#[cfg(target_os = "macos")]
+fn align_main_window_controls(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
+    const TITLEBAR_HEIGHT: f64 = 36.0;
+    const TRAFFIC_LIGHT_LEFT: f64 = 12.0;
+    const TRAFFIC_LIGHT_VERTICAL_OFFSET: f64 = 2.0;
+
+    let Ok(ns_window) = window.ns_window() else {
+        log::warn!("Could not access the main NSWindow to align window controls");
+        return;
+    };
+
+    // SAFETY: Tauri owns this NSWindow for the lifetime of `window`, and setup,
+    // show, and window callbacks all execute on the AppKit main thread.
+    unsafe {
+        let ns_window = &*(ns_window.cast::<NSWindow>());
+        let Some(close) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
+            return;
+        };
+        let Some(minimize) = ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton)
+        else {
+            return;
+        };
+        let Some(zoom) = ns_window.standardWindowButton(NSWindowButton::ZoomButton) else {
+            return;
+        };
+        let Some(button_container) = close.superview() else {
+            return;
+        };
+        let Some(titlebar_container) = button_container.superview() else {
+            return;
+        };
+
+        let close_frame = NSView::frame(&close);
+        let mut titlebar_frame = NSView::frame(&titlebar_container);
+        titlebar_frame.size.height = TITLEBAR_HEIGHT;
+        titlebar_frame.origin.y = ns_window.frame().size.height - TITLEBAR_HEIGHT;
+        let _: () = msg_send![&titlebar_container, setFrame: titlebar_frame];
+        let mut button_container_frame = NSView::frame(&button_container);
+        button_container_frame.origin.y = (TITLEBAR_HEIGHT - button_container_frame.size.height)
+            / 2.0
+            - TRAFFIC_LIGHT_VERTICAL_OFFSET;
+        button_container.setFrameOrigin(button_container_frame.origin);
+
+        let horizontal_step = NSView::frame(&minimize).origin.x - close_frame.origin.x;
+        for (index, button) in [close, minimize, zoom].into_iter().enumerate() {
+            let mut origin = NSView::frame(&button).origin;
+            origin.x = TRAFFIC_LIGHT_LEFT + index as f64 * horizontal_step;
+            button.setFrameOrigin(origin);
+        }
+    }
+}
 
 /// Show the main window and keep the macOS Dock icon in sync. Single entry point so
 /// no caller forgets to reveal the Dock icon when the window becomes visible.
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
+        #[cfg(target_os = "macos")]
+        align_main_window_controls(&window);
         let _ = window.set_focus();
         #[cfg(target_os = "macos")]
         show_dock_icon(app);
@@ -64,23 +123,25 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 /// Hide the main window and the macOS Dock icon — back to the menubar/tray.
-#[allow(clippy::needless_return)]
-fn hide_main_window(app: &tauri::AppHandle) {
+fn hide_main_window(app: &tauri::AppHandle) -> bool {
     // If the system tray failed to create (e.g. the Windows shell notification
     // area wasn't ready at startup), hiding the window would leave the app
     // running with no way to bring it back. Keep the window visible instead.
     if app.tray_by_id("main").is_none() {
         log::warn!("No tray icon present; keeping main window visible instead of hiding to tray");
-        return;
+        return false;
     }
-    if let Some(window) = app.get_webview_window("main") {
-        if let Err(e) = window.hide() {
-            log::error!("Failed to hide main window: {}", e);
-            return;
-        }
-        #[cfg(target_os = "macos")]
-        hide_dock_icon(app);
+    let Some(window) = app.get_webview_window("main") else {
+        log::warn!("Main window is unavailable; could not hide it to the tray");
+        return false;
+    };
+    if let Err(e) = window.hide() {
+        log::error!("Failed to hide main window: {}", e);
+        return false;
     }
+    #[cfg(target_os = "macos")]
+    hide_dock_icon(app);
+    true
 }
 
 // Read the Windows taskbar theme (SystemUsesLightTheme) — deliberately distinct
@@ -220,17 +281,22 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 
 use audio::recorder::AudioRecorder;
 use commands::remote::load_remote_settings;
-use commands::telemetry::{get_telemetry_status, report_frontend_error, set_telemetry_consent};
+use commands::telemetry::{
+    defer_privacy_consent_for_session, get_product_analytics_status, get_telemetry_status,
+    record_onboarding_completed, report_frontend_error, set_product_analytics_consent,
+    set_telemetry_consent,
+};
 use commands::{
     ai::{
-        cache_ai_api_key, clear_ai_api_key_cache, disable_ai_enhancement, enhance_transcription,
-        get_ai_settings, get_ai_settings_for_provider, get_enhancement_options, get_openai_config,
-        get_writing_settings, list_ai_providers, list_provider_models, set_openai_config,
-        test_openai_endpoint, update_ai_settings, update_enhancement_options,
+        cache_ai_api_key, clear_ai_api_key_cache, disable_ai_enhancement, get_ai_settings,
+        get_ai_settings_for_provider, get_enhancement_options, get_openai_config,
+        get_writing_settings, list_ai_providers, list_provider_models, probe_agent_cli,
+        set_openai_config, test_openai_endpoint, update_agent_cli_fast_mode,
+        update_agent_cli_reasoning, update_ai_settings, update_enhancement_options,
         update_writing_settings, validate_ai_api_key,
     },
     audio::*,
-    cli_tool::{cli_tool_status, install_cli_tool, uninstall_cli_tool},
+    cli_tool::{cli_tool_status, install_cli_tool, repair_cli_tool, uninstall_cli_tool},
     clipboard::{copy_image_to_clipboard, save_image_to_file},
     debug::{debug_transcription_flow, test_transcription_event},
     device::get_device_id,
@@ -240,8 +306,9 @@ use commands::{
     logs::{clear_old_logs, get_latest_log_for_bug_report, get_log_directory, open_logs_folder},
     model::{
         activate_live_preview, cancel_download, delete_model, download_eou_model, download_model,
-        eou_model_status, get_active_stream_capabilities, get_model_status, list_downloaded_models,
-        preload_model, verify_model,
+        download_parakeet_vocabulary_model, eou_model_status, get_active_stream_capabilities,
+        get_model_status, get_parakeet_vocabulary_status, list_downloaded_models, preload_model,
+        set_cloud_stt_model, verify_model,
     },
     permissions::{
         check_accessibility_permission, check_microphone_permission, open_accessibility_settings,
@@ -261,10 +328,13 @@ use commands::{
     reset::reset_app_data,
     settings::*,
     shortcuts::{get_shortcut_settings, list_shortcut_actions, update_shortcut_settings},
-    stt::{clear_stt_key_cache, validate_stt_key},
+    stt::{
+        cleanup_soniox_storage, clear_stt_key_cache, get_soniox_storage_counts, validate_stt_key,
+    },
     system_info::get_system_specs,
     text::*,
-    utils::{export_transcriptions, save_transcript_file},
+    updater::{check_for_app_update, install_app_update},
+    utils::{export_transcriptions, get_application_icon, save_transcript_file},
     window::*,
 };
 use remote::lifecycle::RemoteServerManager;
@@ -310,21 +380,153 @@ fn log_filter_predicate(metadata: &log::Metadata) -> bool {
 fn setup_logging() -> tauri_plugin_log::Builder {
     let today = Local::now().format("%Y-%m-%d").to_string();
 
+    // Release builds keep stdout + the FILE sink at Info (no DEBUG firehose
+    // on disk) while the global level stays Debug: the in-memory ring target
+    // captures DEBUG lines and every bug report attaches a redacted dump
+    // (plan 060). Debug builds log Debug everywhere as before.
+    let file_sink_max = if cfg!(debug_assertions) {
+        log::Level::Trace
+    } else {
+        log::Level::Info
+    };
+
     LogBuilder::default()
         .targets([
-            Target::new(TargetKind::Stdout).filter(log_filter_predicate),
+            Target::new(TargetKind::Stdout)
+                .filter(log_filter_predicate)
+                .filter(move |m| m.level() <= file_sink_max),
             Target::new(TargetKind::LogDir {
                 file_name: Some(format!("voicetypr-{}", today)),
             })
-            .filter(log_filter_predicate),
+            .filter(log_filter_predicate)
+            .filter(move |m| m.level() <= file_sink_max),
+            Target::new(TargetKind::Dispatch(crate::utils::ring_log::ring_dispatch()))
+                .filter(log_filter_predicate),
         ])
         .rotation_strategy(RotationStrategy::KeepAll)
         .max_file_size(10_000_000) // 10MB per file
-        .level(if cfg!(debug_assertions) {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        })
+        .level(log::LevelFilter::Debug)
+}
+
+type TrayBuilder = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
+struct TrayRecovery {
+    builder: TrayBuilder,
+}
+
+fn current_tray_status(app: &tauri::AppHandle) -> tray_status::TrayStatus {
+    let state = app.state::<tray_status::TrayStatusState>();
+    if app.tray_by_id("main").is_some() {
+        state.record_present()
+    } else {
+        state.snapshot()
+    }
+}
+
+fn attempt_tray_creation(
+    app: &tauri::AppHandle,
+    builder: &TrayBuilder,
+    source: &'static str,
+) -> tray_status::TrayStatus {
+    let state = app.state::<tray_status::TrayStatusState>();
+    if app.tray_by_id("main").is_some() {
+        return state.record_present();
+    }
+
+    let status = match builder() {
+        Ok(()) => {
+            let status = state.record_success();
+            log::info!(
+                "TRAY_CREATION | source={} | attempt={} | result=success",
+                source,
+                status.attempts
+            );
+            #[cfg(target_os = "windows")]
+            apply_tray_theme_icon(app);
+            status
+        }
+        Err(error) => {
+            let status = state.record_failure(&error);
+            log::warn!(
+                "TRAY_CREATION | source={} | attempt={} | result=failure | error={}",
+                source,
+                status.attempts,
+                error
+            );
+            status
+        }
+    };
+
+    let _ = app.emit("tray-status-changed", &status);
+    status
+}
+
+async fn attempt_tray_creation_on_main_thread(
+    app: tauri::AppHandle,
+    builder: TrayBuilder,
+    source: &'static str,
+) -> Result<tray_status::TrayStatus, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let attempt_app = app.clone();
+    app.run_on_main_thread(move || {
+        let status = attempt_tray_creation(&attempt_app, &builder, source);
+        let _ = sender.send(status);
+    })
+    .map_err(|error| format!("Failed to schedule tray creation: {error}"))?;
+
+    receiver
+        .await
+        .map_err(|_| "Tray creation task ended before returning a result".to_string())
+}
+
+fn schedule_deferred_tray_recovery(app: tauri::AppHandle, builder: TrayBuilder) {
+    tauri::async_runtime::spawn(async move {
+        for delay_secs in tray_status::DEFERRED_TRAY_RETRY_DELAYS_SECS {
+            tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+
+            if app.tray_by_id("main").is_some() {
+                let status = app.state::<tray_status::TrayStatusState>().record_present();
+                let _ = app.emit("tray-status-changed", &status);
+                return;
+            }
+
+            match attempt_tray_creation_on_main_thread(
+                app.clone(),
+                Arc::clone(&builder),
+                "deferred",
+            )
+            .await
+            {
+                Ok(status) if status.available => return,
+                Ok(_) => {}
+                Err(error) => {
+                    log::error!("Deferred tray recovery could not run: {}", error);
+                    return;
+                }
+            }
+        }
+
+        let status = current_tray_status(&app);
+        log::error!(
+            "Tray icon remains unavailable after {} attempts; keeping the main window visible",
+            status.attempts
+        );
+    });
+}
+
+#[tauri::command]
+fn get_tray_status(app: tauri::AppHandle) -> tray_status::TrayStatus {
+    current_tray_status(&app)
+}
+
+#[tauri::command]
+async fn retry_tray_creation(app: tauri::AppHandle) -> Result<tray_status::TrayStatus, String> {
+    if app.tray_by_id("main").is_some() {
+        return Ok(current_tray_status(&app));
+    }
+
+    let builder = Arc::clone(&app.state::<TrayRecovery>().builder);
+    attempt_tray_creation_on_main_thread(app, builder, "manual").await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -357,6 +559,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         &[("component", "secure_store")],
     );
 
+    #[cfg(not(target_os = "windows"))]
     if let Err(e) = secure_store::initialize_encryption_key() {
         log_failed(
             "ENCRYPTION_INIT",
@@ -367,18 +570,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         log::info!("✅ Encryption initialized successfully");
     }
 
-    // Initialize opt-in, anonymous error reporting. No-op unless the user has
-    // opted in AND a DSN was baked in at build time. Native minidumps are
-    // disabled, so no raw process memory is ever captured. The guard must
-    // outlive the app, so it is held until `run()` returns.
+    // Initialize independent diagnostics and product-analytics clients from
+    // their own persisted choices. Only new product analytics is held behind
+    // the one-time acknowledgement gate.
     let app_context = tauri::generate_context!();
+    let analytics_consent =
+        product_analytics::read_consent(app_context.config().identifier.as_str());
     let (telemetry_enabled, telemetry_install_id) =
         telemetry::read_consent(app_context.config().identifier.as_str());
-    // Held for the whole process so the Sentry client stays alive (Rust panics +
-    // frontend-error capture). We do NOT register tauri-plugin-sentry: no JS
-    // injection and no envelope/breadcrumb IPC, so `before_send` is the single
-    // egress chokepoint. Inert unless opted in AND a DSN was compiled in.
     let _sentry_guard = telemetry::init(telemetry_enabled, telemetry_install_id);
+    product_analytics::init(analytics_consent);
 
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut builder = tauri::Builder::default()
@@ -430,12 +631,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = app.emit("tray-check-updates", ());
                 } else if id == HELP_REPORT_ISSUE_ID {
                     let _ = app.opener().open_url(
-                        "https://github.com/moinulmoin/voicetypr/issues",
+                        "https://github.com/ideaplexa/voicetypr/issues",
                         None::<&str>,
                     );
                 } else if id == HELP_RELEASE_NOTES_ID {
                     let _ = app.opener().open_url(
-                        "https://github.com/moinulmoin/voicetypr/releases",
+                        "https://github.com/ideaplexa/voicetypr/releases",
                         None::<&str>,
                     );
                 }
@@ -446,6 +647,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .setup(move |app| {
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
+            // Windows identity persistence must run after the single-instance
+            // plugin has excluded secondary processes, before any secure reads.
+            #[cfg(target_os = "windows")]
+            if let Err(error) = secure_store::windows_identity::initialize(&app.path().app_data_dir()?) {
+                log::error!("Windows identity initialization failed: {}", error);
+                // Keep the UI available for recovery. Secure/API calls fail
+                // closed rather than silently choosing a different identity.
+            }
             let distribution_info = commands::distribution::get_distribution_info();
             log::info!(
                 "Distribution channel: channel={}, store_install={}, package_family_name={:?}",
@@ -547,15 +756,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ]);
 
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    let main_thread_handle = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || {
+                        if let Some(window) = main_thread_handle.get_webview_window("main") {
+                            align_main_window_controls(&window);
+                        }
+                    });
+                });
                 log::info!("🍎 Set macOS activation policy to Accessory");
 
             }
 
-            // Clear license cache on app start to ensure fresh checks
+            // Force a fresh online check while preserving the last successful
+            // validation timestamp that anchors paid offline grace.
             {
                 use crate::simple_cache;
                 let _ = simple_cache::remove(app.app_handle(), "license_status");
-                let _ = simple_cache::remove(app.app_handle(), "last_license_validation");
             }
 
             // Initialize whisper manager
@@ -840,14 +1059,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             display_watcher.start();
             app.manage(display_watcher);
 
+            app.manage(tray_status::TrayStatusState::default());
+
             // Create tray icon
             use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
             // Build the tray menu using our helper function
             // Note: We need to block here since setup is sync
             let tray_app = app.app_handle().clone();
-            let try_build_tray = move || -> Result<(), Box<dyn std::error::Error>> {
-            let menu = tauri::async_runtime::block_on(build_tray_menu(&tray_app))?;
+            let tray_builder: TrayBuilder = Arc::new(move || -> Result<(), String> {
+            let menu = tauri::async_runtime::block_on(build_tray_menu(&tray_app))
+                .map_err(|error| error.to_string())?;
 
 
             // Bare-mark template icon for the menubar (no background; adapts to light/dark).
@@ -932,6 +1154,34 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         });
                     }
+                    else if event_id == "polish_on" || event_id == "polish_off" {
+                        let app_handle = app.app_handle().clone();
+                        let desired_enabled = event_id == "polish_on";
+                        tauri::async_runtime::spawn(async move {
+                            let current_enabled = app_handle
+                                .store("settings")
+                                .ok()
+                                .and_then(|store| store.get("ai_enabled"))
+                                .and_then(|value| value.as_bool())
+                                .unwrap_or(false);
+
+                            if current_enabled != desired_enabled {
+                                match crate::commands::shortcuts::toggle_ai_formatting(app_handle.clone()).await {
+                                    Ok(()) => {
+                                        log::info!("Polish toggled from tray to requested state: {}", desired_enabled);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to toggle Polish from tray: {}", e);
+                                        let _ = app_handle.emit("tray-action-error", &format!("Failed to change Polish: {}", e));
+                                    }
+                                }
+                            }
+
+                            if let Err(e) = crate::commands::settings::update_tray_menu(app_handle.clone()).await {
+                                log::warn!("Failed to refresh tray after Polish change: {}", e);
+                            }
+                        });
+                    }
                     else if event_id == "copy_last_transcription" {
                         let app_handle = app.app_handle().clone();
                         tauri::async_runtime::spawn(async move {
@@ -997,7 +1247,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             match crate::commands::settings::get_settings(app_handle.clone()).await {
                                 Ok(mut s) => {
                                     s.recording_mode = mode.to_string();
-                                    match crate::commands::settings::save_settings(app_handle.clone(), s).await {
+                                    match crate::commands::settings::save_settings(app_handle.clone(), s, None).await {
                                         Err(e) => {
                                             log::error!("Failed to save recording mode from tray: {}", e);
                                             let _ = app_handle.emit("tray-action-error", &format!("Failed to change recording mode: {}", e));
@@ -1029,42 +1279,40 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         show_main_window(app);
                     }
                 })
-                .build(&tray_app)?;
+                .build(&tray_app)
+                .map_err(|error| error.to_string())?;
             Ok(())
-            };
+            });
+            app.manage(TrayRecovery {
+                builder: Arc::clone(&tray_builder),
+            });
 
-            // Tray creation can fail transiently on Windows (e.g. the shell's
-            // notification area isn't ready yet -> os error 0x80004005 / E_FAIL).
-            // This previously aborted the entire setup hook and stopped the app
-            // from launching at all. Retry a few times, then continue WITHOUT a
-            // tray instead of crashing -- a missing tray must never be fatal.
-            let mut tray_attempt: u32 = 0;
-            loop {
-                tray_attempt += 1;
-                match try_build_tray() {
-                    Ok(()) => {
-                        if tray_attempt > 1 {
-                            log::info!("Tray icon created on attempt {}", tray_attempt);
-                        }
-                        break;
-                    }
-                    Err(e) if tray_attempt < 5 => {
-                        log::warn!(
-                            "Tray icon creation failed (attempt {}/5): {} -- retrying in 400ms",
-                            tray_attempt,
-                            e
-                        );
-                        std::thread::sleep(std::time::Duration::from_millis(400));
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "Tray icon creation failed after {} attempts; continuing without system tray: {}",
-                            tray_attempt,
-                            e
-                        );
-                        break;
-                    }
+            // Tray creation can fail transiently while the OS status area is
+            // starting. Preserve the nonfatal startup behavior from PR #96,
+            // then continue with bounded delayed recovery instead of requiring
+            // the user to restart the entire application.
+            let mut tray_status = current_tray_status(app.app_handle());
+            for startup_attempt in 1..=tray_status::STARTUP_TRAY_ATTEMPTS {
+                tray_status =
+                    attempt_tray_creation(app.app_handle(), &tray_builder, "startup");
+                if tray_status.available {
+                    break;
                 }
+                if startup_attempt < tray_status::STARTUP_TRAY_ATTEMPTS {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                }
+            }
+
+            if !tray_status.available {
+                log::error!(
+                    "Tray icon creation failed after {} startup attempts; keeping the main window visible and scheduling recovery",
+                    tray_status.attempts
+                );
+                show_main_window(app.app_handle());
+                schedule_deferred_tray_recovery(
+                    app.app_handle().clone(),
+                    Arc::clone(&tray_builder),
+                );
             }
 
             // Windows ignores macOS template icons, so a single white mark is
@@ -1112,9 +1360,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Preload current model if set (graceful degradation)
             // Use Tauri's async runtime which is available after setup
             if let Ok(store) = app.store("settings") {
+                let current_model_engine = store
+                    .get("current_model_engine")
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "whisper".to_string());
                 if let Some(current_model) = store.get("current_model")
                     .and_then(|v| v.as_str().map(|s| s.to_string()))
                     .filter(|s| !s.is_empty())
+                    .filter(|_| current_model_engine == "whisper")
                 {
                     let app_handle = app.app_handle().clone();
                     // Use tauri::async_runtime instead of tokio directly
@@ -1161,8 +1414,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             log::warn!("Model '{}' not found in models directory, skipping preload", current_model);
                         }
                     });
+                } else if current_model_engine == "whisper" {
+                    log::info!("No Whisper model configured for preloading");
                 } else {
-                    log::info!("No model configured for preloading");
+                    log::debug!(
+                        "Skipping startup Whisper preload for '{}' engine",
+                        current_model_engine
+                    );
                 }
             }
 
@@ -1170,31 +1428,49 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             {
                 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
-                // Calculate center-bottom position for pill/toast
-                let (pos_x, pos_y) = {
-                    let (screen_width, screen_height) = crate::utils::monitor::catch_monitor_panic(|| {
-                        let monitor = app.primary_monitor().ok().flatten()?;
-                        let size = monitor.size();
-                        let scale = monitor.scale_factor();
-                        Some((size.width as f64 / scale, size.height as f64 / scale))
-                    })
-                    .flatten()
-                    .unwrap_or((1440.0, 900.0));
+                // On macOS, use the same saved placement and monitor work area as
+                // later repositioning so an always-visible pill starts clear of the Dock.
+                #[cfg(target_os = "macos")]
+                let ((pos_x, pos_y), (toast_x, toast_y)) = {
+                    let app_state = app.state::<AppState>();
+                    app_state
+                        .get_window_manager()
+                        .map(|manager| manager.current_floating_window_positions())
+                        .unwrap_or_else(|| {
+                            log::warn!("Window manager unavailable during floating window placement; using safe defaults");
+                            ((600.0, 842.0), (520.0, 754.0))
+                        })
+                };
 
-                    let pill_width = 260.0;
-                    let pill_height = 64.0;
-                    let bottom_offset = 10.0;  // Distance from bottom of screen
-
-                    let x = (screen_width - pill_width) / 2.0;
-                    let y = screen_height - pill_height - bottom_offset;
-                    (x, y)
+                // Preserve the established non-macOS startup behavior: primary
+                // monitor, bottom-center, with the fixed 10px edge offset.
+                #[cfg(not(target_os = "macos"))]
+                let ((pos_x, pos_y), (toast_x, toast_y)) = {
+                    let (screen_width, screen_height) =
+                        crate::utils::monitor::catch_monitor_panic(|| {
+                            let monitor = app.primary_monitor().ok().flatten()?;
+                            let size = monitor.size();
+                            let scale = monitor.scale_factor();
+                            Some((size.width as f64 / scale, size.height as f64 / scale))
+                        })
+                        .flatten()
+                        .unwrap_or((1440.0, 900.0));
+                    let pill_x = (screen_width - crate::window_manager::PILL_WIDTH) / 2.0;
+                    let pill_y = screen_height - crate::window_manager::PILL_HEIGHT - 10.0;
+                    let toast_x = pill_x
+                        + (crate::window_manager::PILL_WIDTH
+                            - crate::window_manager::TOAST_WIDTH)
+                            / 2.0;
+                    let toast_y = pill_y
+                        - crate::window_manager::TOAST_HEIGHT
+                        - crate::window_manager::FLOATING_WINDOW_GAP;
+                    ((pill_x, pill_y), (toast_x, toast_y))
                 };
 
                 // macOS: create pill window and convert to NSPanel
                 #[cfg(target_os = "macos")]
                 {
-                    // Create the pill window - sized for 3 dots
-                    // Properties aligned with window_manager.rs for consistency
+                    // Properties aligned with window_manager.rs for consistency.
                     let pill_builder = WebviewWindowBuilder::new(app, "pill", WebviewUrl::App("pill".into()))
                         .title("Recording")
                         .resizable(false)
@@ -1207,7 +1483,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .skip_taskbar(true)
                         .transparent(true)
                         .shadow(false)  // Prevent window shadow on macOS
-                        .inner_size(260.0, 64.0)
+                        .inner_size(crate::window_manager::PILL_WIDTH, crate::window_manager::PILL_HEIGHT)
                         .accept_first_mouse(true)
                         .position(pos_x, pos_y)
                         .visible(true)  // Always visible (controlled by show_pill_indicator setting)
@@ -1221,6 +1497,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let pill_builder = pill_builder;
 
                     let pill_window = pill_builder.build()?;
+                    if let Err(error) = pill_window.set_ignore_cursor_events(true) {
+                        log::warn!("Failed to make pill window click-through: {}", error);
+                    }
 
                     // Convert to NSPanel to prevent focus stealing
                     use tauri_nspanel::WebviewWindowExt;
@@ -1236,16 +1515,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
-                // Create toast window for feedback messages (positioned above pill) - all platforms
-                let toast_width = 400.0;
-                let toast_height = 80.0;
-                let pill_width = 260.0;
-                let gap = 8.0; // Gap between pill and toast
-
-                // Center toast above pill
-                let toast_x = pos_x + (pill_width - toast_width) / 2.0;
-                let toast_y = pos_y - toast_height - gap;
-                log::info!("Toast window position: ({}, {}) - above pill at ({}, {})", toast_x, toast_y, pos_x, pos_y);
+                // Create toast window for feedback messages - all platforms
+                log::info!(
+                    "Toast window position: ({}, {}) relative to pill at ({}, {})",
+                    toast_x,
+                    toast_y,
+                    pos_x,
+                    pos_y
+                );
 
                 let toast_builder = WebviewWindowBuilder::new(app, "toast", WebviewUrl::App("toast".into()))
                     .title("Feedback")
@@ -1255,7 +1532,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .skip_taskbar(true)
                     .transparent(true)
                     .shadow(false) // Prevent window shadow/outline on macOS
-                    .inner_size(toast_width, toast_height)
+                    .inner_size(
+                        crate::window_manager::TOAST_WIDTH,
+                        crate::window_manager::TOAST_HEIGHT,
+                    )
                     .position(toast_x, toast_y)
                     .visible(false); // Starts hidden
 
@@ -1321,8 +1601,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             if should_hide_main {
-                hide_main_window(app.app_handle());
-                log::info!("Main window hidden - menubar mode active");
+                if hide_main_window(app.app_handle()) {
+                    log::info!("Main window hidden - menubar mode active");
+                } else {
+                    log::warn!("Main window remains visible because menubar mode is unavailable");
+                }
             } else {
                 log::info!("👋 First launch or no source configured - keeping main window visible");
                 // Show dock icon when main window is visible
@@ -1354,6 +1637,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_model_status,
             preload_model,
             verify_model,
+            set_cloud_stt_model,
+            download_parakeet_vocabulary_model,
+            get_parakeet_vocabulary_status,
             transcribe_audio_file,
             diarize_audio_file,
             get_settings,
@@ -1369,6 +1655,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_supported_languages,
             set_model_from_tray,
             update_tray_menu,
+            get_tray_status,
+            retry_tray_creation,
             insert_text,
             delete_model,
             list_downloaded_models,
@@ -1387,6 +1675,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             clear_all_transcriptions,
             export_transcriptions,
             save_transcript_file,
+            get_application_icon,
             show_pill_widget,
             hide_pill_widget,
             close_pill_widget,
@@ -1401,6 +1690,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             request_microphone_permission,
             test_automation_permission,
             check_license_status,
+            revalidate_license,
             restore_license,
             activate_license,
             deactivate_license,
@@ -1419,7 +1709,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             test_openai_endpoint,
             clear_ai_api_key_cache,
             update_ai_settings,
-            enhance_transcription,
+            update_agent_cli_reasoning,
+            update_agent_cli_fast_mode,
             disable_ai_enhancement,
             get_enhancement_options,
             update_enhancement_options,
@@ -1427,12 +1718,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             update_writing_settings,
             list_ai_providers,
             list_provider_models,
+            probe_agent_cli,
             keyring_set,
             keyring_get,
             keyring_delete,
             keyring_has,
             validate_stt_key,
             clear_stt_key_cache,
+            get_soniox_storage_counts,
+            cleanup_soniox_storage,
             get_latest_log_for_bug_report,
             get_log_directory,
             open_logs_folder,
@@ -1440,14 +1734,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             set_autostart,
             get_device_id,
             get_distribution_info,
+            check_for_app_update,
+            install_app_update,
             get_system_specs,
             // CLI launcher (voicetypr on PATH)
             install_cli_tool,
+            repair_cli_tool,
             uninstall_cli_tool,
             cli_tool_status,
-            // Telemetry (opt-in error reporting) consent
+            // Independent privacy controls: GlitchTip diagnostics and PostHog
+            // product analytics.
             get_telemetry_status,
             set_telemetry_consent,
+            get_product_analytics_status,
+            set_product_analytics_consent,
+            defer_privacy_consent_for_session,
+            record_onboarding_completed,
             report_frontend_error,
             // Remote transcription commands
             refresh_active_remote_server_status,
@@ -1484,8 +1786,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // background process with no way back -> let the close proceed (quit).
                     if window.app_handle().tray_by_id("main").is_some() {
                         api.prevent_close();
-                        hide_main_window(window.app_handle());
-                        log::info!("Main window hidden instead of closed");
+                        if hide_main_window(window.app_handle()) {
+                            log::info!("Main window hidden instead of closed");
+                        }
                     } else {
                         log::warn!("No tray icon; allowing main window to close (quit) instead of hiding");
                     }
@@ -1527,6 +1830,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         remote.lock().await.stop().await;
                     }
                 });
+                #[cfg(target_os = "macos")]
+                crate::commands::audio::cleanup_media_pause_on_exit();
+                product_analytics::shutdown();
             }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { has_visible_windows, .. } => {
@@ -1549,23 +1855,34 @@ fn migrate_ai_settings_before_key_cache(app: &tauri::AppHandle) {
         return;
     };
 
-    let mut values = serde_json::Map::new();
-    for key in [
+    const MIGRATION_KEYS: [&str; 6] = [
         "ai_enabled",
         "ai_provider",
         "ai_model",
         "ai_models_by_provider",
-    ] {
+        "ai_model_needs_reselection",
+        "enhancement_options",
+    ];
+    let mut values = serde_json::Map::new();
+    for key in MIGRATION_KEYS {
         if let Some(value) = store.get(key) {
             values.insert(key.to_string(), value.clone());
         }
     }
+    let original_values = values.clone();
 
     if migrate_ai_settings_values(&mut values) {
         for (key, value) in values {
             store.set(key, value);
         }
         if let Err(error) = store.save() {
+            for key in MIGRATION_KEYS {
+                if let Some(value) = original_values.get(key) {
+                    store.set(key, value.clone());
+                } else {
+                    store.delete(key);
+                }
+            }
             log::warn!("AI settings migration save failed: {}", error);
         } else {
             log::info!("AI settings migration applied");
@@ -1635,6 +1952,25 @@ fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::V
             );
         }
         changed = true;
+    }
+
+    if let Some(stored_options) = values.get("enhancement_options").cloned() {
+        let normalized = crate::ai::prompts::enhancement_options_for_ai_enabled(
+            Some(&stored_options),
+            ai_enabled,
+        )
+        .and_then(|options| {
+            serde_json::to_value(options)
+                .map_err(|error| format!("Failed to serialize Polish options: {error}"))
+        });
+        match normalized {
+            Ok(normalized) if normalized != stored_options => {
+                values.insert("enhancement_options".to_string(), normalized);
+                changed = true;
+            }
+            Ok(_) => {}
+            Err(error) => log::warn!("Polish settings migration skipped: {}", error),
+        }
     }
 
     changed
@@ -2059,6 +2395,46 @@ mod ai_settings_migration_tests {
 
         assert!(!migrate_ai_settings_values(&mut values));
         assert_eq!(values["ai_model"], json!("local-model"));
+    }
+
+    #[test]
+    fn migration_normalizes_legacy_global_preset_for_enabled_polish() {
+        let mut values = values_with_enabled(
+            true,
+            "custom",
+            "local-model",
+            json!({ "custom": "local-model" }),
+        );
+        values.insert(
+            "enhancement_options".to_string(),
+            json!({ "preset": "Writing" }),
+        );
+
+        assert!(migrate_ai_settings_values(&mut values));
+        assert_eq!(
+            values["enhancement_options"],
+            json!({ "preset": "CleanDictation" })
+        );
+    }
+
+    #[test]
+    fn migration_normalizes_legacy_global_preset_for_disabled_polish() {
+        let mut values = values_with_enabled(
+            false,
+            "custom",
+            "local-model",
+            json!({ "custom": "local-model" }),
+        );
+        values.insert(
+            "enhancement_options".to_string(),
+            json!({ "preset": "Writing" }),
+        );
+
+        assert!(migrate_ai_settings_values(&mut values));
+        assert_eq!(
+            values["enhancement_options"],
+            json!({ "preset": "PersonalDictation" })
+        );
     }
 
     #[test]

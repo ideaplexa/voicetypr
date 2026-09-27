@@ -5,14 +5,14 @@ import { ReactNode } from "react";
 
 // Mock Tauri invoke
 const mockInvoke = vi.fn();
-const eventListeners = new Map<string, Array<() => void>>();
+const eventListeners = new Map<string, Array<(e: { payload: unknown }) => void>>();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
 // Mock Tauri events
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn((event: string, callback: () => void) => {
+  listen: vi.fn((event: string, callback: (e: { payload: unknown }) => void) => {
     const listeners = eventListeners.get(event) ?? [];
     listeners.push(callback);
     eventListeners.set(event, listeners);
@@ -52,7 +52,6 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(ui, { wrapper: TestWrapper });
 }
 
-
 function sharingStatus(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
@@ -77,7 +76,6 @@ function shareableModel(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
 
 describe("NetworkSharingCard", () => {
   beforeEach(() => {
@@ -109,13 +107,21 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve({
               models: [
                 shareableModel({ downloaded: false }),
-                shareableModel({ name: "base.en", display_name: "Base (English)", downloaded: false }),
+                shareableModel({
+                  name: "base.en",
+                  display_name: "Base (English)",
+                  downloaded: false,
+                }),
               ],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -130,7 +136,7 @@ describe("NetworkSharingCard", () => {
       });
 
       expect(
-        screen.getByText(/Remote sharing requires a downloaded Whisper or Parakeet model/)
+        screen.getByText(/Remote sharing requires a downloaded Whisper or Parakeet model/),
       ).toBeInTheDocument();
     });
 
@@ -139,7 +145,7 @@ describe("NetworkSharingCard", () => {
 
       await waitFor(() => {
         const toggle = screen.getByRole("switch");
-        expect(toggle).toBeDisabled();
+        expect(toggle).toHaveAttribute("aria-disabled", "true");
       });
     });
   });
@@ -168,13 +174,21 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve({
               models: [
                 shareableModel(),
-                shareableModel({ name: "base.en", display_name: "Base (English)", downloaded: false }),
+                shareableModel({
+                  name: "base.en",
+                  display_name: "Base (English)",
+                  downloaded: false,
+                }),
               ],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -185,12 +199,10 @@ describe("NetworkSharingCard", () => {
       renderWithProviders(<NetworkSharingCard />);
 
       await waitFor(() => {
-        expect(screen.getByText("Large v3 Turbo")).toBeInTheDocument();
+        expect(screen.getByText(/Large v3 Turbo/)).toBeInTheDocument();
       });
 
-      expect(
-        screen.getByText(/another Voicetypr app can use this device's/)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/is only available on this device/)).toBeInTheDocument();
     });
 
     it("enables the toggle switch when a model is available", async () => {
@@ -198,7 +210,7 @@ describe("NetworkSharingCard", () => {
 
       await waitFor(() => {
         const toggle = screen.getByRole("switch");
-        expect(toggle).not.toBeDisabled();
+        expect(toggle).not.toHaveAttribute("aria-disabled", "true");
       });
     });
 
@@ -233,14 +245,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -294,14 +308,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -313,7 +329,7 @@ describe("NetworkSharingCard", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText("Use this device's transcription from another Voicetypr app")
+          screen.getByText("Use this device's transcription from another Voicetypr app"),
         ).toBeInTheDocument();
       });
     });
@@ -367,7 +383,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -390,7 +410,7 @@ describe("NetworkSharingCard", () => {
         model_name: "base.en",
       };
       for (const listener of eventListeners.get("sharing-status-changed") ?? []) {
-        listener();
+        listener({ payload: null });
       }
 
       await waitFor(() => {
@@ -412,7 +432,7 @@ describe("NetworkSharingCard", () => {
         current_model: "base.en",
       };
       for (const listener of eventListeners.get("model-changed") ?? []) {
-        listener();
+        listener({ payload: null });
       }
 
       await waitFor(() => {
@@ -454,14 +474,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve("remote-server-1");
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -476,7 +498,7 @@ describe("NetworkSharingCard", () => {
       });
 
       expect(
-        screen.getByText(/Remote transcription is unavailable while using another Voicetypr/)
+        screen.getByText(/Remote transcription is unavailable while using another Voicetypr/),
       ).toBeInTheDocument();
     });
 
@@ -485,7 +507,7 @@ describe("NetworkSharingCard", () => {
 
       await waitFor(() => {
         const toggle = screen.getByRole("switch");
-        expect(toggle).toBeDisabled();
+        expect(toggle).toHaveAttribute("aria-disabled", "true");
       });
     });
 
@@ -512,14 +534,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(activeRemoteServer);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -528,12 +552,12 @@ describe("NetworkSharingCard", () => {
       renderWithProviders(<NetworkSharingCard />);
 
       await waitFor(() => {
-        expect(screen.getByRole("switch")).not.toBeDisabled();
+        expect(screen.getByRole("switch")).not.toHaveAttribute("aria-disabled", "true");
       });
 
       activeRemoteServer = "remote-server-1";
       for (const listener of eventListeners.get("sharing-status-changed") ?? []) {
-        listener();
+        listener({ payload: null });
       }
 
       await waitFor(() => {
@@ -564,9 +588,7 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
@@ -641,14 +663,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "start_sharing":
             return Promise.resolve();
           case "stop_sharing":
@@ -664,18 +688,21 @@ describe("NetworkSharingCard", () => {
       renderWithProviders(<NetworkSharingCard />);
 
       await waitFor(() => {
-        expect(screen.getByRole("switch")).not.toBeDisabled();
+        expect(screen.getByRole("switch")).not.toHaveAttribute("aria-disabled", "true");
       });
 
       await user.click(screen.getByRole("switch"));
 
       await waitFor(() => {
-        expect(mockInvoke).toHaveBeenCalledWith("start_sharing", expect.objectContaining({
-          port: 47842,
-          password: null,
-          preservePassword: true,
-          serverName: null,
-        }));
+        expect(mockInvoke).toHaveBeenCalledWith(
+          "start_sharing",
+          expect.objectContaining({
+            port: 47842,
+            password: null,
+            preservePassword: true,
+            serverName: null,
+          }),
+        );
       });
     });
 
@@ -684,7 +711,7 @@ describe("NetworkSharingCard", () => {
       renderWithProviders(<NetworkSharingCard />);
 
       await waitFor(() => {
-        expect(screen.getByRole("switch")).not.toBeDisabled();
+        expect(screen.getByRole("switch")).not.toHaveAttribute("aria-disabled", "true");
       });
 
       await user.click(screen.getByRole("switch"));
@@ -720,16 +747,18 @@ describe("NetworkSharingCard", () => {
         }
         if (command === "get_model_status") {
           return Promise.resolve({
-            models: [
-              shareableModel(),
-            ],
+            models: [shareableModel()],
           });
         }
         if (command === "get_active_remote_server") {
           return Promise.resolve(null);
         }
         if (command === "get_firewall_status") {
-          return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+          return Promise.resolve({
+            firewall_enabled: false,
+            app_allowed: true,
+            may_be_blocked: false,
+          });
         }
         return Promise.reject(new Error(`Unknown command: ${command}`));
       });
@@ -738,7 +767,7 @@ describe("NetworkSharingCard", () => {
       renderWithProviders(<NetworkSharingCard />);
 
       await waitFor(() => {
-        expect(screen.getByRole("switch")).not.toBeDisabled();
+        expect(screen.getByRole("switch")).not.toHaveAttribute("aria-disabled", "true");
       });
 
       await user.click(screen.getByRole("switch"));
@@ -773,14 +802,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -841,14 +872,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -904,8 +937,12 @@ describe("NetworkSharingCard", () => {
       expect(screen.getByText(/192\.168\.1\.100:47842/)).toBeInTheDocument();
       expect(screen.queryByText(/192\.168\.1\.100:8080/)).not.toBeInTheDocument();
       // ...and the copy button must advertise the listening port too (matches clipboard).
-      expect(screen.getByRole("button", { name: "Copy address 192.168.1.100:47842" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Copy address 192.168.1.100:8080" })).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Copy address 192.168.1.100:47842" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Copy address 192.168.1.100:8080" }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -935,14 +972,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -985,7 +1024,7 @@ describe("NetworkSharingCard", () => {
 
       // Find and click the visibility toggle (the Eye icon button)
       const toggleButtons = screen.getAllByRole("button");
-      const visibilityToggle = toggleButtons.find(btn => btn.getAttribute("tabindex") === "-1");
+      const visibilityToggle = toggleButtons.find((btn) => btn.getAttribute("tabindex") === "-1");
 
       if (visibilityToggle) {
         await user.click(visibilityToggle);
@@ -1012,7 +1051,6 @@ describe("NetworkSharingCard", () => {
       });
     });
 
-
     it("persists remote model control opt-in without restarting sharing", async () => {
       mockInvoke.mockImplementation((command: string) => {
         switch (command) {
@@ -1032,7 +1070,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "update_remote_model_control_enabled":
             return Promise.resolve();
           default:
@@ -1043,7 +1085,9 @@ describe("NetworkSharingCard", () => {
       const user = userEvent.setup();
       renderWithProviders(<NetworkSharingCard />);
 
-      const toggle = await screen.findByLabelText("Allow trusted devices to change shared model");
+      const toggle = await screen.findByRole("switch", {
+        name: "Allow trusted devices to change shared model",
+      });
       expect(toggle).not.toBeChecked();
 
       await user.click(toggle);
@@ -1055,7 +1099,9 @@ describe("NetworkSharingCard", () => {
       });
 
       expect(
-        screen.getByText("Requires a sharing password so only trusted devices can change the model this device shares."),
+        screen.getByText(
+          "Requires a sharing password so only trusted devices can change the model this device shares.",
+        ),
       ).toBeInTheDocument();
     });
     it("allows removing a saved sharing password", async () => {
@@ -1083,14 +1129,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -1107,12 +1155,15 @@ describe("NetworkSharingCard", () => {
       await user.click(removePassword);
 
       await waitFor(() => {
-        expect(mockInvoke).toHaveBeenCalledWith("start_sharing", expect.objectContaining({
-          port: 47842,
-          password: null,
-          preservePassword: false,
-          serverName: null,
-        }));
+        expect(mockInvoke).toHaveBeenCalledWith(
+          "start_sharing",
+          expect.objectContaining({
+            port: 47842,
+            password: null,
+            preservePassword: false,
+            serverName: null,
+          }),
+        );
       });
     });
 
@@ -1145,7 +1196,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -1200,14 +1255,16 @@ describe("NetworkSharingCard", () => {
             return Promise.resolve(["192.168.1.100 (eth0)", "10.0.0.5 (WiFi)"]);
           case "get_model_status":
             return Promise.resolve({
-              models: [
-                shareableModel(),
-              ],
+              models: [shareableModel()],
             });
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -1285,7 +1342,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -1299,9 +1360,9 @@ describe("NetworkSharingCard", () => {
         expect(screen.getByText("Current model cannot be shared")).toBeInTheDocument();
       });
 
-      expect(screen.getByRole("switch")).toBeDisabled();
+      expect(screen.getByRole("switch")).toHaveAttribute("aria-disabled", "true");
       expect(
-        screen.getByText(/Cloud sources cannot be shared over the network/)
+        screen.getByText(/Cloud sources cannot be shared over the network/),
       ).toBeInTheDocument();
     });
   });
@@ -1333,7 +1394,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -1347,9 +1412,7 @@ describe("NetworkSharingCard", () => {
         expect(screen.getByText("No network address available")).toBeInTheDocument();
       });
 
-      expect(
-        screen.getByText(/Connect this device to Wi-Fi or Ethernet/)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Connect this device to Wi-Fi or Ethernet/)).toBeInTheDocument();
       expect(screen.queryByText("Starting server...")).not.toBeInTheDocument();
     });
   });
@@ -1382,7 +1445,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "start_sharing":
             return Promise.resolve();
           case "stop_sharing":
@@ -1411,29 +1478,27 @@ describe("NetworkSharingCard", () => {
       });
       expect(mockInvoke).not.toHaveBeenCalledWith("stop_sharing");
     });
-    it.each([
-      ["1e3"],
-      ["47842abc"],
-      ["-1"],
-      ["1.5"],
-    ])("rejects non-digit port strings (%s) before calling stop_sharing", async (invalidPort) => {
-      const user = userEvent.setup();
-      renderWithProviders(<NetworkSharingCard />);
+    it.each([["1e3"], ["47842abc"], ["-1"], ["1.5"]])(
+      "rejects non-digit port strings (%s) before calling stop_sharing",
+      async (invalidPort) => {
+        const user = userEvent.setup();
+        renderWithProviders(<NetworkSharingCard />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText("Port")).toBeInTheDocument();
-      });
+        await waitFor(() => {
+          expect(screen.getByLabelText("Port")).toBeInTheDocument();
+        });
 
-      const portInput = screen.getByLabelText("Port");
-      await user.clear(portInput);
-      fireEvent.change(portInput, { target: { value: invalidPort } });
-      fireEvent.click(screen.getByTitle("Save and restart server"));
+        const portInput = screen.getByLabelText("Port");
+        await user.clear(portInput);
+        fireEvent.change(portInput, { target: { value: invalidPort } });
+        fireEvent.click(screen.getByTitle("Save and restart server"));
 
-      await waitFor(() => {
-        expect(toast.error).toHaveBeenCalledWith("Enter a valid port between 1 and 65535");
-      });
-      expect(mockInvoke).not.toHaveBeenCalledWith("stop_sharing");
-    });
+        await waitFor(() => {
+          expect(toast.error).toHaveBeenCalledWith("Enter a valid port between 1 and 65535");
+        });
+        expect(mockInvoke).not.toHaveBeenCalledWith("stop_sharing");
+      },
+    );
 
     it("restores sharing when a port change restart fails", async () => {
       const user = userEvent.setup();
@@ -1463,7 +1528,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -1491,7 +1560,10 @@ describe("NetworkSharingCard", () => {
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalledWith("Failed to update port; sharing restored");
       });
-      expect(mockInvoke).toHaveBeenCalledWith("start_sharing", expect.objectContaining({ port: 47842 }));
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "start_sharing",
+        expect.objectContaining({ port: 47842 }),
+      );
     });
 
     it("restores sharing when a password change restart fails", async () => {
@@ -1523,7 +1595,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           case "stop_sharing":
             return Promise.resolve();
           case "start_sharing":
@@ -1550,9 +1626,11 @@ describe("NetworkSharingCard", () => {
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalledWith("Failed to update password; sharing restored");
       });
-      expect(mockInvoke).toHaveBeenCalledWith("start_sharing", expect.objectContaining({ port: 47842 }));
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "start_sharing",
+        expect.objectContaining({ port: 47842 }),
+      );
     });
-
   });
 
   describe("host password copy", () => {
@@ -1583,7 +1661,11 @@ describe("NetworkSharingCard", () => {
           case "get_active_remote_server":
             return Promise.resolve(null);
           case "get_firewall_status":
-            return Promise.resolve({ firewall_enabled: false, app_allowed: true, may_be_blocked: false });
+            return Promise.resolve({
+              firewall_enabled: false,
+              app_allowed: true,
+              may_be_blocked: false,
+            });
           default:
             return Promise.reject(new Error(`Unknown command: ${command}`));
         }
@@ -1595,10 +1677,11 @@ describe("NetworkSharingCard", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText("Other devices need this password to connect to your shared transcription.")
+          screen.getByText(
+            "Other devices need this password to connect to your shared transcription.",
+          ),
         ).toBeInTheDocument();
       });
     });
   });
-
 });

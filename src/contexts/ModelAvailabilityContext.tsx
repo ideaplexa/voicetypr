@@ -1,6 +1,6 @@
-import { createContext, useContext, ReactNode } from 'react';
-import { useModelAvailability } from '@/hooks/useModelAvailability';
-import type { ModelAvailability } from '@/hooks/useModelAvailability';
+import { createContext, useContext, ReactNode } from "react";
+import { useModelAvailability } from "@/hooks/useModelAvailability";
+import type { ModelAvailability } from "@/hooks/useModelAvailability";
 
 const ModelAvailabilityContext = createContext<ModelAvailability | null>(null);
 
@@ -17,7 +17,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
 export function useModelAvailabilityContext(): ModelAvailability {
   const context = useContext(ModelAvailabilityContext);
   if (!context) {
-    throw new Error('useModelAvailabilityContext must be used within ModelAvailabilityProvider');
+    throw new Error("useModelAvailabilityContext must be used within ModelAvailabilityProvider");
   }
   return context;
 }

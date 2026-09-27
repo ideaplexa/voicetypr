@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import type { TranscriptionHistory } from "@/types";
 import { createLogger } from "@/lib/logger";
@@ -34,6 +34,8 @@ interface UseTranscriptionHistoryOptions {
 interface UseTranscriptionHistoryResult {
   history: TranscriptionHistory[];
   totalCount: number;
+  isLoading: boolean;
+  loadError: string | null;
   refreshHistory: () => Promise<void>;
 }
 
@@ -72,27 +74,41 @@ export function useTranscriptionHistory({
   const { registerEvent } = useEventCoordinator("main");
   const [history, setHistory] = useState<TranscriptionHistory[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  // Mirrors `history` synchronously so event handlers can check for duplicates
+  // without reading stale closure state or causing side effects inside a
+  // setState updater.
+  const historyRef = useRef<TranscriptionHistory[]>([]);
 
   const refreshHistory = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     try {
-      const historyPromise = invoke<RawTranscriptionHistoryItem[]>(
-        "get_transcription_history",
-        { limit },
-      );
+      const historyPromise = invoke<RawTranscriptionHistoryItem[]>("get_transcription_history", {
+        limit,
+      });
       const countPromise = includeTotalCount
         ? invoke<number>("get_transcription_count")
         : Promise.resolve<number | null>(null);
 
-      const [storedHistory, count] = await Promise.all([
-        historyPromise,
-        countPromise,
-      ]);
+      const [storedHistory, count] = await Promise.all([historyPromise, countPromise]);
 
+      if (requestIdRef.current !== requestId) return;
       const formattedHistory = storedHistory.map(toHistoryItem);
+      historyRef.current = formattedHistory;
       setHistory(formattedHistory);
       setTotalCount(count ?? formattedHistory.length);
+      setLoadError(null);
     } catch (error) {
+      if (requestIdRef.current !== requestId) return;
       log.error("Failed to load transcription history:", error);
+      setLoadError("Couldn't load history");
+    } finally {
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   }, [includeTotalCount, limit]);
 
@@ -100,7 +116,10 @@ export function useTranscriptionHistory({
     let isMounted = true;
     const unlisteners: Array<() => void> = [];
 
-    const register = async <T,>(eventName: string, handler: (payload: T) => void | Promise<void>) => {
+    const register = async <T>(
+      eventName: string,
+      handler: (payload: T) => void | Promise<void>,
+    ) => {
       const unlisten = await registerEvent<T>(eventName, handler);
       if (typeof unlisten !== "function") return;
       if (!isMounted) {
@@ -115,15 +134,17 @@ export function useTranscriptionHistory({
 
       await register<TranscriptionAddedEvent>("transcription-added", (data) => {
         const newItem = fromAddedEvent(data);
-        setHistory((previous) => {
-          if (previous.some((item) => item.id === newItem.id)) {
-            return previous;
-          }
-          if (includeTotalCount) {
-            setTotalCount((count) => count + 1);
-          }
-          return [newItem, ...previous].slice(0, limit);
-        });
+        setLoadError(null);
+        const previous = historyRef.current;
+        if (previous.some((item) => item.id === newItem.id)) {
+          return;
+        }
+        const next = [newItem, ...previous].slice(0, limit);
+        historyRef.current = next;
+        setHistory(next);
+        if (includeTotalCount) {
+          setTotalCount((count) => count + 1);
+        }
       });
 
       await register("history-updated", () => {
@@ -150,6 +171,8 @@ export function useTranscriptionHistory({
   return {
     history,
     totalCount,
+    isLoading,
+    loadError,
     refreshHistory,
   };
 }

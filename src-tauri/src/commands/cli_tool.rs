@@ -25,6 +25,14 @@ pub struct CliToolStatus {
     pub manageable: bool,
     /// Where the command lives / how to invoke it, when known.
     pub path: Option<String>,
+    /// Version of the running app that owns the managed command.
+    pub app_version: String,
+    /// Version exposed by the command when its launcher is known to target this app.
+    pub command_version: Option<String>,
+    /// The installed command is managed by Voicetypr and targets this app installation.
+    pub compatible: bool,
+    /// Actionable health detail when the command is stale, foreign, or unsupported.
+    pub detail: Option<String>,
 }
 
 #[tauri::command]
@@ -43,6 +51,10 @@ pub fn cli_tool_status() -> Result<CliToolStatus, String> {
             installed: false,
             manageable: false,
             path: None,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            command_version: None,
+            compatible: false,
+            detail: Some("Command installation is not managed on this platform.".to_string()),
         })
     }
 }
@@ -67,6 +79,10 @@ pub async fn install_cli_tool() -> Result<CliToolStatus, String> {
     {
         Err("Installing the voicetypr command is not supported on this platform.".to_string())
     }
+}
+#[tauri::command]
+pub async fn repair_cli_tool() -> Result<CliToolStatus, String> {
+    install_cli_tool().await
 }
 
 #[tauri::command]
@@ -129,11 +145,39 @@ mod macos {
     }
 
     pub fn status() -> CliToolStatus {
-        let installed = Path::new(MACOS_SHIM_PATH).exists();
+        let current_exe = current_exe_path().ok();
+        status_for(Path::new(MACOS_SHIM_PATH), current_exe.as_deref())
+    }
+
+    fn status_for(path: &Path, current_exe: Option<&str>) -> CliToolStatus {
+        let ownership = classify(path);
+        let installed = !matches!(ownership, Ownership::Absent);
+        let manageable = !matches!(ownership, Ownership::Foreign);
+        let compatible = matches!(ownership, Ownership::Managed)
+            && current_exe.is_some_and(|exe| {
+                std::fs::read_to_string(path).is_ok_and(|shim| shim == build_shim(exe))
+            });
+        let detail = match ownership {
+            Ownership::Absent => None,
+            Ownership::Foreign => Some(
+                "Another command already uses this path. Voicetypr will not overwrite it."
+                    .to_string(),
+            ),
+            Ownership::Managed if !compatible => Some(
+                "The command points to a different Voicetypr installation. Repair it to use this app."
+                    .to_string(),
+            ),
+            Ownership::Managed => None,
+        };
+
         CliToolStatus {
             installed,
-            manageable: true,
-            path: installed.then(|| MACOS_SHIM_PATH.to_string()),
+            manageable,
+            path: installed.then(|| path.to_string_lossy().into_owned()),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            command_version: compatible.then(|| env!("CARGO_PKG_VERSION").to_string()),
+            compatible,
+            detail,
         }
     }
 
@@ -144,12 +188,7 @@ mod macos {
             Ownership::Foreign => return Err(foreign_error()),
             Ownership::Managed | Ownership::Absent => {}
         }
-        let exe =
-            std::env::current_exe().map_err(|e| format!("Cannot resolve app executable: {e}"))?;
-        let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
-        let exe_str = exe
-            .to_str()
-            .ok_or("App executable path is not valid UTF-8")?;
+        let exe_str = current_exe_path()?;
 
         // App Translocation gives a quarantined app a random, read-only path that vanishes;
         // a shim pointing there would break. Tell the user to install to /Applications first.
@@ -160,7 +199,7 @@ mod macos {
             );
         }
 
-        let shim = build_shim(exe_str);
+        let shim = build_shim(&exe_str);
 
         // Stage the shim in a securely-created unique temp file (tempfile uses O_EXCL + a
         // random name, mode 0600), so a local attacker can't pre-create or swap it before the
@@ -248,6 +287,14 @@ mod macos {
             comment = shim_comment_line(),
             exe = sh_double_quote_escape(exe),
         )
+    }
+    fn current_exe_path() -> Result<String, String> {
+        let exe =
+            std::env::current_exe().map_err(|e| format!("Cannot resolve app executable: {e}"))?;
+        let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+        exe.to_str()
+            .map(str::to_string)
+            .ok_or_else(|| "App executable path is not valid UTF-8".to_string())
     }
 
     /// Classify an arbitrary path by the same rules as the real shim path. Kept
@@ -422,6 +469,47 @@ mod macos {
         }
 
         #[test]
+        fn reports_current_stale_and_foreign_command_health() {
+            let dir = tempfile::tempdir().unwrap();
+            let command = dir.path().join("voicetypr");
+            let current_exe = "/Applications/Voicetypr.app/Contents/MacOS/voicetypr";
+
+            std::fs::write(&command, build_shim(current_exe)).unwrap();
+            let current = status_for(&command, Some(current_exe));
+            assert!(current.installed);
+            assert!(current.manageable);
+            assert!(current.compatible);
+            assert_eq!(
+                current.command_version.as_deref(),
+                Some(env!("CARGO_PKG_VERSION"))
+            );
+            assert!(current.detail.is_none());
+
+            let stale = status_for(
+                &command,
+                Some("/Applications/Other Voicetypr.app/Contents/MacOS/voicetypr"),
+            );
+            assert!(stale.installed);
+            assert!(stale.manageable);
+            assert!(!stale.compatible);
+            assert!(stale.command_version.is_none());
+            assert!(stale
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("Repair")));
+
+            std::fs::write(&command, "#!/bin/sh\necho foreign\n").unwrap();
+            let foreign = status_for(&command, Some(current_exe));
+            assert!(foreign.installed);
+            assert!(!foreign.manageable);
+            assert!(!foreign.compatible);
+            assert!(foreign
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("not overwrite")));
+        }
+
+        #[test]
         fn build_shim_carries_the_marker() {
             let shim = build_shim("/some/exe");
             assert!(shim.starts_with("#!/bin/sh\n"));
@@ -436,36 +524,44 @@ mod macos {
 #[cfg(target_os = "windows")]
 mod windows_path {
     use super::CliToolStatus;
+    use std::path::Path;
     use winreg::enums::{RegType, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
     use winreg::{RegKey, RegValue};
 
     pub fn status() -> CliToolStatus {
+        let (installed, compatible) = inspect_path().unwrap_or_default();
         CliToolStatus {
-            installed: check_installed().unwrap_or(false),
+            installed,
             manageable: true,
             path: Some("voicetypr".to_string()),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            command_version: compatible.then(|| env!("CARGO_PKG_VERSION").to_string()),
+            compatible,
+            detail: (installed && !compatible).then(|| {
+                "Another voicetypr command appears earlier on your user PATH. Repair this installation to give it priority.".to_string()
+            }),
         }
     }
 
-    fn check_installed() -> Option<bool> {
+    fn inspect_path() -> Option<(bool, bool)> {
         let dir = install_dir().ok()?;
         let env = open_env(false).ok()?;
         let (current, _) = read_path(&env).ok()??;
-        Some(path_contains_dir(&current, &dir))
+        let installed = path_contains_dir(&current, &dir);
+        let compatible = installed
+            && resolved_command_dir(&current, &dir)
+                .is_some_and(|entry| entry_matches_dir(entry, &dir));
+        Some((installed, compatible))
     }
 
     pub fn install() -> Result<(), String> {
         let dir = install_dir()?;
         let env = open_env(true)?;
         let (current, vtype) = read_path(&env)?.unwrap_or((String::new(), RegType::REG_EXPAND_SZ));
-        if path_contains_dir(&current, &dir) {
+        let new = prioritize_dir(&current, &dir);
+        if new == current {
             return Ok(());
         }
-        let new = if current.is_empty() {
-            dir
-        } else {
-            format!("{};{}", current.trim_end_matches(';'), dir)
-        };
         env.set_raw_value("Path", &encode_reg_sz(&new, vtype))
             .map_err(|e| format!("Cannot update PATH: {e}"))?;
         broadcast_env_change();
@@ -556,11 +652,74 @@ mod windows_path {
         path.split(';').any(|entry| entry_matches_dir(entry, dir))
     }
 
-    /// Case-insensitive, trailing-slash-insensitive comparison of a single PATH entry.
+    fn prioritize_dir(path: &str, dir: &str) -> String {
+        let kept = path
+            .split(';')
+            .filter(|entry| !entry_matches_dir(entry, dir))
+            .collect::<Vec<_>>()
+            .join(";");
+        if kept.is_empty() {
+            dir.to_string()
+        } else {
+            format!("{dir};{kept}")
+        }
+    }
+
+    fn resolved_command_dir<'a>(path: &'a str, install_dir: &str) -> Option<&'a str> {
+        path.split(';').find(|entry| {
+            entry_matches_dir(entry, install_dir)
+                || Path::new(normalize_entry(entry))
+                    .join("voicetypr.exe")
+                    .is_file()
+        })
+    }
+
+    fn normalize_entry(entry: &str) -> &str {
+        entry
+            .trim()
+            .trim_matches('"')
+            .trim_end_matches(|c| c == '\\' || c == '/')
+    }
+
+    /// Case-insensitive, quote- and trailing-slash-insensitive comparison of a PATH entry.
     fn entry_matches_dir(entry: &str, dir: &str) -> bool {
-        let normalize = |s: &str| s.trim().trim_end_matches('\\').to_string();
-        let entry = normalize(entry);
-        !entry.is_empty() && entry.eq_ignore_ascii_case(&normalize(dir))
+        let entry = normalize_entry(entry);
+        !entry.is_empty() && entry.eq_ignore_ascii_case(normalize_entry(dir))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn repair_prioritizes_current_app_over_shadowing_command() {
+            let root = tempfile::tempdir().unwrap();
+            let foreign = root.path().join("foreign");
+            let current = root.path().join("current");
+            std::fs::create_dir_all(&foreign).unwrap();
+            std::fs::create_dir_all(&current).unwrap();
+            std::fs::write(foreign.join("voicetypr.exe"), b"foreign").unwrap();
+            std::fs::write(current.join("voicetypr.exe"), b"current").unwrap();
+
+            let foreign = foreign.to_string_lossy();
+            let current = current.to_string_lossy();
+            let shadowed = format!("{foreign};{current}");
+            assert!(resolved_command_dir(&shadowed, &current)
+                .is_some_and(|entry| entry_matches_dir(entry, &foreign)));
+
+            let repaired = prioritize_dir(&shadowed, &current);
+            assert!(resolved_command_dir(&repaired, &current)
+                .is_some_and(|entry| entry_matches_dir(entry, &current)));
+            assert_eq!(repaired, format!("{current};{foreign}"));
+        }
+
+        #[test]
+        fn prioritizing_an_already_first_directory_is_a_noop() {
+            let current = r"C:\Program Files\Voicetypr";
+            let other = r"C:\Tools";
+            let path = format!("{current};{other}");
+            assert_eq!(prioritize_dir(&path, current), path);
+        }
     }
 
     fn broadcast_env_change() {

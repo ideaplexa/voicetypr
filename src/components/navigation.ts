@@ -1,47 +1,37 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   Bug,
   Clock,
   Cpu,
   FileAudio,
-  HelpCircle,
   Home,
   Keyboard,
   Key,
-  Layers,
+  Mic,
   Settings2,
   Share2,
   Sparkles,
   Terminal,
-  Type,
 } from "lucide-react";
 
 export type ScreenId =
   | "overview"
   | "recordings"
   | "audio"
+  | "recording"
   | "general"
   | "shortcuts"
   | "models"
   | "network"
   | "formatting"
-  | "text-rules"
   | "license"
   | "agent"
   | "advanced"
-  | "help";
-
-export type SidebarActionId = "report-bug";
+  | "report-problem";
 
 export interface ScreenDefinition {
   id: ScreenId;
-  label: string;
-  icon: LucideIcon;
-  description: string;
-}
-
-export interface SidebarActionDefinition {
-  id: SidebarActionId;
   label: string;
   icon: LucideIcon;
   description: string;
@@ -67,50 +57,50 @@ export const primaryScreens: ScreenDefinition[] = [
     description: "Transcribe existing audio files.",
   },
   {
+    id: "recording",
+    label: "Recording",
+    icon: Mic,
+    description: "Microphone, primary shortcut, feedback, and recording behavior.",
+  },
+  {
     id: "models",
-    label: "Transcription",
+    label: "Sources",
     icon: Cpu,
-    description: "Local models, cloud transcription, and remote Voicetypr servers.",
+    description: "Choose local, cloud, or remote transcription.",
   },
   {
     id: "network",
     label: "Network sharing",
     icon: Share2,
-    description: "Share this device's transcription engine over your network, or connect to one.",
+    description: "Let other devices use this device's transcription engine.",
   },
   {
     id: "formatting",
-    label: "AI Formatting",
+    label: "Polish",
     icon: Sparkles,
-    description: "AI polish, formatting modes, and provider/model setup.",
-  },
-  {
-    id: "text-rules",
-    label: "Default Formatting",
-    icon: Type,
-    description: "Always-on text rules — corrections, Words & Names, and shortcuts. Work with or without AI, even better with AI Formatting on.",
+    description: "Configure AI cleanup, dictionary, corrections, snippets, and modes.",
   },
   {
     id: "general",
-    label: "Settings",
+    label: "General",
     icon: Settings2,
-    description: "Hotkeys, paste behavior, microphones, and app preferences.",
+    description: "Appearance, startup, privacy, and update options.",
   },
   {
     id: "shortcuts",
     label: "Shortcuts",
     icon: Keyboard,
-    description: "Recording, history, and mode shortcuts.",
+    description: "Additional shortcuts for history, Polish, and app actions.",
   },
   {
     id: "license",
-    label: "Licensing",
+    label: "License",
     icon: Key,
-    description: "Trial and license activation.",
+    description: "Trial status, license activation, and purchase access.",
   },
   {
     id: "agent",
-    label: "Agent & CLI",
+    label: "CLI",
     icon: Terminal,
     description: "Drive Voicetypr from scripts and agents via the CLI and local API.",
   },
@@ -119,62 +109,40 @@ export const primaryScreens: ScreenDefinition[] = [
 export const secondaryScreens: ScreenDefinition[] = [
   {
     id: "advanced",
-    label: "Advanced",
-    icon: Layers,
-    description: "Power-user and diagnostics settings.",
+    label: "Quick help",
+    icon: Activity,
+    description: "Permissions, troubleshooting, reset tools, and app diagnostics.",
   },
   {
-    id: "help",
-    label: "Help",
-    icon: HelpCircle,
-    description: "Troubleshooting, support, and bug reporting.",
-  },
-];
-
-export const sidebarActions: SidebarActionDefinition[] = [
-  {
-    id: "report-bug",
-    label: "Report Bug",
+    id: "report-problem",
+    label: "Report a problem",
     icon: Bug,
-    description: "Send a bug report with diagnostic logs.",
+    description: "Send an issue with diagnostic logs.",
   },
 ];
 
 export const screens = [...primaryScreens, ...secondaryScreens] as const;
 
-export const isScreenId = (value: string): value is ScreenId =>
-  screens.some((screen) => screen.id === value);
-
-export interface NavGroup {
-  label: string;
-  screens: ScreenDefinition[];
-}
-
 const screenById = (id: ScreenId): ScreenDefinition =>
   screens.find((screen) => screen.id === id) as ScreenDefinition;
 
-// Grouped sidebar layout (Claude dashboard design): Workspace / Configure / Account.
-export const navGroups: NavGroup[] = [
-  {
-    label: "Workspace",
-    screens: [screenById("overview"), screenById("recordings"), screenById("audio")],
-  },
-  {
-    label: "Configure",
-    screens: [
-      screenById("general"),
-      screenById("shortcuts"),
-      screenById("models"),
-      screenById("network"),
-      screenById("formatting"),
-      screenById("text-rules"),
-      screenById("agent"),
-    ],
-  },
-  {
-    label: "Account",
-    screens: [screenById("license"), screenById("advanced")],
-  },
+// Main navigation stays focused on everyday workflows.
+export const navScreens: ScreenDefinition[] = [
+  screenById("overview"),
+  screenById("general"),
+  screenById("recordings"),
+  screenById("audio"),
+  screenById("models"),
+  screenById("recording"),
+  screenById("formatting"),
+  screenById("shortcuts"),
+  screenById("network"),
+  screenById("agent"),
+  screenById("license"),
 ];
 
-export const footerScreens: ScreenDefinition[] = [screenById("help")];
+// Support and troubleshooting remain fixed at the bottom.
+export const footerNavScreens: ScreenDefinition[] = [
+  screenById("advanced"),
+  screenById("report-problem"),
+];

@@ -1,0 +1,11 @@
+[package]
+name = "vulkan-device-select"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "vulkan_device_select"
+path = "src/lib.rs"
+
+[dependencies]

@@ -2,34 +2,42 @@
 import { AccountTab } from "./AccountTab";
 import { AdvancedTab } from "./AdvancedTab";
 import { EnhancementsTab } from "./EnhancementsTab";
-import { HelpTab } from "./HelpTab";
 import { ModelsTab } from "./ModelsTab";
 import { OverviewTab } from "./OverviewTab";
 import { RecordingsTab } from "./RecordingsTab";
+import { RecordingTab } from "./RecordingTab";
 import { SettingsTab } from "./SettingsTab";
 import { ShortcutsTab } from "./ShortcutsTab";
 import { NetworkSharingTab } from "./NetworkSharingTab";
 import { AgentCliTab } from "./AgentCliTab";
-import { TextRulesTab } from "./TextRulesTab";
 import { AudioUploadSection } from "../sections/AudioUploadSection";
+import { ReportProblemSection } from "../sections/ReportProblemSection";
 import type { ScreenId } from "@/components/navigation";
 
-interface TabContainerProps {
+import type { SourceFilterProps } from "../sections/models/types";
+
+interface TabContainerProps extends SourceFilterProps {
   activeSection: ScreenId;
+  onNavigate?: (section: ScreenId) => void;
 }
 
-export function TabContainer({ activeSection }: TabContainerProps) {
-
+export function TabContainer({
+  activeSection,
+  onNavigate,
+  ...sourceFilterProps
+}: TabContainerProps) {
   const renderTabContent = () => {
     switch (activeSection) {
       case "overview":
-        return <OverviewTab />;
+        return <OverviewTab onNavigate={onNavigate} />;
 
       case "recordings":
         return <RecordingsTab />;
 
       case "audio":
         return <AudioUploadSection />;
+      case "recording":
+        return <RecordingTab />;
 
       case "general":
         return <SettingsTab />;
@@ -38,7 +46,7 @@ export function TabContainer({ activeSection }: TabContainerProps) {
         return <ShortcutsTab />;
 
       case "models":
-        return <ModelsTab />;
+        return <ModelsTab {...sourceFilterProps} />;
 
       case "network":
         return <NetworkSharingTab />;
@@ -52,18 +60,14 @@ export function TabContainer({ activeSection }: TabContainerProps) {
       case "formatting":
         return <EnhancementsTab />;
 
-      case "text-rules":
-        return <TextRulesTab />;
-
       case "license":
         return <AccountTab />;
 
-      case "help":
-        return <HelpTab />;
-
+      case "report-problem":
+        return <ReportProblemSection />;
 
       default:
-        return <OverviewTab />;
+        return <OverviewTab onNavigate={onNavigate} />;
     }
   };
 

@@ -4,7 +4,7 @@ use tokio::time::{sleep, Duration};
 use crate::audio::device_watcher::try_start_device_watcher_if_ready;
 
 #[tauri::command]
-pub async fn check_accessibility_permission() -> Result<bool, String> {
+pub async fn check_accessibility_permission(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         use tauri_plugin_macos_permissions::check_accessibility_permission;
@@ -25,6 +25,11 @@ pub async fn check_accessibility_permission() -> Result<bool, String> {
             if has_permission || attempts >= MAX_ATTEMPTS {
                 if has_permission {
                     log::info!("Accessibility permission is authorized");
+                    // A grant made in System Settings is first observed by this
+                    // polling command, not by the request command. Reuse the
+                    // existing event so backend dependants (including the
+                    // trigger engine) recover without an app restart.
+                    emit_accessibility_granted(&app);
                 } else {
                     log::warn!(
                         "Accessibility permission is not authorized after {} attempts",
@@ -46,8 +51,19 @@ pub async fn check_accessibility_permission() -> Result<bool, String> {
 
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = app;
         // On non-macOS platforms, we don't need special permissions
         Ok(true)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn emit_accessibility_granted(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    log::info!("Emitting accessibility-granted event");
+    if let Err(error) = app.emit("accessibility-granted", ()) {
+        log::warn!("Failed to emit accessibility-granted event: {}", error);
     }
 }
 
@@ -64,11 +80,7 @@ pub async fn request_accessibility_permission(app: tauri::AppHandle) -> Result<b
         let already_granted = check_accessibility_permission().await;
         if already_granted {
             log::info!("Accessibility permission already granted");
-
-            // Emit accessibility-granted event for UI update
-            log::info!("Emitting accessibility-granted event");
-            use tauri::Emitter;
-            let _ = app.emit("accessibility-granted", ());
+            emit_accessibility_granted(&app);
 
             // Return true to indicate permission is already granted
             return Ok(true);
@@ -89,10 +101,10 @@ pub async fn request_accessibility_permission(app: tauri::AppHandle) -> Result<b
         );
 
         // Emit appropriate event based on permission status
-        use tauri::Emitter;
         if has_permission {
-            let _ = app.emit("accessibility-granted", ());
+            emit_accessibility_granted(&app);
         } else {
+            use tauri::Emitter;
             let _ = app.emit("accessibility-denied", ());
         }
 

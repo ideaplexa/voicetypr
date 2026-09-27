@@ -1,0 +1,13 @@
+paths:
+  '.github/workflows/ci.yml':
+    ignore:
+      # GitHub-hosted Intel label is newer than actionlint's bundled runner list.
+      - 'label "macos-15-intel" is unknown'
+      # Existing Xcode selection uses fixed /Applications glob patterns.
+      - 'shellcheck reported issue in this script: SC2012:'
+  '.github/workflows/release.yml':
+    ignore:
+      - 'label "macos-15-intel" is unknown'
+      - 'shellcheck reported issue in this script: SC2012:'
+      # Tauri emits one fixed Voicetypr.app bundle name; it cannot begin with a dash.
+      - 'shellcheck reported issue in this script: SC2035:'

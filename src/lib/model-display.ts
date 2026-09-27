@@ -1,18 +1,18 @@
-import type { ModelInfo } from '@/types';
+import type { ModelInfo } from "@/types";
 
 const KNOWN_MODEL_DISPLAY_NAMES: Record<string, string> = {
-  'base.en': 'Base (English)',
-  'small.en': 'Small (English)',
-  'large-v3': 'Large v3',
-  'large-v3-turbo': 'Large v3 Turbo',
-  'large-v3-turbo-q8_0': 'Large v3 Turbo (Q8)',
-  'parakeet-tdt-0.6b-v3': 'Parakeet V3',
-  'parakeet-tdt-0.6b-v2': 'Parakeet V2 (English)',
-  soniox: 'Soniox (Cloud)',
-  openai: 'OpenAI (Cloud)',
-  groq: 'Groq (Cloud)',
-  deepgram: 'Deepgram (Cloud)',
-  cohere: 'Cohere (Cloud)',
+  "base.en": "Base (English)",
+  "small.en": "Small (English)",
+  "large-v3": "Large v3",
+  "large-v3-turbo": "Large v3 Turbo",
+  "large-v3-turbo-q8_0": "Large v3 Turbo (Q8)",
+  "parakeet-tdt-0.6b-v3": "Parakeet V3",
+  "parakeet-tdt-0.6b-v2": "Parakeet V2 (English)",
+  soniox: "Soniox (Cloud)",
+  openai: "OpenAI (Cloud)",
+  groq: "Groq (Cloud)",
+  deepgram: "Deepgram (Cloud)",
+  cohere: "Cohere (Cloud)",
 };
 
 function titleCaseToken(token: string) {
@@ -26,12 +26,12 @@ function titleCaseToken(token: string) {
 
 export function humanizeModelId(modelId: string) {
   return modelId
-    .replace(/\.en$/i, ' English')
-    .replace(/[_-]+/g, ' ')
-    .split(' ')
+    .replace(/\.en$/i, " English")
+    .replace(/[_-]+/g, " ")
+    .split(" ")
     .filter(Boolean)
     .map(titleCaseToken)
-    .join(' ');
+    .join(" ");
 }
 
 export function getModelDisplayName(
@@ -40,5 +40,9 @@ export function getModelDisplayName(
 ) {
   if (!modelId) return null;
 
-  return models?.[modelId]?.display_name || KNOWN_MODEL_DISPLAY_NAMES[modelId] || humanizeModelId(modelId);
+  return (
+    models?.[modelId]?.display_name ||
+    KNOWN_MODEL_DISPLAY_NAMES[modelId] ||
+    humanizeModelId(modelId)
+  );
 }

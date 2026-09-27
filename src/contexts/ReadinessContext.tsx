@@ -1,5 +1,5 @@
-import { createContext, useContext, ReactNode } from 'react';
-import { useAppReadiness } from '@/hooks/useAppReadiness';
+import { createContext, useContext, ReactNode } from "react";
+import { useAppReadiness } from "@/hooks/useAppReadiness";
 
 type ReadinessContextType = ReturnType<typeof useAppReadiness>;
 
@@ -8,17 +8,13 @@ const ReadinessContext = createContext<ReadinessContextType | null>(null);
 export function ReadinessProvider({ children }: { children: ReactNode }) {
   const readinessState = useAppReadiness();
 
-  return (
-    <ReadinessContext.Provider value={readinessState}>
-      {children}
-    </ReadinessContext.Provider>
-  );
+  return <ReadinessContext.Provider value={readinessState}>{children}</ReadinessContext.Provider>;
 }
 
 export function useReadiness() {
   const context = useContext(ReadinessContext);
   if (!context) {
-    throw new Error('useReadiness must be used within a ReadinessProvider');
+    throw new Error("useReadiness must be used within a ReadinessProvider");
   }
   return context;
 }
@@ -38,7 +34,7 @@ export function useCanAutoInsert() {
 export function useReadinessState() {
   const context = useContext(ReadinessContext);
   if (!context) return null;
-  
+
   // Return a simplified object that matches the old AppReadiness interface
   // This helps with backward compatibility during the refactor
   return {
@@ -47,6 +43,6 @@ export function useReadinessState() {
     has_models: context.hasModels,
     selected_model_available: context.selectedModelAvailable,
     license_valid: context.licenseValid,
-    ai_ready: false // This would need to be computed based on AI settings
+    ai_ready: false, // This would need to be computed based on AI settings
   };
 }

@@ -1,20 +1,18 @@
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useModelAvailability } from './useModelAvailability';
+import { renderHook, act, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useModelAvailability } from "./useModelAvailability";
 
 const mockInvoke = vi.fn();
-const tauriEventListeners = new Map<
-  string,
-  Set<(event: { payload: unknown }) => void>
->();
+const tauriEventListeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
 
-vi.mock('@tauri-apps/api/core', () => ({
+vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
+vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
-    const listeners = tauriEventListeners.get(eventName) ?? new Set<(event: { payload: unknown }) => void>();
+    const listeners =
+      tauriEventListeners.get(eventName) ?? new Set<(event: { payload: unknown }) => void>();
     listeners.add(callback);
     tauriEventListeners.set(eventName, listeners);
 
@@ -24,10 +22,10 @@ vi.mock('@tauri-apps/api/event', () => ({
   }),
 }));
 
-vi.mock('@/contexts/SettingsContext', () => ({
+vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({
     settings: {
-      current_model: 'local-model',
+      current_model: "local-model",
     },
   }),
 }));
@@ -54,7 +52,7 @@ const unknownRemoteSnapshot = {
   cloud_selected: false,
   cloud_ready: false,
   remote_selected: true,
-  remote_status: 'unknown',
+  remote_status: "unknown",
   remote_available: false,
   remote_last_checked: null,
 };
@@ -65,24 +63,24 @@ const onlineRemoteSnapshot = {
   cloud_selected: false,
   cloud_ready: false,
   remote_selected: true,
-  remote_status: 'online',
+  remote_status: "online",
   remote_available: true,
-  remote_last_checked: '2026-03-31T00:01:00Z',
+  remote_last_checked: "2026-03-31T00:01:00Z",
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   tauriEventListeners.clear();
   mockInvoke.mockImplementation((command: string) => {
-    if (command === 'get_model_status') {
+    if (command === "get_model_status") {
       return Promise.resolve({ models: [] });
     }
 
-    if (command === 'get_recognition_availability_snapshot') {
+    if (command === "get_recognition_availability_snapshot") {
       return Promise.resolve(unknownRemoteSnapshot);
     }
 
-    if (command === 'refresh_active_remote_server_status') {
+    if (command === "refresh_active_remote_server_status") {
       return Promise.resolve(null);
     }
 
@@ -90,13 +88,13 @@ beforeEach(() => {
   });
 });
 
-describe('useModelAvailability', () => {
-  it('treats a selected remote with unknown status as unresolved rather than unavailable', async () => {
+describe("useModelAvailability", () => {
+  it("treats a selected remote with unknown status as unresolved rather than unavailable", async () => {
     const { result } = renderHook(() => useModelAvailability());
 
     await waitFor(() => {
       expect(result.current.remoteSelected).toBe(true);
-      expect(result.current.remoteStatus).toBe('unknown');
+      expect(result.current.remoteStatus).toBe("unknown");
     });
 
     expect(result.current.remoteAvailable).toBe(false);
@@ -104,21 +102,21 @@ describe('useModelAvailability', () => {
     expect(result.current.hasModels).toBeNull();
   });
 
-  it('treats auth-failed remote status as resolved and unavailable', async () => {
+  it("treats auth-failed remote status as resolved and unavailable", async () => {
     mockInvoke.mockImplementation((command: string) => {
-      if (command === 'get_model_status') {
+      if (command === "get_model_status") {
         return Promise.resolve({ models: [] });
       }
 
-      if (command === 'get_recognition_availability_snapshot') {
+      if (command === "get_recognition_availability_snapshot") {
         return Promise.resolve({
           ...unknownRemoteSnapshot,
-          remote_status: 'AuthFailed',
+          remote_status: "AuthFailed",
           remote_available: false,
         });
       }
 
-      if (command === 'refresh_active_remote_server_status') {
+      if (command === "refresh_active_remote_server_status") {
         return Promise.resolve(null);
       }
 
@@ -129,7 +127,7 @@ describe('useModelAvailability', () => {
 
     await waitFor(() => {
       expect(result.current.remoteSelected).toBe(true);
-      expect(result.current.remoteStatus).toBe('auth_failed');
+      expect(result.current.remoteStatus).toBe("auth_failed");
     });
 
     expect(result.current.remoteAvailable).toBe(false);
@@ -137,17 +135,17 @@ describe('useModelAvailability', () => {
     expect(result.current.hasModels).toBe(false);
   });
 
-  it('does not collapse availability failures into a confirmed no-model state', async () => {
+  it("does not collapse availability failures into a confirmed no-model state", async () => {
     mockInvoke.mockImplementation((command: string) => {
-      if (command === 'get_model_status') {
-        return Promise.reject(new Error('temporary failure'));
+      if (command === "get_model_status") {
+        return Promise.reject(new Error("temporary failure"));
       }
 
-      if (command === 'get_recognition_availability_snapshot') {
+      if (command === "get_recognition_availability_snapshot") {
         return Promise.resolve(unknownRemoteSnapshot);
       }
 
-      if (command === 'refresh_active_remote_server_status') {
+      if (command === "refresh_active_remote_server_status") {
         return Promise.resolve(null);
       }
 
@@ -162,26 +160,26 @@ describe('useModelAvailability', () => {
 
     expect(result.current.hasModels).toBeNull();
     expect(result.current.selectedModelAvailable).toBeNull();
-    expect(result.current.remoteStatus).toBe('unknown');
+    expect(result.current.remoteStatus).toBe("unknown");
   });
 
-  it('demotes a previously confirmed state back to unresolved when refresh fails', async () => {
+  it("demotes a previously confirmed state back to unresolved when refresh fails", async () => {
     const { result } = renderHook(() => useModelAvailability());
 
     await waitFor(() => {
-      expect(result.current.remoteStatus).toBe('unknown');
+      expect(result.current.remoteStatus).toBe("unknown");
     });
 
     act(() => {
-      emitTauriEvent('recognition-availability', onlineRemoteSnapshot);
+      emitTauriEvent("recognition-availability", onlineRemoteSnapshot);
     });
 
     await waitFor(() => {
-      expect(result.current.remoteStatus).toBe('online');
+      expect(result.current.remoteStatus).toBe("online");
       expect(result.current.hasModels).toBe(true);
     });
 
-    mockInvoke.mockImplementation(() => Promise.reject(new Error('refresh failed')));
+    mockInvoke.mockImplementation(() => Promise.reject(new Error("refresh failed")));
 
     await act(async () => {
       await result.current.checkModels();
@@ -189,11 +187,11 @@ describe('useModelAvailability', () => {
 
     expect(result.current.hasModels).toBeNull();
     expect(result.current.selectedModelAvailable).toBeNull();
-    expect(result.current.remoteStatus).toBe('unknown');
+    expect(result.current.remoteStatus).toBe("unknown");
     expect(result.current.remoteAvailable).toBe(false);
   });
 
-  it('applies canonical availability events directly to hook state', async () => {
+  it("applies canonical availability events directly to hook state", async () => {
     const { result } = renderHook(() => useModelAvailability());
 
     await waitFor(() => {
@@ -201,31 +199,31 @@ describe('useModelAvailability', () => {
     });
 
     act(() => {
-      emitTauriEvent('recognition-availability', onlineRemoteSnapshot);
+      emitTauriEvent("recognition-availability", onlineRemoteSnapshot);
     });
 
     await waitFor(() => {
-      expect(result.current.remoteStatus).toBe('online');
+      expect(result.current.remoteStatus).toBe("online");
       expect(result.current.remoteAvailable).toBe(true);
       expect(result.current.selectedModelAvailable).toBe(true);
       expect(result.current.hasModels).toBe(true);
     });
   });
 
-  it('does not let a stale refresh overwrite a newer recognition availability event', async () => {
+  it("does not let a stale refresh overwrite a newer recognition availability event", async () => {
     const statusDeferred = deferred<{ models: [] }>();
     const availabilityDeferred = deferred<typeof unknownRemoteSnapshot>();
 
     mockInvoke.mockImplementation((command: string) => {
-      if (command === 'get_model_status') {
+      if (command === "get_model_status") {
         return statusDeferred.promise;
       }
 
-      if (command === 'get_recognition_availability_snapshot') {
+      if (command === "get_recognition_availability_snapshot") {
         return availabilityDeferred.promise;
       }
 
-      if (command === 'refresh_active_remote_server_status') {
+      if (command === "refresh_active_remote_server_status") {
         return Promise.resolve(null);
       }
 
@@ -235,15 +233,15 @@ describe('useModelAvailability', () => {
     const { result } = renderHook(() => useModelAvailability());
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('get_model_status');
+      expect(mockInvoke).toHaveBeenCalledWith("get_model_status");
     });
 
     act(() => {
-      emitTauriEvent('recognition-availability', onlineRemoteSnapshot);
+      emitTauriEvent("recognition-availability", onlineRemoteSnapshot);
     });
 
     await waitFor(() => {
-      expect(result.current.remoteStatus).toBe('online');
+      expect(result.current.remoteStatus).toBe("online");
     });
 
     await act(async () => {
@@ -252,44 +250,44 @@ describe('useModelAvailability', () => {
       await Promise.all([statusDeferred.promise, availabilityDeferred.promise]);
     });
 
-    expect(result.current.remoteStatus).toBe('online');
+    expect(result.current.remoteStatus).toBe("online");
     expect(result.current.remoteAvailable).toBe(true);
     expect(result.current.selectedModelAvailable).toBe(true);
     expect(result.current.hasModels).toBe(true);
   });
 
-  it('refreshes the active remote only when it is selected and not already online', async () => {
+  it("refreshes the active remote only when it is selected and not already online", async () => {
     const { result } = renderHook(() => useModelAvailability());
 
     await waitFor(() => {
       expect(result.current.remoteSelected).toBe(true);
-      expect(result.current.remoteStatus).toBe('unknown');
+      expect(result.current.remoteStatus).toBe("unknown");
     });
 
     mockInvoke.mockClear();
 
     act(() => {
-      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event("focus"));
     });
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('refresh_active_remote_server_status');
+      expect(mockInvoke).toHaveBeenCalledWith("refresh_active_remote_server_status");
     });
 
     mockInvoke.mockClear();
 
     act(() => {
-      emitTauriEvent('recognition-availability', onlineRemoteSnapshot);
+      emitTauriEvent("recognition-availability", onlineRemoteSnapshot);
     });
 
     await waitFor(() => {
-      expect(result.current.remoteStatus).toBe('online');
+      expect(result.current.remoteStatus).toBe("online");
     });
 
     act(() => {
-      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event("focus"));
     });
 
-    expect(mockInvoke).not.toHaveBeenCalledWith('refresh_active_remote_server_status');
+    expect(mockInvoke).not.toHaveBeenCalledWith("refresh_active_remote_server_status");
   });
 });

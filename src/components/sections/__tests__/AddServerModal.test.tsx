@@ -48,7 +48,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
       expect(screen.getByText("Add Remote Voicetypr")).toBeInTheDocument();
     });
@@ -59,7 +59,7 @@ describe("AddServerModal", () => {
           open={false}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
       expect(screen.queryByText("Add Remote Voicetypr")).not.toBeInTheDocument();
     });
@@ -80,7 +80,7 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
       expect(screen.getByText("Edit Remote Voicetypr")).toBeInTheDocument();
     });
@@ -91,7 +91,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
       fireEvent.click(screen.getByText("Cancel"));
       expect(mockOnOpenChange).toHaveBeenCalledWith(false);
@@ -109,7 +109,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       expect(screen.getByLabelText("Host Address")).toBeInTheDocument();
@@ -124,7 +124,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
       expect(screen.getByText("Test Connection")).toBeInTheDocument();
     });
@@ -135,7 +135,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
       expect(screen.getByText("Add Server")).toBeInTheDocument();
     });
@@ -156,7 +156,7 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
       expect(screen.getByText("Save Changes")).toBeInTheDocument();
     });
@@ -167,7 +167,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
       expect(screen.getByLabelText("Port")).toHaveValue(47842);
     });
@@ -185,7 +185,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       const hostInput = screen.getByLabelText("Host Address");
@@ -200,7 +200,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       const portInput = screen.getByLabelText("Port");
@@ -210,36 +210,35 @@ describe("AddServerModal", () => {
     });
 
     it("allows entering password", async () => {
-      const user = userEvent.setup();
       render(
         <AddServerModal
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
-      const passwordInput = screen.getByLabelText("Password (if required)");
-      await user.type(passwordInput, "secret123");
+      const passwordInput = await screen.findByLabelText("Password (if required)");
+      await waitFor(() => expect(passwordInput).not.toBeDisabled());
+      fireEvent.change(passwordInput, { target: { value: "secret123" } });
       expect(passwordInput).toHaveValue("secret123");
     });
 
     it("allows entering display name", async () => {
-      const user = userEvent.setup();
       render(
         <AddServerModal
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
-      const nameInput = screen.getByLabelText("Display Name (optional)");
-      await user.type(nameInput, "My Server");
+      const nameInput = await screen.findByLabelText("Display Name (optional)");
+      await waitFor(() => expect(nameInput).not.toBeDisabled());
+      fireEvent.change(nameInput, { target: { value: "My Server" } });
       expect(nameInput).toHaveValue("My Server");
     });
   });
-
 
   describe("Port validation", () => {
     it("rejects invalid ports before testing connection", async () => {
@@ -253,7 +252,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -279,7 +278,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -306,7 +305,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       const passwordInput = screen.getByLabelText("Password (if required)");
@@ -320,7 +319,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       const passwordInput = screen.getByLabelText("Password (if required)");
@@ -349,7 +348,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       expect(screen.getByText("Test Connection")).toBeDisabled();
@@ -362,7 +361,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -386,12 +385,12 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
 
       expect(await screen.findByText("Test Connection")).toBeDisabled();
       expect(
-        screen.getByText(/Saving with this field empty keeps the saved password/i)
+        screen.getByText(/Saving with this field empty keeps the saved password/i),
       ).toBeInTheDocument();
     });
 
@@ -401,7 +400,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       expect(screen.getByText("Add Server")).toBeDisabled();
@@ -414,7 +413,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -428,7 +427,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       // The button should be disabled, but let's test the validation logic
@@ -454,7 +453,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -483,7 +482,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -506,7 +505,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -529,7 +528,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -558,7 +557,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -593,7 +592,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "localhost");
@@ -622,7 +621,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "localhost");
@@ -658,7 +657,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -704,7 +703,7 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
 
       // Update the host
@@ -746,7 +745,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -776,7 +775,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -809,7 +808,7 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
 
       expect(screen.getByLabelText("Host Address")).toHaveValue("192.168.1.100");
@@ -834,7 +833,7 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
 
       expect(screen.getByText(/Update connection details/i)).toBeInTheDocument();
@@ -859,7 +858,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -891,7 +890,7 @@ describe("AddServerModal", () => {
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
           editServer={editServer}
-        />
+        />,
       );
 
       fireEvent.click(screen.getByText("Save Changes"));
@@ -920,7 +919,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");
@@ -943,7 +942,7 @@ describe("AddServerModal", () => {
           open={true}
           onOpenChange={mockOnOpenChange}
           onServerAdded={mockOnServerAdded}
-        />
+        />,
       );
 
       await user.type(screen.getByLabelText("Host Address"), "192.168.1.100");

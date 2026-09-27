@@ -103,7 +103,7 @@ pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), Stri
     #[cfg(target_os = "macos")]
     let has_accessibility_permission = {
         use crate::commands::permissions::check_accessibility_permission;
-        check_accessibility_permission().await?
+        check_accessibility_permission(app.clone()).await?
     };
 
     #[cfg(not(target_os = "macos"))]
@@ -173,6 +173,10 @@ enum PasteOutcome {
     Pasted,
     LeftInClipboard,
     NoPermission,
+}
+
+fn paste_completed_cue_eligible(outcome: &PasteOutcome) -> bool {
+    matches!(outcome, PasteOutcome::Pasted)
 }
 
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
@@ -463,37 +467,61 @@ fn insert_via_clipboard(
     // Every outcome supersedes any prior pending restore: we either record our
     // own (Pasted) or clear it (no-restore outcomes), so a stale restore from a
     // previous dictation can never fire over what we just placed or left.
-    match outcome {
+    let play_completed_cue = paste_completed_cue_eligible(&outcome);
+    let (result, schedule_restore) = match outcome {
         PasteOutcome::Pasted => {
-            match original_to_restore {
+            let schedule_restore = match original_to_restore {
                 Some(original) => {
                     *guard = Some(PendingClipboardRestore {
                         generation,
                         transcript: text.clone(),
                         original,
                     });
-                    drop(guard);
-                    spawn_deferred_clipboard_restore(generation);
+                    true
                 }
-                None => *guard = None,
-            }
-            Ok(())
+                None => {
+                    *guard = None;
+                    false
+                }
+            };
+            (Ok(()), schedule_restore)
         }
         // Paste failed but the transcript stays on the clipboard for manual
         // paste; schedule no restore AND invalidate any stale prior restore so
         // it cannot remove the transcript we just left.
         PasteOutcome::LeftInClipboard => {
             *guard = None;
-            Ok(())
+            (Ok(()), false)
         }
         PasteOutcome::NoPermission => {
             *guard = None;
-            Err(
-                "No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission."
-                    .to_string(),
+            (
+                Err(
+                    "No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission."
+                        .to_string(),
+                ),
+                false,
             )
         }
+    };
+    drop(guard);
+    if schedule_restore {
+        spawn_deferred_clipboard_restore(generation);
     }
+
+    // Commit clipboard restoration state before best-effort feedback. The cue
+    // means VoiceTypr successfully completed its paste command; arbitrary
+    // target applications do not expose a reliable text-acceptance signal.
+    if play_completed_cue {
+        if let Some(app) = app_handle.as_ref() {
+            crate::commands::audio_feedback::play_audio_feedback(
+                app,
+                crate::commands::audio_feedback::AudioFeedbackCue::PasteCompleted,
+            );
+        }
+    }
+
+    result
 }
 
 fn try_paste_with_applescript() -> Result<(), String> {
@@ -701,7 +729,7 @@ fn paste_windows() -> Result<(), String> {
                         KEYBD_EVENT_FLAGS(0)
                     },
                     time: 0,
-                    dwExtraInfo: 0,
+                    dwExtraInfo: keytrigger::INJECTED_SIGNATURE,
                 },
             },
         }
@@ -765,6 +793,15 @@ mod clipboard_insertion {
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    #[test]
+    fn completed_paste_cue_requires_successful_paste_command() {
+        assert!(paste_completed_cue_eligible(&PasteOutcome::Pasted));
+        assert!(!paste_completed_cue_eligible(
+            &PasteOutcome::LeftInClipboard
+        ));
+        assert!(!paste_completed_cue_eligible(&PasteOutcome::NoPermission));
+    }
 
     struct MockClipboard {
         current: String,

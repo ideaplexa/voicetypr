@@ -1,12 +1,9 @@
-import { ReportBugDialog } from "@/components/ReportBugDialog";
 import { Brandmark } from "@/components/Brandmark";
 import {
-  navGroups,
-  footerScreens,
-  sidebarActions,
+  footerNavScreens,
+  navScreens,
   type ScreenDefinition,
   type ScreenId,
-  type SidebarActionDefinition,
 } from "@/components/navigation";
 import { getVersion } from "@tauri-apps/api/app";
 import { Button } from "@/components/ui/button";
@@ -15,7 +12,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -34,7 +30,6 @@ interface SidebarProps {
   onSectionChange: (section: ScreenId) => void;
 }
 
-
 function getLicenseBadge(status: LicenseStatus | null, daysLeft: number) {
   if (!status || status.status === "none") {
     return {
@@ -46,7 +41,7 @@ function getLicenseBadge(status: LicenseStatus | null, daysLeft: number) {
   if (status.status === "licensed") {
     return {
       label: "Pro",
-      className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
+      className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-800",
     };
   }
 
@@ -54,40 +49,41 @@ function getLicenseBadge(status: LicenseStatus | null, daysLeft: number) {
     if (daysLeft > 1) {
       return {
         label: `Trial · ${daysLeft} days left`,
-        className: "border-green-500/25 bg-green-500/10 text-green-700 dark:text-green-400",
+        className: "border-green-500/25 bg-green-500/10 text-green-800 dark:text-green-400",
       };
     }
 
     if (daysLeft === 1) {
       return {
         label: "Trial · 1 day left",
-        className: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+        className: "border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-400",
       };
     }
 
     if (daysLeft === 0) {
       return {
         label: "Trial expires today",
-        className: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+        className: "border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-400",
       };
     }
 
     return {
       label: "Trial",
-      className: "border-green-500/25 bg-green-500/10 text-green-700 dark:text-green-400",
+      className: "border-green-500/25 bg-green-500/10 text-green-800 dark:text-green-400",
     };
   }
 
   return {
     label: "Trial expired",
-    className: "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-400",
+    className: "border-red-500/25 bg-red-500/10 text-red-800 dark:text-red-400",
   };
 }
 export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const { status, isLoading } = useLicense();
   const [appVersion, setAppVersion] = useState("—");
-  const [showReportBugDialog, setShowReportBugDialog] = useState(false);
   const licenseBadge = getLicenseBadge(status, status?.trial_days_left ?? -1);
+  const licenseNeedsAttention =
+    status?.status === "expired" || status?.verification_state === "needs_revalidation";
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -101,99 +97,99 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   }, []);
 
   return (
-    <>
-      <SidebarPrimitive collapsible="none" className="border-sidebar-border/80 bg-sidebar/95 backdrop-blur-sm">
-        <SidebarHeader className="px-4 pb-2 pt-4">
+    <SidebarPrimitive
+      collapsible="icon"
+      className="group-data-[side=left]:border-r-0 bg-sidebar/95 pt-9 backdrop-blur-sm"
+    >
+      <SidebarHeader className="gap-2 px-4 pb-2 pt-1 group-data-[collapsible=icon]:px-2">
+        <div className="flex w-full items-center gap-2 rounded-lg px-1">
           <button
             type="button"
             onClick={() => onSectionChange("overview")}
-            className="flex w-full items-center justify-between gap-3 rounded-lg border border-sidebar-border/60 bg-background/60 px-3 py-2 text-left transition-colors hover:bg-sidebar-accent"
+            aria-label="Overview"
+            title="Overview"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent group-data-[collapsible=icon]:justify-center"
           >
-            <div className="flex min-w-0 items-center gap-2.5">
-              <Brandmark className="size-6 shrink-0 text-sage" />
-              <span className="truncate text-sm font-semibold tracking-tight">Voicetypr</span>
-            </div>
-            {!isLoading && status ? (
-              <span
-                className={cn(
-                  "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                  licenseBadge.className,
-                )}
-              >
-                {licenseBadge.label}
-              </span>
-            ) : null}
+            <Brandmark className="size-6 shrink-0 text-sage" />
+            <span className="truncate text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
+              Voicetypr
+            </span>
           </button>
-        </SidebarHeader>
+          {!isLoading && status ? (
+            <button
+              type="button"
+              onClick={() => onSectionChange("license")}
+              aria-label={`${licenseBadge.label}. Open License`}
+              title="Open License"
+              className={cn(
+                "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] transition-shadow hover:ring-2 hover:ring-sage/20 group-data-[collapsible=icon]:hidden",
+                licenseBadge.className,
+                licenseNeedsAttention && "ring-2 ring-amber-500/25",
+              )}
+            >
+              {licenseBadge.label}
+            </button>
+          ) : null}
+        </div>
+      </SidebarHeader>
 
-        <SidebarContent className="flex flex-col px-2">
-          {navGroups.map((group) => (
-            <SidebarNavGroup
-              key={group.label}
-              label={group.label}
-              items={group.screens}
-              activeSection={activeSection}
-              onSectionChange={onSectionChange}
-            />
-          ))}
-          <div className="mt-auto space-y-0 pb-2">
-            <SidebarNavGroup
-              label={null}
-              items={footerScreens}
-              activeSection={activeSection}
-              onSectionChange={onSectionChange}
-            />
-            <SidebarActionGroup
-              actions={sidebarActions}
-              onReportBug={() => setShowReportBugDialog(true)}
-            />
-          </div>
-        </SidebarContent>
+      <SidebarContent className="overflow-hidden px-2">
+        <SidebarNavMenu
+          items={navScreens}
+          activeSection={activeSection}
+          onSectionChange={onSectionChange}
+        />
+      </SidebarContent>
 
-        <SidebarFooter className="border-t border-sidebar-border/70 px-3 py-2">
-          <SidebarFooterStatus appVersion={appVersion} />
-        </SidebarFooter>
-      </SidebarPrimitive>
-
-      <ReportBugDialog
-        isOpen={showReportBugDialog}
-        onClose={() => setShowReportBugDialog(false)}
-      />
-    </>
+      <SidebarFooter className="gap-1 px-2">
+        <nav data-testid="sidebar-footer-nav">
+          <SidebarGroup className="py-1">
+            <SidebarGroupContent>
+              <SidebarMenu className="group-data-[collapsible=icon]:items-center">
+                {footerNavScreens.map((item) => (
+                  <SidebarNavItem
+                    key={item.id}
+                    item={item}
+                    isActive={activeSection === item.id}
+                    onSelect={onSectionChange}
+                  />
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </nav>
+        <SidebarFooterStatus appVersion={appVersion} />
+      </SidebarFooter>
+    </SidebarPrimitive>
   );
 }
 
-function SidebarNavGroup({
-  label,
+function SidebarNavMenu({
   items,
   activeSection,
   onSectionChange,
 }: {
-  label: string | null;
   items: ScreenDefinition[];
   activeSection: ScreenId;
   onSectionChange: (section: ScreenId) => void;
 }) {
   return (
-    <SidebarGroup>
-      {label ? (
-        <SidebarGroupLabel className="px-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-          {label}
-        </SidebarGroupLabel>
-      ) : null}
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {items.map((item) => (
-            <SidebarNavItem
-              key={item.id}
-              item={item}
-              isActive={activeSection === item.id}
-              onSelect={onSectionChange}
-            />
-          ))}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
+    <nav data-testid="sidebar-main-nav">
+      <SidebarGroup className="py-1">
+        <SidebarGroupContent>
+          <SidebarMenu className="group-data-[collapsible=icon]:items-center">
+            {items.map((item) => (
+              <SidebarNavItem
+                key={item.id}
+                item={item}
+                isActive={activeSection === item.id}
+                onSelect={onSectionChange}
+              />
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </nav>
   );
 }
 
@@ -211,6 +207,7 @@ function SidebarNavItem({
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        size="sm"
         tooltip={item.description}
         isActive={isActive}
         onClick={() => onSelect(item.id)}
@@ -228,43 +225,7 @@ function SidebarNavItem({
   );
 }
 
-function SidebarActionGroup({
-  actions,
-  onReportBug,
-}: {
-  actions: SidebarActionDefinition[];
-  onReportBug: () => void;
-}) {
-  return (
-    <SidebarGroup className="px-2 pb-2 pt-0">
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {actions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <SidebarMenuItem key={action.id}>
-                <SidebarMenuButton
-                  tooltip={action.description}
-                  onClick={onReportBug}
-                  className="rounded-xl text-sm transition-colors"
-                >
-                  <Icon />
-                  <span>{action.label}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            );
-          })}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
-  );
-}
-
-function SidebarFooterStatus({
-  appVersion,
-}: {
-  appVersion: string;
-}) {
+function SidebarFooterStatus({ appVersion }: { appVersion: string }) {
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 
   const checkUpdates = async () => {
@@ -277,20 +238,24 @@ function SidebarFooterStatus({
   };
 
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-xs text-muted-foreground">v{appVersion}</span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="size-7 rounded-md text-muted-foreground"
-        onClick={checkUpdates}
-        disabled={isCheckingUpdates}
-        title="Check for updates"
-      >
-        <RefreshCw className={cn("size-3.5", isCheckingUpdates && "animate-spin")} />
-        <span className="sr-only">Check for updates</span>
-      </Button>
+    <div className="flex flex-col gap-2 px-2">
+      <div className="flex items-center justify-between gap-2 group-data-[collapsible=icon]:justify-center">
+        <span className="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+          v{appVersion}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="size-7 rounded-md text-muted-foreground"
+          onClick={checkUpdates}
+          disabled={isCheckingUpdates}
+          title="Check for updates"
+        >
+          <RefreshCw className={cn("size-3.5", isCheckingUpdates && "animate-spin")} />
+          <span className="sr-only">Check for updates</span>
+        </Button>
+      </div>
     </div>
   );
 }

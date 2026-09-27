@@ -190,7 +190,10 @@ mod tests {
         assert_eq!(spec.bits_per_sample, 16, "expected 16-bit");
         assert_eq!(spec.sample_format, SampleFormat::Int, "expected int (s16)");
 
-        let n = reader.into_samples::<i16>().take_while(|s| s.is_ok()).count();
+        let n = reader
+            .into_samples::<i16>()
+            .take_while(|s| s.is_ok())
+            .count();
         assert!(n > 0, "expected non-empty samples");
     }
 

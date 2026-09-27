@@ -51,9 +51,9 @@ pub(crate) struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            min_window_samples: 16_000,   // 1s @ 16k
-            incr_step_samples: 16_000,    // 1s
-            max_window_samples: 480_000,  // 30s
+            min_window_samples: 16_000,  // 1s @ 16k
+            incr_step_samples: 16_000,   // 1s
+            max_window_samples: 480_000, // 30s
         }
     }
 }
@@ -146,7 +146,10 @@ impl DecodeAheadBuffer {
         }
 
         // tentative = text of the segments NOT committed (the trailing one(s)).
-        let tentative: String = segs[commit_count..].iter().map(|s| s.text.as_str()).collect();
+        let tentative: String = segs[commit_count..]
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
 
         // Backoff + next-infer schedule, relative to the post-advance window.
         let progress = commit_count > 0;
@@ -209,7 +212,10 @@ mod tests {
 
     /// Test helper: build a `DecodedSegment`.
     fn seg(text: &str, end_cs: i64) -> DecodedSegment {
-        DecodedSegment { text: text.to_string(), end_cs }
+        DecodedSegment {
+            text: text.to_string(),
+            end_cs,
+        }
     }
 
     /// `n` distinguishable samples: `samples[i] = i as f32`.
@@ -372,7 +378,10 @@ mod tests {
         let mut b = DecodeAheadBuffer::with_default_config();
         b.push(&samples(20_000));
         // 3 segments, non-eos, non-max: commit first two, last is tentative
-        let p = b.ingest(&[seg("one ", 30), seg("two ", 60), seg("three", 100)], false);
+        let p = b.ingest(
+            &[seg("one ", 30), seg("two ", 60), seg("three", 100)],
+            false,
+        );
         assert_eq!(p.committed, "one two ");
         assert_eq!(p.tentative, "three");
     }
@@ -473,7 +482,10 @@ mod tests {
             prev = p.committed;
         }
         let pfinal = b.ingest(&[seg("end", 350)], true);
-        assert!(StreamSessionGate::assert_committed_monotonic(&prev, &pfinal.committed));
+        assert!(StreamSessionGate::assert_committed_monotonic(
+            &prev,
+            &pfinal.committed
+        ));
     }
 
     // ---- compaction ----

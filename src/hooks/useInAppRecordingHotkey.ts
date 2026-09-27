@@ -7,11 +7,7 @@ import { createLogger } from "@/lib/logger";
 import { isMacOS } from "@/lib/platform";
 import { findActivePrimaryBinding } from "@/lib/shortcut-display";
 import { eventMatchesShortcut } from "@/lib/shortcut-event-match";
-import type {
-  ModifierSpec,
-  ShortcutBinding,
-  ShortcutSettings,
-} from "@/types/shortcuts";
+import type { ModifierSpec, ShortcutBinding, ShortcutSettings } from "@/types/shortcuts";
 
 const log = createLogger("in-app-hotkey");
 
@@ -134,26 +130,29 @@ export function useInAppRecordingHotkey(): void {
    * the backend reports shortcut settings changed, so an in-session binding save
    * refreshes the cached spec without an app restart.
    */
-  const reloadBareModifier = useCallback((currentHotkey: string | undefined, force = false): void => {
-    if ((!force && currentHotkey) || isMacOS) {
-      bareModifierRef.current = null;
-      return;
-    }
-    const token = ++bareModifierLoadTokenRef.current;
-    invoke<ShortcutSettings>("get_shortcut_settings")
-      .then((settings) => {
-        if (token === bareModifierLoadTokenRef.current) {
-          bareModifierRef.current = bareModifierFallback(
-            findActivePrimaryBinding(settings.bindings),
-          );
-        }
-      })
-      .catch(() => {
-        if (token === bareModifierLoadTokenRef.current) {
-          bareModifierRef.current = null;
-        }
-      });
-  }, []);
+  const reloadBareModifier = useCallback(
+    (currentHotkey: string | undefined, force = false): void => {
+      if ((!force && currentHotkey) || isMacOS) {
+        bareModifierRef.current = null;
+        return;
+      }
+      const token = ++bareModifierLoadTokenRef.current;
+      invoke<ShortcutSettings>("get_shortcut_settings")
+        .then((settings) => {
+          if (token === bareModifierLoadTokenRef.current) {
+            bareModifierRef.current = bareModifierFallback(
+              findActivePrimaryBinding(settings.bindings),
+            );
+          }
+        })
+        .catch(() => {
+          if (token === bareModifierLoadTokenRef.current) {
+            bareModifierRef.current = null;
+          }
+        });
+    },
+    [],
+  );
 
   useEffect(() => {
     reloadBareModifier(hotkey);
@@ -349,7 +348,6 @@ export function useInAppRecordingHotkey(): void {
         performToggle("hotkey");
         return;
       }
-
     };
 
     const onKeyUp = (event: KeyboardEvent) => {

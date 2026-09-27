@@ -3,7 +3,8 @@
 //! Tests the tray menu changes for remote server selection and status display.
 
 use crate::menu::{
-    format_tray_model_label, should_include_remote_connection_in_tray, should_mark_model_selected,
+    format_tray_model_label, format_tray_polish_label, should_include_remote_connection_in_tray,
+    should_mark_model_selected,
 };
 use crate::remote::settings::ConnectionStatus;
 
@@ -133,6 +134,12 @@ fn test_format_label_long_display_name() {
     let long_name = "A".repeat(100);
     let result = format_tray_model_label(true, "model", Some(long_name.clone()));
     assert_eq!(result, format!("Model: {}", long_name));
+}
+
+#[test]
+fn test_format_polish_label_shows_state() {
+    assert_eq!(format_tray_polish_label(true), "Polish: On");
+    assert_eq!(format_tray_polish_label(false), "Polish: Off");
 }
 
 // ============================================================================

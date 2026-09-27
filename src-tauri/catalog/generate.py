@@ -65,10 +65,10 @@ def sorted_models(models: Any) -> list[dict[str, Any]]:
 
 
 def project_model(model: dict[str, Any], recommended_ids: set[str]) -> dict[str, Any]:
-    model_id = str(model["id"])
+    model_id = str(model.get("id") or model["model_id"])
     projected: dict[str, Any] = {
         "model_id": model_id,
-        "label": str(model.get("name") or humanize(model_id)),
+        "label": str(model.get("name") or model.get("label") or humanize(model_id)),
         "recommended": model_id in recommended_ids,
         "reasoning": bool(model.get("reasoning", False)),
     }
@@ -99,23 +99,28 @@ def build_catalog() -> dict[str, Any]:
     for provider_id, config in overlay.items():
         if provider_id == "custom":
             continue
-        snapshot_id = config["snapshot_id"]
-        provider = snapshot[snapshot_id]
+
+        snapshot_id = config.get("snapshot_id")
+        inline_models = config.get("models")
+        provider = snapshot[snapshot_id] if snapshot_id else {}
         recommended_ids = set(config.get("recommended", []))
-        adapter = config["adapter"]
-        models = [project_model(model, recommended_ids) for model in sorted_models(provider.get("models"))]
+        adapter = config.get("adapter")
+        source_models = inline_models if inline_models is not None or snapshot_id is None else provider.get("models")
+        models = [project_model(model, recommended_ids) for model in sorted_models(source_models)]
         models.sort(key=lambda model: (not model["recommended"], model["model_id"]))
+        runtime = str(config.get("runtime", "genai_adapter"))
 
         providers.append(
             {
                 "id": provider_id,
                 "label": str(config.get("label") or provider.get("name") or humanize(provider_id)),
                 "status": config["status"],
+                "runtime": runtime,
                 "adapter": adapter,
                 "namespace": config.get("namespace"),
                 "requires_api_key": True,
                 "supports_base_url": False,
-                "supports_reasoning": adapter in REASONING_ADAPTERS,
+                "supports_reasoning": False if inline_models is not None or snapshot_id is None else adapter in REASONING_ADAPTERS,
                 "docs_url": provider.get("doc"),
                 "models": models,
             }
@@ -134,7 +139,9 @@ def project_snapshot() -> None:
     projected: dict[str, Any] = {}
 
     for config in overlay.values():
-        snapshot_id = config["snapshot_id"]
+        snapshot_id = config.get("snapshot_id")
+        if snapshot_id is None:
+            continue
         provider = full[snapshot_id]
         projected_provider = {
             key: provider[key] for key in PROVIDER_FIELDS if key in provider

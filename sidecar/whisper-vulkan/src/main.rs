@@ -221,6 +221,7 @@ fn ensure_context<'a>(
         .map(|cached| cached.model_path.as_str() != model_path)
         .unwrap_or(true)
     {
+        ensure_preferred_vulkan_device_selected();
         let mut params = WhisperContextParameters::default();
         params.use_gpu(true);
         let context = WhisperContext::new_with_params(model_path, params)
@@ -235,6 +236,110 @@ fn ensure_context<'a>(
         .as_ref()
         .map(|cached| &cached.context)
         .ok_or_else(|| "Vulkan context cache was not initialized".to_string())
+}
+
+/// Enumerate Vulkan devices and, unless the user already pinned one via
+/// `GGML_VK_VISIBLE_DEVICES`, set that env var to the preferred discrete GPU
+/// BEFORE the ggml Vulkan backend initializes. This runs inside the sidecar
+/// process only: a driver abort during enumeration kills the sidecar (the main
+/// app then falls back to CPU) and never touches the main process.
+fn ensure_preferred_vulkan_device_selected() {
+    // Explicit override wins and does zero Vulkan work, so a user hitting a bad
+    // driver can bypass enumeration entirely.
+    if std::env::var_os("GGML_VK_VISIBLE_DEVICES").is_some() {
+        eprintln!("GGML_VK_VISIBLE_DEVICES already set; inheriting existing selection");
+        return;
+    }
+
+    match select_preferred_vulkan_device() {
+        Ok(Some((index, descriptor))) => {
+            // SAFETY: sidecar main() is a single-threaded stdin loop with no concurrent
+            // env readers; unsafe is required under edition 2024, harmless under 2021.
+            unsafe {
+                std::env::set_var("GGML_VK_VISIBLE_DEVICES", index.to_string());
+            }
+            eprintln!(
+                "Selected Vulkan device {} ({}, vendor=0x{:04X}, type={}); set GGML_VK_VISIBLE_DEVICES={}",
+                index,
+                descriptor.device_name,
+                descriptor.vendor_id,
+                vulkan_device_select::device_type_label(descriptor.device_type),
+                index
+            );
+        }
+        Ok(None) => {
+            eprintln!("No Vulkan physical devices found; using ggml default device selection");
+        }
+        Err(error) => {
+            eprintln!(
+                "Vulkan device enumeration failed; using ggml default device selection: {error}"
+            );
+        }
+    }
+}
+
+fn select_preferred_vulkan_device(
+) -> Result<Option<(usize, vulkan_device_select::VulkanDeviceDescriptor)>, String> {
+    use ash::vk;
+    use vulkan_device_select::{VulkanDeviceDescriptor, VulkanDeviceType};
+
+    let entry =
+        unsafe { ash::Entry::load() }.map_err(|err| format!("failed to load Vulkan entry: {err}"))?;
+    let app_info = vk::ApplicationInfo::default().api_version(vk::make_api_version(0, 1, 0, 0));
+    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    let instance = unsafe { entry.create_instance(&create_info, None) }
+        .map_err(|err| format!("failed to create Vulkan instance for device selection: {err}"))?;
+
+    let result = (|| -> Result<Option<(usize, VulkanDeviceDescriptor)>, String> {
+        let physical_devices = unsafe { instance.enumerate_physical_devices() }
+            .map_err(|err| format!("failed to enumerate Vulkan physical devices: {err}"))?;
+        if physical_devices.is_empty() {
+            return Ok(None);
+        }
+
+        let mut descriptors = Vec::with_capacity(physical_devices.len());
+        for (index, device) in physical_devices.into_iter().enumerate() {
+            let properties = unsafe { instance.get_physical_device_properties(device) };
+            let memory = unsafe { instance.get_physical_device_memory_properties(device) };
+            let device_type = match properties.device_type {
+                vk::PhysicalDeviceType::DISCRETE_GPU => VulkanDeviceType::Discrete,
+                vk::PhysicalDeviceType::INTEGRATED_GPU => VulkanDeviceType::Integrated,
+                _ => VulkanDeviceType::Other,
+            };
+            let device_local_heap_bytes = memory
+                .memory_heaps
+                .iter()
+                .filter(|heap| heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+                .map(|heap| heap.size)
+                .max()
+                .unwrap_or(0);
+            let device_name = unsafe { std::ffi::CStr::from_ptr(properties.device_name.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+            descriptors.push(VulkanDeviceDescriptor {
+                index,
+                vendor_id: properties.vendor_id,
+                device_type,
+                device_local_heap_bytes,
+                device_name,
+            });
+        }
+
+        let Some(index) = vulkan_device_select::select_preferred_device_index(&descriptors) else {
+            return Ok(None);
+        };
+        let chosen = descriptors
+            .into_iter()
+            .find(|d| d.index == index)
+            .ok_or_else(|| "preferred Vulkan device index missing from descriptor list".to_string())?;
+        Ok(Some((index, chosen)))
+    })();
+
+    unsafe {
+        instance.destroy_instance(None);
+    }
+
+    result
 }
 
 fn sanitize_initial_prompt(initial_prompt: Option<&str>) -> String {
@@ -303,6 +408,7 @@ fn transcribe_with_context(
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
     params.set_suppress_blank(true);
+    // Suppress annotation-like tokens while keeping commas and sentence-ending punctuation.
     params.set_suppress_nst(true);
     params.set_no_speech_thold(0.6);
     params.set_entropy_thold(2.4);
@@ -311,8 +417,8 @@ fn transcribe_with_context(
     let prompt = sanitize_initial_prompt(initial_prompt);
     params.set_initial_prompt(&prompt);
 
-    params.set_temperature(0.2);
-    params.set_temperature_inc(0.2);
+    params.set_temperature(0.0);
+    params.set_temperature_inc(0.2); // Match CPU: keep temperature fallback enabled
     params.set_max_initial_ts(1.0);
     params.set_max_len(0);
     params.set_length_penalty(-1.0);
@@ -341,7 +447,7 @@ fn transcribe_with_context(
     }
 
     Ok(TranscriptionOutput {
-        text: text.trim().to_string(),
+        text: transcript_text::normalize_transcript_spacing(text.trim()).into_owned(),
         transcript_language,
         segments,
         audio_duration_ms,

@@ -22,7 +22,9 @@ vi.mock("@/hooks/useRecording", () => ({
   useRecording: () => mockRecording,
 }));
 
-const mockSettings = vi.hoisted(() => ({ hotkey: "CommandOrControl+Space" }) as Record<string, unknown>);
+const mockSettings = vi.hoisted(
+  () => ({ hotkey: "CommandOrControl+Space" }) as Record<string, unknown>,
+);
 vi.mock("@/contexts/SettingsContext", () => ({
   useSetting: (key: string) => mockSettings[key],
 }));
@@ -319,10 +321,18 @@ describe("useInAppRecordingHotkey", () => {
     await renderWithBareModifier();
 
     const opts = { bubbles: true, cancelable: true };
-    editable.dispatchEvent(new KeyboardEvent("keydown", { ...opts, code: "ControlLeft", key: "Control", ctrlKey: true }));
-    editable.dispatchEvent(new KeyboardEvent("keydown", { ...opts, code: "KeyC", key: "c", ctrlKey: true }));
-    editable.dispatchEvent(new KeyboardEvent("keyup", { ...opts, code: "KeyC", key: "c", ctrlKey: true }));
-    editable.dispatchEvent(new KeyboardEvent("keyup", { ...opts, code: "ControlLeft", key: "Control" }));
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { ...opts, code: "ControlLeft", key: "Control", ctrlKey: true }),
+    );
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { ...opts, code: "KeyC", key: "c", ctrlKey: true }),
+    );
+    editable.dispatchEvent(
+      new KeyboardEvent("keyup", { ...opts, code: "KeyC", key: "c", ctrlKey: true }),
+    );
+    editable.dispatchEvent(
+      new KeyboardEvent("keyup", { ...opts, code: "ControlLeft", key: "Control" }),
+    );
 
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
@@ -430,7 +440,10 @@ describe("useInAppRecordingHotkey", () => {
     });
     let resolveStart: ((started: boolean) => void) | undefined;
     mockRecording.startRecording.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => { resolveStart = resolve; }),
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStart = resolve;
+        }),
     );
     await renderWithBareModifier();
 
@@ -483,7 +496,10 @@ describe("useInAppRecordingHotkey", () => {
     });
     let resolveStart: ((started: boolean) => void) | undefined;
     mockRecording.startRecording.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => { resolveStart = resolve; }),
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStart = resolve;
+        }),
     );
     await renderWithBareModifier();
 
@@ -507,7 +523,10 @@ describe("useInAppRecordingHotkey", () => {
     });
     let resolveStart: ((started: boolean) => void) | undefined;
     mockRecording.startRecording.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => { resolveStart = resolve; }),
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStart = resolve;
+        }),
     );
     await renderWithBareModifier();
 
@@ -685,5 +704,4 @@ describe("useInAppRecordingHotkey", () => {
 
     expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
   });
-
 });

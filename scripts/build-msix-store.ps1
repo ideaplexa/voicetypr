@@ -37,15 +37,20 @@ $TargetDir = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
 } else {
     $env:CARGO_TARGET_DIR
 }
+$SidecarTargetDir = if ([string]::IsNullOrWhiteSpace($env:WHISPER_VULKAN_TARGET_DIR)) {
+    $TargetDir
+} else {
+    $env:WHISPER_VULKAN_TARGET_DIR
+}
 
 if (-not $SkipGpuSidecarBuild) {
     $env:RUSTFLAGS = "-C target-feature=+crt-static"
-    cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release --target-dir $TargetDir
+    cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release --target-dir $SidecarTargetDir
     if ($LASTEXITCODE -ne 0) { throw "Whisper Vulkan sidecar build failed with exit code $LASTEXITCODE" }
 
     $SidecarOutDir = Join-Path $RepoRoot "sidecar\whisper-vulkan\dist"
     New-Item -ItemType Directory -Force -Path $SidecarOutDir | Out-Null
-    $BuiltSidecar = Join-Path $TargetDir "release\whisper-vulkan-sidecar.exe"
+    $BuiltSidecar = Join-Path $SidecarTargetDir "release\whisper-vulkan-sidecar.exe"
     if (-not (Test-Path $BuiltSidecar)) { throw "Whisper Vulkan sidecar not found: $BuiltSidecar" }
     Copy-Item $BuiltSidecar (Join-Path $SidecarOutDir "whisper-vulkan-sidecar-$TargetTriple.exe") -Force
     Copy-Item $BuiltSidecar (Join-Path $SidecarOutDir "whisper-vulkan-sidecar.exe") -Force

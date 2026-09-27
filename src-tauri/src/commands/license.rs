@@ -1,4 +1,7 @@
-use crate::license::{api_client::LicenseApiClient, device, keychain, LicenseState, LicenseStatus};
+use crate::license::{
+    api_client::{LicenseApiClient, LicenseValidationFailureKind},
+    device, keychain, LicenseState, LicenseStatus, LicenseVerificationState,
+};
 use crate::simple_cache::{self as scache, SetItemOptions};
 use crate::AppState;
 use chrono::{DateTime, Duration, Utc};
@@ -41,6 +44,26 @@ impl CachedLicense {
 impl UnwindSafe for CachedLicense {}
 impl RefUnwindSafe for CachedLicense {}
 
+/// A completed failed check is not an in-flight check. Keep it distinct from
+/// both a missing entitlement and a successful status so recording can direct
+/// the user to recovery without falling back to an expired trial.
+#[derive(Clone, Debug, Default)]
+pub enum RuntimeLicenseCache {
+    #[default]
+    Loading,
+    Ready(CachedLicense),
+    Failed,
+}
+
+impl RuntimeLicenseCache {
+    fn from_check(result: &Result<LicenseStatus, String>) -> Self {
+        match result {
+            Ok(status) => Self::Ready(CachedLicense::new(status.clone())),
+            Err(_) => Self::Failed,
+        }
+    }
+}
+
 // Wrapper for cached license status with metadata
 #[derive(Serialize, Deserialize, Debug)]
 struct CachedLicenseStatus {
@@ -54,8 +77,11 @@ const TRIAL_OFFLINE_GRACE_PERIOD_DAYS: i64 = 1; // 1 day offline grace for trial
 const CACHE_TTL_HOURS: u64 = 8; // 8-hour cache TTL for both licensed and trial users
 const LICENSE_CACHE_KEY: &str = "license_status";
 const LAST_VALIDATION_KEY: &str = "last_license_validation";
+const VALIDATION_ANCHOR_INITIALIZED_KEY: &str = "license_validation_anchor_initialized";
 const LAST_TRIAL_VALIDATION_KEY: &str = "last_trial_validation"; // Tracks when trial was last validated online
 const TRIAL_EXPIRES_KEY: &str = "trial_expires_at"; // Cache key for trial expiry date
+const VALIDATION_FAILURES_KEY: &str = "license_validation_failures";
+const REVALIDATION_WARNING_THRESHOLD: u32 = 3;
 
 // Error message constants for consistency
 const ERR_INVALID_LICENSE: &str = "Invalid license key format";
@@ -80,32 +106,19 @@ fn hours_to_days(hours: i64) -> i32 {
     (hours as f64 / 24.0).ceil() as i32
 }
 
-// Check if we're within the grace period for offline access
-fn is_within_grace_period(app: &AppHandle) -> Option<i64> {
-    // Use store-backed cache helper
-    // let cache = app.cache();
-
-    if let Ok(Some(timestamp_json)) = scache::get(app, LAST_VALIDATION_KEY) {
-        if let Ok(last_validation) = serde_json::from_value::<DateTime<Utc>>(timestamp_json) {
-            let elapsed = Utc::now().signed_duration_since(last_validation);
-            let days_elapsed = elapsed.num_days();
-
-            if days_elapsed < OFFLINE_GRACE_PERIOD_DAYS {
-                return Some(OFFLINE_GRACE_PERIOD_DAYS - days_elapsed);
-            }
-        }
-    }
-
-    None
-}
-
-// Check if grace period timestamp exists (regardless of whether it's valid)
-fn has_grace_period_timestamp(app: &AppHandle) -> bool {
-    // let cache = app.cache();
+fn last_successful_validation(app: &AppHandle) -> Option<DateTime<Utc>> {
     scache::get(app, LAST_VALIDATION_KEY)
         .ok()
         .flatten()
-        .is_some()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+fn validation_anchor_initialized(app: &AppHandle) -> bool {
+    scache::get(app, VALIDATION_ANCHOR_INITIALIZED_KEY)
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or(false)
 }
 
 // Check if we're within the trial grace period
@@ -138,21 +151,214 @@ fn should_delete_invalid_license(error_msg: &str) -> bool {
         || msg_lower.contains("license revoked")
 }
 
+fn consecutive_validation_failures(app: &AppHandle) -> u32 {
+    scache::get(app, VALIDATION_FAILURES_KEY)
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or(0)
+}
+
+fn record_validation_failure(app: &AppHandle) -> u32 {
+    let failures = consecutive_validation_failures(app).saturating_add(1);
+    if let Err(error) = scache::set(
+        app,
+        VALIDATION_FAILURES_KEY,
+        serde_json::to_value(failures).unwrap_or_default(),
+        None,
+    ) {
+        log::warn!(
+            "Failed to persist license validation failure count: {}",
+            error
+        );
+    }
+    failures
+}
+
+fn reset_validation_failures(app: &AppHandle) {
+    if let Err(error) = scache::remove(app, VALIDATION_FAILURES_KEY) {
+        log::warn!(
+            "Failed to reset license validation failure count: {}",
+            error
+        );
+    }
+}
+
+fn verification_state_for_failures(failures: u32) -> LicenseVerificationState {
+    if failures >= REVALIDATION_WARNING_THRESHOLD {
+        LicenseVerificationState::NeedsRevalidation
+    } else {
+        LicenseVerificationState::OfflineGrace
+    }
+}
+
 /// Check the current license status
 /// This checks license first (if stored), then falls back to trial
 /// Forces fresh check on app start, then uses cache during session
 async fn seed_runtime_license_cache(app: &AppHandle, status: &LicenseStatus) {
     let app_state = app.state::<AppState>();
     let mut perf_cache = app_state.license_cache.write().await;
-    *perf_cache = Some(CachedLicense::new(status.clone()));
+    *perf_cache = RuntimeLicenseCache::Ready(CachedLicense::new(status.clone()));
+}
+
+fn cache_license_status(app: &AppHandle, status: &LicenseStatus) {
+    let wrapped_status = CachedLicenseStatus {
+        status: status.clone(),
+        cached_at: Utc::now(),
+    };
+    let cache_options = Some(SetItemOptions {
+        ttl: Some(CACHE_TTL_HOURS * 60 * 60),
+        compress: None,
+        compression_method: None,
+    });
+    if let Err(error) = scache::set(
+        app,
+        LICENSE_CACHE_KEY,
+        serde_json::to_value(wrapped_status).unwrap_or_default(),
+        cache_options,
+    ) {
+        log::warn!("Failed to cache license status: {}", error);
+    }
+}
+
+fn licensed_status(
+    license_key: String,
+    verification_state: LicenseVerificationState,
+    expires_at: Option<String>,
+    verification_expires_at: Option<DateTime<Utc>>,
+) -> LicenseStatus {
+    LicenseStatus {
+        status: LicenseState::Licensed,
+        trial_days_left: None,
+        license_type: Some("pro".to_string()),
+        license_key: Some(license_key),
+        expires_at,
+        verification_state: Some(verification_state),
+        verification_expires_at,
+    }
+}
+
+fn record_successful_validation(app: &AppHandle) -> DateTime<Utc> {
+    let validation_time = Utc::now();
+    if let Err(error) = scache::set(
+        app,
+        LAST_VALIDATION_KEY,
+        serde_json::to_value(validation_time).unwrap_or_default(),
+        None,
+    ) {
+        log::warn!("Failed to persist successful license validation: {}", error);
+    }
+    if let Err(error) = scache::set(
+        app,
+        VALIDATION_ANCHOR_INITIALIZED_KEY,
+        serde_json::json!(true),
+        None,
+    ) {
+        log::warn!(
+            "Failed to persist license validation anchor state: {}",
+            error
+        );
+    }
+    reset_validation_failures(app);
+    validation_time + Duration::days(OFFLINE_GRACE_PERIOD_DAYS)
+}
+
+fn preserve_paid_entitlement(
+    app: &AppHandle,
+    license_key: String,
+) -> Result<LicenseStatus, String> {
+    let now = Utc::now();
+    let validation_time = match last_successful_validation(app) {
+        Some(validation_time) => validation_time,
+        None if validation_anchor_initialized(app) => {
+            return Err(
+                "Couldn't verify the license because its validation history is unavailable. Connect to the internet and revalidate."
+                    .to_string(),
+            );
+        }
+        None => {
+            // Versions through 2.0.4 deleted this timestamp during every startup.
+            // A stored key is only written after successful activation, so seed the
+            // existing entitlement once instead of locking that paid user out.
+            scache::set(
+                app,
+                LAST_VALIDATION_KEY,
+                serde_json::to_value(now).unwrap_or_default(),
+                None,
+            )
+            .map_err(|error| {
+                format!(
+                    "Couldn't preserve offline license access after verification failed: {}",
+                    error
+                )
+            })?;
+            scache::set(
+                app,
+                VALIDATION_ANCHOR_INITIALIZED_KEY,
+                serde_json::json!(true),
+                None,
+            )
+            .map_err(|error| {
+                format!(
+                    "Couldn't preserve the license validation boundary after verification failed: {}",
+                    error
+                )
+            })?;
+            now
+        }
+    };
+    let verification_expires_at = validation_time + Duration::days(OFFLINE_GRACE_PERIOD_DAYS);
+    if now >= verification_expires_at {
+        return Err(
+            "Couldn't verify the license and the offline grace period has ended. Connect to the internet and revalidate."
+                .to_string(),
+        );
+    }
+
+    let seconds_remaining = (verification_expires_at - now).num_seconds();
+    let days_remaining = ((seconds_remaining + 86_399) / 86_400).max(1);
+    let failures = record_validation_failure(app);
+    let status = licensed_status(
+        license_key,
+        verification_state_for_failures(failures),
+        Some(format!("{} days offline remaining", days_remaining)),
+        Some(verification_expires_at),
+    );
+    cache_license_status(app, &status);
+    Ok(status)
+}
+
+async fn revoke_paid_entitlement(app: &AppHandle) {
+    if keychain::delete_license(app).is_err() {
+        log::warn!("Failed to remove a definitively rejected license from secure storage");
+    }
+    if scache::set(
+        app,
+        VALIDATION_ANCHOR_INITIALIZED_KEY,
+        serde_json::json!(true),
+        None,
+    )
+    .is_err()
+    {
+        log::warn!("Failed to persist the rejected license boundary");
+    }
+    let _ = scache::remove(app, LAST_VALIDATION_KEY);
+    reset_validation_failures(app);
+    clear_license_status_cache(app).await;
 }
 
 #[tauri::command]
 pub async fn check_license_status(app: AppHandle) -> Result<LicenseStatus, String> {
-    log::info!("Checking license status");
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
+    perform_license_status_check(&app).await
+}
 
-    // Directly call the implementation - Tauri handles concurrent command execution
-    check_license_status_impl(app).await
+async fn perform_license_status_check(app: &AppHandle) -> Result<LicenseStatus, String> {
+    log::info!("Checking license status");
+    let result = check_license_status_impl(app.clone()).await;
+    *app.state::<AppState>().license_cache.write().await = RuntimeLicenseCache::from_check(&result);
+    result
 }
 
 /// Internal implementation of license status check
@@ -163,7 +369,6 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
     match scache::get(&app, LICENSE_CACHE_KEY) {
         Ok(Some(cached_json)) => {
             log::info!("📦 Cache hit: Found cached license status");
-            log::debug!("Raw cached data: {:?}", cached_json);
 
             // Try to deserialize as new format first (with metadata)
             match serde_json::from_value::<CachedLicenseStatus>(cached_json.clone()) {
@@ -196,8 +401,11 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                                 return Ok(status);
                             }
                         }
+                    } else if status.verification_window_expired(Utc::now()) {
+                        log::warn!(
+                            "Cached offline grace has ended - performing fresh license check"
+                        );
                     } else {
-                        // Not a trial, return cached status
                         return Ok(status);
                     }
                 }
@@ -223,8 +431,11 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                                 } else {
                                     return Ok(cached_status);
                                 }
+                            } else if cached_status.verification_window_expired(Utc::now()) {
+                                log::warn!(
+                                    "Cached offline grace has ended - performing fresh license check"
+                                );
                             } else {
-                                // Not a trial, return cached status
                                 return Ok(cached_status);
                             }
                         }
@@ -243,11 +454,13 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
         }
     }
 
-    // Get device hash
+    // An unreadable saved license is a recovery error, never an absent license
+    // or a reason to query trial status under a newly selected identity.
+    let saved_license = keychain::get_license(&app)?;
     let device_hash = device::get_device_hash()?;
 
     // First, check if we have a stored license
-    if let Some(license_key) = keychain::get_license(&app)? {
+    if let Some(license_key) = saved_license {
         log::info!("Found stored license, validating...");
 
         // Try to validate the stored license
@@ -258,128 +471,65 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
             .validate_license(&license_key, &device_hash, Some(&app_version))
             .await
         {
+            Ok(response) if response.data.valid => {
+                log::info!("License is valid");
+                let verification_expires_at = record_successful_validation(&app);
+                let status = licensed_status(
+                    license_key,
+                    LicenseVerificationState::Verified,
+                    None,
+                    Some(verification_expires_at),
+                );
+                cache_license_status(&app, &status);
+                return Ok(status);
+            }
             Ok(response) => {
-                if response.data.valid {
-                    log::info!("License is valid");
-                    let status = LicenseStatus {
-                        status: LicenseState::Licensed,
-                        trial_days_left: None,
-                        license_type: Some("pro".to_string()), // You might want to get this from the API
-                        license_key: Some(license_key),
-                        expires_at: None,
-                    };
-
-                    // Store last successful validation timestamp
-                    let validation_time = Utc::now();
-                    let _ = scache::set(
-                        &app,
-                        LAST_VALIDATION_KEY,
-                        serde_json::to_value(validation_time).unwrap_or_default(),
-                        None,
+                let message = response.message.as_deref().unwrap_or_default();
+                if should_delete_invalid_license(message) {
+                    log::warn!("License service definitively rejected the stored license");
+                    revoke_paid_entitlement(&app).await;
+                } else {
+                    log::warn!(
+                        "License could not be verified definitively; preserving paid entitlement"
                     );
 
-                    // Cache for 24 hours for licensed users
-                    let wrapped_status = CachedLicenseStatus {
-                        status: status.clone(),
-                        cached_at: validation_time,
-                    };
-
-                    let cache_options = Some(SetItemOptions {
-                        ttl: Some(CACHE_TTL_HOURS * 60 * 60), // 8 hours in seconds
-                        compress: None,
-                        compression_method: None,
-                    });
-                    match scache::set(
-                        &app,
-                        LICENSE_CACHE_KEY,
-                        serde_json::to_value(&wrapped_status).unwrap_or_default(),
-                        cache_options,
-                    ) {
-                        Ok(_) => log::info!(
-                            "Cached licensed status for {} hours with metadata",
-                            CACHE_TTL_HOURS
-                        ),
-                        Err(e) => log::error!("Failed to cache licensed status: {}", e),
-                    }
-
-                    return Ok(status);
-                } else {
-                    log::warn!("Stored license is invalid: {:?}", response.message);
-                    // Only delete if we're certain the license is invalid
-                    if let Some(ref msg) = response.message {
-                        if should_delete_invalid_license(msg) {
-                            log::info!("Removing invalid license from keychain");
-                            let _ = keychain::delete_license(&app);
-                        } else {
-                            log::warn!("License validation failed but keeping stored license (error might be temporary)");
+                    if message.to_lowercase().contains("different device") {
+                        log::info!("Attempting to repair the device activation");
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            activate_license_internal(license_key.clone(), app.clone()),
+                        )
+                        .await
+                        {
+                            Ok(Ok(status)) => return Ok(status),
+                            Ok(Err(_)) => {
+                                log::warn!(
+                                    "Automatic device activation repair failed; preserving offline access"
+                                );
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "Automatic device activation repair timed out; preserving offline access"
+                                );
+                            }
                         }
                     }
+
+                    return preserve_paid_entitlement(&app, license_key);
                 }
             }
-            Err(e) => {
-                log::error!("Failed to validate license: {}", e);
-
-                // Check if we're within the offline grace period
-                if let Some(days_remaining) = is_within_grace_period(&app) {
-                    log::info!(
-                        "API unavailable but within {}-day grace period. {} days remaining",
-                        OFFLINE_GRACE_PERIOD_DAYS,
-                        days_remaining
-                    );
-
-                    // Warn if approaching limit
-                    if days_remaining <= 7 {
-                        log::warn!("⚠️ Only {} days of offline access remaining. Please connect to internet soon.",
-                                 days_remaining);
-                    }
-
-                    let status = LicenseStatus {
-                        status: LicenseState::Licensed,
-                        trial_days_left: None,
-                        license_type: Some("pro".to_string()),
-                        license_key: Some(license_key),
-                        expires_at: Some(format!("{} days offline remaining", days_remaining)),
-                    };
-
-                    // Cache with 8-hour TTL during grace period
-                    let wrapped_status = CachedLicenseStatus {
-                        status: status.clone(),
-                        cached_at: Utc::now(),
-                    };
-
-                    let cache_options = Some(SetItemOptions {
-                        ttl: Some(CACHE_TTL_HOURS * 60 * 60), // 8 hours
-                        compress: None,
-                        compression_method: None,
-                    });
-                    let _ = scache::set(
-                        &app,
-                        LICENSE_CACHE_KEY,
-                        serde_json::to_value(&wrapped_status).unwrap_or_default(),
-                        cache_options,
-                    );
-
-                    return Ok(status);
-                } else {
-                    // Check if we have a timestamp at all before assuming grace period expired
-                    if has_grace_period_timestamp(&app) {
-                        // Timestamp exists and grace period expired
-                        log::error!("Grace period of {} days has expired. License requires online validation.",
-                                  OFFLINE_GRACE_PERIOD_DAYS);
-                        // DO NOT DELETE THE LICENSE! User paid for it and might just be offline temporarily
-                        // Clear the timestamp so next successful validation starts fresh grace period
-                        let _ = scache::remove(&app, LAST_VALIDATION_KEY);
-                        return Err("Grace period expired. Please connect to internet to revalidate your license.".to_string());
-                    } else {
-                        // No timestamp exists - this is the first offline attempt
-                        log::warn!("No previous online validation found. Initial online validation required.");
-                        // DON'T delete the license - it may still be valid
-                        return Err(
-                            "Initial online validation required. Please connect to internet."
-                                .to_string(),
-                        );
-                    }
-                }
+            Err(error)
+                if error.kind == LicenseValidationFailureKind::Rejected
+                    && should_delete_invalid_license(&error.message) =>
+            {
+                log::warn!("License service definitively rejected the stored license");
+                revoke_paid_entitlement(&app).await;
+            }
+            Err(_) => {
+                log::warn!(
+                    "License verification unavailable after bounded retries; preserving offline access"
+                );
+                return preserve_paid_entitlement(&app, license_key);
             }
         }
     }
@@ -398,6 +548,8 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                     license_type: None,
                     license_key: None,
                     expires_at: None,
+                    verification_state: None,
+                    verification_expires_at: None,
                 };
 
                 // Don't cache expired status - always check
@@ -414,6 +566,8 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                     license_type: None,
                     license_key: None,
                     expires_at: None,
+                    verification_state: None,
+                    verification_expires_at: None,
                 };
 
                 // Set last successful trial validation timestamp for grace period tracking
@@ -511,6 +665,8 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                                 license_type: None,
                                 license_key: None,
                                 expires_at: None,
+                                verification_state: None,
+                                verification_expires_at: None,
                             });
                         }
 
@@ -542,6 +698,8 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                                     "Offline grace: {} day remaining",
                                     grace_days_remaining
                                 )),
+                                verification_state: None,
+                                verification_expires_at: None,
                             };
 
                             return Ok(status);
@@ -605,6 +763,8 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                 license_type: None,
                 license_key: None,
                 expires_at: None,
+                verification_state: None,
+                verification_expires_at: None,
             };
 
             // Don't cache None status - always check
@@ -617,6 +777,8 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
 #[tauri::command]
 pub async fn restore_license(app: AppHandle) -> Result<LicenseStatus, String> {
     log::info!("Attempting to restore license");
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
 
     // Check if we have a stored license
     let license_key =
@@ -636,21 +798,9 @@ pub async fn restore_license(app: AppHandle) -> Result<LicenseStatus, String> {
                 log::info!("License restored successfully");
 
                 // Clear cache when license is restored
-                let _ = invalidate_license_cache(app.clone()).await;
+                clear_license_status_cache(&app).await;
 
-                // Set last validation timestamp for grace period tracking
-                let validation_time = Utc::now();
-                if let Err(e) = scache::set(
-                    &app,
-                    LAST_VALIDATION_KEY,
-                    serde_json::to_value(validation_time).unwrap_or_default(),
-                    None, // No TTL for validation timestamp
-                ) {
-                    log::warn!(
-                        "Failed to set last validation timestamp during restore: {}",
-                        e
-                    );
-                }
+                let verification_expires_at = record_successful_validation(&app);
 
                 // Reset recording state when license is restored
                 let app_state = app.state::<AppState>();
@@ -663,24 +813,50 @@ pub async fn restore_license(app: AppHandle) -> Result<LicenseStatus, String> {
                     log::info!("Reset recording state to Idle during license restore");
                 }
 
-                let status = LicenseStatus {
-                    status: LicenseState::Licensed,
-                    trial_days_left: None,
-                    license_type: Some("pro".to_string()),
-                    license_key: Some(license_key),
-                    expires_at: None,
-                };
+                let status = licensed_status(
+                    license_key,
+                    LicenseVerificationState::Verified,
+                    None,
+                    Some(verification_expires_at),
+                );
                 seed_runtime_license_cache(&app, &status).await;
                 Ok(status)
             } else {
-                // License is not valid for this device, try to activate it
-                log::info!("License not valid for this device, attempting activation");
-                activate_license_internal(license_key, app).await
+                let message = response.message.as_deref().unwrap_or_default();
+                if should_delete_invalid_license(message) {
+                    revoke_paid_entitlement(&app).await;
+                    Err(
+                        "The stored license is no longer valid. Enter a valid license key to continue."
+                            .to_string(),
+                    )
+                } else {
+                    log::info!("License not valid for this device, attempting activation");
+                    activate_license_internal(license_key, app).await
+                }
             }
         }
-        Err(e) => {
-            log::error!("Failed to validate license: {}", e);
-            Err(format!("Failed to restore license: {}", e))
+        Err(error)
+            if error.kind == LicenseValidationFailureKind::Rejected
+                && should_delete_invalid_license(&error.message) =>
+        {
+            revoke_paid_entitlement(&app).await;
+            Err(
+                "The stored license is no longer valid. Enter a valid license key to continue."
+                    .to_string(),
+            )
+        }
+        Err(_) => {
+            log::warn!("License restore verification unavailable; preserving offline access");
+            let status = preserve_paid_entitlement(&app, license_key)?;
+            seed_runtime_license_cache(&app, &status).await;
+            let app_state = app.state::<AppState>();
+            if let Err(error) = app_state.recording_state.reset() {
+                log::warn!(
+                    "Failed to reset recording state after offline license restore: {}",
+                    error
+                );
+            }
+            Ok(status)
         }
     }
 }
@@ -716,6 +892,9 @@ pub async fn activate_license(
     {
         return Err("License key contains invalid characters".to_string());
     }
+
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
 
     // Reset recording state to Idle when activating license
     // This ensures we're not stuck in Error state from previous license issues
@@ -763,18 +942,9 @@ async fn activate_license_internal(
                 log::info!("License activated successfully");
 
                 // Clear cache when license is activated
-                let _ = invalidate_license_cache(app.clone()).await;
+                clear_license_status_cache(&app).await;
 
-                // Set last validation timestamp for grace period tracking
-                let validation_time = Utc::now();
-                if let Err(e) = scache::set(
-                    &app,
-                    LAST_VALIDATION_KEY,
-                    serde_json::to_value(validation_time).unwrap_or_default(),
-                    None, // No TTL for validation timestamp
-                ) {
-                    log::warn!("Failed to set last validation timestamp: {}", e);
-                }
+                let verification_expires_at = record_successful_validation(&app);
 
                 // Reset recording state when license is successfully activated
                 let app_state = app.state::<AppState>();
@@ -787,13 +957,12 @@ async fn activate_license_internal(
                     log::info!("Reset recording state to Idle after successful activation");
                 }
 
-                let status = LicenseStatus {
-                    status: LicenseState::Licensed,
-                    trial_days_left: None,
-                    license_type: Some("pro".to_string()),
-                    license_key: Some(license_key),
-                    expires_at: None,
-                };
+                let status = licensed_status(
+                    license_key,
+                    LicenseVerificationState::Verified,
+                    None,
+                    Some(verification_expires_at),
+                );
                 seed_runtime_license_cache(&app, &status).await;
                 Ok(status)
             } else {
@@ -815,6 +984,8 @@ async fn activate_license_internal(
 #[tauri::command]
 pub async fn deactivate_license(app: AppHandle) -> Result<(), String> {
     log::info!("Deactivating license");
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
 
     // Get the stored license
     let license_key =
@@ -842,7 +1013,8 @@ pub async fn deactivate_license(app: AppHandle) -> Result<(), String> {
                 let _ = scache::remove(&app, LAST_VALIDATION_KEY);
 
                 // Clear our performance cache too
-                let _ = invalidate_license_cache(app.clone()).await;
+                clear_license_status_cache(&app).await;
+                reset_validation_failures(&app);
 
                 log::info!("License deactivated successfully");
 
@@ -932,26 +1104,141 @@ pub async fn open_purchase_page() -> Result<(), String> {
     Ok(())
 }
 
+async fn clear_license_status_cache(app: &AppHandle) {
+    match scache::remove(app, LICENSE_CACHE_KEY) {
+        Ok(_) => log::debug!("Cleared cached license status"),
+        Err(error) => log::warn!("Failed to clear cached license status: {}", error),
+    }
+
+    let app_state = app.state::<AppState>();
+    let mut runtime_cache = app_state.license_cache.write().await;
+    *runtime_cache = RuntimeLicenseCache::Loading;
+}
+
+#[tauri::command]
+pub async fn revalidate_license(app: AppHandle) -> Result<LicenseStatus, String> {
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
+    clear_license_status_cache(&app).await;
+    perform_license_status_check(&app).await
+}
+
 pub async fn check_license_status_internal(app: &AppHandle) -> Result<LicenseStatus, String> {
-    let status = check_license_status(app.clone()).await?;
-    seed_runtime_license_cache(app, &status).await;
-    Ok(status)
+    check_license_status(app.clone()).await
 }
 
 /// Invalidate cached license status when license state changes
 #[tauri::command]
 pub async fn invalidate_license_cache(app: AppHandle) -> Result<(), String> {
-    // Clear both the old cache and the new performance cache
-    match scache::remove(&app, LICENSE_CACHE_KEY) {
-        Ok(_) => log::debug!("Cleared old license cache"),
-        Err(e) => log::warn!("Failed to clear old license cache: {}", e),
-    }
-    let _ = scache::remove(&app, LAST_VALIDATION_KEY);
-
-    // Clear the new performance cache
-    let app_state = app.state::<AppState>();
-    let mut perf_cache = app_state.license_cache.write().await;
-    *perf_cache = None;
-    log::debug!("License cache invalidated due to license state change");
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
+    clear_license_status_cache(&app).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_license_check_is_terminal_until_successful_recovery() {
+        assert!(matches!(
+            RuntimeLicenseCache::default(),
+            RuntimeLicenseCache::Loading
+        ));
+        let failed = RuntimeLicenseCache::from_check(&Err(
+            "Stored value for 'license' could not be decrypted; the saved entry was preserved"
+                .to_string(),
+        ));
+        assert!(matches!(failed, RuntimeLicenseCache::Failed));
+
+        let recovered = licensed_status(
+            "VT-RECOVERED-TEST".to_string(),
+            LicenseVerificationState::Verified,
+            None,
+            Some(Utc::now() + Duration::days(90)),
+        );
+        let ready = RuntimeLicenseCache::from_check(&Ok(recovered));
+        let RuntimeLicenseCache::Ready(cached) = ready else {
+            panic!("successful reactivation must replace the failed state");
+        };
+        assert_eq!(cached.status.status, LicenseState::Licensed);
+        assert_eq!(
+            cached.status.license_key.as_deref(),
+            Some("VT-RECOVERED-TEST")
+        );
+        assert!(cached.is_valid());
+    }
+
+    #[test]
+    fn repeated_verification_failures_escalate_without_expiring_entitlement() {
+        assert_eq!(
+            verification_state_for_failures(1),
+            LicenseVerificationState::OfflineGrace
+        );
+        assert_eq!(
+            verification_state_for_failures(2),
+            LicenseVerificationState::OfflineGrace
+        );
+        assert_eq!(
+            verification_state_for_failures(3),
+            LicenseVerificationState::NeedsRevalidation
+        );
+
+        let deadline = Utc::now() + Duration::days(90);
+        let status = licensed_status(
+            "VT-TEST-LICENSE".to_string(),
+            verification_state_for_failures(3),
+            Some("90 days offline remaining".to_string()),
+            Some(deadline),
+        );
+        assert_eq!(status.status, LicenseState::Licensed);
+        assert_eq!(
+            status.verification_state,
+            Some(LicenseVerificationState::NeedsRevalidation)
+        );
+        assert!(!status.verification_window_expired(Utc::now()));
+        assert!(status.verification_window_expired(deadline));
+    }
+
+    #[test]
+    fn verified_license_requires_revalidation_at_exact_deadline() {
+        let deadline = Utc::now() + Duration::days(90);
+        let status = licensed_status(
+            "VT-TEST-LICENSE".to_string(),
+            LicenseVerificationState::Verified,
+            None,
+            Some(deadline),
+        );
+
+        assert!(!status.verification_window_expired(deadline - Duration::milliseconds(1)));
+        assert!(status.verification_window_expired(deadline));
+    }
+
+    #[test]
+    fn only_definitive_entitlement_messages_delete_a_stored_license() {
+        assert!(should_delete_invalid_license("License revoked"));
+        assert!(should_delete_invalid_license("License not found"));
+        assert!(!should_delete_invalid_license(
+            "This license is registered to a different device."
+        ));
+        assert!(!should_delete_invalid_license(
+            "License service temporarily unavailable"
+        ));
+    }
+
+    #[test]
+    fn old_cached_license_status_deserializes_without_verification_metadata() {
+        let status: LicenseStatus = serde_json::from_value(serde_json::json!({
+            "status": "licensed",
+            "trial_days_left": null,
+            "license_type": "pro",
+            "license_key": "VT-TEST-LICENSE",
+            "expires_at": null
+        }))
+        .expect("legacy cached status should remain readable");
+
+        assert_eq!(status.status, LicenseState::Licensed);
+        assert_eq!(status.verification_state, None);
+    }
 }

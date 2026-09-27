@@ -47,14 +47,16 @@ export class EventCoordinator {
   async register<T = any>(
     windowId: WindowId,
     eventName: string,
-    handler: EventHandler<T>
+    handler: EventHandler<T>,
   ): Promise<UnlistenFn> {
     // Check for existing registration and clean it up if found
     const existing = this.registrations.get(eventName);
     if (existing) {
-      const existingForWindow = existing.find(reg => reg.windowId === windowId);
+      const existingForWindow = existing.find((reg) => reg.windowId === windowId);
       if (existingForWindow) {
-        log.debug(`[EventCoordinator] Event "${eventName}" already registered for window "${windowId}". Cleaning up old registration.`);
+        log.debug(
+          `[EventCoordinator] Event "${eventName}" already registered for window "${windowId}". Cleaning up old registration.`,
+        );
         // Clean up the old registration before creating a new one
         this.unregister(windowId, eventName);
       }
@@ -63,8 +65,10 @@ export class EventCoordinator {
     // Create wrapper that checks if this window should handle the event
     const wrappedHandler = (event: TauriEvent<T>) => {
       const shouldHandle = this.shouldWindowHandleEvent(windowId, eventName);
-      
-      log.debug(`[EventCoordinator] Event "${eventName}" received. Window: ${windowId}, Should handle: ${shouldHandle}`);
+
+      log.debug(
+        `[EventCoordinator] Event "${eventName}" received. Window: ${windowId}, Should handle: ${shouldHandle}`,
+      );
 
       if (shouldHandle) {
         handler(event.payload);
@@ -78,7 +82,7 @@ export class EventCoordinator {
     const registration: EventRegistration = {
       windowId,
       handler: handler as EventHandler,
-      unlisten
+      unlisten,
     };
 
     if (!this.registrations.has(eventName)) {
@@ -101,7 +105,7 @@ export class EventCoordinator {
     const registrations = this.registrations.get(eventName);
     if (!registrations) return;
 
-    const index = registrations.findIndex(reg => reg.windowId === windowId);
+    const index = registrations.findIndex((reg) => reg.windowId === windowId);
     if (index !== -1) {
       const registration = registrations[index];
       registration.unlisten?.();
@@ -111,9 +115,7 @@ export class EventCoordinator {
         this.registrations.delete(eventName);
       }
 
-      log.debug(
-        `[EventCoordinator] Unregistered event "${eventName}" for window "${windowId}"`
-      );
+      log.debug(`[EventCoordinator] Unregistered event "${eventName}" for window "${windowId}"`);
     }
   }
 
@@ -125,28 +127,28 @@ export class EventCoordinator {
     // Event routing rules
     const routingRules: Record<string, WindowId | "all"> = {
       // Transcription events
-      "transcription-complete": "pill",  // Pill window handles paste/clipboard/save
-      "history-updated": "main",         // Main window reloads history
+      "transcription-complete": "pill", // Pill window handles paste/clipboard/save
+      "history-updated": "main", // Main window reloads history
       "audio-level": "pill",
       "recording-state-changed": "all",
-      
+
       // Model events should go to all windows (for onboarding support)
       "download-progress": "all",
       "model-downloaded": "all",
       "model-verifying": "all",
       "download-cancelled": "all",
       "download-error": "all",
-      
+
       // Recording/transcription errors now use pill_toast() → FeedbackToast directly,
       // not as routed events. Only domain-specific main window errors are listed here.
       "parakeet-unavailable": "main",
-      
+
       // Debug events
       "test-event": "pill",
     };
 
     const rule = routingRules[eventName];
-    
+
     // If no rule defined, only active window handles it
     if (!rule) {
       return windowId === this.activeWindow;
@@ -166,7 +168,7 @@ export class EventCoordinator {
    */
   clearWindowRegistrations(windowId: WindowId) {
     for (const [eventName, registrations] of this.registrations.entries()) {
-      const filtered = registrations.filter(reg => {
+      const filtered = registrations.filter((reg) => {
         if (reg.windowId === windowId) {
           reg.unlisten?.();
           return false;
@@ -190,11 +192,11 @@ export class EventCoordinator {
   getDebugInfo() {
     const info: Record<string, string[]> = {};
     for (const [eventName, registrations] of this.registrations.entries()) {
-      info[eventName] = registrations.map(reg => reg.windowId);
+      info[eventName] = registrations.map((reg) => reg.windowId);
     }
     return {
       activeWindow: this.activeWindow,
-      registrations: info
+      registrations: info,
     };
   }
 }

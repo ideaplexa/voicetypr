@@ -16,6 +16,16 @@ pub(crate) enum SttError {
     Auth,
     ModelUnavailable,
     RateLimited,
+    /// Provider-side quota wall (e.g. Soniox `limit_exceeded`): permanent
+    /// until whatever it caps is relieved — never a retry candidate.
+    /// `file_storage`: `true` for retained-audio caps (stored file
+    /// count/size — only file deletions free them), `false` for
+    /// stored-transcription count caps (record deletions free them). The
+    /// storage-wall self-heal uses this to wait on capacity that actually
+    /// freed before retrying.
+    LimitExceeded {
+        file_storage: bool,
+    },
     Timeout,
     Network,
     Server,
@@ -33,6 +43,10 @@ impl SttError {
             Self::RateLimited => {
                 format!("{} rate limit reached. Try again shortly.", provider_name)
             }
+            Self::LimitExceeded { .. } => format!(
+                "{provider} storage quota exceeded. Open Sources → Cloud → Clean up stored files to retry cleanup of records from this app session. Manage older or other-client records in the Soniox console.",
+                provider = provider_name
+            ),
             Self::Timeout => format!("{} request timed out", provider_name),
             Self::Network => format!("Network error reaching {}", provider_name),
             Self::Server => format!("{} service error. Try again shortly.", provider_name),
@@ -113,11 +127,22 @@ fn build_client(timeout: std::time::Duration) -> reqwest::Client {
     builder.build().unwrap_or_else(|_| reqwest::Client::new())
 }
 
+#[cfg(not(test))]
 static SHARED_CLIENT: std::sync::LazyLock<reqwest::Client> =
     std::sync::LazyLock::new(|| build_client(REQUEST_TIMEOUT));
 
 pub(super) fn http_client() -> reqwest::Client {
-    SHARED_CLIENT.clone()
+    #[cfg(test)]
+    {
+        // Wiremock servers use ephemeral ports that can be recycled between
+        // parallel tests. Isolate their connection pools so a stale keep-alive
+        // socket cannot reach a later server that inherited the same port.
+        build_client(REQUEST_TIMEOUT)
+    }
+    #[cfg(not(test))]
+    {
+        SHARED_CLIENT.clone()
+    }
 }
 
 // Fire-and-forget: warm the shared pool's DNS+TCP+TLS for `origin`; result ignored.
@@ -169,11 +194,74 @@ where
     }
 }
 
+/// Classify a Soniox `limit_exceeded` 429 body by which documented cap it
+/// names: `Some(true)` = retained-audio storage (stored file count/size —
+/// freed only by file deletions), `Some(false)` = stored-transcription
+/// count (freed by record deletions). Soniox folds per-minute request
+/// rate, concurrency, pending-file and storage walls into this single
+/// `error_type`; per the API docs the `message` names which limit was hit,
+/// so the classification anchors on the documented limit identifiers
+/// (`files_total_count`, `files_total_size_gb`,
+/// `transcribe_async_total_num_files`) and their plain-English example
+/// wording. `total` anchors the storage phrases so the transient "pending
+/// file count" wall can never match. Any other wording — per-minute rate,
+/// concurrency, pending, or future unknown limits — is `None`: transient
+/// (`RateLimited`), never a destructive cleanup.
+fn soniox_limit_is_file_storage(body: &str) -> Option<bool> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return None;
+    };
+    if v.get("error_type").and_then(|t| t.as_str()) != Some("limit_exceeded") {
+        return None;
+    }
+    let message = v.get("message").and_then(|m| m.as_str())?;
+    let message = message.to_ascii_lowercase();
+    if message.contains("transcribe_async_total_num_files") {
+        return Some(false);
+    }
+    if message.contains("files_total_count")
+        || message.contains("files_total_size_gb")
+        || message.contains("total file count")
+        || message.contains("total file size")
+    {
+        return Some(true);
+    }
+    None
+}
+
 pub(super) async fn log_http_body(resp: reqwest::Response, label: &str) -> SttError {
+    log_http_body_for_provider(resp, label, false).await
+}
+
+pub(super) async fn log_soniox_http_body(resp: reqwest::Response, label: &str) -> SttError {
+    log_http_body_for_provider(resp, label, true).await
+}
+
+async fn log_http_body_for_provider(
+    resp: reqwest::Response,
+    label: &str,
+    soniox: bool,
+) -> SttError {
     let status = resp.status();
-    let err = classify_status(status);
+    let mut err = classify_status(status);
     // Body holds err_msg + a request id, never the key — safe to log, needed to diagnose.
     let body = resp.text().await.unwrap_or_default();
+    // Soniox folds many distinct limits into one HTTP 429
+    // `error_type: "limit_exceeded"` (per-minute request rate, concurrency,
+    // stored-file count/size, stored-transcription count, pending files).
+    // The docs instruct clients to read `message` for the sub-cause: only
+    // retained-storage walls are permanent until records are deleted, so
+    // only those may become the non-retryable quota error (plan 060) —
+    // typed by which capacity was hit so the self-heal waits on capacity
+    // that actually freed. Every other 429 — including unrecognized
+    // wording — stays the transient `RateLimited`; we never guess a
+    // destructive cleanup from an unrecognized message and never surface
+    // the raw body to the user.
+    if soniox && matches!(err, SttError::RateLimited) {
+        if let Some(file_storage) = soniox_limit_is_file_storage(&body) {
+            err = SttError::LimitExceeded { file_storage };
+        }
+    }
     let snippet: String = body.chars().take(500).collect();
     if snippet.trim().is_empty() {
         log::warn!("{label}: HTTP {status} (empty response body)");
@@ -311,7 +399,13 @@ pub(super) async fn openai_compatible_transcribe(
                 .text("model", model.to_string())
                 .text("response_format", "json".to_string());
             if let Some(lang) = language {
-                form = form.text("language", lang);
+                // `gpt-transcribe` takes the language as an array field; every
+                // other OpenAI-compatible model keeps the singular `language`.
+                if model == "gpt-transcribe" {
+                    form = form.text("languages[]", lang);
+                } else {
+                    form = form.text("language", lang);
+                }
             }
             if let Some(prompt) = prompt {
                 form = form.text("prompt", prompt);
@@ -437,6 +531,78 @@ mod tests {
         let body = String::from_utf8_lossy(&request.body);
         assert!(body.contains("name=\"model\""));
         assert!(body.contains("gpt-4o-transcribe"));
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_transcribe_gpt_transcribe_sends_languages_array_not_singular() {
+        // `gpt-transcribe` expects the language as `languages[]`; the singular
+        // `language` field would be rejected by the API.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "text": "ok"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let audio = audio_file();
+
+        openai_compatible_transcribe(
+            &server.uri(),
+            "k",
+            "gpt-transcribe",
+            audio.path(),
+            Some("en"),
+            None,
+            "OpenAI transcription",
+        )
+        .await
+        .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let body = String::from_utf8_lossy(&requests[0].body);
+        assert!(body.contains("name=\"languages[]\""));
+        assert!(body.contains("\r\n\r\nen\r\n"));
+        assert!(!body.contains("name=\"language\""));
+        // The selected model must be propagated, not a hardcoded default.
+        assert!(body.contains("name=\"model\""));
+        assert!(body.contains("gpt-transcribe"));
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_transcribe_keeps_singular_language_for_other_models() {
+        // Every other model (OpenAI mini, Groq whisper) keeps `language`.
+        for model in ["gpt-4o-mini-transcribe", "whisper-large-v3-turbo"] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/audio/transcriptions"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "text": "ok"
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let audio = audio_file();
+
+            openai_compatible_transcribe(
+                &server.uri(),
+                "k",
+                model,
+                audio.path(),
+                Some("en"),
+                None,
+                "transcription",
+            )
+            .await
+            .unwrap();
+
+            let requests = server.received_requests().await.unwrap();
+            let body = String::from_utf8_lossy(&requests[0].body);
+            assert!(body.contains("name=\"language\""), "model {model}");
+            assert!(!body.contains("name=\"languages[]\""), "model {model}");
+            assert!(body.contains(model), "model {model} not propagated");
+        }
     }
     #[tokio::test]
     async fn openai_compatible_transcribe_includes_prompt_field_when_provided() {
@@ -814,5 +980,114 @@ mod tests {
             vec![1, 0, 255, 255, 0, 1]
         );
         assert!(super::samples_to_le_bytes(&[]).is_empty());
+    }
+
+    #[test]
+    fn soniox_429_subcauses_split_rate_from_storage_quota() {
+        // Actual documented JSON shapes (docs "Errors" reference): the
+        // per-minute rate example must stay transient, the retained-storage
+        // examples classify file-storage, the stored-transcription count
+        // classifies record-capacity.
+        let rate_rpm = r#"{"status_code":429,"error_type":"limit_exceeded","message":"Requests per minute limit for async transcription has been exceeded for your organization."}"#;
+        assert_eq!(super::soniox_limit_is_file_storage(rate_rpm), None);
+
+        let rate_file_mgmt = r#"{"status_code":429,"error_type":"limit_exceeded","message":"Requests per minute limit for file management has been exceeded for your organization."}"#;
+        assert_eq!(super::soniox_limit_is_file_storage(rate_file_mgmt), None);
+
+        let storage_files = r#"{"status_code":429,"error_type":"limit_exceeded","message":"Total file count limit has been exceeded for your organization. Please delete some."}"#;
+        assert_eq!(
+            super::soniox_limit_is_file_storage(storage_files),
+            Some(true)
+        );
+
+        // Documented limit identifiers must classify even when the wording
+        // changes around them.
+        let storage_slug = r#"{"error_type":"limit_exceeded","message":"Adding this file would put the organization over its files_total_size_gb cap."}"#;
+        assert_eq!(
+            super::soniox_limit_is_file_storage(storage_slug),
+            Some(true)
+        );
+
+        let storage_transcriptions = r#"{"error_type":"limit_exceeded","message":"transcribe_async_total_num_files limit has been exceeded."}"#;
+        assert_eq!(
+            super::soniox_limit_is_file_storage(storage_transcriptions),
+            Some(false)
+        );
+
+        // The transient "pending file count" wall mentions "file count" but
+        // not a retained-storage cap — it must stay transient.
+        let pending = r#"{"error_type":"limit_exceeded","message":"Pending file count limit has been exceeded. Wait for in-flight transcriptions to complete."}"#;
+        assert_eq!(super::soniox_limit_is_file_storage(pending), None);
+
+        // Unknown 429 wording stays transient — never a destructive cleanup.
+        let unknown =
+            r#"{"error_type":"limit_exceeded","message":"Some future limit you have never seen."}"#;
+        assert_eq!(super::soniox_limit_is_file_storage(unknown), None);
+
+        // Different error_type / non-JSON / missing message: not a quota wall.
+        assert_eq!(
+            super::soniox_limit_is_file_storage(
+                r#"{"error_type":"unauthenticated","message":"Total file count limit exceeded"}"#
+            ),
+            None
+        );
+        assert_eq!(super::soniox_limit_is_file_storage("not json at all"), None);
+        assert_eq!(
+            super::soniox_limit_is_file_storage(r#"{"error_type":"limit_exceeded"}"#),
+            None
+        );
+    }
+    #[tokio::test]
+    async fn other_provider_429_does_not_trigger_soniox_cleanup_classification() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
+                "error_type":"limit_exceeded", "message":"Total file count limit has been exceeded"
+            })))
+            .mount(&server)
+            .await;
+        let response = reqwest::get(server.uri()).await.unwrap();
+        assert!(matches!(
+            super::log_http_body(response, "Deepgram").await,
+            SttError::RateLimited
+        ));
+    }
+
+    #[tokio::test]
+    async fn log_http_body_maps_soniox_429_json_paths_to_typed_quota_kinds() {
+        for (body, expected_label, expected_storage) in [
+            (
+                r#"{"status_code":429,"error_type":"limit_exceeded","message":"Requests per minute limit for file management has been exceeded for your organization."}"#,
+                "RateLimited",
+                None,
+            ),
+            (
+                r#"{"status_code":429,"error_type":"limit_exceeded","message":"Total file count limit has been exceeded for your organization. Please delete some."}"#,
+                "LimitExceeded",
+                Some(true),
+            ),
+            (
+                r#"{"status_code":429,"error_type":"limit_exceeded","message":"transcribe_async_total_num_files limit has been exceeded."}"#,
+                "LimitExceeded",
+                Some(false),
+            ),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(429).set_body_string(body))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let resp = reqwest::get(server.uri()).await.unwrap();
+            let err = super::log_soniox_http_body(resp, "Soniox classification").await;
+            // The file_storage FIELD is part of the contract: a
+            // discriminant-only compare could pass {true} vs {false}.
+            let kind = match &err {
+                SttError::RateLimited => ("RateLimited", None),
+                SttError::LimitExceeded { file_storage } => ("LimitExceeded", Some(*file_storage)),
+                other => unreachable!("unexpected classification {other:?}"),
+            };
+            assert_eq!(kind, (expected_label, expected_storage));
+        }
     }
 }

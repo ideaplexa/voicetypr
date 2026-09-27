@@ -5,8 +5,8 @@ export function AgentCliTab() {
   return (
     <SettingsPage>
       <SettingsHeader
-        title="Agent & CLI"
-        description="Drive Voicetypr from scripts and agents — a command-line interface plus a local HTTP API for programmatic transcription."
+        title="CLI"
+        description="Transcribe from the terminal and connect Voicetypr to scripts or AI agents."
       />
       <AgentCliSection />
     </SettingsPage>

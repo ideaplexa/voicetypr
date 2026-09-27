@@ -92,7 +92,7 @@ export function FeedbackToast() {
         timerRef.current = null;
       }, payload.duration_ms);
     },
-    [clearTimer]
+    [clearTimer],
   );
 
   useEffect(() => {
@@ -128,7 +128,9 @@ export function FeedbackToast() {
         role="status"
         aria-live="polite"
         className={`flex min-w-[200px] max-w-[400px] items-start gap-2 rounded-lg px-4 py-2 text-sm shadow-lg ring-1 ${
-          isAlert ? "bg-amber-950 text-amber-50 ring-amber-400/40" : "bg-black text-white ring-white/30"
+          isAlert
+            ? "bg-amber-950 text-amber-50 ring-amber-400/40"
+            : "bg-black text-white ring-white/30"
         }`}
       >
         {isAlert ? (
@@ -136,7 +138,10 @@ export function FeedbackToast() {
         ) : (
           <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-white/80" aria-hidden />
         )}
-        <span aria-hidden className={`flex-shrink-0 ${isAlert ? "text-amber-400/50" : "text-white/30"}`}>
+        <span
+          aria-hidden
+          className={`flex-shrink-0 ${isAlert ? "text-amber-400/50" : "text-white/30"}`}
+        >
           |
         </span>
         <div className="flex min-w-0 flex-col">

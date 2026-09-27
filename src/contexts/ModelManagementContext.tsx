@@ -1,5 +1,5 @@
-import { createContext, useContext, ReactNode } from 'react';
-import { useModelManagement } from '@/hooks/useModelManagement';
+import { createContext, useContext, ReactNode } from "react";
+import { useModelManagement } from "@/hooks/useModelManagement";
 
 type ModelManagementContextType = ReturnType<typeof useModelManagement>;
 
@@ -8,7 +8,7 @@ const ModelManagementContext = createContext<ModelManagementContextType | null>(
 export function ModelManagementProvider({ children }: { children: ReactNode }) {
   const modelManagement = useModelManagement({
     windowId: "main",
-    showToasts: true
+    showToasts: true,
   });
 
   return (
@@ -21,7 +21,7 @@ export function ModelManagementProvider({ children }: { children: ReactNode }) {
 export function useModelManagementContext() {
   const context = useContext(ModelManagementContext);
   if (!context) {
-    throw new Error('useModelManagementContext must be used within ModelManagementProvider');
+    throw new Error("useModelManagementContext must be used within ModelManagementProvider");
   }
   return context;
 }

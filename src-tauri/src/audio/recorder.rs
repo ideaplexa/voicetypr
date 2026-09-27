@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -64,7 +64,7 @@ const STREAM_TAP_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Outer budget [`AudioRecorder::stop_recording`] gives the whole recording
 /// thread to tear down during stop. It must cover every internal sub-budget —
-/// drain window (~200ms) + platform stream drop (≤3s on Windows) + writer
+/// post-roll (250ms) + drain window (~200ms) + platform stream drop (≤3s on Windows) + writer
 /// finalize ([`WRITER_JOIN_TIMEOUT`]) + stream-tap observation
 /// ([`STREAM_TAP_JOIN_TIMEOUT`]) — plus a finalize margin. It is
 /// intentionally larger than their sum so the outer join never preempts the
@@ -72,6 +72,9 @@ const STREAM_TAP_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 /// raced the (then-unbounded) writer join and timed out mid-finalize, leaving
 /// an unfinalized WAV that the command layer then deleted.
 const STOP_JOIN_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Keep capturing the end of a word after a user stops recording.
+pub const STOP_POST_ROLL: Duration = Duration::from_millis(250);
 
 enum WriterMsg {
     Chunk(Vec<i16>),
@@ -106,6 +109,63 @@ fn next_writer_action(
             } else {
                 WriterAction::Idle
             }
+        }
+    }
+}
+
+/// One final-callback drain step (plan 060.1), factored out so the evidence +
+/// integrity guarantees are unit-testable.
+///
+/// The stop boundary usually lands right after the last word, so the final
+/// buffer MUST feed the shared capture speech evidence — otherwise the
+/// no-speech gate can delete a recording whose speech the metrics never saw.
+/// And a final buffer that cannot reach the writer must be COUNTED as
+/// dropped, so the writer's integrity check fails the recording instead of
+/// presenting a silently truncated WAV (with clean-looking evidence) as
+/// complete. Single traversal, atomics only, no allocation — runs on the
+/// real-time callback thread.
+#[allow(clippy::too_many_arguments)]
+fn drain_final_callback(
+    f32_samples: &[f32],
+    i16_samples: &[i16],
+    capture_metrics: &CaptureMetricsAccumulator,
+    recycle_rx: &mpsc::Receiver<Vec<i16>>,
+    writer_tx: &SyncSender<WriterMsg>,
+    recycle_tx: &SyncSender<Vec<i16>>,
+    dropped_chunks: &AtomicU64,
+    stream_tap_rt: Option<&StreamTapRt>,
+) {
+    // Evidence contribution shares the steady-state path's single traversal.
+    // Level meter / silence detector stay steady-state-only: they drive live
+    // UI, not evidence, and the stream is closing anyway.
+    capture_metrics.observe(f32_samples);
+    if let Some(tap) = stream_tap_rt {
+        stream_tap::enqueue_frame_rt(tap, i16_samples);
+    }
+
+    let Ok(mut chunk) = recycle_rx.try_recv() else {
+        // Pool exhausted: the final buffer cannot be written — count it so
+        // the integrity check fails the recording (never silently truncate).
+        dropped_chunks.fetch_add(1, Ordering::SeqCst);
+        return;
+    };
+    chunk.clear();
+    chunk.extend_from_slice(i16_samples);
+    match writer_tx.try_send(WriterMsg::Chunk(chunk)) {
+        Ok(()) => {}
+        Err(TrySendError::Full(WriterMsg::Chunk(mut chunk))) => {
+            dropped_chunks.fetch_add(1, Ordering::SeqCst);
+            chunk.clear();
+            // Full carries the message we tried to send (never the queue
+            // front). Return that buffer to the pool for the RT thread;
+            // the drop is counted above.
+            let _ = recycle_tx.try_send(chunk);
+        }
+        // Disconnected (writer gone) counts the same way. The
+        // Full(Finalize) arm exists only for pattern totality: a Chunk
+        // send can never observe a Full carrying a different message.
+        Err(TrySendError::Full(WriterMsg::Finalize)) | Err(TrySendError::Disconnected(_)) => {
+            dropped_chunks.fetch_add(1, Ordering::SeqCst);
         }
     }
 }
@@ -181,10 +241,251 @@ fn chunk_capacity_for(max_frames: usize, channels: usize) -> usize {
     max_frames.saturating_mul(channels).max(CHUNK_CAPACITY_MIN)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CaptureAudioMetrics {
+    pub sample_count: u64,
+    pub duration_ms: u64,
+    pub rms: f64,
+    pub peak: f32,
+    /// Highest single-callback (window) RMS seen during the capture. A short
+    /// quiet word inside a long silent capture keeps the aggregate RMS low
+    /// but pushes this well above room tone — the no-speech gate's guard
+    /// against deleting real speech.
+    pub max_window_rms: f32,
+    /// How many milliseconds of audio sat in callback windows above the
+    /// no-speech floor. Real speech spans >= tens of ms above it; a mic
+    /// wake-up pop or click is a few ms. Duration — not callback count —
+    /// so the discriminator is independent of the device buffer size.
+    pub ms_above_rms_floor: u64,
+    /// How many callback windows exceeded the no-speech floor (telemetry
+    /// only; decisions use `ms_above_rms_floor`).
+    pub windows_above_rms_floor: u32,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub speech_detected: bool,
+    pub post_roll_ms: u64,
+    pub post_roll_interrupted: bool,
+    /// A callback exceeded the silence detector's voice level during post-roll.
+    pub post_roll_speech_detected: bool,
+}
+
+const SPEECH_EVIDENCE_WINDOW_MS: u64 = 5;
+
+#[derive(Debug)]
+struct CaptureMetricsAccumulator {
+    sample_count: AtomicU64,
+    sum_squares_bits: AtomicU64,
+    peak_bits: AtomicU32,
+    max_window_rms_bits: AtomicU32,
+    evidence_window_samples: u64,
+    evidence_window_sum_squares_bits: AtomicU64,
+    evidence_window_sample_count: AtomicU64,
+    samples_above_rms_floor: AtomicU64,
+    windows_above_rms_floor: AtomicU32,
+    post_roll_active: AtomicBool,
+    post_roll_speech_detected: AtomicBool,
+    post_roll_ms: AtomicU64,
+    post_roll_interrupted: AtomicBool,
+}
+
+impl CaptureMetricsAccumulator {
+    fn new(sample_rate: u32, channels: u16) -> Self {
+        let frames_per_window = u64::from(sample_rate.max(1))
+            .saturating_mul(SPEECH_EVIDENCE_WINDOW_MS)
+            .checked_div(1000)
+            .unwrap_or(0)
+            .max(1);
+        Self {
+            sample_count: AtomicU64::new(0),
+            sum_squares_bits: AtomicU64::new(0),
+            peak_bits: AtomicU32::new(0),
+            max_window_rms_bits: AtomicU32::new(0),
+            evidence_window_samples: frames_per_window.saturating_mul(u64::from(channels.max(1))),
+            evidence_window_sum_squares_bits: AtomicU64::new(0),
+            evidence_window_sample_count: AtomicU64::new(0),
+            samples_above_rms_floor: AtomicU64::new(0),
+            windows_above_rms_floor: AtomicU32::new(0),
+            post_roll_active: AtomicBool::new(false),
+            post_roll_speech_detected: AtomicBool::new(false),
+            post_roll_ms: AtomicU64::new(0),
+            post_roll_interrupted: AtomicBool::new(false),
+        }
+    }
+
+    /// Observe one CPAL callback buffer and return its RMS. Recording-wide
+    /// metrics and fixed 10ms evidence windows share this single sample traversal.
+    fn observe(&self, samples: &[f32]) -> f32 {
+        let mut callback_sum_squares = 0.0f32;
+        let mut aggregate_sum_squares = 0.0f64;
+        let mut peak = 0.0f32;
+        let mut evidence_sum_squares = f64::from_bits(
+            self.evidence_window_sum_squares_bits
+                .load(Ordering::Relaxed),
+        );
+        let mut evidence_sample_count = self.evidence_window_sample_count.load(Ordering::Relaxed);
+        let mut samples_above_floor = 0u64;
+        let mut windows_above_floor = 0u32;
+
+        for &sample in samples {
+            callback_sum_squares += sample * sample;
+            let sample_f64 = sample as f64;
+            let sample_square = sample_f64 * sample_f64;
+            aggregate_sum_squares += sample_square;
+            peak = peak.max(sample.abs());
+
+            evidence_sum_squares += sample_square;
+            evidence_sample_count += 1;
+            if evidence_sample_count == self.evidence_window_samples {
+                let evidence_rms =
+                    (evidence_sum_squares / evidence_sample_count as f64).sqrt() as f32;
+                if evidence_rms > crate::audio::speech_evidence::NO_SPEECH_WINDOW_RMS_FLOOR {
+                    samples_above_floor = samples_above_floor.saturating_add(evidence_sample_count);
+                    windows_above_floor = windows_above_floor.saturating_add(1);
+                }
+                evidence_sum_squares = 0.0;
+                evidence_sample_count = 0;
+            }
+        }
+
+        // Bit-exact legacy formula (including NaN on empty slices) — the
+        // silence-detector threshold math depends on these bits.
+        let window_rms = (callback_sum_squares / samples.len() as f32).sqrt();
+        if self.post_roll_active.load(Ordering::SeqCst)
+            && window_rms > crate::audio::silence_detector::VOICE_RMS_THRESHOLD
+        {
+            self.post_roll_speech_detected.store(true, Ordering::SeqCst);
+        }
+        if !samples.is_empty() {
+            self.sample_count
+                .fetch_add(samples.len() as u64, Ordering::Relaxed);
+            atomic_add_f64(&self.sum_squares_bits, aggregate_sum_squares);
+            atomic_max_f32(&self.peak_bits, peak);
+            atomic_max_f32(&self.max_window_rms_bits, window_rms);
+            self.evidence_window_sum_squares_bits
+                .store(evidence_sum_squares.to_bits(), Ordering::Relaxed);
+            self.evidence_window_sample_count
+                .store(evidence_sample_count, Ordering::Relaxed);
+            self.samples_above_rms_floor
+                .fetch_add(samples_above_floor, Ordering::Relaxed);
+            self.windows_above_rms_floor
+                .fetch_add(windows_above_floor, Ordering::Relaxed);
+        }
+        window_rms
+    }
+
+    fn snapshot(
+        &self,
+        sample_rate: u32,
+        channels: u16,
+        speech_detected: bool,
+    ) -> CaptureAudioMetrics {
+        let sample_count = self.sample_count.load(Ordering::Relaxed);
+        let sum_squares = f64::from_bits(self.sum_squares_bits.load(Ordering::Relaxed));
+        let frames = sample_count / u64::from(channels.max(1));
+        let duration_ms = frames
+            .saturating_mul(1000)
+            .checked_div(u64::from(sample_rate.max(1)))
+            .unwrap_or(0);
+        let rms = if sample_count == 0 {
+            0.0
+        } else {
+            (sum_squares / sample_count as f64).sqrt()
+        };
+
+        let mut samples_above = self.samples_above_rms_floor.load(Ordering::Relaxed);
+        let mut windows_above = self.windows_above_rms_floor.load(Ordering::Relaxed);
+        let partial_sample_count = self.evidence_window_sample_count.load(Ordering::Relaxed);
+        if partial_sample_count > 0 {
+            let partial_sum_squares = f64::from_bits(
+                self.evidence_window_sum_squares_bits
+                    .load(Ordering::Relaxed),
+            );
+            let partial_rms = (partial_sum_squares / partial_sample_count as f64).sqrt() as f32;
+            if partial_rms > crate::audio::speech_evidence::NO_SPEECH_WINDOW_RMS_FLOOR {
+                samples_above = samples_above.saturating_add(partial_sample_count);
+                windows_above = windows_above.saturating_add(1);
+            }
+        }
+        let above_frames = samples_above / u64::from(channels.max(1));
+        let rate = u64::from(sample_rate.max(1));
+        let ms_above_rms_floor = above_frames
+            .saturating_mul(1000)
+            .saturating_add(rate.saturating_sub(1))
+            .checked_div(rate)
+            .unwrap_or(0);
+
+        CaptureAudioMetrics {
+            sample_count,
+            duration_ms,
+            rms,
+            peak: f32::from_bits(self.peak_bits.load(Ordering::Relaxed)),
+            max_window_rms: f32::from_bits(self.max_window_rms_bits.load(Ordering::Relaxed)),
+            ms_above_rms_floor,
+            windows_above_rms_floor: windows_above,
+            sample_rate,
+            channels,
+            speech_detected,
+            post_roll_ms: self.post_roll_ms.load(Ordering::SeqCst),
+            post_roll_interrupted: self.post_roll_interrupted.load(Ordering::SeqCst),
+            post_roll_speech_detected: self.post_roll_speech_detected.load(Ordering::SeqCst),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for CaptureMetricsAccumulator {
+    fn default() -> Self {
+        Self::new(100, 1)
+    }
+}
+
+fn atomic_add_f64(target: &AtomicU64, value: f64) {
+    let mut current = target.load(Ordering::Relaxed);
+    loop {
+        let next = (f64::from_bits(current) + value).to_bits();
+        match target.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn atomic_max_f32(target: &AtomicU32, value: f32) {
+    let mut current = target.load(Ordering::Relaxed);
+    while value > f32::from_bits(current) {
+        match target.compare_exchange_weak(
+            current,
+            value.to_bits(),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn finish_capture(
+    last_capture_metrics: &Mutex<Option<CaptureAudioMetrics>>,
+    metrics: CaptureAudioMetrics,
+    writer_result: Result<(), String>,
+    device_error: Option<String>,
+) -> Result<(), String> {
+    if let Ok(mut guard) = last_capture_metrics.lock() {
+        *guard = Some(metrics);
+    }
+    writer_result?;
+    if let Some(error) = device_error {
+        return Err(error);
+    }
+    Ok(())
+}
+
 pub struct AudioRecorder {
     recording_handle: Arc<Mutex<Option<RecordingHandle>>>,
     audio_level_receiver: Arc<Mutex<Option<mpsc::Receiver<f64>>>>,
     silence_event_receiver: Arc<Mutex<Option<mpsc::Receiver<SilenceDetectorEvent>>>>,
+    last_capture_metrics: Arc<Mutex<Option<CaptureAudioMetrics>>>,
 }
 
 impl Drop for AudioRecorder {
@@ -193,7 +494,9 @@ impl Drop for AudioRecorder {
         if let Ok(mut handle_guard) = self.recording_handle.lock() {
             if let Some(handle) = handle_guard.take() {
                 // Send stop signal
-                if let Err(e) = handle.stop_tx.send(RecorderCommand::Stop) {
+                if let Err(e) = handle.stop_tx.send(RecorderCommand::Stop {
+                    post_roll: Duration::ZERO,
+                }) {
                     log::warn!("Failed to send stop signal during drop: {:?}", e);
                 }
                 // Don't wait for thread in Drop - let it clean up in background
@@ -225,7 +528,39 @@ struct RecordingHandle {
 
 #[derive(Debug)]
 enum RecorderCommand {
-    Stop,
+    Stop { post_roll: Duration },
+}
+
+fn stop_after_post_roll(
+    command: Option<&RecorderCommand>,
+    stop_rx: &mpsc::Receiver<RecorderCommand>,
+    capture_metrics: &CaptureMetricsAccumulator,
+    stop_requested: &AtomicBool,
+) {
+    let post_roll = match command {
+        Some(RecorderCommand::Stop { post_roll }) => *post_roll,
+        None => Duration::ZERO,
+    };
+    capture_metrics
+        .post_roll_ms
+        .store(post_roll.as_millis() as u64, Ordering::SeqCst);
+    if !post_roll.is_zero() {
+        capture_metrics
+            .post_roll_active
+            .store(true, Ordering::SeqCst);
+        match stop_rx.recv_timeout(post_roll) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(RecorderCommand::Stop { .. }) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                capture_metrics
+                    .post_roll_interrupted
+                    .store(true, Ordering::SeqCst);
+            }
+        }
+        capture_metrics
+            .post_roll_active
+            .store(false, Ordering::SeqCst);
+    }
+    stop_requested.store(true, Ordering::SeqCst);
 }
 
 impl AudioRecorder {
@@ -234,6 +569,7 @@ impl AudioRecorder {
             recording_handle: Arc::new(Mutex::new(None)),
             audio_level_receiver: Arc::new(Mutex::new(None)),
             silence_event_receiver: Arc::new(Mutex::new(None)),
+            last_capture_metrics: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -269,10 +605,15 @@ impl AudioRecorder {
         if let Ok(mut guard) = self.silence_event_receiver.lock() {
             guard.take();
         }
+        *self
+            .last_capture_metrics
+            .lock()
+            .map_err(|e| format!("Failed to acquire capture metrics lock: {e}"))? = None;
 
         let output_path = PathBuf::from(output_path);
         let (stop_tx, stop_rx) = mpsc::channel();
         let stop_tx_clone = stop_tx.clone();
+        let last_capture_metrics = self.last_capture_metrics.clone();
 
         // Create audio level channel (f64 for EBU R128 loudness values)
         let (audio_level_tx, audio_level_rx) = mpsc::sync_channel::<f64>(8);
@@ -327,6 +668,10 @@ impl AudioRecorder {
 
             // Initialize silence detector and level meter
             let silence_detector = Arc::new(Mutex::new(SilenceDetector::new()));
+            let capture_metrics = Arc::new(CaptureMetricsAccumulator::new(
+                config.sample_rate().0,
+                config.channels(),
+            ));
             let level_meter = Arc::new(Mutex::new(
                 AudioLevelMeter::new(
                     config.sample_rate().0,
@@ -426,7 +771,9 @@ impl AudioRecorder {
                     let new_total =
                         writer_bytes.fetch_add(sample_bytes, Ordering::SeqCst) + sample_bytes;
                     if RecordingSize::check(new_total).is_err() {
-                        let _ = stop_tx_for_size.send(RecorderCommand::Stop);
+                        let _ = stop_tx_for_size.send(RecorderCommand::Stop {
+                            post_roll: Duration::ZERO,
+                        });
                     }
 
                     samples.clear();
@@ -475,7 +822,9 @@ impl AudioRecorder {
                     *guard = Some(format!("Audio device error: {}", err));
                 }
                 // Signal the recording thread to stop
-                let _ = stop_tx_for_error.send(RecorderCommand::Stop);
+                let _ = stop_tx_for_error.send(RecorderCommand::Stop {
+                    post_roll: Duration::ZERO,
+                });
             };
 
             // Drain barrier flags shared between callback and stop path
@@ -493,6 +842,7 @@ impl AudioRecorder {
                 let stop_requested_clone = stop_requested.clone();
                 let callback_drained_clone = callback_drained.clone();
                 let stream_tap_rt: Option<StreamTapRt> = stream_tap_rt;
+                let capture_metrics_clone = capture_metrics.clone();
 
                 move |f32_samples: &[f32], i16_samples: &[i16]| {
                     // A panic in this real-time path would unwind into CPAL's
@@ -505,35 +855,27 @@ impl AudioRecorder {
                         if stop_requested_clone.load(Ordering::SeqCst) {
                             // Only write on the first callback after stop; skip all subsequent ones
                             if !callback_drained_clone.load(Ordering::SeqCst) {
-                                if let Ok(mut chunk) = recycle_rx.try_recv() {
-                                    chunk.clear();
-                                    chunk.extend_from_slice(i16_samples);
-                                    match writer_tx_clone.try_send(WriterMsg::Chunk(chunk)) {
-                                        Ok(()) => {}
-                                        Err(TrySendError::Full(WriterMsg::Chunk(mut chunk))) => {
-                                            dropped_chunks_clone.fetch_add(1, Ordering::SeqCst);
-                                            chunk.clear();
-                                            // try_send: never blocks or allocates
-                                            // on the RT thread. By conservation
-                                            // (RECYCLE_CHANNEL_CAPACITY) the channel
-                                            // always has room; on the impossible
-                                            // full case the chunk is simply dropped.
-                                            let _ = recycle_tx_for_drop.try_send(chunk);
-                                        }
-                                        Err(TrySendError::Full(WriterMsg::Finalize)) => {}
-                                        Err(TrySendError::Disconnected(_)) => {}
-                                    }
-                                    if let Some(tap) = stream_tap_rt.as_ref() {
-                                        stream_tap::enqueue_frame_rt(tap, i16_samples);
-                                    }
-                                }
+                                // Plan 060.1: the final buffer contributes capture
+                                // speech evidence (no second scan, no allocation) and
+                                // an unwritable final buffer is counted as dropped so
+                                // the integrity check — not the no-speech gate — owns
+                                // the outcome.
+                                drain_final_callback(
+                                    f32_samples,
+                                    i16_samples,
+                                    &capture_metrics_clone,
+                                    &recycle_rx,
+                                    &writer_tx_clone,
+                                    &recycle_tx_for_drop,
+                                    &dropped_chunks_clone,
+                                    stream_tap_rt.as_ref(),
+                                );
                                 callback_drained_clone.store(true, Ordering::SeqCst);
                             }
                             return;
                         }
-                        // Calculate RMS for both level meter and silence detection
-                        let sum: f32 = f32_samples.iter().map(|x| x * x).sum();
-                        let rms = (sum / f32_samples.len() as f32).sqrt();
+                        // Reuse one traversal for callback RMS and recording-wide metrics.
+                        let rms = capture_metrics_clone.observe(f32_samples);
 
                         // Process with level meter
                         if let Ok(mut meter) = level_meter_clone.try_lock() {
@@ -660,7 +1002,12 @@ impl AudioRecorder {
             let stop_reason = stop_rx.recv().ok();
 
             // Drain barrier: signal callback to drain and wait for acknowledgment
-            stop_requested.store(true, Ordering::SeqCst);
+            stop_after_post_roll(
+                stop_reason.as_ref(),
+                &stop_rx,
+                &capture_metrics,
+                &stop_requested,
+            );
             let drain_start = Instant::now();
             while !callback_drained.load(Ordering::SeqCst) {
                 if drain_start.elapsed() > Duration::from_millis(200) {
@@ -732,23 +1079,24 @@ impl AudioRecorder {
             // unfinalized-but-alive. See [`WRITER_JOIN_TIMEOUT`] and
             // [`join_writer_bounded`].
             let writer_result = join_writer_bounded(writer_handle, WRITER_JOIN_TIMEOUT);
-
             if let Some(worker) = stream_tap_worker {
                 let _ = join_stream_tap_bounded(worker, STREAM_TAP_JOIN_TIMEOUT);
             }
-            writer_result?;
-
-            // Check if any errors occurred during recording after preserving writer integrity
-            // failures as the primary stop error.
-            if let Ok(guard) = error_occurred.lock() {
-                if let Some(error) = &*guard {
-                    return Err(error.clone());
-                }
-            }
+            let speech_detected = silence_detector
+                .lock()
+                .map(|detector| detector.speech_detected())
+                .unwrap_or(false);
+            let metrics = capture_metrics.snapshot(
+                config.sample_rate().0,
+                config.channels(),
+                speech_detected,
+            );
+            let device_error = error_occurred.lock().ok().and_then(|guard| guard.clone());
+            finish_capture(&last_capture_metrics, metrics, writer_result, device_error)?;
 
             // Return appropriate message based on stop reason
             match stop_reason {
-                Some(RecorderCommand::Stop) => Ok("Recording stopped by user".to_string()),
+                Some(RecorderCommand::Stop { .. }) => Ok("Recording stopped by user".to_string()),
                 None => Ok("Recording stopped".to_string()),
             }
         });
@@ -775,6 +1123,10 @@ impl AudioRecorder {
     }
 
     pub fn stop_recording(&mut self) -> Result<String, String> {
+        self.stop_recording_with_post_roll(Duration::ZERO)
+    }
+
+    pub fn stop_recording_with_post_roll(&mut self, post_roll: Duration) -> Result<String, String> {
         let handle = self
             .recording_handle
             .lock()
@@ -793,11 +1145,14 @@ impl AudioRecorder {
 
         if let Some(handle) = handle {
             // Send stop signal
-            handle.stop_tx.send(RecorderCommand::Stop).ok();
+            handle
+                .stop_tx
+                .send(RecorderCommand::Stop { post_roll })
+                .ok();
 
             // Wait for the recording thread to finish, bounded by a SINGLE
             // teardown deadline that covers every internal sub-budget (drain
-            // window + platform stream drop + writer finalize). See
+            // post-roll + window + platform stream drop + writer finalize). See
             // [`STOP_JOIN_TIMEOUT`]. Replaces the old independent 5s poll that
             // raced the previously-unbounded writer join.
             let thread_handle = handle.thread_handle;
@@ -821,6 +1176,13 @@ impl AudioRecorder {
         } else {
             Err("Not recording".to_string())
         }
+    }
+
+    pub fn take_last_capture_metrics(&self) -> Option<CaptureAudioMetrics> {
+        self.last_capture_metrics
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
     }
 
     pub fn wait_for_recording_end(&mut self) -> Result<String, String> {
@@ -1290,6 +1652,109 @@ mod tests {
     }
 
     #[test]
+    fn stop_recording_requests_immediate_drain() {
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let worker_stop_requested = stop_requested.clone();
+        let thread_handle = thread::spawn(move || {
+            let command = stop_rx.recv().unwrap();
+            assert!(matches!(
+                &command,
+                RecorderCommand::Stop { post_roll } if post_roll.is_zero()
+            ));
+            let metrics = CaptureMetricsAccumulator::default();
+            stop_after_post_roll(Some(&command), &stop_rx, &metrics, &worker_stop_requested);
+            assert_eq!(metrics.snapshot(100, 1, false).post_roll_ms, 0);
+            Ok::<String, String>("stopped".to_string())
+        });
+        let mut recorder = AudioRecorder::new();
+        *recorder.recording_handle.lock().unwrap() = Some(RecordingHandle {
+            stop_tx,
+            thread_handle,
+        });
+
+        assert_eq!(recorder.stop_recording().unwrap(), "stopped");
+        assert!(stop_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn post_roll_delays_drain_barrier() {
+        let post_roll = Duration::from_millis(60);
+        let (_stop_tx, stop_rx) = mpsc::channel();
+        let command = RecorderCommand::Stop { post_roll };
+        let metrics = CaptureMetricsAccumulator::default();
+        let stop_requested = AtomicBool::new(false);
+
+        assert!(!stop_requested.load(Ordering::SeqCst));
+        let start = Instant::now();
+        stop_after_post_roll(Some(&command), &stop_rx, &metrics, &stop_requested);
+        assert!(start.elapsed() >= post_roll);
+        assert!(stop_requested.load(Ordering::SeqCst));
+        let snapshot = metrics.snapshot(100, 1, false);
+        assert!(!snapshot.post_roll_interrupted);
+        assert_eq!(snapshot.post_roll_ms, 60);
+    }
+
+    #[test]
+    fn later_stop_interrupts_post_roll() {
+        let (stop_tx, stop_rx) = mpsc::channel();
+        stop_tx
+            .send(RecorderCommand::Stop {
+                post_roll: Duration::ZERO,
+            })
+            .unwrap();
+        let command = RecorderCommand::Stop {
+            post_roll: Duration::from_secs(5),
+        };
+        let metrics = CaptureMetricsAccumulator::default();
+        let stop_requested = AtomicBool::new(false);
+
+        let start = Instant::now();
+        stop_after_post_roll(Some(&command), &stop_rx, &metrics, &stop_requested);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(stop_requested.load(Ordering::SeqCst));
+        assert!(metrics.snapshot(100, 1, false).post_roll_interrupted);
+    }
+
+    #[test]
+    fn disconnected_stop_channel_interrupts_post_roll() {
+        let (stop_tx, stop_rx) = mpsc::channel::<RecorderCommand>();
+        drop(stop_tx);
+        let command = RecorderCommand::Stop {
+            post_roll: Duration::from_secs(5),
+        };
+        let metrics = CaptureMetricsAccumulator::default();
+        let stop_requested = AtomicBool::new(false);
+
+        let start = Instant::now();
+        stop_after_post_roll(Some(&command), &stop_rx, &metrics, &stop_requested);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(stop_requested.load(Ordering::SeqCst));
+        assert!(metrics.snapshot(100, 1, false).post_roll_interrupted);
+    }
+
+    #[test]
+    fn capture_metrics_snapshot_includes_post_roll_speech() {
+        let metrics = CaptureMetricsAccumulator::default();
+        metrics.post_roll_ms.store(250, Ordering::SeqCst);
+        metrics.post_roll_active.store(true, Ordering::SeqCst);
+        metrics.observe(&[0.01, 0.01]);
+        metrics.post_roll_active.store(false, Ordering::SeqCst);
+
+        let snapshot = metrics.snapshot(100, 1, false);
+        assert_eq!(snapshot.post_roll_ms, 250);
+        assert!(!snapshot.post_roll_interrupted);
+        assert!(snapshot.post_roll_speech_detected);
+
+        let immediate = CaptureMetricsAccumulator::default();
+        immediate.observe(&[0.01, 0.01]);
+        let snapshot = immediate.snapshot(100, 1, false);
+        assert_eq!(snapshot.post_roll_ms, 0);
+        assert!(!snapshot.post_roll_interrupted);
+        assert!(!snapshot.post_roll_speech_detected);
+    }
+
+    #[test]
     fn take_silence_event_receiver_consumes_receiver() {
         let mut recorder = AudioRecorder::new();
         let (_tx, rx) = mpsc::sync_channel::<SilenceDetectorEvent>(1);
@@ -1343,5 +1808,378 @@ mod tests {
 
         assert!(!recorder.recording_thread_finished());
         drop(recorder);
+    }
+    #[test]
+    fn capture_metrics_accumulate_rms_peak_and_duration_in_callback_pass() {
+        let metrics = CaptureMetricsAccumulator::default();
+
+        assert!((metrics.observe(&[0.5, -0.5]) - 0.5).abs() < f32::EPSILON);
+        assert!((metrics.observe(&[0.25, -0.25]) - 0.25).abs() < f32::EPSILON);
+
+        let snapshot = metrics.snapshot(2, 1, true);
+        assert_eq!(snapshot.sample_count, 4);
+        assert_eq!(snapshot.duration_ms, 2000);
+        assert!((snapshot.rms - 0.395_284_707_521_047_44).abs() < 1e-12);
+        assert!((snapshot.peak - 0.5).abs() < f32::EPSILON);
+        assert!(snapshot.speech_detected);
+    }
+
+    #[test]
+    fn evidence_duration_uses_fixed_windows_across_callback_boundaries() {
+        let samples: Vec<f32> = std::iter::repeat_n(0.004, 50)
+            .chain(std::iter::repeat_n(0.0007, 50))
+            .collect();
+        let one_callback = CaptureMetricsAccumulator::new(1_000, 1);
+        one_callback.observe(&samples);
+        let one_snapshot = one_callback.snapshot(1_000, 1, false);
+
+        let split_callbacks = CaptureMetricsAccumulator::new(1_000, 1);
+        for chunk in samples.chunks(7) {
+            split_callbacks.observe(chunk);
+        }
+        let split_snapshot = split_callbacks.snapshot(1_000, 1, false);
+
+        assert_eq!(one_snapshot.ms_above_rms_floor, 50);
+        assert_eq!(one_snapshot.windows_above_rms_floor, 10);
+        assert_eq!(
+            split_snapshot.ms_above_rms_floor,
+            one_snapshot.ms_above_rms_floor
+        );
+        assert_eq!(
+            split_snapshot.windows_above_rms_floor,
+            one_snapshot.windows_above_rms_floor
+        );
+    }
+
+    #[test]
+    fn evidence_duration_counts_a_short_transient_not_its_host_callback() {
+        let samples: Vec<f32> = std::iter::repeat_n(0.02, 5)
+            .chain(std::iter::repeat_n(0.0007, 95))
+            .collect();
+        let metrics = CaptureMetricsAccumulator::new(1_000, 1);
+        metrics.observe(&samples);
+
+        let snapshot = metrics.snapshot(1_000, 1, false);
+        assert_eq!(snapshot.ms_above_rms_floor, 5);
+        assert_eq!(snapshot.windows_above_rms_floor, 1);
+    }
+
+    #[test]
+    fn evidence_duration_rounds_up_past_transient_boundary() {
+        let metrics = CaptureMetricsAccumulator::new(48_000, 1);
+        let samples = vec![0.004; 961];
+        metrics.observe(&samples);
+
+        let snapshot = metrics.snapshot(48_000, 1, false);
+        assert_eq!(snapshot.ms_above_rms_floor, 21);
+    }
+
+    #[test]
+    fn soft_speech_survives_fixed_window_phase_alignment() {
+        let metrics = CaptureMetricsAccumulator::new(2_000, 1);
+        let samples: Vec<f32> = std::iter::repeat_n(0.0007, 5)
+            .chain(std::iter::repeat_n(0.004, 62))
+            .chain(std::iter::repeat_n(0.0007, 133))
+            .collect();
+        metrics.observe(&samples);
+
+        let snapshot = metrics.snapshot(2_000, 1, false);
+        assert!(
+            snapshot.ms_above_rms_floor > 20,
+            "31ms soft speech measured only {}ms above floor",
+            snapshot.ms_above_rms_floor
+        );
+    }
+
+    #[test]
+    fn callback_rms_preserves_previous_f32_calculation_bits() {
+        fn legacy_callback_rms(samples: &[f32]) -> f32 {
+            let sum: f32 = samples.iter().map(|sample| sample * sample).sum();
+            (sum / samples.len() as f32).sqrt()
+        }
+
+        let near_threshold = [
+            crate::audio::silence_detector::VOICE_RMS_THRESHOLD - 0.000_001,
+            crate::audio::silence_detector::VOICE_RMS_THRESHOLD + 0.000_001,
+            -0.004_999,
+            0.005_001,
+        ];
+        let signed_zero = [0.0, -0.0];
+
+        for samples in [&[][..], &near_threshold[..], &signed_zero[..]] {
+            let metrics = CaptureMetricsAccumulator::default();
+            assert_eq!(
+                metrics.observe(samples).to_bits(),
+                legacy_callback_rms(samples).to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn capture_metrics_survive_writer_and_device_errors() {
+        let expected = CaptureAudioMetrics {
+            sample_count: 16_000,
+            duration_ms: 1000,
+            rms: 0.1,
+            peak: 0.2,
+            max_window_rms: 0.1,
+            windows_above_rms_floor: 0,
+            ms_above_rms_floor: 0,
+            sample_rate: 16_000,
+            channels: 1,
+            speech_detected: true,
+            post_roll_ms: 0,
+            post_roll_interrupted: false,
+            post_roll_speech_detected: false,
+        };
+
+        for (writer_result, device_error, expected_error) in [
+            (Err("writer failed".to_string()), None, "writer failed"),
+            (Ok(()), Some("device failed".to_string()), "device failed"),
+        ] {
+            let slot = Mutex::new(None);
+            let error = finish_capture(&slot, expected, writer_result, device_error).unwrap_err();
+            assert_eq!(error, expected_error);
+            assert_eq!(slot.lock().ok().and_then(|guard| *guard), Some(expected));
+        }
+    }
+
+    #[test]
+    fn take_last_capture_metrics_consumes_snapshot() {
+        let recorder = AudioRecorder::new();
+        let expected = CaptureAudioMetrics {
+            sample_count: 16_000,
+            duration_ms: 1000,
+            rms: 0.1,
+            peak: 0.2,
+            max_window_rms: 0.1,
+            windows_above_rms_floor: 0,
+            ms_above_rms_floor: 0,
+            sample_rate: 16_000,
+            channels: 1,
+            speech_detected: false,
+            post_roll_ms: 0,
+            post_roll_interrupted: false,
+            post_roll_speech_detected: false,
+        };
+        if let Ok(mut guard) = recorder.last_capture_metrics.lock() {
+            *guard = Some(expected);
+        }
+
+        assert_eq!(recorder.take_last_capture_metrics(), Some(expected));
+        assert_eq!(recorder.take_last_capture_metrics(), None);
+    }
+    #[test]
+    fn drain_final_callback_feeds_capture_evidence_from_the_final_buffer() {
+        use crate::audio::speech_evidence::{classify_speech_evidence, SpeechEvidenceClass};
+        // Plan 060.1: the stop boundary lands right after the last word — the
+        // final buffer must contribute speech evidence, or the no-speech gate
+        // deletes a recording whose speech the metrics never saw.
+        let metrics = CaptureMetricsAccumulator::new(16_000, 1);
+        // One second of quiet room tone. Nonzero on purpose: an all-zero
+        // capture would take the HighConfidenceNoInput path, not the gate.
+        metrics.observe(&vec![0.0007; 16_000]);
+        // Pre-fix counterfactual: without the drained final buffer the
+        // evidence classifies as high-confidence no-speech — would_skip_engine
+        // is true and the recording (with its final word) is deleted.
+        let baseline_only = metrics.snapshot(16_000, 1, false);
+        assert!(matches!(
+            classify_speech_evidence(Some(baseline_only), None),
+            SpeechEvidenceClass::HighConfidenceNoSpeech
+        ));
+
+        // The final drained buffer: 35ms of soft speech (0.004 > the 0.003
+        // window floor, yet below the aggregate floors) — past the 20ms
+        // transient allowance the gate extends to a bare click.
+        let final_buf: Vec<f32> = vec![0.004; 560];
+        let i16_samples: Vec<i16> = final_buf.iter().map(|&sample| f32_to_i16(sample)).collect();
+
+        let (pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        pool_tx.send(Vec::with_capacity(560)).unwrap();
+        let (writer_tx, writer_rx) = mpsc::sync_channel::<WriterMsg>(1);
+        let (recycle_tx, _recycle_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        let dropped = AtomicU64::new(0);
+
+        drain_final_callback(
+            &final_buf,
+            &i16_samples,
+            &metrics,
+            &pool_rx,
+            &writer_tx,
+            &recycle_tx,
+            &dropped,
+            None,
+        );
+
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+        let written = writer_rx.try_recv().ok();
+        assert!(
+            matches!(written.as_ref(), Some(WriterMsg::Chunk(chunk)) if *chunk == i16_samples),
+            "final chunk must reach the writer verbatim"
+        );
+        // The gate can no longer skip this capture: the final buffer's
+        // sustained above-floor windows pushed the evidence past the
+        // transient threshold (engine runs, speech survives).
+        let snapshot = metrics.snapshot(16_000, 1, false);
+        let class = classify_speech_evidence(Some(snapshot), None);
+        assert!(
+            !class.would_skip_engine(),
+            "final speech must not be gated away, got {class:?}"
+        );
+        assert!(matches!(class, SpeechEvidenceClass::Uncertain));
+    }
+
+    #[test]
+    fn drain_final_callback_writes_the_final_chunk_when_the_pool_has_room() {
+        let metrics = CaptureMetricsAccumulator::new(16_000, 1);
+        let samples = vec![0.2f32; 160];
+        let i16_samples: Vec<i16> = samples.iter().map(|&sample| f32_to_i16(sample)).collect();
+
+        let (pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        pool_tx.send(Vec::with_capacity(160)).unwrap();
+        let (writer_tx, writer_rx) = mpsc::sync_channel::<WriterMsg>(1);
+        let (recycle_tx, _recycle_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        let dropped = AtomicU64::new(0);
+
+        drain_final_callback(
+            &samples,
+            &i16_samples,
+            &metrics,
+            &pool_rx,
+            &writer_tx,
+            &recycle_tx,
+            &dropped,
+            None,
+        );
+
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+        let written = writer_rx.try_recv().ok();
+        assert!(
+            matches!(written.as_ref(), Some(WriterMsg::Chunk(chunk)) if *chunk == i16_samples),
+            "final chunk must reach the writer verbatim"
+        );
+    }
+
+    #[test]
+    fn drain_final_callback_counts_pool_exhaustion_as_dropped() {
+        // Pre-fix the empty-pool path silently discarded the final buffer: the
+        // WAV was truncated while the dropped counter stayed zero, so the
+        // integrity check passed and the no-speech gate judged (and could
+        // delete) a recording that never contained its own tail.
+        let metrics = CaptureMetricsAccumulator::new(16_000, 1);
+        let samples = vec![0.2f32; 160];
+        let i16_samples: Vec<i16> = samples.iter().map(|&sample| f32_to_i16(sample)).collect();
+
+        let (_pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(1); // empty pool
+        let (writer_tx, writer_rx) = mpsc::sync_channel::<WriterMsg>(1);
+        let (recycle_tx, _recycle_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        let dropped = AtomicU64::new(0);
+
+        drain_final_callback(
+            &samples,
+            &i16_samples,
+            &metrics,
+            &pool_rx,
+            &writer_tx,
+            &recycle_tx,
+            &dropped,
+            None,
+        );
+
+        assert_eq!(
+            dropped.load(Ordering::SeqCst),
+            1,
+            "unwritable final buffer must count as dropped"
+        );
+        assert!(
+            writer_rx.try_recv().is_err(),
+            "nothing may reach the writer"
+        );
+    }
+
+    #[test]
+    fn drain_final_callback_counts_queue_full_and_disconnected_writer_as_dropped() {
+        let metrics = CaptureMetricsAccumulator::new(16_000, 1);
+        let samples = vec![0.2f32; 160];
+        let i16_samples: Vec<i16> = samples.iter().map(|&sample| f32_to_i16(sample)).collect();
+
+        // Full queue (occupied by a Finalize, the Windows stream-drop-timeout
+        // case). The occupant is irrelevant: a Chunk send into a queue with
+        // no free slot reports Full carrying OUR chunk, which returns to the
+        // pool while the drop is counted.
+        let (pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        pool_tx.send(Vec::with_capacity(160)).unwrap();
+        let (writer_tx, _writer_rx) = mpsc::sync_channel::<WriterMsg>(1);
+        writer_tx.send(WriterMsg::Finalize).unwrap();
+        let (recycle_tx, recycle_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        let dropped = AtomicU64::new(0);
+
+        drain_final_callback(
+            &samples,
+            &i16_samples,
+            &metrics,
+            &pool_rx,
+            &writer_tx,
+            &recycle_tx,
+            &dropped,
+            None,
+        );
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert!(
+            recycle_rx.try_recv().is_ok(),
+            "the borrowed chunk returns to the pool for the RT thread"
+        );
+
+        // Disconnected writer (receiver dropped) with a pool chunk available:
+        // the send itself fails, and the drop is counted the same way.
+        let (pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        pool_tx.send(Vec::with_capacity(160)).unwrap();
+        let (writer_tx, writer_rx) = mpsc::sync_channel::<WriterMsg>(1);
+        drop(writer_rx);
+        let dropped = AtomicU64::new(0);
+        drain_final_callback(
+            &samples,
+            &i16_samples,
+            &metrics,
+            &pool_rx,
+            &writer_tx,
+            &recycle_tx,
+            &dropped,
+            None,
+        );
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn drain_final_callback_counts_full_writer_queue_as_dropped_and_recycles() {
+        // Queue occupied by a Chunk (the Full(Chunk) case): the buffer is
+        // counted dropped and the recycled chunk returns to the pool for the
+        // real-time thread.
+        let metrics = CaptureMetricsAccumulator::new(16_000, 1);
+        let samples = vec![0.2f32; 160];
+        let i16_samples: Vec<i16> = samples.iter().map(|&sample| f32_to_i16(sample)).collect();
+
+        let (pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        pool_tx.send(Vec::with_capacity(160)).unwrap();
+        let (writer_tx, _writer_rx) = mpsc::sync_channel::<WriterMsg>(1);
+        writer_tx.send(WriterMsg::Chunk(Vec::new())).unwrap(); // occupy the queue
+        let (recycle_tx, recycle_rx) = mpsc::sync_channel::<Vec<i16>>(1);
+        let dropped = AtomicU64::new(0);
+
+        drain_final_callback(
+            &samples,
+            &i16_samples,
+            &metrics,
+            &pool_rx,
+            &writer_tx,
+            &recycle_tx,
+            &dropped,
+            None,
+        );
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert!(
+            recycle_rx.try_recv().is_ok(),
+            "Full(Chunk) returns its chunk to the pool"
+        );
     }
 }

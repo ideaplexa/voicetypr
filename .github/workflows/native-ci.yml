@@ -1,0 +1,232 @@
+name: Native CI
+
+# Reusable native lanes. Every job runs on a literal GitHub-hosted runner
+# label; callers cannot inject a runner label, matrix, timeout, or checkout
+# ref. The original caller `github` context (event, ref, sha) is retained,
+# so checkout lands on the caller's revision.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ===========================================
+  # Build macOS (Apple Silicon)
+  # ===========================================
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Select Swift 6 toolchain and configure Clang runtime
+        run: |
+          xcode=$(
+            find /Applications -maxdepth 1 \( -type d -o -type l \) \
+              \( -name 'Xcode_1[6-9]*.app' -o -name 'Xcode_[2-9][0-9]*.app' \) \
+              | sort -V \
+              | tail -1
+          )
+          if [ -z "$xcode" ]; then echo "No Xcode >=16 (Swift 6) found on runner" >&2; exit 1; fi
+          echo "Selecting $xcode"
+          sudo xcode-select -s "$xcode"
+          swift --version
+          # Xcode 16.4 emits availability checks in whisper.cpp's Metal objects,
+          # but Rust's final link does not automatically include compiler-rt.
+          # Older toolchains (e.g. GitHub-hosted Xcode 16.2) may not ship or
+          # require the archive, so discovery is bundle-local and optional:
+          # link libclang_rt.osx.a only when the selected Xcode actually has one.
+          clang_runtime=$(
+            find "$xcode/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang" \
+              -type f -name 'libclang_rt.osx.a' 2>/dev/null \
+              | sort -V \
+              | tail -1
+          )
+          if [ -n "$clang_runtime" ]; then
+            echo "Linking compiler-rt archive: $clang_runtime"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+          else
+            echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
+          fi
+
+      - name: Capture Swift toolchain cache key
+        id: swift-toolchain
+        run: echo "hash=$(swift --version | shasum -a 256 | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Swift Parakeet build
+        uses: actions/cache@v5
+        with:
+          path: sidecar/parakeet-swift/.build
+          key: parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-${{ hashFiles('sidecar/parakeet-swift/Package.swift', 'sidecar/parakeet-swift/Package.resolved', 'sidecar/parakeet-swift/build.sh', 'sidecar/parakeet-swift/Sources/**') }}
+          restore-keys: |
+            parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.19.0'
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.13.1 --activate
+          pnpm --version
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Rust tests
+        run: cd src-tauri && cargo test
+
+      - name: Clippy
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build Tauri (release)
+        run: cd src-tauri && cargo build --release
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-macos-aarch64-preview
+          path: src-tauri/target/release/voicetypr
+          retention-days: 30
+
+  # Build Windows (CPU-safe app + Vulkan sidecar)
+  # ===========================================
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep dependency trees.
+      CARGO_TARGET_DIR: D:\b\app
+      VULKAN_RUNTIME_VERSION: 1.3.290.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.19.0'
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.13.1 --activate
+          pnpm --version
+
+      - name: Prepare cargo target dir
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-x64-build
+          key: vulkan-${{ env.VULKAN_RUNTIME_VERSION }}
+          workspaces: |
+            src-tauri -> ../../../../b/app
+            sidecar/whisper-vulkan -> ../../../../../b/vulkan
+
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: 1.3.290.0
+          install_runtime: true
+          cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Whisper Vulkan sidecar
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: D:\b\vulkan
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Whisper Vulkan sidecar build failed with exit code $LASTEXITCODE"
+          }
+          New-Item -ItemType Directory -Force -Path "sidecar/whisper-vulkan/dist" | Out-Null
+          $targetDir = $env:CARGO_TARGET_DIR
+          if ([string]::IsNullOrWhiteSpace($targetDir)) {
+            $targetDir = "sidecar/whisper-vulkan/target"
+          }
+          $sidecarExe = Join-Path $targetDir "release/whisper-vulkan-sidecar.exe"
+          if (-not (Test-Path $sidecarExe)) {
+            throw "Whisper Vulkan sidecar binary not found: $sidecarExe"
+          }
+          Copy-Item $sidecarExe "sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe"
+
+      - name: Download Windows runtime installer resources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "src-tauri/windows/resources" | Out-Null
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "src-tauri/windows/resources/vc_redist.x64.exe"
+          $vulkanVersion = $env:VULKAN_RUNTIME_VERSION
+          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
+            $vulkanVersion = $env:VULKAN_VERSION
+          }
+          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
+            $vulkanVersion = Split-Path -Leaf $env:VULKAN_SDK
+          }
+          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
+            throw "Cannot determine Vulkan version. Set VULKAN_RUNTIME_VERSION, VULKAN_VERSION, or VULKAN_SDK."
+          }
+          $vulkanRuntimeUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanRT-$vulkanVersion-Installer.exe"
+          Invoke-WebRequest -Uri $vulkanRuntimeUrl -OutFile "src-tauri/windows/resources/VulkanRT-Installer.exe"
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Clippy
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build and run Rust tests on Windows
+        shell: pwsh
+        working-directory: src-tauri
+        run: ./run-tests.ps1
+
+      - name: Build Tauri (release, CPU-safe main app)
+        run: cd src-tauri && cargo build --release
+
+      - name: Assert CPU build does not import vulkan-1.dll
+        shell: pwsh
+        run: |
+          & ./src-tauri/windows/assert-no-vulkan-import.ps1 -ExePath "$env:CARGO_TARGET_DIR/release/voicetypr.exe"
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-windows-x64-preview
+          path: D:/b/app/release/voicetypr.exe
+          retention-days: 30

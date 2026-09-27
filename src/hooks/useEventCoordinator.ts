@@ -18,7 +18,7 @@ export function useEventCoordinator(windowId: WindowId) {
     // Cleanup function
     return () => {
       // Unregister all event listeners for this component
-      unlistenersRef.current.forEach(unlisten => unlisten());
+      unlistenersRef.current.forEach((unlisten) => unlisten());
       unlistenersRef.current = [];
     };
   }, [windowId]);
@@ -28,14 +28,14 @@ export function useEventCoordinator(windowId: WindowId) {
    * @param eventName The name of the event to listen for
    * @param handler The handler function to call when event is received
    */
-  const registerEvent = useCallback(async <T = any>(
-    eventName: string,
-    handler: (payload: T) => void | Promise<void>
-  ) => {
-    const unlisten = await eventCoordinator.register(windowId, eventName, handler);
-    unlistenersRef.current.push(unlisten);
-    return unlisten;
-  }, [windowId]);
+  const registerEvent = useCallback(
+    async <T = any>(eventName: string, handler: (payload: T) => void | Promise<void>) => {
+      const unlisten = await eventCoordinator.register(windowId, eventName, handler);
+      unlistenersRef.current.push(unlisten);
+      return unlisten;
+    },
+    [windowId],
+  );
 
   const setActive = useCallback(() => {
     eventCoordinator.setActiveWindow(windowId);
@@ -48,6 +48,6 @@ export function useEventCoordinator(windowId: WindowId) {
   return {
     registerEvent,
     setActive,
-    getDebugInfo
+    getDebugInfo,
   };
 }

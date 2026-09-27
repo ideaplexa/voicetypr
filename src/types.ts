@@ -1,11 +1,18 @@
-export type SpeechModelEngine = 'whisper' | 'parakeet' | 'soniox' | 'openai' | 'groq' | 'deepgram' | 'cohere';
-export type ModelKind = 'local' | 'cloud';
+export type SpeechModelEngine =
+  | "whisper"
+  | "parakeet"
+  | "soniox"
+  | "openai"
+  | "groq"
+  | "deepgram"
+  | "cohere";
+export type ModelKind = "local" | "cloud";
 
 /** A downloaded shareable model exposed by a remote Voicetypr host. */
 export interface RemoteShareableModel {
   id: string;
   display_name: string;
-  engine: Extract<SpeechModelEngine, 'whisper' | 'parakeet'>;
+  engine: Extract<SpeechModelEngine, "whisper" | "parakeet">;
   recommended?: boolean | null;
   speed_score?: number | null;
   accuracy_score?: number | null;
@@ -34,7 +41,7 @@ interface BaseModelInfo {
 }
 
 export interface LocalModelInfo extends BaseModelInfo {
-  kind: 'local';
+  kind: "local";
   size: number;
   url: string;
   sha256: string;
@@ -42,25 +49,38 @@ export interface LocalModelInfo extends BaseModelInfo {
   accuracy_score: number;
 }
 
+export interface CloudSttModel {
+  id: string;
+  display_name: string;
+}
+
 export interface CloudModelInfo extends BaseModelInfo {
-  kind: 'cloud';
+  kind: "cloud";
   /** Backend-sourced transcription model id used by this cloud provider. */
   underlying_model?: string | null;
+  /** Curated, friendly-labeled API models for this provider. */
+  available_models?: CloudSttModel[] | null;
 }
 
 export type ModelInfo = LocalModelInfo | CloudModelInfo;
 
-export const isCloudModel = (model: ModelInfo): model is CloudModelInfo =>
-  model.kind === 'cloud';
+export const isCloudModel = (model: ModelInfo): model is CloudModelInfo => model.kind === "cloud";
 
-export const isLocalModel = (model: ModelInfo): model is LocalModelInfo =>
-  model.kind === 'local';
+export const isLocalModel = (model: ModelInfo): model is LocalModelInfo => model.kind === "local";
 
-export type RecordingMode = 'toggle' | 'push_to_talk';
-export type PillIndicatorMode = 'never' | 'always' | 'when_recording';
-export type PillIndicatorPosition = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
-export type TranscriptionAcceleration = 'auto' | 'gpu' | 'cpu';
-export type TranscriptionMode = 'regular' | 'live_preview';
+export type RecordingMode = "toggle" | "push_to_talk";
+export type PillIndicatorMode = "never" | "always" | "when_recording";
+export type PillIndicatorStyle = "compact" | "full";
+export type PillIndicatorPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+export type TranscriptionAcceleration = "auto" | "gpu" | "cpu";
+export type UpdateChannel = "stable" | "beta";
+export type TranscriptionMode = "regular" | "live_preview";
 
 export interface EngineStreamCapabilities {
   supports_streaming: boolean;
@@ -83,7 +103,7 @@ export interface AppSettings {
   hotkey: string;
   current_model: string;
   speech_language: string;
-  transcription_task?: 'transcribe' | 'translate_to_english';
+  transcription_task?: "transcribe" | "translate_to_english";
   final_text_language?: string;
   theme: string;
   transcription_cleanup_days?: number | null;
@@ -100,30 +120,30 @@ export interface AppSettings {
   keep_transcription_in_clipboard?: boolean;
   // Audio feedback
   play_sound_on_recording?: boolean;
-  play_sound_on_recording_end?: boolean;
+  play_sound_on_transcription_complete?: boolean;
+  play_sound_on_paste_success?: boolean;
+  settings_mode?: string;
   // Pill indicator visibility mode
   pill_indicator_mode?: PillIndicatorMode;
+  // Pill indicator detail level
+  pill_indicator_style?: PillIndicatorStyle;
   // Pill indicator screen position
   pill_indicator_position?: PillIndicatorPosition;
   // Pill indicator offset from screen edge in pixels (10-50)
   pill_indicator_offset?: number;
-  // Custom dragged pill coordinate [x, y]; null = use pill_indicator_position.
-  // Persisted by the backend but was previously absent from this type.
   pill_position?: [number, number] | null;
   // Pause system media during recording
   pause_media_during_recording?: boolean;
   // Network sharing settings
   sharing_port?: number;
-  // NOTE: read-managed in secure storage, NOT persisted via save_settings — the
-  // backend forces this to None on read and deletes it on save. Do not rely on
-  // setting it through updateSettings; the value is silently dropped.
   sharing_password?: string;
   // Recording persistence settings
   save_recordings?: boolean;
   recording_retention_days?: number | null; // null = keep forever
   // Transcription acceleration (Windows only; stored-but-ignored on other platforms)
   transcription_acceleration?: TranscriptionAcceleration;
-  // Whisper speed mode is applied only on Apple-Silicon Metal.
+  // Direct-install update feed (Store/MSIX ignores this setting)
+  update_channel?: UpdateChannel;
   whisper_speed_mode?: boolean;
   transcription_mode?: TranscriptionMode;
 }
@@ -150,8 +170,10 @@ export interface TranscriptionWritingMeta {
   ai_applied?: boolean;
   /** Pre-AI raw transcript saved when AI formatting changed the text (desktop only). Never logged; local history only. */
   original_text?: string;
-  /** App that received the dictated text (set when App Rules capture the active app). */
-  context_hint?: { app_name?: string };
+  /** App active when desktop recording started. Captured locally whether Polish is on or off. */
+  context_hint?: { app_name?: string; process_path?: string; category?: string };
+  ai_provider?: string;
+  ai_model?: string;
 }
 
 export interface TranscriptionHistory {
@@ -161,14 +183,16 @@ export interface TranscriptionHistory {
   model: string;
   recording_file?: string; // Filename of the saved recording (not full path)
   source_recording_id?: string; // For re-transcriptions, references original transcription
-  status?: 'completed' | 'in_progress' | 'failed';
+  status?: "completed" | "in_progress" | "failed";
   writing?: TranscriptionWritingMeta;
 }
 
 export interface LicenseStatus {
-  status: 'licensed' | 'trial' | 'expired' | 'none';
+  status: "licensed" | "trial" | "expired" | "none";
   trial_days_left?: number;
   license_type?: string;
   license_key?: string;
   expires_at?: string;
+  verification_state?: "verified" | "offline_grace" | "needs_revalidation";
+  verification_expires_at?: string;
 }

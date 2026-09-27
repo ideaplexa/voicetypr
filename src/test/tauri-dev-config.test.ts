@@ -20,9 +20,7 @@ function mergePatch(target: unknown, patch: unknown): unknown {
     return patch;
   }
   const base =
-    target && typeof target === "object" && !Array.isArray(target)
-      ? { ...(target as Json) }
-      : {};
+    target && typeof target === "object" && !Array.isArray(target) ? { ...(target as Json) } : {};
   for (const [key, value] of Object.entries(patch as Json)) {
     if (value === null) delete base[key];
     else base[key] = mergePatch(base[key], value);
@@ -30,10 +28,7 @@ function mergePatch(target: unknown, patch: unknown): unknown {
   return base;
 }
 
-const tauriDir = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../src-tauri",
-);
+const tauriDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../src-tauri");
 const readConf = (name: string) =>
   JSON.parse(readFileSync(resolve(tauriDir, name), "utf8")) as Json;
 
@@ -49,11 +44,7 @@ describe("tauri dev config resolution (--config tauri.dev.conf.json)", () => {
   it("keeps the Parakeet sidecar registered in the macOS dev build", () => {
     const bundle = macDev.bundle as Json;
     const build = macDev.build as Json;
-    expect(
-      (bundle.externalBin as string[]).some((b) =>
-        b.includes("parakeet-sidecar"),
-      ),
-    ).toBe(true);
+    expect((bundle.externalBin as string[]).some((b) => b.includes("parakeet-sidecar"))).toBe(true);
     expect(build.beforeDevCommand as string).toContain("sidecar:build");
     expect(build.devUrl).toBe("http://localhost:1420");
   });
@@ -66,5 +57,12 @@ describe("tauri dev config resolution (--config tauri.dev.conf.json)", () => {
 
   it("preserves the dev-only bundle identifier", () => {
     expect(macDev.identifier).toBe("com.ideaplexa.voicetypr.dev");
+  });
+
+  it("labels the development window distinctly", () => {
+    for (const config of [macDev, winDev]) {
+      const windows = (config.app as Json).windows as Json[];
+      expect(windows[0]?.title).toBe("Voicetypr Dev");
+    }
   });
 });

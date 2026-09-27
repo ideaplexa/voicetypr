@@ -4,8 +4,6 @@ use super::common::{self, AuthScheme};
 use std::path::Path;
 use tauri::AppHandle;
 
-pub(super) const MODEL: &str = "gpt-4o-transcribe";
-
 const BASE: &str = "https://api.openai.com/v1";
 
 pub(super) async fn validate_key(key: &str) -> Result<(), String> {
@@ -22,6 +20,7 @@ pub(super) async fn validate_key(key: &str) -> Result<(), String> {
 pub(super) async fn transcribe_typed(
     app: &AppHandle,
     key: &str,
+    model: &str,
     audio_path: &Path,
     language: Option<&str>,
 ) -> Result<String, common::SttError> {
@@ -31,7 +30,7 @@ pub(super) async fn transcribe_typed(
     common::openai_compatible_transcribe(
         BASE,
         key,
-        MODEL,
+        model,
         audio_path,
         language,
         prompt.as_deref(),

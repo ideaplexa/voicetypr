@@ -5,20 +5,53 @@
 ### Main Release Scripts
 - `release-separate.sh` - macOS release script (creates version, builds both architectures, creates GitHub release)
 - `release-windows.ps1` - Windows release script (builds NSIS installer, updates existing release)
-- `release-windows.bat` - Batch wrapper for the PowerShell script
 
 ### Microsoft Store MSIX
 - `build-msix-store.ps1` - Windows Microsoft Store MSIX package builder
 - Store submission playbook: [`MICROSOFT_STORE_LAUNCH.md`](../MICROSOFT_STORE_LAUNCH.md)
 
 ### Supporting Scripts
-- `fix-release-archives.sh` - Fixes macOS tar.gz archives by removing AppleDouble files
-- `create-latest-json.js` - Creates the combined latest.json for the updater
+- `latest.json` for the updater is generated inline by `release-separate.sh`, `release-windows.ps1`, and the release workflow (no standalone script)
 - Other scripts - Various build configurations for different scenarios
 
-## Cross-Platform Release Workflow
+## Release Paths
 
-The recommended release process is:
+**Automated (recommended):** the GitHub Actions release workflow
+`.github/workflows/release.yml` (workflow_dispatch) computes the version and tag with
+`.github/scripts/release-tool.mjs`, builds macOS aarch64/x86_64 and Windows x64, bumps version
+files, publishes the tag, and opens a draft GitHub release with generated release notes. It does
+not regenerate `CHANGELOG.md`; released sections are curated by hand on main.
+
+
+### CI compute policy
+
+GitHub Actions is the workflow and release control plane, and every workflow
+in this repository runs exclusively on GitHub-hosted standard runners.
+`ci.yml` calls the same repository's reusable `native-ci.yml` with no
+inputs; that callee pins Apple Silicon macOS to `macos-14` and Windows x64
+to `windows-2022` with fixed 90/120-minute timeouts, and callers cannot
+inject a runner label, matrix, timeout, trust boolean, or checkout ref.
+There are no runner-routing variables or dispatch inputs.
+
+- Regular PR CI omits Intel. Use the CI workflow's manual `include_intel`
+  option for an on-demand compatibility build; every release still produces
+  the legacy x86_64 artifact.
+- Draft PRs and frontend-only changes skip native runners. Commit locally as
+  needed, then push reviewed checkpoints. Superseded runs cancel.
+- Store MSIX packaging is manual-only, requires the exact 40-character commit
+  SHA, and is release-candidate validation, not a normal PR check; a preflight
+  trust gate verifies that SHA is an ancestor of `origin/main` before the
+  Windows packaging job runs, so only reviewed commits on main can be packaged.
+  Its single Windows job runs on GitHub-hosted `windows-2022`.
+
+Depot's managed runners were evaluated as an acceleration lane and rejected
+for routine use: warm GitHub CI achieves practical parity with the measured
+Depot pilots, and free standard runners are sufficient. Depot's own CI
+product was separately rejected because it is Linux-only. Depot remains an
+external service unused by this repository. See
+`plans/064-depot-runners-intel-legacy.md`.
+
+**Manual (local scripts):** the per-platform scripts below.
 
 1. **macOS Release** (creates the initial release):
    ```bash
@@ -34,10 +67,6 @@ The recommended release process is:
 2. **Windows x86_64 Release** (adds to existing release):
    ```powershell
    .\scripts\release-windows.ps1 [version]
-   ```
-   OR
-   ```batch
-   scripts\release-windows.bat [version]
    ```
    - Reads version from package.json (or uses provided version)
    - Verifies the GitHub release exists
@@ -93,9 +122,7 @@ failed to unpack `._voicetypr.app` into `/var/folders/.../T/tauri_updated_app...
 ```
 
 ### The Solution
-1. **Environment Variable**: Set `COPYFILE_DISABLE=1` in `.cargo/config.toml` to prevent creation during build
-2. **Post-Build Fix**: The `fix-release-archives.sh` script repacks archives without AppleDouble files
-3. **Release Process**: The main `release.sh` automatically calls the fix script after building
+1. **Archive creation excludes**: `release-separate.sh` and the release workflow create updater archives with `COPYFILE_DISABLE=1 tar -czf ... --exclude='._*' --exclude='.DS_Store'`; prevention is built into the packaging steps (there is no separate fix script)
 
 ### Manual Fix (if needed)
 If you need to fix an existing archive:
@@ -104,3 +131,14 @@ COPYFILE_DISABLE=1 tar -czf fixed.tar.gz --exclude='._*' --exclude='.DS_Store' V
 ```
 
 This ensures the Tauri updater can successfully unpack and install updates on all macOS systems.
+
+## Known CI Failure: Intel Artifact Upload ENOTFOUND
+
+The manual `build-macos-intel` CI job (runner `macos-15-intel`) can fail in its `Upload preview artifact`
+step with `Failed to CreateArtifact: Unable to make request: ENOTFOUND`. That is a transient,
+runner-side DNS failure reaching GitHub's artifact storage; the build itself completed. Re-run
+the failed job. This is external network noise: do not change build or packaging code for it.
+
+Packaging and notarized artifacts have no automated test suite. Green CI establishes compilation
+and automated contracts only; packaged-app validation is the manual smoke matrix
+(`plans/SMOKE.md`).

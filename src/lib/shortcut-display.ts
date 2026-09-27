@@ -20,17 +20,14 @@ const BARE_MOD_ICONS: Record<string, string> = {
  *
  * Returns `null` when the active primary is a combo, or nothing is set.
  */
-export function findActivePrimaryBinding(
-  bindings: ShortcutBinding[],
-): ShortcutBinding | null {
+export function findActivePrimaryBinding(bindings: ShortcutBinding[]): ShortcutBinding | null {
   return (
     bindings.find((b) => b.id === "onboarding-primary-hold") ??
     bindings.find(
       (b) =>
         b.enabled &&
         (b.action === "hold_to_record" || b.action === "toggle_recording") &&
-        (b.trigger_kind === "modifier_hold" ||
-          b.trigger_kind === "isolated_tap"),
+        (b.trigger_kind === "modifier_hold" || b.trigger_kind === "isolated_tap"),
     ) ??
     null
   );
@@ -38,8 +35,7 @@ export function findActivePrimaryBinding(
 
 /** Format a side-specific bare modifier as a compact label, e.g. "Right ⌥". */
 export function formatModifierLabel(mod: ModifierSpec): string {
-  const sideLabel =
-    mod.side === "right" ? "Right " : mod.side === "left" ? "Left " : "";
+  const sideLabel = mod.side === "right" ? "Right " : mod.side === "left" ? "Left " : "";
   const modLabel = isMacOS
     ? (BARE_MOD_ICONS[mod.modifier] ?? mod.modifier)
     : mod.modifier.charAt(0).toUpperCase() + mod.modifier.slice(1);

@@ -1,13 +1,246 @@
 # Pending manual smoke — consolidated checklist
 
-All code below is implemented, gate-green, and committed. The ONLY remaining
-work is interactive desktop smoke, batched (per product owner) to run once at
-the end of the current feature push, before release. Do NOT re-implement
-anything here; executors and agents treat these plans as code-frozen.
+Unchecked rows are unverified, regardless of green automated checks.
+Use the packaged candidate for the named platform and record its exact version,
+date, result, and evidence. Development runs help diagnosis but do not establish
+beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
+reproduced failure against the named plan.
 
-Run on a real macOS machine via `pnpm tauri:dev` (item 16-S8 needs a Windows
-build). Check each box with date + result; on failure, file the failure
-against the named plan instead of hot-fixing inline.
+## 068 — Whisper callback correctness (beta.11 candidate, not released)
+
+- [ ] **068-S1 — Packaged desktop:** Base English on macOS Metal and Windows
+  in-process CPU fallback: transcribe short speech repeatedly, cancel during
+  inference, then transcribe again. No spurious encoder -6, no insertion after
+  cancellation, and no stuck state. Record exact candidate/platform/log evidence.
+- [ ] **068-S2 — Original #116 environment:** ask the reporter to retry the new
+  candidate on their Mac. Local reproduction of the callback defect is not proof
+  of the historical root cause; capture native engine diagnostics if -6 remains.
+
+## 066 — Stable Windows license identity (next candidate, not beta.10)
+
+- [ ] **066-S1 — Legacy source drift:** disposable Windows profile with synthetic
+  secure-store fixtures encrypted under a hardware UUID and, separately, registry
+  MachineGuid. Change which discovery source succeeds before first upgraded launch.
+  Available matching candidates recover the license without modifying `secure.dat`;
+  a fresh process uses the protected identity without launching WMIC/CIM/registry.
+  Mixed-key provider credentials remain readable. Do not alter the real machine's
+  registry or use a customer's license for this test.
+- [ ] **066-S2 — Real DPAPI and activation:** direct and Store packages, valid test
+  license: activate, exit normally, restart, reboot, and record. API identity remains
+  stable, paid entitlement remains valid, and no extra activation is consumed.
+  Repeat with the CLI; launching a second desktop instance cannot overwrite the pin.
+- [ ] **066-S3 — Recovery failures:** unreadable DPAPI pin, unavailable legacy key,
+  malformed store, and denied write permissions in disposable profiles. Errors must
+  preserve existing files and never become a trial response. Unknown-key credentials
+  require explicit reactivation; failed activation cannot pin a replacement identity.
+  A pin protected by another Windows user cannot be silently replaced.
+- [ ] **066-S4 — Lookup deadlines:** on Windows, stalled discovery and descendants
+  retaining output pipes return within the configured deadlines. Verify no hanging
+  PowerShell/WMIC children or console flashes. Pin-loaded restart skips discovery.
+- [ ] **066-S5 — Customer confirmation:** collect fresh activation/restart evidence
+  with the new candidate. The reproduced mechanism alone does not establish either
+  customer's historical identity or recover a license deleted by an older build.
+
+## 065 — Windows customer recovery (next candidate, not beta.10)
+
+- [ ] **065-S1 — Quiet input:** Windows Yeti/default input, normal and soft
+  speech for 5–15 seconds: no false “No audio detected” warning; transcript and
+  paste still succeed. Continue soft input beyond five minutes, and switch from
+  louder to soft speech: no false silence warning or automatic stop. Digital-zero
+  input still warns; uncertain audio is retained/transcribed after five minutes
+  without signal rather than discarded. Background noise can keep recording active.
+- [ ] **065-S2 — Feedback:** Windows direct and Store packages, each cue enabled
+  independently: recording, transcript-ready and paste sounds are audible on the
+  selected Windows default output. Disabled settings remain silent. Playback
+  failures log a Windows API error; no PowerShell process or console flash.
+- [ ] **065-S3 — License recovery:** disposable Windows profile with a valid JSON
+  secure store and an unreadable license entry: startup reports a read failure;
+  hotkey opens License with recovery guidance, never “still loading” or a claim
+  that the paid license expired. Retry and normal exit preserve unreadable data.
+  Re-enter a valid test license; activation, recording and a fresh restart work.
+  Do not reset customer data or submit a real customer's key for this test.
+- [ ] **065-S4 — Customer follow-up:** establish whether Wtin can reactivate and
+  remains activated after restart; for Roger, capture a fresh activation and
+  restart log to establish why the license became unavailable. Original decrypt
+  cause and already-deleted license recovery are not proven fixed by this patch.
+
+The 060/061 candidate is released as `v2.0.6-beta.10` (2026-09-15).
+Smoke must run against that exact build, not against older betas or PR CI.
+Windows hardware, real-provider cleanup, and consent/alert delivery remain
+unchecked. Existing 045-S1–S6, 050-S1–S3, 058-S1/S2 and 059-S1/S2 must also be
+verified against the new candidate rather than inherited from older betas.
+
+Local 060/061 development-bundle observation: build and startup succeeded under
+the separate `.dev` identity; cached Parakeet loading completed. The dashboard
+remained hidden in menubar mode and background AX input was refused. No
+foreground navigation, recording, consent change, or report submission was
+initiated; the owned process was stopped. This does not check any release row.
+
+2026-09-06 isolated macOS ARM VM observations (ad hoc packages `9d5248ab` and
+`6c09035c`, source version 2.0.5): onboarding OFF/OFF persistence, late
+Accessibility engine recovery, local recording/insertion/cancel, file
+transcription/export, CLI installation and loopback remote transcription were
+exercised. Malformed/undecryptable license fixtures survived Retry and normal
+exit/relaunch with reachable recovery, and the share-card PNG rendered at
+2400×1600. See `063-macos-vm-qa.md` for exact limits and evidence. These are
+partial runtime observations: signed-update, physical hardware, provider and
+alert-delivery conditions below remain unchecked. A silence-only CLI fixture
+hallucinated `you`; one cached VM Whisper inference failed with code `-6` and
+recovered after app restart. Neither silence prevention nor GPU stability is
+claimed passed.
+
+Final VM package `f76cbc68` additionally verified Saved text expansion for an
+STT-punctuated whole trigger (including live cursor insertion), rejection of a
+trigger embedded in a longer sentence, and a visible bottom recording indicator
+above the default Dock with idle/completion hiding intact. Cached Whisper `-6`
+recurred after bundle replacement and recovered after normal app restart; this
+remains a runtime limitation, not a passed stability check.
+
+## Plan 060 — Soniox lifecycle, failure events, report diagnostics + beta10 remediation (NEEDS-SMOKE)
+
+Use a dedicated Soniox test account and the configured GlitchTip/Discord test
+route. Obtain approval before creating/deleting provider records or changing
+diagnostic consent. macOS first; 060-S4/S7 also require real Windows hardware.
+
+- [ ] 060-S1 Soniox dictation with a key that has stored records →
+      transcription succeeds AND `Settings → Cloud transcription → Soniox
+      stored files` counts do not grow (auto-delete fired); Soniox console
+      shows the new records gone.
+- [ ] 060-S2 Exercise retained-file and retained-transcription caps in
+      the test account. Cleanup retries only records created by this app
+      session, preserving older records and records from other apps/devices.
+      Unknown records remain counted and the UI directs review to the Soniox
+      console. A remaining wall shows the storage error and Sources → Cloud
+      cleanup route. A quota retry happens at most once after capacity frees,
+      cleanup finishes, or the eight-second wait expires.
+- [ ] 060-S3 With telemetry endpoints reachable, use an invalid test Groq key
+      to trigger a transcription failure. With consent on, verify the
+      GlitchTip issue `flow.transcription.failed.<class>`, closed-vocabulary
+      engine/model/backend/failure_class tags, redaction, and Discord routing.
+      With consent off, verify no consent-gated failure event is emitted.
+      Separately disconnect networking and verify local failure handling;
+      remote alert delivery is not required while offline. In both cases,
+      verify no structured logs/transactions are emitted. Change consent only
+      with explicit approval.
+- [ ] 060-S4 Windows with GPU sidecar active → failure event carries
+      `backend=sidecar`; with GPU off/fallback → `backend=cpu`.
+- [ ] 060-S5 A release-build report contains System specs (or a visible
+      collection failure) and the redacted DEBUG ring. A failed submission's
+      Copy Details fallback retains both. Release log files contain no DEBUG
+      entries.
+- [ ] 060-S6 Media-restore regression (with 058-S1/S2): dictation where
+      stop fails (force recorder error) or ESC during `Starting` → media
+      still resumes (no stuck-pause after an error path).
+- [ ] 060-S7 Windows: a terminal failure reports the backend actually
+      attempted. If CPU fallback is attempted and fails, report `cpu`; if the
+      terminal attempt is the GPU sidecar, report `sidecar`. Concurrent
+      preload/remote work and previous recordings cannot replace that tag.
+      A recovered success must not emit a terminal-failure event.
+- [ ] 060-S8 Polish: a ready CLI provider can be enabled from tray/shortcut
+      controls; Refresh updates capabilities and the model picker after an
+      external CLI change. Failed refresh retains the previous usable list.
+      Standalone “Sure” survives punctuation changes and line reflow.
+- [ ] 060-S9 On macOS and Windows, short/quiet speech ending at hotkey release
+      remains intact; final callback buffers must not turn speech into a
+      no-speech rejection. Re-run 059-S1/S2 and the media restoration checks.
+- [ ] 060-S10 Polish settings finish loading after reopening the window;
+      opt-in crash reporting shows restart guidance when required. Opt-out
+      takes effect immediately. Change consent only with explicit approval.
+
+## Plan 061 — Unreadable license preservation (NEEDS-SMOKE)
+
+Use a disposable app-data/user profile with synthetic malformed JSON and
+valid-length but unauthenticatable ciphertext, never a customer's real store.
+Preserve fixtures before starting. Do not activate/deactivate an entitlement
+or reset existing app data as part of this check.
+
+- [ ] 061-S1 Windows packaged candidate: unreadable license data produces a
+      recovery error, not an expired-trial fallback. Account Retry is reachable.
+      Repeated reads and a full exit/relaunch preserve the fixture; no paid
+      validation or trial request is triggered by that storage failure.
+- [ ] 061-S2 macOS packaged candidate: repeat the preservation/exit checks.
+      A missing store still follows normal unlicensed handling; a valid test
+      store still reads normally. Parse errors and diagnostics contain no
+      synthetic secret, ciphertext, or device fingerprint.
+
+## Plan 030 — Windows crash dependencies (NEEDS-SMOKE)
+
+Run these on the signed Windows Beta 7 build. Keep Bugsink open for recurrence
+of the `flush_paint_messages` assertion and invalid-monitor-handle error 1461.
+
+- [ ] 030-S1 With the tray menu and pill alternately open and closed, put a
+      Bluetooth device to sleep, wake it, disconnect it, and reconnect it;
+      repeat while connecting/disconnecting a VPN or network adapter → app
+      stays alive, tray actions still work, no matching Bugsink panic.
+- [ ] 030-S2 Hot-plug/unplug a secondary monitor and sleep/wake the displays
+      while showing/hiding the main window and pill → app stays alive and
+      windows remain reachable.
+- [ ] 030-S3 Change the primary display and move the pill/main window between
+      displays with different DPI/scaling → placement updates without panic.
+- [ ] 030-S4 Normal regression: record, transcribe, paste, open tray settings,
+      then quit from the tray → unchanged behavior.
+
+## Plan 033 — tray recovery + upload result accessibility (NEEDS-SMOKE)
+
+Run these on signed `v2.0.5-beta.7`. The local macOS development build already
+proved first-attempt tray construction and ordinary tray-menu availability;
+the failure/recovery path and long-upload geometry still require real runtime
+conditions.
+
+- [ ] 033-S1 macOS cold launch and quit/relaunch → menu-bar icon appears once,
+      dashboard opens, tray actions work, and the launch log contains
+      `TRAY_CREATION | source=startup | attempt=1 | result=success`.
+- [ ] 033-S2 On the affected Mac, reproduce any tray creation failure →
+      dashboard stays visible, warning reports the attempt count, Retry icon
+      either restores one icon or leaves actionable help visible, and a copied
+      bug report includes tray availability/attempts/last error.
+- [ ] 033-S3 Crowded notched menu bar and external display → determine whether
+      an `available` tray is merely hidden by macOS placement; no duplicate
+      icon appears after sleep/wake or relaunch.
+- [ ] 033-S4 Upload a long Parakeet file with enough diarization segments to
+      scroll → the timeline stays inside its panel; Copy, Save, and Transcribe
+      Another File remain mouse- and keyboard-accessible; saved text matches
+      History.
+- [ ] 033-S5 Windows normal launch and autostart → delayed tray recovery does
+      not crash or duplicate the icon; complete Plan 030-S1..S4 on the same
+      signed build.
+
+## Plans 034, 040, 041 — Beta 7 support, diagnostics, and licensing
+
+Run these on published prerelease `v2.0.5-beta.7`, built by release run
+`30105763790`. The signed macOS ARM64, macOS Intel, and Windows artifacts all
+passed their release jobs; the checks below cover runtime behavior that CI
+cannot prove.
+
+- [ ] 034-S1 Submit a Report a problem form successfully → required email and
+      issue fields are enforced, the prepared report previews the real system
+      configuration, the form clears only after success, and the received
+      diagnostics contain no raw full paths, credentials, secrets, or other
+      unredacted sensitive values.
+- [ ] 034-S2 Force report submission to fail → entered fields remain intact,
+      Copy report remains usable, and copied diagnostics are still redacted.
+- [ ] 040-S1 Reproduce the affected Windows/Russian punctuation scenario with
+      AI formatting disabled and then with Clean Dictation enabled → each
+      transcription emits exactly one privacy-safe `AI_FORMATTING_DECISION`
+      outcome: `disabled`, `mode_skipped`, `literal_preserved`, `applied`,
+      `unchanged`, or `fallback`. The record contains no dictated text, prompt,
+      API key, or target-application name.
+- [ ] 040-S2 Make a configured AI provider unavailable during Clean Dictation
+      → raw/deterministic text is preserved, the decision is `fallback`, and
+      the app returns to idle without losing the transcript.
+- [ ] 041-S1 Activate a paid license online, quit, and relaunch → Pro remains
+      active and recording is available without another activation.
+- [ ] 041-S2 After a successful verification, disconnect the network or force
+      timeout/5xx validation failures during three scheduled checks → failures
+      1–2 retain offline grace, failure 3 shows the truthful revalidation
+      warning, Pro and recording remain available throughout, Revalidate stays
+      reachable, and `Trial expired` never appears.
+- [ ] 041-S3 Restore service and click Revalidate → the warning clears and Pro
+      remains active. A definitive invalid/expired/revoked response instead
+      removes the entitlement immediately rather than entering offline grace.
+- [ ] 041-S4 Inspect logs and telemetry from activation, transient failures,
+      revalidation, and definitive rejection → no license key, device
+      identifier, hostname, or raw server response was captured.
 
 ## Plan 004 — cancel during `Starting` (code at `9868fdc` era, NEEDS-SMOKE)
 
@@ -323,13 +556,145 @@ capped; near-silent noise unchanged). Residue = real mic capture + real ambient.
       NOT amplified into loud hiss or spurious words (stays at the 10x cap).
 - [ ] NORM-S3 Normal-volume dictation → unchanged quality.
 
+## Plan 045 — privacy-safe PostHog product analytics (NEEDS-SMOKE)
+
+Run these checks on the next newly cut signed Beta with the public
+`POSTHOG_PROJECT_TOKEN` repository variable configured. Inspect PostHog Live
+Events and GlitchTip while exercising the desktop app; CI and local debug builds
+cannot prove production ingestion boundaries.
+
+- [ ] 045-S1 Fresh install on macOS and Windows → onboarding shows separate
+      Crash & error reporting and Usage analytics choices, both checked by
+      default. Turn only Usage analytics off, finish onboarding, restart, and
+      confirm analytics remains off while diagnostics remains on.
+- [ ] 045-S2 Upgrade an existing profile with no `privacy_consent_version` →
+      no PostHog request occurs before Continue. `Not now` keeps analytics off
+      for the process and the prompt returns next launch. Continue persists both
+      independent choices; a failed save leaves the prompt recoverable.
+- [ ] 045-S3 With analytics enabled, launch once and complete successful local
+      recordings with Polish disabled and enabled → PostHog receives only the
+      closed journey events (`app.started`, `onboarding.completed` when
+      applicable, `recording.started`, `recording.stopped`,
+      `transcription.stage_finished`, and `polish.finished`). GlitchTip receives
+      no duplicate product events.
+- [ ] 045-S4 Inspect every captured PostHog property → the distinct ID is an
+      opaque UUID; person profiles and GeoIP are disabled; durations are
+      buckets; provider/model values are curated or bucketed; no audio,
+      transcript, clipboard, prompt, key, email, path, hostname, target app,
+      window title, hotkey, error string, or free-form property is present.
+- [ ] 045-S5 Trigger decode/formatting/delivery failure and cancellation paths,
+      then disable Usage analytics while events are queued → outcomes stay in
+      the closed vocabulary and queued events are dropped. After the command
+      returns, no new request starts; a request already handed to the HTTP stack
+      may complete. Diagnostics continues independently.
+- [ ] 045-S6 Build/run a debug app and a release app without
+      `POSTHOG_PROJECT_TOKEN` → neither sends PostHog traffic. Re-enable the
+      token only in the signed Beta, verify both macOS architectures and Windows
+      ingest to the EU endpoint, and confirm funnels/retention can join the
+      anonymous journey by installation ID.
+
+## Plan 046 — Polish workflow alignment (NEEDS-SMOKE)
+
+Run these checks on the next newly cut signed Beta. The automated contract tests
+cover stage ordering, settings normalization, deterministic rules, and prompt
+construction; they do not prove provider output or upgraded desktop state.
+
+- [ ] 046-S1 Dictate a short sentence and a longer two-topic passage without
+      speaking punctuation → Polish supplies natural punctuation, keeps the
+      short result in one paragraph, and adds only a restrained topic-change
+      paragraph break to the longer result (no invented headings or bullets).
+- [ ] 046-S2 Say `comma`, `full stop`, `new line`, and `new paragraph` as
+      complete utterances with Polish off and on → none is deterministically
+      replaced by punctuation or whitespace as a hidden spoken command.
+- [ ] 046-S3 Add Saved Text entries, restart, then speak an exact whole trigger
+      and the same trigger inside a longer sentence → only the whole utterance
+      expands. Confirm `Insert exactly` bypasses Polish while a normal entry
+      continues through Polish.
+- [ ] 046-S4 Add different App Rules for two applications, dictate equivalent
+      text into each, and inspect diagnostics → the matching app preset is
+      selected before the single logical Polish stage; the generic app category
+      does not override an explicit rule.
+- [ ] 046-S5 Upgrade profiles whose global preset is Writing, Notes, Message,
+      or Code without first opening the Polish page → recording uses Clean
+      Dictation when Polish is on and bypasses Polish when it is off. The
+      normalized value persists across restart, and App Rules label the bypass
+      option `Polish Off`.
+- [ ] 046-S6 Install the update from the previous signed Beta → the one-time
+      2.0.6 announcement explains automatic Polish migration and confirms which
+      settings remain unchanged. Dismiss it, restart, and confirm it does not
+      return; existing models, AI setup, hotkeys, corrections, Saved Text, and
+      App Rules remain intact.
+
+## 2.0.5 Beta train — Windows issue triage
+
+Current Beta: `2.0.5-beta.7`. Stable remains `2.0.4`. This signed candidate
+adds tray/upload recovery, paid-license resilience, formatting diagnostics,
+and the dedicated problem-report page to the earlier Windows fixes.
+
+- [x] **BETA-UPD-M1** (macOS ARM64): signed `beta.1` selected Beta, discovered
+      `beta.2`, installed it, restarted as `beta.2`, retained Beta, then reported
+      latest-version with no update loop.
+- [ ] **BETA-UPD-W1** (Windows): install/update from the previous signed Beta
+      to `beta.7`, restart, and confirm Beta persists with no update loop.
+- [ ] **BETA-GPU-W1** (Windows hybrid GPU): Auto prefers discrete NVIDIA/AMD;
+      a Vulkan/sidecar failure cannot crash the main app; CPU fallback completes;
+      the failed sidecar model does not remain resident beside the CPU model.
+- [ ] **BETA-HOTKEY-W1** (Windows): Stream Deck/injected input starts and stops
+      recording; the physical shortcut still works after restart.
+- [ ] **BETA-TEXT-W1**: punctuation spacing has no double spaces or spaces before
+      punctuation, while guarded multiline/code-like text remains unchanged.
+- [ ] **BETA-SILENCE-W1**: speech followed by 2–5 seconds of silence does not
+      invent trailing text or truncate the real final words; soft speech and a
+      silence-only control are included.
+- [ ] **BETA-EVIDENCE-W1**: retain representative `SPEECH_EVIDENCE` logs covering
+      capture RMS/peak/duration, prepared-audio metrics, engine/route/outcome,
+      and the shadow classification.
+
+The reported A3 onboarding/hotkey crash blocks Stable only if it reproduces on
+`beta.7`; collect the exact stage, acceleration mode, model, GPU, OS, and logs.
+The reported C2 all-model accuracy issue needs selected-mic plus
+RMS/peak/prepared-audio evidence before attributing it to an engine. Any
+resulting product fix requires a newly cut beta and a rerun of the affected
+checks above.
+
+## Plan 050 — share card + chrome/UI pass (NEEDS-SMOKE)
+
+Verified on the local macOS dev build (`pnpm tauri:dev`) 2026-08-18: share
+modal geometry and rendered card pixels, Overview restructure (header share
+button, activity block, all-time strip), Quick help rename, CLI copy, and
+titlebar traffic-light/toggle alignment measured at 0.0px delta. Full
+`pnpm quality-gate` green (1378 backend tests).
+
+- [ ] 050-S1 Windows build (compile-only in CI): open Overview, Polish, and
+      History — container rhythm renders sanely at the 1000×680 min size and
+      the share modal export (Copy image / Download) produces the 2400×1600
+      PNG.
+- [ ] 050-S2 Packaged macOS build (non-dev): traffic lights at `y:12` stay
+      pixel-aligned with the sidebar-toggle glyph, and the branded share card
+      (logo, gradient CTA) renders identically to the dev build.
+- [ ] 050-S3 Real `pi` CLI against an OpenAI provider: Polish → Local Agents
+      → pi → Thinking selector offers Off/Minimal/Low/Medium and a polish run
+      at Minimal succeeds end-to-end (contract covered by
+      `agent_cli` unit tests; the real-binary round-trip is ignored in CI).
+
 ## Release rule
 
-015 + 016 smoke are ship gates for the AI-polish release; 004/008 smoke are
-ship gates for the recording-path release. None block further feature
+015 + 016 + 046 smoke are ship gates for the AI-polish release; 004/008 smoke
+are ship gates for the recording-path release. None block further feature
 development on this branch.
 
 Native triggers (NT-S1..S4) are a SEPARATE post-2.0.0 add-on (plan 022 P2,
 owner-confirmed): optional to smoke and they do NOT gate the 2.0.0 release.
 If they fail, the native engine is simply not advertised; the legacy
 global_shortcut path is untouched, so 2.0.0 ships regardless.
+
+- [ ] **058-S1** Packaged macOS (v2.0.6-beta.7): with "Pause media during recording" enabled —
+      (a) Spotify or Music.app playing → hotkey: music pauses, stop: resumes (log: `paused via MediaRemote command`);
+      (b) browser player playing → hotkey: audio silences via mute fallback if the player ignores commands (log: `muted via CoreAudio`), stop: unmutes;
+      (c) quick tap (<0.5s) with music: still resumes;
+      (d) back-to-back recordings: stays paused through both, resumes after last stop;
+      (e) quit the app while a muted recording is active → output unmutes on exit;
+      (f) nothing playing → no phantom media action.
+- [ ] **058-S2** Windows (v2.0.6-beta.7): media pause via SMTC — Spotify + a Chrome tab video pause on record, resume on stop; verify the paused-session ledger resumes only the session we paused.
+- [ ] **059-S1** Packaged macOS (`v2.0.6-beta.8`): hotkey with silence and a mic activation pop → pill "No speech detected", nothing inserted, no engine/polish in logs (`skipped_no_speech` in `SPEECH_EVIDENCE`); a 31–100ms soft utterance, quiet whisper, and deliberately dictated punctuation still transcribe; cloud STT path behaves like local.
+  - [ ] **059-S2** Packaged Windows (`v2.0.6-beta.8`): repeat 059-S1 with mono/stereo 44.1/48kHz devices and both small/large WASAPI callback buffers; stop during the final syllable keeps speech; local/cloud/remote routes remain fail-open for uncertain audio.

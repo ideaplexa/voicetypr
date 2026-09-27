@@ -9,6 +9,8 @@ param(
     [switch]$SkipPublish
 )
 
+$GitHubRepository = "ideaplexa/voicetypr"
+
 function Write-Success($Message) { Write-Host "[OK] $Message" -ForegroundColor Green }
 function Write-Error($Message) { Write-Host "[ERROR] $Message" -ForegroundColor Red }
 function Write-Info($Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
@@ -249,7 +251,7 @@ if (-not $SkipBuild) {
     Write-Info "Updating latest.json with Windows platform..."
     $latestJsonPath = "$OutputDir\latest.json"
     try {
-        gh release download $ReleaseTag -p "latest.json" -D $OutputDir --clobber 2>&1 | Out-Null
+        gh release download $ReleaseTag --repo $GitHubRepository -p "latest.json" -D $OutputDir --clobber 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0 -and (Test-Path $latestJsonPath)) { Write-Success "Downloaded existing latest.json" }
     } catch {
         Write-Info "No existing latest.json downloaded: $_"
@@ -260,9 +262,14 @@ if (-not $SkipBuild) {
         if (-not $latestJson.platforms) {
             $latestJson | Add-Member -NotePropertyName "platforms" -NotePropertyValue @{} -Force
         }
+        foreach ($platform in $latestJson.platforms.PSObject.Properties) {
+            if ($platform.Value.url -match '^https://github\.com/[^/]+/voicetypr/releases/download/') {
+                $platform.Value.url = $platform.Value.url -replace '^https://github\.com/[^/]+/voicetypr/', "https://github.com/$GitHubRepository/"
+            }
+        }
         $windowsPlatform = @{
             signature = $signature
-            url = "https://github.com/moinulmoin/voicetypr/releases/download/$ReleaseTag/$InstallerName"
+            url = "https://github.com/$GitHubRepository/releases/download/$ReleaseTag/$InstallerName"
         }
         $latestJson.platforms | Add-Member -NotePropertyName "windows-x86_64" -NotePropertyValue $windowsPlatform -Force
         $latestJson | ConvertTo-Json -Depth 10 | Set-Content $latestJsonPath
@@ -274,7 +281,7 @@ if (-not $SkipBuild) {
             platforms = @{
                 "windows-x86_64" = @{
                     signature = $signature
-                    url = "https://github.com/moinulmoin/voicetypr/releases/download/$ReleaseTag/$InstallerName"
+                    url = "https://github.com/$GitHubRepository/releases/download/$ReleaseTag/$InstallerName"
                 }
             }
         }
@@ -295,16 +302,16 @@ if ($SkipBuild) {
 
 if (-not $SkipPublish) {
     Write-Step "Uploading to GitHub"
-    gh release view $ReleaseTag 2>&1 | Out-Null
+    gh release view $ReleaseTag --repo $GitHubRepository 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Release $ReleaseTag not found. Run macOS release first to create the draft."
         exit 1
     }
 
-    gh release upload $ReleaseTag "$OutputDir\$InstallerName" --clobber
-    gh release upload $ReleaseTag "$OutputDir\$InstallerName.sig" --clobber
+    gh release upload $ReleaseTag "$OutputDir\$InstallerName" --repo $GitHubRepository --clobber
+    gh release upload $ReleaseTag "$OutputDir\$InstallerName.sig" --repo $GitHubRepository --clobber
     if (Test-Path "$OutputDir\latest.json") {
-        gh release upload $ReleaseTag "$OutputDir\latest.json" --clobber
+        gh release upload $ReleaseTag "$OutputDir\latest.json" --repo $GitHubRepository --clobber
     }
     Write-Success "Installer uploaded successfully"
 }

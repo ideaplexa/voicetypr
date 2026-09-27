@@ -12,18 +12,21 @@
     "windows": [
       {
         "title": "Voicetypr",
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 12, "y": 12 },
         "label": "main",
-        "width": 1100,
-        "height": 950,
-        "minWidth": 1040,
-        "minHeight": 880,
+        "width": 1000,
+        "height": 680,
+        "minWidth": 1000,
+        "minHeight": 680,
         "resizable": true,
         "center": true,
         "visible": false,
         "skipTaskbar": true,
         "alwaysOnTop": false,
-        "minimizable": false,
-        "maximizable": false
+        "minimizable": true,
+        "maximizable": true
       }
     ],
     "security": {
@@ -72,7 +75,7 @@
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/moinulmoin/voicetypr/releases/latest/download/latest.json"
+        "https://github.com/ideaplexa/voicetypr/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2Q0M5NTZENjAwM0YyNDkKUldSSjhnTmdiWlhNRm0wdHQ1YmxNSzBWS2tiZlcyZ3FJZG5FajZ3MFBzTUZmRDgvZys5R1J6c2cK",
       "windows": {

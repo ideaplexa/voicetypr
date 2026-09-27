@@ -30,7 +30,7 @@ export function AccountTab() {
               // Show toast after window is focused to ensure it appears on top
               setTimeout(() => {
                 toast.error(event.message, {
-                  duration: 2000
+                  duration: 2000,
                 });
               }, 200);
             } catch (error) {
@@ -38,7 +38,7 @@ export function AccountTab() {
               // If window focus fails, still show the toast
               toast.error(event.message);
             }
-          }
+          },
         );
       } catch (error) {
         log.error("Failed to initialize account tab:", error);

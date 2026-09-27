@@ -21,8 +21,7 @@ const isDownloadCancellation = (error: unknown) =>
   String(error).toLowerCase().includes("cancelled") ||
   String(error).toLowerCase().includes("canceled");
 
-const getErrorText = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
+const getErrorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const createDownloadRequestId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -39,9 +38,7 @@ const getAccuracyScore = (model: ModelInfo) =>
   model.accuracy_score ?? (isCloudModel(model) ? CLOUD_ACCURACY_FALLBACK : 0);
 
 const getSizeValue = (model: ModelInfo) =>
-  isCloudModel(model)
-    ? Number.POSITIVE_INFINITY
-    : (model.size ?? Number.POSITIVE_INFINITY);
+  isCloudModel(model) ? Number.POSITIVE_INFINITY : (model.size ?? Number.POSITIVE_INFINITY);
 
 // Helper function to calculate balanced performance score
 function calculateBalancedScore(model: ModelInfo): number {
@@ -87,13 +84,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
   const modelsRef = useRef<Record<string, ModelInfo>>({});
 
   const [models, setModels] = useState<Record<string, ModelInfo>>({});
-  const [downloadProgress, setDownloadProgress] = useState<
-    Record<string, number>
-  >({});
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadPhases, setDownloadPhases] = useState<Record<string, string>>({});
-  const [verifyingModels, setVerifyingModels] = useState<Set<string>>(
-    new Set(),
-  );
+  const [verifyingModels, setVerifyingModels] = useState<Set<string>>(new Set());
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({});
 
   // Removed selectedModel state - now using settings.current_model directly
@@ -135,18 +128,14 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
     try {
       setIsLoading(true);
       log.debug("[useModelManagement] Calling get_model_status...");
-      const response = await invoke<{ models: ModelInfo[] }>(
-        "get_model_status",
-      );
+      const response = await invoke<{ models: ModelInfo[] }>("get_model_status");
       log.debug("model status loaded", { count: response.models.length });
 
       if (!response || !Array.isArray(response.models)) {
         throw new Error("Invalid response format from get_model_status");
       }
 
-      const modelStatus = Object.fromEntries(
-        response.models.map((model) => [model.name, model]),
-      );
+      const modelStatus = Object.fromEntries(response.models.map((model) => [model.name, model]));
       setModels(modelStatus);
       modelsRef.current = modelStatus;
 
@@ -168,9 +157,7 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
       const target = models[modelName];
       if (target && isCloudModel(target)) {
         if (showToasts) {
-          toast.info(
-            `${target.display_name} is a cloud model and does not require downloading.`,
-          );
+          toast.info(`${target.display_name} is a cloud model and does not require downloading.`);
         }
         return;
       }
@@ -225,7 +212,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
             [modelName]: errorText,
           }));
           if (showToasts) {
-            toast.error(`Failed to download ${getModelDisplayName(modelName, models)}: ${errorText}`);
+            toast.error(
+              `Failed to download ${getModelDisplayName(modelName, models)}: ${errorText}`,
+            );
           }
           if (activeDownloadRequests.current.get(modelName) === requestId) {
             clearDownloadState(modelName);
@@ -235,7 +224,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
         log.error("[useModelManagement.downloadModel] Failed to start download:", error);
         const errorText = getErrorText(error);
         if (showToasts) {
-          toast.error(`Failed to start ${getModelDisplayName(modelName, models)} download: ${errorText}`);
+          toast.error(
+            `Failed to start ${getModelDisplayName(modelName, models)} download: ${errorText}`,
+          );
         }
         setDownloadErrors((prev) => ({
           ...prev,
@@ -274,7 +265,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
         log.error("Failed to cancel download:", error);
         if (showToasts) {
           const errorText = getErrorText(error);
-          toast.error(`Failed to cancel ${getModelDisplayName(modelName, modelsRef.current)} download: ${errorText}`);
+          toast.error(
+            `Failed to cancel ${getModelDisplayName(modelName, modelsRef.current)} download: ${errorText}`,
+          );
         }
       }
     },
@@ -287,9 +280,7 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
       const target = models[modelName];
       if (target && isCloudModel(target)) {
         if (showToasts) {
-          toast.info(
-            `${target.display_name} is a cloud model and cannot be deleted locally.`,
-          );
+          toast.info(`${target.display_name} is a cloud model and cannot be deleted locally.`);
         }
         return false;
       }
@@ -361,7 +352,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
       } catch (error) {
         log.error("Failed to repair model:", error);
         if (showToasts) {
-          toast.error(`Failed to repair ${getModelDisplayName(modelName, modelsRef.current)}: ${error}`);
+          toast.error(
+            `Failed to repair ${getModelDisplayName(modelName, modelsRef.current)}: ${error}`,
+          );
         }
       }
     },
@@ -373,7 +366,10 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
     let isMounted = true;
     const unlisteners: Array<() => void> = [];
 
-    const register = async <T,>(eventName: string, handler: (payload: T) => void | Promise<void>) => {
+    const register = async <T>(
+      eventName: string,
+      handler: (payload: T) => void | Promise<void>,
+    ) => {
       const unlisten = await registerEvent<T>(eventName, handler);
       if (typeof unlisten !== "function") return;
       if (!isMounted) {
@@ -404,7 +400,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
           return;
         }
 
-        log.debug(`[useModelManagement] Download progress for ${model} (${engine ?? "whisper"}): ${progress.toFixed(1)}%`);
+        log.debug(
+          `[useModelManagement] Download progress for ${model} (${engine ?? "whisper"}): ${progress.toFixed(1)}%`,
+        );
 
         // Keep updating progress until we receive the verifying event
         setDownloadProgress((prev) => ({
@@ -453,10 +451,7 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
         // Remove from download progress after a brief delay to ensure UI updates
         setTimeout(() => {
           const activeRequestId = activeDownloadRequests.current.get(modelName);
-          if (
-            (requestId && activeRequestId !== requestId) ||
-            (!requestId && activeRequestId)
-          ) {
+          if ((requestId && activeRequestId !== requestId) || (!requestId && activeRequestId)) {
             return;
           }
 
@@ -522,7 +517,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
         await loadModels();
 
         if (showToasts) {
-          toast.success(`${getModelDisplayName(modelName, modelsRef.current)} downloaded successfully`);
+          toast.success(
+            `${getModelDisplayName(modelName, modelsRef.current)} downloaded successfully`,
+          );
         }
       });
 
@@ -614,7 +611,10 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
 
   // Load models on mount
   useEffect(() => {
-    loadModels();
+    void (async () => {
+      await Promise.resolve();
+      await loadModels();
+    })();
   }, [loadModels]);
 
   // Derive model order from sorted models

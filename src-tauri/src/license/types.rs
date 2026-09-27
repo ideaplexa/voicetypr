@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -7,6 +8,19 @@ pub struct LicenseStatus {
     pub license_type: Option<String>,
     pub license_key: Option<String>,
     pub expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_state: Option<LicenseVerificationState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_expires_at: Option<DateTime<Utc>>,
+}
+
+impl LicenseStatus {
+    pub fn verification_window_expired(&self, now: DateTime<Utc>) -> bool {
+        matches!(self.status, LicenseState::Licensed)
+            && self
+                .verification_expires_at
+                .is_some_and(|deadline| now >= deadline)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -16,6 +30,14 @@ pub enum LicenseState {
     Trial,
     Expired,
     None,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LicenseVerificationState {
+    Verified,
+    OfflineGrace,
+    NeedsRevalidation,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

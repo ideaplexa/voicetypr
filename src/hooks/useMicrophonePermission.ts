@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("permissions");
@@ -18,11 +18,11 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
   const checkPermission = useCallback(async () => {
     setIsChecking(true);
     try {
-      const result = await invoke<boolean>('check_microphone_permission');
+      const result = await invoke<boolean>("check_microphone_permission");
       setHasPermission(result);
       return result;
     } catch (error) {
-      log.error('Failed to check microphone permission:', error);
+      log.error("Failed to check microphone permission:", error);
       setHasPermission(false);
       return false;
     } finally {
@@ -32,11 +32,11 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
 
   const requestPermission = useCallback(async () => {
     try {
-      const result = await invoke<boolean>('request_microphone_permission');
+      const result = await invoke<boolean>("request_microphone_permission");
       setHasPermission(result);
       return result;
     } catch (error) {
-      log.error('Failed to request microphone permission:', error);
+      log.error("Failed to request microphone permission:", error);
       return false;
     }
   }, []);
@@ -44,24 +44,27 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
   // Optionally check permission on mount
   useEffect(() => {
     if (!checkOnMount) return;
-    checkPermission();
+    void (async () => {
+      await Promise.resolve();
+      await checkPermission();
+    })();
   }, [checkPermission, checkOnMount]);
 
   // Listen for permission changes
   useEffect(() => {
-    const unlistenGranted = listen('microphone-granted', () => {
-      log.info('[useMicrophonePermission] Permission granted event received');
+    const unlistenGranted = listen("microphone-granted", () => {
+      log.info("[useMicrophonePermission] Permission granted event received");
       setHasPermission(true);
     });
 
-    const unlistenDenied = listen('microphone-denied', () => {
-      log.info('[useMicrophonePermission] Permission denied event received');
+    const unlistenDenied = listen("microphone-denied", () => {
+      log.info("[useMicrophonePermission] Permission denied event received");
       setHasPermission(false);
     });
 
     return () => {
-      Promise.all([unlistenGranted, unlistenDenied]).then(unsubs => {
-        unsubs.forEach(unsub => unsub());
+      Promise.all([unlistenGranted, unlistenDenied]).then((unsubs) => {
+        unsubs.forEach((unsub) => unsub());
       });
     };
   }, []);
@@ -70,6 +73,6 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
     hasPermission,
     isChecking,
     checkPermission,
-    requestPermission
+    requestPermission,
   };
 }

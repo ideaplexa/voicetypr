@@ -5,7 +5,7 @@ use crate::commands::settings::{
 use crate::emit_to_all;
 use crate::license::LicenseState;
 use crate::parakeet::manager::ParakeetEouModelStatus;
-use crate::parakeet::{ParakeetManager, ParakeetModelStatus};
+use crate::parakeet::{messages::ParakeetResponse, ParakeetManager, ParakeetModelStatus};
 use crate::provider_capabilities::ProviderEngine;
 use crate::remote::settings::RemoteSettings;
 use crate::secure_store;
@@ -287,7 +287,7 @@ pub async fn download_model(
             let progress = (downloaded as f64 / total as f64) * 100.0;
             log::debug!(
                 "Download progress for {}: {:.1}%",
-                &model_name_clone,
+                model_name_clone,
                 progress
             );
 
@@ -319,7 +319,7 @@ pub async fn download_model(
                 verification_emitted = true;
                 log::info!(
                     "Download complete, starting verification for model: {}",
-                    &model_name_clone
+                    model_name_clone
                 );
                 if let Err(e) = emit_to_all(
                     &app_handle,
@@ -577,8 +577,15 @@ pub struct UnifiedModelInfo {
     pub engine: String,
     pub kind: String,
     pub requires_setup: bool,
+    pub available_models: Option<Vec<crate::cloud_stt::CloudSttModel>>,
     pub underlying_model: Option<String>,
     pub supported_languages: Option<Vec<String>>,
+}
+
+#[derive(serde::Serialize)]
+pub struct ParakeetVocabularyStatusResponse {
+    pub supported: bool,
+    pub ready: bool,
 }
 
 /// Returns status of all available speech recognition models (Whisper + Parakeet).
@@ -624,6 +631,128 @@ pub async fn get_model_status(
     log::debug!("[GET_MODEL_STATUS] Returning {} models", models.len());
 
     Ok(ModelStatusResponse { models })
+}
+
+#[tauri::command]
+pub async fn get_parakeet_vocabulary_status(
+    app: AppHandle,
+    parakeet_manager: State<'_, ParakeetManager>,
+) -> Result<ParakeetVocabularyStatusResponse, String> {
+    match parakeet_manager.status(&app).await {
+        Ok(response) => {
+            let Some(status) = ParakeetManager::vocabulary_status_from_response(&response) else {
+                return Err(format!("Unexpected Parakeet response: {:?}", response));
+            };
+            Ok(ParakeetVocabularyStatusResponse {
+                supported: status.supported,
+                ready: status.ready,
+            })
+        }
+        Err(err) => Err(format!("Failed to get Parakeet vocabulary status: {}", err)),
+    }
+}
+
+#[tauri::command]
+pub async fn download_parakeet_vocabulary_model(
+    app: AppHandle,
+    parakeet_manager: State<'_, ParakeetManager>,
+    active_downloads: ActiveDownloadsState<'_>,
+) -> Result<(), String> {
+    const MODEL_ID: &str = "parakeet-vocabulary-ctc-110m";
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    register_active_download(&active_downloads, MODEL_ID, cancel_flag.clone())?;
+
+    let _ = emit_to_all(
+        &app,
+        "download-progress",
+        serde_json::json!({
+            "model": MODEL_ID,
+            "engine": "parakeet",
+            "downloaded": 0,
+            "total": 1,
+            "progress": 0.0,
+            "requestId": null,
+            "phase": "starting",
+        }),
+    );
+
+    // The CTC sidecar command is currently a single request without a public cancel hook.
+    // Register the flag anyway so cancel_download sees the same active model id and this
+    // path can report cancellation consistently once the sidecar returns.
+    let download_result = parakeet_manager.download_ctc_models(&app).await;
+
+    clear_active_download(&active_downloads, MODEL_ID);
+
+    if cancel_flag.load(Ordering::Relaxed) {
+        let _ = emit_to_all(
+            &app,
+            "download-cancelled",
+            serde_json::json!({
+                "model": MODEL_ID,
+                "engine": "parakeet",
+                "requestId": null,
+            }),
+        );
+        return Err("Download cancelled by user".to_string());
+    }
+
+    match download_result {
+        Ok(ParakeetResponse::Ok { .. }) | Ok(ParakeetResponse::Status { .. }) => {
+            let _ = emit_to_all(
+                &app,
+                "model-downloaded",
+                serde_json::json!({
+                    "model": MODEL_ID,
+                    "engine": "parakeet",
+                    "requestId": null,
+                }),
+            );
+            Ok(())
+        }
+        Ok(ParakeetResponse::Error { code, message, .. }) => {
+            let error = format!("Failed to download Parakeet vocabulary model: {code}: {message}");
+            let _ = emit_to_all(
+                &app,
+                "download-error",
+                serde_json::json!({
+                    "model": MODEL_ID,
+                    "engine": "parakeet",
+                    "requestId": null,
+                    "error": &error,
+                }),
+            );
+            Err(error)
+        }
+        Ok(other) => {
+            let error = format!("Unexpected Parakeet response: {:?}", other);
+            let _ = emit_to_all(
+                &app,
+                "download-error",
+                serde_json::json!({
+                    "model": MODEL_ID,
+                    "engine": "parakeet",
+                    "requestId": null,
+                    "error": &error,
+                }),
+            );
+            Err(error)
+        }
+        Err(err) => {
+            let error = format!("Failed to download Parakeet vocabulary model: {}", err);
+            let _ = emit_to_all(
+                &app,
+                "download-error",
+                serde_json::json!({
+                    "model": MODEL_ID,
+                    "engine": "parakeet",
+                    "requestId": null,
+                    "error": &error,
+                }),
+            );
+            Err(error)
+        }
+    }
 }
 
 async fn ensure_model_is_not_currently_shared(
@@ -783,6 +912,7 @@ fn convert_whisper_model(name: String, info: ModelInfo) -> UnifiedModelInfo {
         requires_setup: false,
         underlying_model: None,
         supported_languages: None,
+        available_models: None,
     }
 }
 
@@ -802,6 +932,7 @@ fn convert_parakeet_model(status: ParakeetModelStatus) -> UnifiedModelInfo {
         requires_setup: false,
         underlying_model: None,
         supported_languages: Some(status.supported_languages),
+        available_models: None,
     }
 }
 
@@ -831,11 +962,53 @@ fn collect_cloud_models(app: &AppHandle) -> Vec<UnifiedModelInfo> {
                 engine: provider.id().to_string(),
                 kind: "cloud".to_string(),
                 requires_setup: !has_key,
-                underlying_model: Some(provider.model_name().to_string()),
+                underlying_model: Some(provider.selected_model(app).id.to_string()),
                 supported_languages: None,
+                available_models: Some(provider.available_models().to_vec()),
             }
         })
         .collect()
+}
+
+/// Persist a curated cloud STT API model for one provider without changing
+/// `current_model` / `current_model_engine` (those stay as the provider id).
+#[tauri::command]
+pub async fn set_cloud_stt_model(
+    app: AppHandle,
+    provider_id: String,
+    model_id: String,
+) -> Result<(), String> {
+    let provider = crate::cloud_stt::CloudProvider::from_id(&provider_id)
+        .ok_or_else(|| format!("Unknown cloud STT provider '{}'", provider_id.trim()))?;
+    let model = provider.model_by_id(model_id.trim()).ok_or_else(|| {
+        format!(
+            "Unknown {} model '{}'",
+            provider.display_name(),
+            model_id.trim()
+        )
+    })?;
+
+    crate::commands::settings::persist_settings_and_invalidate(
+        &app,
+        |store| {
+            let mut models_by_provider = crate::cloud_stt::stored_models_by_provider(store);
+            models_by_provider.insert(provider.id().to_string(), model.id.to_string());
+            store.set(
+                crate::cloud_stt::CLOUD_STT_MODELS_BY_PROVIDER_KEY,
+                serde_json::json!(models_by_provider),
+            );
+            Ok(())
+        },
+        |e| format!("Failed to save cloud STT model: {}", e),
+    )
+    .await?;
+
+    log::info!(
+        "Cloud STT model updated: provider={}, model={}",
+        provider.id(),
+        model.id
+    );
+    Ok(())
 }
 
 #[tauri::command]

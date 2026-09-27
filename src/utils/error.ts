@@ -18,4 +18,3 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
 
   return fallback || "An unexpected error occurred";
 }
-

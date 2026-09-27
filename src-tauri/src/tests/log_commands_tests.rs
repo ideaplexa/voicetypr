@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::commands::logs::{
-        find_newest_log, read_log_tail, redact_log_content, LatestLogAttachment,
+        find_newest_log, read_log_tail, redact_log_content, voicetypr_log_date, LatestLogAttachment,
     };
     use std::io::Write;
     use tempfile::TempDir;
@@ -194,6 +194,64 @@ mod tests {
     }
 
     #[test]
+    fn test_redact_wrapped_secrets_with_escaped_delimiters() {
+        for secret in [
+            "prefix\"suffix",
+            "prefix'suffix",
+            "prefix\\\"suffix",
+            "prefix\\suffix\\",
+            "prefix\nsuffix\r\ttail",
+            "prefix雪suffix",
+        ] {
+            let encoded = serde_json::to_string(secret).unwrap();
+            for value in [
+                encoded.clone(),
+                format!("String({encoded})"),
+                format!("Some({encoded})"),
+            ] {
+                let input = format!(r#"before {{"password": {value}, "status": "ready"}} after"#);
+                let expected_value = value.replace(&encoded, "\"[REDACTED]\"");
+                let expected =
+                    format!(r#"before {{"password": {expected_value}, "status": "ready"}} after"#);
+                assert_eq!(redact_log_content(&input), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_redact_legacy_remote_settings_debug_password_fully() {
+        let value = serde_json::json!({
+            "password": "prefix\"suffix\\tail'apostrophe\nlast",
+            "port": 47842,
+        });
+        let input = format!("Raw JSON: {value:?}");
+        let redacted = redact_log_content(&input);
+        for fragment in ["prefix", "suffix", "tail", "apostrophe", "last"] {
+            assert!(!redacted.contains(fragment), "leaked fragment {fragment}");
+        }
+        assert!(redacted.contains("Raw JSON:"));
+        assert!(redacted.contains("47842"));
+    }
+
+    #[test]
+    fn test_redact_single_quoted_secrets_without_eating_neighbors() {
+        for value in [
+            r#"'prefix\'suffix'"#,
+            r#"Some('prefix\'suffix')"#,
+            r#"String('prefix"suffix\\tail')"#,
+            "'prefix\nsuffix'",
+        ] {
+            let input = format!("before {{'api_key': {value}, 'status': 'ready'}} after");
+            let redacted = redact_log_content(&input);
+            assert!(!redacted.contains("prefix"));
+            assert!(!redacted.contains("suffix"));
+            assert!(!redacted.contains("tail"));
+            assert!(redacted.starts_with("before {'api_key': "));
+            assert!(redacted.ends_with(", 'status': 'ready'} after"));
+        }
+    }
+
+    #[test]
     fn test_redact_email_addresses() {
         let input = "User: alice@example.com and bob@voicetypr.com reported";
         let redacted = redact_log_content(input);
@@ -279,6 +337,85 @@ mod tests {
         assert_eq!(redact_log_content(""), "");
     }
 
+    #[test]
+    fn test_redact_password_fields_in_json_and_plain() {
+        let json_line = r#"Raw JSON: {"active_connection_id":"x","password":"hunter2"}"#;
+        let redacted = redact_log_content(json_line);
+        assert!(
+            !redacted.contains("hunter2"),
+            "password value must be redacted"
+        );
+        assert!(redacted.contains("password"), "field name must survive");
+
+        let plain = "remote auth password=super-secret accepted";
+        let redacted = redact_log_content(plain);
+        assert!(!redacted.contains("super-secret"));
+    }
+
+    #[test]
+    fn test_redact_unc_paths() {
+        let line = r#"saved transcript to \\fileserver\private\report.txt ok"#;
+        let redacted = redact_log_content(line);
+        assert!(
+            !redacted.contains("fileserver"),
+            "UNC server must be redacted"
+        );
+        assert!(!redacted.contains("private"));
+    }
+
+    #[test]
+    fn test_voicetypr_log_date_strict_shapes() {
+        assert_eq!(
+            voicetypr_log_date("voicetypr-2026-08-20.log"),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 20)
+        );
+        assert_eq!(
+            voicetypr_log_date("voicetypr-2026-08-20.log.3"),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 20)
+        );
+        // Non-numeric or executable suffixes are NOT logs — never deleted,
+        // never attached to reports.
+        assert_eq!(voicetypr_log_date("voicetypr-2026-08-20.log.1.exe"), None);
+        assert_eq!(voicetypr_log_date("voicetypr-backup.logx"), None);
+        for date in [
+            "backup",
+            "2026-02-30",
+            "2025-02-29",
+            "2026-13-01",
+            "2026-8-20",
+            "+2026-08-20",
+            "2026-08-2",
+            "2026-08-20-extra",
+        ] {
+            for suffix in [".log", ".log.3"] {
+                assert_eq!(
+                    voicetypr_log_date(&format!("voicetypr-{date}{suffix}")),
+                    None
+                );
+            }
+        }
+        assert_eq!(
+            voicetypr_log_date("voicetypr-2024-02-29.log"),
+            chrono::NaiveDate::from_ymd_opt(2024, 2, 29)
+        );
+    }
+
+    #[test]
+    fn test_find_newest_log_excludes_invalid_dates_and_backups() {
+        let dir = TempDir::new().unwrap();
+        for name in [
+            "voicetypr-backup.log",
+            "voicetypr-2026-02-30.log",
+            "voicetypr-2026-8-20.log.3",
+        ] {
+            std::fs::write(dir.path().join(name), "private backup").unwrap();
+        }
+        assert!(find_newest_log(dir.path()).is_none());
+        let valid = dir.path().join("voicetypr-2026-08-20.log.1");
+        std::fs::write(&valid, "log").unwrap();
+        assert_eq!(find_newest_log(dir.path()), Some(valid));
+    }
+
     // ── LatestLogAttachment serialization ──────────────────────────────
 
     #[test]
@@ -288,6 +425,7 @@ mod tests {
             redacted_content: "[REDACTED] log content".to_string(),
             truncated: true,
             status_note: String::new(),
+            debug_ring: String::new(),
         };
 
         let json = serde_json::to_string(&attachment).unwrap();
@@ -296,6 +434,8 @@ mod tests {
         assert!(json.contains("\"fileName\":\"voicetypr-2026-04-27.log\""));
         assert!(json.contains("\"redactedContent\":\"[REDACTED] log content\""));
         assert!(json.contains("\"truncated\":true"));
+        assert!(json.contains("\"debugRing\":\"\""));
+        assert!(!json.contains("debug_ring"));
     }
 
     #[test]
@@ -305,6 +445,7 @@ mod tests {
             redacted_content: String::new(),
             truncated: false,
             status_note: "No log file found.".to_string(),
+            debug_ring: String::new(),
         };
 
         let json = serde_json::to_string(&attachment).unwrap();

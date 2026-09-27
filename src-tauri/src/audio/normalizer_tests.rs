@@ -1,4 +1,6 @@
-use super::normalizer::{normalize_to_whisper_wav, peak_normalization_gain};
+use super::normalizer::{
+    normalize_to_whisper_wav, normalize_to_whisper_wav_with_metrics, peak_normalization_gain,
+};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use std::f32::consts::PI;
 use std::fs;
@@ -101,6 +103,58 @@ fn write_gapped_tone_wav(
             .expect("write sample");
     }
     writer.finalize().expect("finalize wav");
+}
+
+fn write_speech_then_silence_wav(
+    path: &Path,
+    sample_rate: u32,
+    speech_secs: f32,
+    silence_secs: f32,
+    amp: f32,
+    freq: f32,
+) {
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer = WavWriter::create(path, spec).expect("create wav");
+    let speech_frames = (speech_secs * sample_rate as f32) as usize;
+    let silence_frames = (silence_secs * sample_rate as f32) as usize;
+
+    for n in 0..speech_frames {
+        let t = n as f32 / sample_rate as f32;
+        let sample = (amp * (2.0 * PI * freq * t).sin()).clamp(-1.0, 1.0);
+        writer
+            .write_sample((sample * 32767.0) as i16)
+            .expect("write sample");
+    }
+    for _ in 0..silence_frames {
+        writer.write_sample(0).expect("write sample");
+    }
+    writer.finalize().expect("finalize wav");
+}
+
+fn write_silence_wav(path: &Path, sample_rate: u32, secs: f32) {
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer = WavWriter::create(path, spec).expect("create wav");
+    let total_frames = (secs * sample_rate as f32) as usize;
+    for _ in 0..total_frames {
+        writer.write_sample(0).expect("write sample");
+    }
+    writer.finalize().expect("finalize wav");
+}
+
+fn wav_duration_secs(path: &Path) -> f32 {
+    let reader = hound::WavReader::open(path).expect("open wav");
+    let spec = reader.spec();
+    reader.duration() as f32 / spec.sample_rate as f32
 }
 
 fn read_peak(path: &Path) -> f32 {
@@ -375,5 +429,210 @@ fn normalize_very_short_non_empty_wav_outputs_valid_16k_mono_s16() {
     // Cleanup
     let _ = fs::remove_file(&input);
     let _ = fs::remove_file(&out_path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn trims_long_trailing_digital_silence_after_speech() {
+    let input = temp_file("trim_long_tail_in.wav");
+    let out_dir = temp_file("trim_long_tail_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    // 1.5s speech + 2s digital silence (16 kHz mono).
+    write_speech_then_silence_wav(&input, 16_000, 1.5, 2.0, 0.5, 440.0);
+    let input_duration = wav_duration_secs(&input);
+
+    let out_path = normalize_to_whisper_wav(&input, &out_dir).expect("normalize");
+    let out_duration = wav_duration_secs(&out_path);
+
+    let removed = input_duration - out_duration;
+    // Expect ~2s silence removed minus ~300ms retained context; allow windowing tolerance.
+    assert!(
+        removed > 1.5 && removed < 2.1,
+        "expected ~1.7s removed, got removed={removed}s (in={input_duration}s out={out_duration}s)"
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&out_path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn does_not_trim_short_pause() {
+    let input = temp_file("trim_short_pause_in.wav");
+    let out_dir = temp_file("trim_short_pause_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    write_speech_then_silence_wav(&input, 16_000, 1.0, 0.3, 0.5, 440.0);
+    let input_duration = wav_duration_secs(&input);
+
+    let out_path = normalize_to_whisper_wav(&input, &out_dir).expect("normalize");
+    let out_duration = wav_duration_secs(&out_path);
+
+    assert!(
+        (out_duration - input_duration).abs() < 0.08,
+        "300ms trailing pause should be kept: in={input_duration}s out={out_duration}s"
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&out_path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn does_not_trim_without_sustained_voice() {
+    let input = temp_file("trim_all_silence_in.wav");
+    let out_dir = temp_file("trim_all_silence_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    write_silence_wav(&input, 16_000, 2.0);
+    let input_duration = wav_duration_secs(&input);
+
+    let out_path = normalize_to_whisper_wav(&input, &out_dir).expect("normalize");
+    let out_duration = wav_duration_secs(&out_path);
+
+    assert!(
+        (out_duration - input_duration).abs() < 0.05,
+        "all-silence clip must not be rewritten: in={input_duration}s out={out_duration}s"
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&out_path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn does_not_trim_below_min_duration() {
+    let input = temp_file("trim_min_duration_in.wav");
+    let out_dir = temp_file("trim_min_duration_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    write_speech_then_silence_wav(&input, 16_000, 0.2, 0.5, 0.5, 440.0);
+
+    let out_path = normalize_to_whisper_wav(&input, &out_dir).expect("normalize");
+
+    let mut reader = hound::WavReader::open(&out_path).expect("open normalized");
+    let spec = reader.spec();
+    assert_eq!(spec.sample_rate, 16_000);
+    assert_eq!(spec.channels, 1);
+    assert_eq!(spec.bits_per_sample, 16);
+    assert_eq!(spec.sample_format, SampleFormat::Int);
+
+    let samples: Vec<i16> = reader.samples::<i16>().map(|s| s.unwrap()).collect();
+    assert!(!samples.is_empty(), "very short clip must stay non-empty");
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&out_path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn preserves_tail_above_silence_threshold() {
+    let input = temp_file("trim_noisy_tail_in.wav");
+    let out_dir = temp_file("trim_noisy_tail_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    // Speech then a low-level noise tail above TRAILING_SILENCE_RMS_THRESHOLD (0.00125).
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: 16_000,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer = WavWriter::create(&input, spec).expect("create wav");
+    let speech_frames = (1.0 * 16_000.0) as usize;
+    let tail_frames = (2.0 * 16_000.0) as usize;
+    let tail_amp = 0.02f32;
+    let mut state = 0xDEAD_BEEFu32;
+
+    for n in 0..speech_frames {
+        let t = n as f32 / 16_000.0;
+        let sample = (0.5 * (2.0 * PI * 440.0 * t).sin()).clamp(-1.0, 1.0);
+        writer
+            .write_sample((sample * 32767.0) as i16)
+            .expect("write sample");
+    }
+    for _ in 0..tail_frames {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let unit = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
+        let sample = (unit * tail_amp).clamp(-1.0, 1.0);
+        writer
+            .write_sample((sample * 32767.0) as i16)
+            .expect("write sample");
+    }
+    writer.finalize().expect("finalize wav");
+    let input_duration = wav_duration_secs(&input);
+
+    let out_path = normalize_to_whisper_wav(&input, &out_dir).expect("normalize");
+    let out_duration = wav_duration_secs(&out_path);
+
+    assert!(
+        (out_duration - input_duration).abs() < 0.15,
+        "voiced/noisy tail above silence threshold should be kept: in={input_duration}s out={out_duration}s"
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&out_path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn normalization_metrics_reuse_gapped_speech_decision_and_gain() {
+    let input = temp_file("metrics_gapped_speech_in.wav");
+    let out_dir = temp_file("metrics_gapped_speech_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    write_gapped_tone_wav(&input, 16_000, 1.2, 0.03, 220.0, 200, 120);
+
+    let normalized =
+        normalize_to_whisper_wav_with_metrics(&input, &out_dir).expect("normalize with metrics");
+
+    assert!(normalized.metrics.speech_like_modulation);
+    assert!(normalized.metrics.pre_gain_peak > 0.02);
+    assert!(normalized.metrics.applied_gain > 10.0);
+    assert_eq!(normalized.metrics.input_duration_ms, 1200);
+    assert_eq!(normalized.metrics.output_duration_ms, 1200);
+    assert_eq!(normalized.metrics.trimmed_duration_ms, 0);
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&normalized.path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn normalization_metrics_report_digital_silence_without_inventing_speech() {
+    let input = temp_file("metrics_silence_in.wav");
+    let out_dir = temp_file("metrics_silence_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    write_silence_wav(&input, 16_000, 1.0);
+
+    let normalized =
+        normalize_to_whisper_wav_with_metrics(&input, &out_dir).expect("normalize with metrics");
+
+    assert_eq!(normalized.metrics.pre_gain_peak, 0.0);
+    assert!(!normalized.metrics.speech_like_modulation);
+    assert_eq!(normalized.metrics.applied_gain, 1.0);
+    assert_eq!(normalized.metrics.input_duration_ms, 1000);
+    assert_eq!(normalized.metrics.output_duration_ms, 1000);
+    assert_eq!(normalized.metrics.trimmed_duration_ms, 0);
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&normalized.path);
+    let _ = fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn normalization_metrics_account_for_trimmed_tail() {
+    let input = temp_file("metrics_trim_in.wav");
+    let out_dir = temp_file("metrics_trim_out_dir");
+    let _ = fs::create_dir_all(&out_dir);
+    write_speech_then_silence_wav(&input, 16_000, 1.0, 2.0, 0.5, 440.0);
+
+    let normalized =
+        normalize_to_whisper_wav_with_metrics(&input, &out_dir).expect("normalize with metrics");
+
+    assert_eq!(normalized.metrics.input_duration_ms, 3000);
+    assert!(normalized.metrics.trimmed_duration_ms >= 1500);
+    assert_eq!(
+        normalized.metrics.output_duration_ms + normalized.metrics.trimmed_duration_ms,
+        normalized.metrics.input_duration_ms
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&normalized.path);
     let _ = fs::remove_dir_all(&out_dir);
 }

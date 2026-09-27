@@ -25,7 +25,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::cloud_stt::common::SttError;
-use crate::cloud_stt::deepgram::{is_nova3, MODEL};
+use crate::cloud_stt::deepgram::is_nova3;
 use crate::cloud_stt::deepgram_rt::{DeepgramRtFolder, DeepgramRtPartial, DeepgramRtResponse};
 
 /// Deepgram realtime WebSocket endpoint — SAME origin as the REST API
@@ -47,6 +47,8 @@ enum Control {
 /// is never logged.
 pub(crate) struct DeepgramStreamConfig {
     pub api_key: String,
+    /// Deepgram model id selected in the cloud model catalog (e.g. `nova-3`).
+    pub model: String,
     pub sample_rate: u32,
     pub channels: u16,
     pub language: Option<String>,
@@ -118,7 +120,7 @@ fn build_listen_url(config: &DeepgramStreamConfig) -> Result<reqwest::Url, SttEr
     let mut url = reqwest::Url::parse(RT_ENDPOINT).map_err(|_| SttError::BadResponse)?;
     {
         let mut q = url.query_pairs_mut();
-        q.append_pair("model", MODEL);
+        q.append_pair("model", &config.model);
         if let Some(lang) = config
             .language
             .as_deref()
@@ -132,7 +134,7 @@ fn build_listen_url(config: &DeepgramStreamConfig) -> Result<reqwest::Url, SttEr
         q.append_pair("channels", &config.channels.to_string());
         q.append_pair("interim_results", "true");
         q.append_pair("smart_format", "true");
-        if is_nova3(MODEL) {
+        if is_nova3(&config.model) {
             for term in &config.keyterms {
                 q.append_pair("keyterm", term);
             }
@@ -321,6 +323,7 @@ mod tests {
     #[test]
     fn build_listen_url_has_required_params_omits_empty_language_and_hides_key() {
         let config = DeepgramStreamConfig {
+            model: "nova-3".to_string(),
             api_key: "secret-key".to_string(),
             sample_rate: 16_000,
             channels: 1,
@@ -357,6 +360,7 @@ mod tests {
     #[test]
     fn build_listen_url_includes_language_and_percent_encodes_keyterms() {
         let config = DeepgramStreamConfig {
+            model: "nova-3".to_string(),
             api_key: "k".to_string(),
             sample_rate: 48_000,
             channels: 2,

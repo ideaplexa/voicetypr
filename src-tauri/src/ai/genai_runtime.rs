@@ -1,4 +1,4 @@
-use super::contract::AiPolishRequest;
+use super::contract::{output_token_cap_for_input, AiPolishRequest};
 use super::error::{map_genai_error, AiProviderError, MappedAiProviderError};
 use crate::ai::catalog;
 use genai::adapter::AdapterKind;
@@ -58,12 +58,23 @@ impl GenaiRuntime {
         //                      crate maps Minimal->LOW since a zero budget is rejected
         //                      by 2.5 Pro)
         //   - Anthropic (4.x): adaptive thinking, effort "low" / 1024 budget tokens
-        // Non-reasoning models are left with `None` so we never attach a reasoning
-        // parameter a provider would reject (e.g. gpt-4o, gemini-2.0-flash).
+        // Non-reasoning models still receive sampling options, but never a
+        // reasoning parameter a provider would reject (e.g. gpt-4o,
+        // gemini-2.0-flash).
+        let max_tokens = output_token_cap_for_input(request.input_text.len());
         let chat_options = if model_supports_reasoning(&request.provider_id, &request.model_id) {
-            Some(ChatOptions::default().with_reasoning_effort(ReasoningEffort::Minimal))
+            Some(
+                ChatOptions::default()
+                    .with_temperature(0.2)
+                    .with_max_tokens(max_tokens)
+                    .with_reasoning_effort(ReasoningEffort::Minimal),
+            )
         } else {
-            None
+            Some(
+                ChatOptions::default()
+                    .with_temperature(0.2)
+                    .with_max_tokens(max_tokens),
+            )
         };
 
         let response = self
