@@ -1,7 +1,9 @@
 # Plan 069 — Handy-informed audio and streaming recovery
 
-Status: DONE — research consolidation, 2026-09-22. Product recovery stages below
-are proposed and have not been executed by this documentation change.
+Status: research consolidation DONE (2026-09-22); product recovery IN PROGRESS.
+The [2026-09-26 checkpoint](../docs/reports/2026-09-26-parakeet-recovery.md) verifies
+two local sidecar fixes and records fresh model inference failures. It is not an
+application or release pass. The original consolidation was documentation only.
 
 ## Working home and provenance
 
@@ -117,6 +119,10 @@ current main and the integration baseline before making performance claims.
 Do not infer duration from names such as `en-5s`; saved inputs can be longer.
 
 ### 2. Reconcile with current main
+
+**On hold:** the user's instruction is not to integrate current main until they
+say so. The proposed steps below require that instruction to be lifted; continue
+focused recovery in the existing integration branch meanwhile. Do not push.
 
 Refresh both heads. Keep this worktree as the home, and decide between a
 reviewed rebase and selective porting from the overlap analysis; neither was

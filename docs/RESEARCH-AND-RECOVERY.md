@@ -5,6 +5,11 @@ audio/streaming feature line. Start with
 [Plan 069](../plans/069-handy-informed-audio-streaming-recovery.md) for current
 status and the continuation order.
 
+Latest execution: [2026-09-26 Parakeet recovery checkpoint](reports/2026-09-26-parakeet-recovery.md).
+The fresh sidecar build and first-command protocol fixes are verified locally.
+Real TDT/Unified/Nemotron checks expose unresolved transcription-quality failures;
+the application is not release-validated. Main integration and push remain on hold.
+
 ## What we want to deliver
 
 - Live words in the recording pill, with stable confirmed text and a revisable tail.
