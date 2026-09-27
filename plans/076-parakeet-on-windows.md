@@ -1,6 +1,6 @@
 # Plan 076 — Parakeet on Windows (ONNX, in-process)
 
-Status: SPIKE — Claude 2026-09-28. Founder wants Windows parity and more local
+Status: SPIKE DONE (2026-09-28) → step 2 next. Claude. Founder wants Windows parity and more local
 models on Windows. Windows local = Whisper only; Parakeet is macOS-only
 (Swift/FluidAudio/CoreML sidecar).
 
@@ -30,6 +30,21 @@ real-speech set (EN/DE/ES/long) against the macOS sidecar numbers: WER must be
 within ~1 point of the CoreML batch results; CPU real-time factor recorded on
 this Mac and on a GitHub Windows runner; binary size of the ONNX Runtime
 dependency on Windows.
+
+## Spike results (Mac CPU, int8 TDT v3, `tools/parakeet-onnx-spike`)
+
+Mean WER 4.38% vs CoreML 4.65% on the same 10 clips: equal on 6, better on
+3 (ls-1 2.9 vs 8.8, de-1 3.7 vs 7.4, es-1 2.4 vs 4.9), worse on one German
+clip (de-0 25.0 vs 15.6 — compound splits "so eben"/"her führt" plus three real
+misrecognitions). CPU RTF ≈ 0.03–0.08 (13–40× faster than real time on Apple
+Silicon); model load 8.3 s; peak RSS 1.6 GiB; +26 MB binary (ONNX Runtime linked
+statically, no DLL). Findings for step 2: long audio must be split at quiet gaps
+(a 52 s clip returned empty text in one pass); `parakeet-rs` TDT has no
+language-hint input (auto-detect); keep the model warm (8 s load).
+
+Decision: proceed to step 2, gated by (a) a larger German/European clip set to
+confirm de-0 is an outlier, (b) Windows runner speed + memory in the model-bench
+workflow (plan 077), (c) RSS within budget on 8 GB machines.
 
 ## Step 2 — integrate (separate plan after the spike's numbers)
 
