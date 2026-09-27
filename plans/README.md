@@ -32,6 +32,8 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
+Plan 076 — SPIKE — Claude 2026-09-28: Parakeet on Windows via ONNX in-process (`parakeet-rs` on `ort`, int8 TDT v3 ≈ 670 MB); spike measures WER/speed vs the macOS sidecar before integration. See `076-parakeet-on-windows.md`.
+
 Plan 075 — SPEC — Claude 2026-09-27: desktop E2E dictation harness — BlackHole 2ch virtual mic, isolated HOME profile, cliclick hotkeys, TextEdit target, stop→text/WER/first-word metrics. Runs before every 2.1 beta. See `075-desktop-e2e-harness.md`.
 
 Plan 074 — LOCAL CHECKS PASSED / NEEDS E2E first-word run — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed x4): first word not clipped — the "recording" cue waits for the first real audio callback, sink creation never delays capture, duplicate device probe removed, start latency measured. Target 2.1.0-beta.2 after 073. See `074-truthful-recording-start.md`.
