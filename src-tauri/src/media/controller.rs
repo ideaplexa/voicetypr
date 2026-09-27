@@ -3,7 +3,9 @@
 //! Pauses system media when recording starts and resumes when recording stops.
 //! Only resumes if WE paused it (not if user manually paused during recording).
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU32, AtomicU8};
 
 #[cfg(target_os = "windows")]
 use parking_lot::Mutex;

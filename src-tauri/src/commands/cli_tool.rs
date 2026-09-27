@@ -675,16 +675,34 @@ mod windows_path {
     }
 
     fn normalize_entry(entry: &str) -> &str {
-        entry
-            .trim()
-            .trim_matches('"')
-            .trim_end_matches(|c| c == '\\' || c == '/')
+        entry.trim().trim_matches('"').trim_end_matches(['\\', '/'])
     }
 
     /// Case-insensitive, quote- and trailing-slash-insensitive comparison of a PATH entry.
     fn entry_matches_dir(entry: &str, dir: &str) -> bool {
         let entry = normalize_entry(entry);
         !entry.is_empty() && entry.eq_ignore_ascii_case(normalize_entry(dir))
+    }
+
+    fn broadcast_env_change() {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+        };
+        // UTF-16 "Environment" payload; must outlive the synchronous SendMessageTimeoutW call.
+        let target: Vec<u16> = "Environment\0".encode_utf16().collect();
+        // SAFETY: user32 FFI; target buffer is valid for the duration of this blocking call.
+        unsafe {
+            let _ = SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                WPARAM(0),
+                LPARAM(target.as_ptr() as isize),
+                SMTO_ABORTIFHUNG,
+                5000,
+                None,
+            );
+        }
     }
 
     #[cfg(test)]
@@ -719,27 +737,6 @@ mod windows_path {
             let other = r"C:\Tools";
             let path = format!("{current};{other}");
             assert_eq!(prioritize_dir(&path, current), path);
-        }
-    }
-
-    fn broadcast_env_change() {
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{
-            SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
-        };
-        // UTF-16 "Environment" payload; must outlive the synchronous SendMessageTimeoutW call.
-        let target: Vec<u16> = "Environment\0".encode_utf16().collect();
-        // SAFETY: user32 FFI; target buffer is valid for the duration of this blocking call.
-        unsafe {
-            let _ = SendMessageTimeoutW(
-                HWND_BROADCAST,
-                WM_SETTINGCHANGE,
-                WPARAM(0),
-                LPARAM(target.as_ptr() as isize),
-                SMTO_ABORTIFHUNG,
-                5000,
-                None,
-            );
         }
     }
 }
