@@ -1744,7 +1744,7 @@ struct ParakeetSidecar {
         )
     }
 
-    // VoiceTypr stores bare ISO-639 codes; the native bundle uses regional
+    // Voicetypr stores bare ISO-639 codes; the native bundle uses regional
     // prompt_dictionary keys for these languages.
     static func nemotronLanguageHint(_ language: String?) -> String {
         switch language?.lowercased() {

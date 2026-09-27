@@ -1,9 +1,9 @@
-# Audio capture + resample + format-normalization pipeline — VoiceTypr perf teardown
+# Audio capture + resample + format-normalization pipeline — Voicetypr perf teardown
 
 > Scope: everything between the microphone and the engine's `&[f32]` input —
 > CPAL capture, the WAV write/drain, normalization (resample + downmix +
 > peak-gain + dither), and the ffmpeg-vs-in-process decode surface. READ-ONLY
-> analysis of VoiceTypr `main` (HEAD `af63ab1`). Streaming *architecture* is
+> analysis of Voicetypr `main` (HEAD `af63ab1`). Streaming *architecture* is
 > already decided in `06-oracle-decision.md` and is **out of scope** here; this
 > doc cites it for the live-tap/resampler prerequisite and stays on the perf
 > layer. Engine decode itself is `03`/`05`/`01`.

@@ -1,4 +1,4 @@
-# Cloud STT network path + App shell — VoiceTypr perf teardown
+# Cloud STT network path + App shell — Voicetypr perf teardown
 
 > Scope: two perf surfaces in one doc. **(A) Cloud STT** (`src-tauri/src/cloud_stt/`) — provider HTTP path, the Soniox REST 1 s poll floor, client pooling, timeout/retry. **(B) App shell** — `[profile.release]`, startup, idle CPU/memory, frontend bundle. Streaming *architecture* is settled in `06-oracle-decision.md` and is NOT re-derived here; this doc quantifies the network/shell perf layer and cites `06` for the Soniox→WS streaming decision.
 

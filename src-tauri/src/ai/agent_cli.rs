@@ -1789,7 +1789,7 @@ pub enum AgentCliProbeState {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentCliProbe {
     pub state: AgentCliProbeState,
-    /// Static reasoning levels supported by VoiceTypr's provider adapter.
+    /// Static reasoning levels supported by Voicetypr's provider adapter.
     #[serde(rename = "reasoningLevels")]
     pub reasoning_levels: Vec<String>,
     /// Whether this adapter can invoke the CLI's native fast service mode.

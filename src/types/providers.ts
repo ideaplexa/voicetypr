@@ -21,9 +21,9 @@ export type AgentCliProbeState = "ready" | "missing" | "unsafe_launcher";
 
 export interface AgentCliProbe {
   state: AgentCliProbeState;
-  /** Static reasoning levels supported by VoiceTypr's provider adapter. */
+  /** Static reasoning levels supported by Voicetypr's provider adapter. */
   reasoningLevels: string[];
-  /** Whether VoiceTypr can invoke this CLI's native fast service mode. */
+  /** Whether Voicetypr can invoke this CLI's native fast service mode. */
   supportsFastMode: boolean;
 }
 

@@ -1,4 +1,4 @@
-# VoiceTypr Master Plan — Q4 2026 (desktop first)
+# Voicetypr Master Plan — Q4 2026 (desktop first)
 
 Status: ACTIVE, updated 2026-09-27 (evening) with the founder's decisions. Supersedes the ordering of older
 plans; older plans are history, not constraints. Built from the 2026-09-27
@@ -113,7 +113,7 @@ Goal: one honest scoreboard everything else is judged against.
 
 ## Phase 2 — Final-text accuracy (the core bet)
 
-Goal: VoiceTypr gets the user's words right, local or cloud.
+Goal: Voicetypr gets the user's words right, local or cloud.
 
 1. **Vocabulary engine (all engines):**
    - Store: term, spoken aliases, scope (global / app / project), source
@@ -254,7 +254,7 @@ on-device, Gemini Live, OpenAI.
   cannot use the mic → app-session hop, like Wispr), Android keyboard (mic
   allowed). Apple on-device dictation as the no-download default on iOS.
 - Siri / Shortcuts / Action Button via App Intents; Android assistant later.
-- Windows Copilot key: register VoiceTypr as a Copilot key provider in the
+- Windows Copilot key: register Voicetypr as a Copilot key provider in the
   Store package (cheap — can move earlier).
 - Watch later.
 

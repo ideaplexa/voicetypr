@@ -122,7 +122,7 @@ impl KeyEventSource for WinKeyboardHook {
     }
 }
 
-/// Whether a hook event is one of VoiceTypr's OWN synthetic keystrokes: injected
+/// Whether a hook event is one of Voicetypr's OWN synthetic keystrokes: injected
 /// (`LLKHF_INJECTED`) AND carrying our [`crate::INJECTED_SIGNATURE`] in `dwExtraInfo`.
 /// External tools' injected input (Stream Deck, AutoHotkey, PowerToys) sets the
 /// injected flag but NOT our signature, so it returns false and is allowed through.
@@ -139,7 +139,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         // the key was consumed; a panic is treated as "not consumed" (pass through).
         let consumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-            // Ignore only VoiceTypr's OWN synthetic keystrokes. The post-transcription
+            // Ignore only Voicetypr's OWN synthetic keystrokes. The post-transcription
             // paste (commands::text::paste_windows) injects Ctrl+V via SendInput stamped
             // with crate::INJECTED_SIGNATURE in dwExtraInfo; forwarding it to the matcher
             // could re-trigger a ModifierHold on Ctrl (the paste modifier), spuriously

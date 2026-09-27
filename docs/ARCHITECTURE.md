@@ -1,4 +1,4 @@
-# VoiceTypr architecture
+# Voicetypr architecture
 
 Reference for how the code fits together (verified 2026-09-27). The short
 rules agents must follow live in [`AGENTS.md`](../AGENTS.md).
@@ -96,7 +96,7 @@ Idle`; any → `Error`; `Error → Idle`. Transitions happen in
 | Soniox | cloud | realtime WS (`stt-rt-v5`) | WS final authoritative; REST `stt-async-v5` fallback |
 | Deepgram | cloud | realtime WS | same authority model as Soniox |
 | OpenAI, Groq, Cohere | cloud | final only | |
-| Remote (LAN) | another VoiceTypr (strong host, weak client) | final only | local network only |
+| Remote (LAN) | another Voicetypr (strong host, weak client) | final only | local network only |
 
 Contract (`transcription/stream.rs`): `EngineStreamCapabilities::for_engine`;
 events on `transcription-stream` (`Started/Partial/Final/Cancelled/Error`).

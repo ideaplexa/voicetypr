@@ -284,7 +284,7 @@ mod tests {
                         "HTTP-Referer".to_string(),
                         "https://voicetypr.com".to_string(),
                     ),
-                    ("X-Title".to_string(), "VoiceTypr".to_string()),
+                    ("X-Title".to_string(), "Voicetypr".to_string()),
                 ],
             },
             HashMap::new(),
@@ -329,7 +329,7 @@ mod tests {
                 .headers
                 .get("X-Title")
                 .and_then(|value| value.to_str().ok()),
-            Some("VoiceTypr")
+            Some("Voicetypr")
         );
     }
 

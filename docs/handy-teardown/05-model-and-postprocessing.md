@@ -520,20 +520,20 @@ It also **auto-selects a freshly downloaded model** unless recording (`ModelSele
 
 ---
 
-## 4. VoiceTypr takeaways
+## 4. Voicetypr takeaways
 
 | Priority | Takeaway | Rationale / mechanism to port |
 |---|---|---|
 | **High** | **Catalog-driven model registry, build-time-baked.** Generate a `catalog.json` and `include_str!` it; normalize into one `ModelDescriptor` → `ModelInfo`. | Zero-network first-run model list; single declarative source for size/scores/caps/recommended; trivially extensible (`catalog/mod.rs:62-99`). Far better than hardcoded model tables. |
 | **High** | **One typed event per lifecycle stage + one Zustand store listening to all of them.** | Eliminates listener sprawl, makes progress/verify/extract/load states self-healing, and keeps React re-renders minimal (`modelStore.ts:277-426`). |
-| **High** | **Lease-aware engine ownership with `active_engine_lease` atomic + condvar hand-off.** | Lets streaming *own* the engine structurally (no concurrent batch corruption) while `is_model_loaded()` stays truthful (`transcription.rs:356-360, 804-832`). Critical if VoiceTypr adds live preview. |
+| **High** | **Lease-aware engine ownership with `active_engine_lease` atomic + condvar hand-off.** | Lets streaming *own* the engine structurally (no concurrent batch corruption) while `is_model_loaded()` stays truthful (`transcription.rs:356-360, 804-832`). Critical if Voicetypr adds live preview. |
 | **High** | **Resumable + SHA-256-verified downloads, hashing in `spawn_blocking`.** | Large model files must resume and be integrity-checked without stalling the async executor (`model.rs:1899-1921, 2039-2055`). |
-| **Med** | **Configurable idle-unload watcher (default 5 min).** | Frees GPU/RAM when idle; the recording-aware `touch_activity()` prevents mid-session unloads (`transcription.rs:299-337`). VoiceTypr's blocking-decode hard-timeout (existing skill) is complementary, not a substitute. |
+| **Med** | **Configurable idle-unload watcher (default 5 min).** | Frees GPU/RAM when idle; the recording-aware `touch_activity()` prevents mid-session unloads (`transcription.rs:299-337`). Voicetypr's blocking-decode hard-timeout (existing skill) is complementary, not a substitute. |
 | **Med** | **Throttled progress (≤10/sec) + smoothed EWMA MB/s.** | Prevents UI freeze on fast networks; the 0.8/0.2 speed smoothing avoids jittery numbers (`model.rs:388, modelStore.ts:302-316`). |
 | **Med** | **Polish gating with all-skip guards + visible `Polishing` overlay phase.** | Off-by-default LLM polish that degrades to raw transcript on any misconfig; the dedicated `StreamWorkKind::Polishing` phase tells the user *why* there's a pause (`actions.rs:77-131, 700-707`). |
 | **Med** | **Shared HF cache for downloads.** | `hf-hub`'s stock cache means models download once and are reused by Whisper.cpp/other tools (`model.rs:275-286, 1554-1561`). |
 | **Low** | **RAII guards for cleanup (`DownloadCleanup`, `RescanGuard`, `LoadingGuard`).** | Guarantees `is_downloading`/`is_loading` flags clear on every error path without manual cleanup (`model.rs:421-444`). |
-| **Low** | **GGUF-header pre-download capability probing.** | Surface honest streaming/translate/language badges before download, reconciled at load (`model_capabilities.rs:90-107`, `transcription.rs:560-571`). Only worth it if VoiceTypr supports drop-in custom models. |
+| **Low** | **GGUF-header pre-download capability probing.** | Surface honest streaming/translate/language badges before download, reconciled at load (`model_capabilities.rs:90-107`, `transcription.rs:560-571`). Only worth it if Voicetypr supports drop-in custom models. |
 | **Avoid** | **Don't conflate catalog `architecture` with `EngineType`.** | Handy's `EngineType::Parakeet` (ONNX) vs catalog `architecture:"parakeet"` (GGUF via TranscribeCpp) is a real footgun — a fork should pick one distinction axis. |
 | **Avoid** | **Silent polish egress.** | Handy enables cloud text-egress with only a generic toggle label. A privacy-conscious fork should add an explicit "sends transcripts to {provider}" warning and default to Apple Intelligence / local LLM where available (`actions.rs:77`, `settings.rs:540`). |
 
@@ -541,7 +541,7 @@ It also **auto-selects a freshly downloaded model** unless recording (`ModelSele
 
 ## 5. Open questions / risks
 
-- **Catalog models have no SHA-256.** Only `ModelSource::Url` entries carry a hash (`model.rs:43-49`); HF-sourced catalog models rely on hf-hub's ETag/LFS integrity (`model.rs:1743-1824`). `[INFERENCE]` A malicious-but-HF-hosted file with the right repo id would not be caught by an independent checksum. Worth confirming hf-hub's exact integrity guarantee if VoiceTypr copies this.
+- **Catalog models have no SHA-256.** Only `ModelSource::Url` entries carry a hash (`model.rs:43-49`); HF-sourced catalog models rely on hf-hub's ETag/LFS integrity (`model.rs:1743-1824`). `[INFERENCE]` A malicious-but-HF-hosted file with the right repo id would not be caught by an independent checksum. Worth confirming hf-hub's exact integrity guarantee if Voicetypr copies this.
 - **`Sec15` debug timeout vs `Immediately`.** Both map to short windows but are handled by *different* code paths (`Immediately` → `maybe_unload_immediately` post-transcription, `transcription.rs:292-297`; `Sec15` → the watcher thread). The comment at `transcription.rs:292-294` admits treating `Immediately` as 0s in the watcher "would unload the model mid-recording" — a subtle two-path invariant a fork should collapse into one.
 - **Polish egress privacy surface.** No explicit user-facing warning that enabling polish sends transcripts off-device (only the toggle label). Not verified whether any telemetry/onboarding calls this out. `[INFERENCE]`
 - **`set_runtime_capabilities` overrides are sticky.** A rescan is additive and preserves existing entries including runtime-probed caps (`model.rs:1142-1144`); if a user swaps the underlying file on disk, stale capabilities could persist until a restart. Not exercised in this read.

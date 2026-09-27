@@ -4,7 +4,7 @@ Status: IN PROGRESS — claimed Main 2026-07-14.
 
 ## Goal
 
-Move VoiceTypr Desktop from Bugsink to the self-hosted GlitchTip 6.2 project and enable privacy-safe errors, native symbolication, curated application logs, and sampled transcription traces in the next Beta.
+Move Voicetypr Desktop from Bugsink to the self-hosted GlitchTip 6.2 project and enable privacy-safe errors, native symbolication, curated application logs, and sampled transcription traces in the next Beta.
 
 ## Non-negotiable privacy contract
 
@@ -16,7 +16,7 @@ Move VoiceTypr Desktop from Bugsink to the self-hosted GlitchTip 6.2 project and
 
 ## Change
 
-1. Replace the release-only Bugsink DSN with the `VoiceTypr Desktop` GlitchTip DSN. Preserve `voicetypr@<version>`, add `environment=production` and a stable/beta release-channel tag, set `auto_session_tracking=false`, and sample traces at 1%.
+1. Replace the release-only Bugsink DSN with the `Voicetypr Desktop` GlitchTip DSN. Preserve `voicetypr@<version>`, add `environment=production` and a stable/beta release-channel tag, set `auto_session_tracking=false`, and sample traces at 1%.
 2. Enable Sentry Rust `debug-images` and structured-log support. Extend the event scrubber to preserve only sanitized native debug metadata and native frame addresses.
 3. Add a closed operational-event API for transcription start/success/failure/cancellation with safe enums, integer durations, and booleans only. Do not forward the existing `log` stream.
 4. Instrument the desktop transcription lifecycle with one sampled transaction and fixed child spans for decode, writing, and delivery where those phases exist.
@@ -33,6 +33,6 @@ Move VoiceTypr Desktop from Bugsink to the self-hosted GlitchTip 6.2 project and
 ## Runtime acceptance
 
 - A controlled Beta error appears in GlitchTip under release `voicetypr@<version>` with environment, channel, OS, and architecture tags and no forbidden data.
-- A controlled native Beta panic resolves to VoiceTypr frames after PDB/dSYM upload.
+- A controlled native Beta panic resolves to Voicetypr frames after PDB/dSYM upload.
 - One transcription emits only the curated lifecycle logs and a sampled transaction/span tree; cancellation/failure outcomes remain distinguishable.
 - Disabling diagnostics prevents subsequent errors, logs, and traces from reaching GlitchTip during that session.

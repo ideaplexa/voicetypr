@@ -125,7 +125,7 @@ const workspace = await mkdtemp(join(tmpdir(), "glitchtip-cli-"));
 
 try {
   const response = await fetch(CRATE_URL, {
-    headers: { "user-agent": "VoiceTypr release workflow" },
+    headers: { "user-agent": "Voicetypr release workflow" },
   });
   if (!response.ok) {
     throw new Error(`Failed to download ${CRATE_URL}: HTTP ${response.status}`);

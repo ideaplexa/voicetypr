@@ -1,4 +1,4 @@
-# VoiceTypr — agent guide
+# Voicetypr — agent guide
 
 Desktop dictation for macOS 14+ and Windows 10+: hotkey → speak → text at the
 cursor. Local engines (Whisper, Parakeet sidecar), cloud engines (Soniox,

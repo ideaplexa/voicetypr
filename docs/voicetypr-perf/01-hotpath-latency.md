@@ -1,7 +1,7 @@
-# Hotkey→text critical path — VoiceTypr perf teardown
+# Hotkey→text critical path — Voicetypr perf teardown
 
 > Scope: the **local success path** on macOS (Parakeet + Whisper), hotkey-accept → text-at-cursor.
-> Source: VoiceTypr `main`, HEAD `af63ab1` (CLEAN). All citations are `path:line` relative to repo root.
+> Source: Voicetypr `main`, HEAD `af63ab1` (CLEAN). All citations are `path:line` relative to repo root.
 > Cross-refs: plan `plans/028-transcription-latency-streaming.md` (Evidence A latency table), `06-oracle-decision.md` (settled streaming decision — streaming redesign is OUT of scope here; this doc is the perf/squeeze layer).
 
 ## TL;DR

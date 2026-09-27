@@ -29,7 +29,7 @@ pub use types::{
 };
 
 /// Sentinel written to a synthetic keystroke's `dwExtraInfo` (Windows) to mark it
-/// as VoiceTypr's OWN injection — currently the post-transcription Ctrl+V paste in
+/// as Voicetypr's OWN injection — currently the post-transcription Ctrl+V paste in
 /// `commands::text::paste_windows`. The low-level keyboard hook ignores keystrokes
 /// carrying this value (so our paste can't re-trigger a hotkey), while external
 /// tools' injected input (Stream Deck, AutoHotkey, PowerToys) carries a different

@@ -1,7 +1,7 @@
 # How Handy feels lightweight, smooth & instant — teardown synthesis
 
 > Line-level teardown of **cjpais/Handy** (`_handy-src/`, HEAD `9b0d8a1`, 2026-07-01), the "most forkable" offline STT app.
-> Same stack as VoiceTypr: **Tauri 2.x + Rust + React 19/TS + Zustand**.
+> Same stack as Voicetypr: **Tauri 2.x + Rust + React 19/TS + Zustand**.
 > The five deep-dives (`01`–`05`) are the evidence; this file is the answer and the roadmap.
 
 ---
@@ -79,11 +79,11 @@ flowchart LR
 
 ---
 
-## VoiceTypr today vs Handy — the real delta
+## Voicetypr today vs Handy — the real delta
 
-Verified against VoiceTypr `main` (this repo), not assumed:
+Verified against Voicetypr `main` (this repo), not assumed:
 
-| Axis | Handy | VoiceTypr today | Gap |
+| Axis | Handy | Voicetypr today | Gap |
 |---|---|---|---|
 | **Live text** | streams `committed`/`tentative` while speaking | **batch only** — `RecordingState = Idle→Starting→Recording→Stopping→Transcribing→Idle`, no `Streaming` state, no partials | **the big one** — this *is* the "smooth/instant" the users praise |
 | **IPC contract** | tauri-specta generated `bindings.ts` | **hand-written `invoke` strings**, no `bindings.ts`, no `specta` in `Cargo.toml` | typo-safety + refactor safety |
@@ -96,7 +96,7 @@ Verified against VoiceTypr `main` (this repo), not assumed:
 
 ---
 
-## Recommended roadmap for VoiceTypr (prioritized, concrete)
+## Recommended roadmap for Voicetypr (prioritized, concrete)
 
 **P0 — the streaming vertical (what actually earns the "smooth/instant" reputation)**
 1. Add a `Streaming` recording state + a `StreamTextEvent { committed, tentative }` event. Enforce **append-only committed** in the Rust core (debug-assert prefix invariant).

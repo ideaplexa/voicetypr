@@ -278,7 +278,7 @@ describe("GeneralSettings audio feedback settings", () => {
       screen.getByText("Play a sound after transcription and optional AI formatting finish."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Play a sound after VoiceTypr successfully sends the paste command."),
+      screen.getByText("Play a sound after Voicetypr successfully sends the paste command."),
     ).toBeInTheDocument();
   });
 

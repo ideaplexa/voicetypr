@@ -1,4 +1,4 @@
-# Competitive + SOTA STT performance research — VoiceTypr perf teardown
+# Competitive + SOTA STT performance research — Voicetypr perf teardown
 
 > **Scope:** Source-verified external research — *how the fastest local-dictation tools and
 > STT runtimes achieve speed + smoothness* — to arm every other perf slice with concrete,

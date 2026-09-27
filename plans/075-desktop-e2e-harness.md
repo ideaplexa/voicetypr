@@ -12,7 +12,7 @@ smoke tests for everything except hardware feel.
 ## Pieces
 
 1. **Audio in:** `ffmpeg -re -i clip.wav -f audiotoolbox -audio_device_index
-   <BlackHole> -` plays a real clip into BlackHole 2ch; VoiceTypr records from
+   <BlackHole> -` plays a real clip into BlackHole 2ch; Voicetypr records from
    "BlackHole 2ch". Clips: the real-speech set (LibriSpeech, MLS DE/ES, long
    English; CC BY 4.0) fetched by a script into `.tmp/e2e-clips/`, not committed.
 2. **Isolated profile:** run the debug app with `HOME=<temp dir>` so settings,

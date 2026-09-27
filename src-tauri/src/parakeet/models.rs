@@ -170,7 +170,7 @@ pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
             repo_id: "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
             cache_subdir: "nemotron-multilingual/multilingual/1120ms",
             description: "Native multilingual streaming with language detection",
-            // Bare codes that both VoiceTypr's selector and the pinned 1120ms
+            // Bare codes that both Voicetypr's selector and the pinned 1120ms
             // bundle's metadata.json prompt_dictionary can represent.
             languages: &[
                 "en", "af", "am", "ar", "az", "bg", "bn", "cs", "da", "de", "el", "es", "et", "fa",
