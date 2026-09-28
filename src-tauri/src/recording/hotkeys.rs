@@ -79,6 +79,7 @@ fn handle_toggle_mode(
             if hotkey_stop_needs_dispatch(
                 current_state,
                 &app_state.pending_stop_after_start,
+                &app_state.pending_stop_requested,
                 || app_state.get_current_state(),
             ) =>
         {
@@ -106,10 +107,17 @@ fn claim_toggle_press(toggle_key_held: &AtomicBool) -> bool {
 fn hotkey_stop_needs_dispatch(
     state: RecordingState,
     pending: &AtomicBool,
+    requested: &std::sync::Mutex<Option<std::time::Instant>>,
     read_state: impl FnOnce() -> RecordingState,
 ) -> bool {
     matches!(state, RecordingState::Starting | RecordingState::Recording)
-        && !queue_stop_during_start(state, pending, read_state)
+        && !queue_stop_during_start(
+            state,
+            pending,
+            requested,
+            std::time::Instant::now(),
+            read_state,
+        )
 }
 
 fn handle_hold_to_record_source(
@@ -187,6 +195,7 @@ fn handle_ptt_mode(
                     if hotkey_stop_needs_dispatch(
                         current_state,
                         &app_state.pending_stop_after_start,
+                        &app_state.pending_stop_requested,
                         || app_state.get_current_state(),
                     ) =>
                 {
@@ -368,12 +377,14 @@ mod tests {
     #[test]
     fn hotkey_release_reclaims_stop_after_start_consumed_empty_flag() {
         let pending = AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
         // Start published Recording and consumed the empty flag after the
         // hotkey captured Starting, but before it queued the release.
         assert!(!pending.swap(false, Ordering::SeqCst));
         assert!(hotkey_stop_needs_dispatch(
             RecordingState::Starting,
             &pending,
+            &requested,
             || {
                 assert!(pending.load(Ordering::SeqCst));
                 RecordingState::Recording
@@ -385,9 +396,11 @@ mod tests {
     #[test]
     fn hotkey_release_leaves_queued_stop_for_start_to_consume() {
         let pending = AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
         assert!(!hotkey_stop_needs_dispatch(
             RecordingState::Starting,
             &pending,
+            &requested,
             || RecordingState::Starting,
         ));
         assert!(pending.load(Ordering::SeqCst));
@@ -396,9 +409,11 @@ mod tests {
     #[test]
     fn hotkey_release_does_not_dispatch_when_start_consumes_queued_stop() {
         let pending = AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
         assert!(!hotkey_stop_needs_dispatch(
             RecordingState::Starting,
             &pending,
+            &requested,
             || {
                 assert!(pending.swap(false, Ordering::SeqCst));
                 RecordingState::Recording

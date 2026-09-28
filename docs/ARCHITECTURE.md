@@ -129,6 +129,23 @@ Secrets (cloud keys, license, remote passwords) go through `secure_store`
   only, opt-out, every event rebuilt from an allowlist.
 - `product_analytics.rs` → **PostHog EU**: consent-gated, closed set of typed
   events, personless, allowlist-scrubbed; no frontend SDK.
+- `commands/dictation_telemetry.rs` owns the completion guard for the stop and
+  cancel flows. `dictation.completed` is emitted once per stopped desktop dictation, including
+  cancellation, no speech, empty audio, failure, and successful delivery. It
+  carries only closed categories and bounded numbers; no transcript, audio,
+  clipboard, prompt, key, path, app name, or window title. `stop_to_text_ms`
+  measures stop request to text ready for delivery; on paths without text it
+  measures stop request to terminal outcome. Clipboard-only delivery has
+  `paste=skipped`.
+
+PostHog dashboard definition (all insights filter to `dictation.completed`):
+
+| Insight | Measure | Breakdowns / filters |
+|---|---|---|
+| Stop to text latency | p50 and p95 of `stop_to_text_ms` | `engine`, `transport`; filter `outcome=delivered` |
+| First audio latency | p50 and p95 of `start_to_first_audio_ms` | `os`; exclude events without the property |
+| Outcome mix | Count and share of events | `outcome`; optionally break down by `engine` |
+| Paste failure rate | `paste=failed` / (`paste=succeeded` + `paste=failed`) | `app_category`; exclude `paste=skipped` |
 
 ## Sidecars
 

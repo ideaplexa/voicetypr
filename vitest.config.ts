@@ -13,6 +13,7 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/.worktrees/**',
+      '**/scripts/e2e/**', // Node's test runner owns these suites.
     ],
   },
   resolve: {

@@ -9,6 +9,9 @@ use crate::audio::speech_evidence::{
 };
 use crate::audio::stream_tap::{StreamTapSink, StreamTapSinkFactory};
 use crate::cloud_stt::common::SttError;
+use crate::commands::dictation_telemetry::{
+    dictation_engine_from_id, dictation_transport, DictationCompletionGuard,
+};
 use crate::commands::settings::{
     get_settings, normalize_final_text_language, normalize_speech_language_for_model,
     normalize_transcription_task, recording_retention_days_from_store, resolve_pill_indicator_mode,
@@ -2634,48 +2637,89 @@ mod tests {
     #[test]
     fn pending_stop_during_readiness_wait_is_consumed_once_without_cue() {
         let pending = std::sync::atomic::AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
+        let first_requested = std::time::Instant::now();
         assert!(!queue_stop_during_start(
             crate::RecordingState::Idle,
             &pending,
+            &requested,
+            first_requested,
             || crate::RecordingState::Idle,
         ));
         assert!(queue_stop_during_start(
             crate::RecordingState::Starting,
             &pending,
+            &requested,
+            first_requested,
             || crate::RecordingState::Starting,
         ));
-        let first_stop = consume_pending_stop_after_start(&pending);
-        assert!(first_stop);
+        let first_stop = consume_pending_stop_after_start(&pending, &requested);
+        assert_eq!(first_stop, Some(first_requested));
         assert!(!recording_started_cue_eligible(
-            first_stop,
+            first_stop.is_some(),
             RecordingState::Recording,
             false
         ));
-        assert!(!consume_pending_stop_after_start(&pending));
+        assert!(consume_pending_stop_after_start(&pending, &requested).is_none());
+        assert!(requested.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn queued_stop_keeps_first_request_timestamp() {
+        let pending = AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
+        let first = std::time::Instant::now();
+        let second = first + std::time::Duration::from_millis(20);
+        assert!(queue_stop_during_start(
+            RecordingState::Starting,
+            &pending,
+            &requested,
+            first,
+            || RecordingState::Starting
+        ));
+        assert!(queue_stop_during_start(
+            RecordingState::Starting,
+            &pending,
+            &requested,
+            second,
+            || RecordingState::Starting
+        ));
+        assert_eq!(
+            consume_pending_stop_after_start(&pending, &requested),
+            Some(first)
+        );
     }
 
     #[test]
     fn stop_reclaims_flag_when_start_consumed_before_stop_queued() {
         let pending = AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
         // Start transitions and consumes an empty flag after stop's first read.
         let initial_state = RecordingState::Starting;
-        assert!(!consume_pending_stop_after_start(&pending));
-        assert!(!queue_stop_during_start(initial_state, &pending, || {
-            RecordingState::Recording
-        }));
+        assert!(consume_pending_stop_after_start(&pending, &requested).is_none());
+        assert!(!queue_stop_during_start(
+            initial_state,
+            &pending,
+            &requested,
+            std::time::Instant::now(),
+            || { RecordingState::Recording }
+        ));
         assert!(!pending.load(Ordering::SeqCst));
     }
 
     #[test]
     fn stop_returns_when_start_consumes_queued_flag() {
         let pending = AtomicBool::new(false);
+        let requested = std::sync::Mutex::new(None);
         let mut consumed = false;
         assert!(queue_stop_during_start(
             RecordingState::Starting,
             &pending,
+            &requested,
+            std::time::Instant::now(),
             || {
                 // Start transitions, then consumes the flag before stop's reread.
-                consumed = consume_pending_stop_after_start(&pending);
+                consumed = consume_pending_stop_after_start(&pending, &requested).is_some();
                 RecordingState::Recording
             },
         ));
@@ -4928,9 +4972,14 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
 }
 
 pub(crate) fn clear_pending_stop_after_start(app_state: &AppState) {
+    let mut requested = app_state
+        .pending_stop_requested
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     app_state
         .pending_stop_after_start
-        .store(false, std::sync::atomic::Ordering::SeqCst);
+        .store(false, AtomicOrdering::SeqCst);
+    *requested = None;
 }
 
 fn recording_started_cue_eligible(
@@ -4941,26 +4990,44 @@ fn recording_started_cue_eligible(
     !pending_stop_consumed && state == RecordingState::Recording && !generation_is_stale
 }
 
-fn consume_pending_stop_after_start(pending: &AtomicBool) -> bool {
-    pending.swap(false, std::sync::atomic::Ordering::SeqCst)
+fn consume_pending_stop_after_start(
+    pending: &AtomicBool,
+    requested: &Mutex<Option<Instant>>,
+) -> Option<Instant> {
+    let mut requested = requested.lock().unwrap_or_else(|error| error.into_inner());
+    pending
+        .swap(false, AtomicOrdering::SeqCst)
+        .then(|| requested.take().unwrap_or_else(Instant::now))
 }
 
 pub(crate) fn queue_stop_during_start(
     state: RecordingState,
     pending: &AtomicBool,
+    requested: &Mutex<Option<Instant>>,
+    stop_requested: Instant,
     read_state: impl FnOnce() -> RecordingState,
 ) -> bool {
     if state != RecordingState::Starting {
         return false;
     }
-    pending.store(true, std::sync::atomic::Ordering::SeqCst);
+    {
+        let mut first_requested = requested.lock().unwrap_or_else(|error| error.into_inner());
+        first_requested.get_or_insert(stop_requested);
+        pending.store(true, AtomicOrdering::SeqCst);
+    }
     // Start publishes Recording before consuming this flag. If it already
     // crossed both steps, reclaim our flag and stop normally; otherwise start
     // owns the queued stop and must dispatch it without our stop guard held.
     if read_state() == RecordingState::Starting {
         return true;
     }
-    !pending.swap(false, std::sync::atomic::Ordering::SeqCst)
+    let mut first_requested = requested.lock().unwrap_or_else(|error| error.into_inner());
+    if pending.swap(false, AtomicOrdering::SeqCst) {
+        *first_requested = None;
+        false
+    } else {
+        true
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -5267,8 +5334,8 @@ pub async fn start_recording(
         app_state.clear_cancellation();
         clear_pending_stop_after_start(&app_state);
     }
-    if let Some(hint) = crate::writing::capture_active_app_context() {
-        if let Some(app_state) = app.try_state::<AppState>() {
+    if let Some(app_state) = app.try_state::<AppState>() {
+        if let Some(hint) = crate::writing::capture_active_app_context() {
             app_state.set_recording_app_context(hint);
         }
     }
@@ -5320,6 +5387,9 @@ pub async fn start_recording(
             )
         })
         .unwrap_or((false, false, false));
+    app_state
+        .recording_live_preview
+        .store(live_preview_mode, AtomicOrdering::SeqCst);
 
     // Pause system media if enabled (default: off)
     let mut resume_media_on_error = false;
@@ -5859,14 +5929,24 @@ pub async fn start_recording(
     // after entering Recording state. For PTT, key-up in Starting state sets this flag.
     // The second PTT guard above handles key-up during audio init; this handles the
     // narrow window between Starting transition and this point.
-    let pending_stop_consumed =
-        consume_pending_stop_after_start(&app_state.pending_stop_after_start);
-    if pending_stop_consumed {
+    let pending_stop_requested = consume_pending_stop_after_start(
+        &app_state.pending_stop_after_start,
+        &app_state.pending_stop_requested,
+    );
+    let pending_stop_consumed = pending_stop_requested.is_some();
+    if let Some(stop_requested) = pending_stop_requested {
         log::info!("Toggle: pending stop triggered right after start; stopping now");
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             let recorder_state = app_handle.state::<RecorderState>();
-            if let Err(e) = stop_recording(app_handle.clone(), recorder_state).await {
+            if let Err(e) = stop_recording_with_mode_at(
+                app_handle.clone(),
+                recorder_state,
+                STOP_POST_ROLL,
+                stop_requested,
+            )
+            .await
+            {
                 log::error!("Toggle: pending stop failed: {}", e);
             }
         });
@@ -5981,6 +6061,15 @@ async fn stop_recording_with_mode(
     state: State<'_, RecorderState>,
     post_roll: Duration,
 ) -> Result<String, String> {
+    stop_recording_with_mode_at(app, state, post_roll, Instant::now()).await
+}
+
+async fn stop_recording_with_mode_at(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+    post_roll: Duration,
+    stop_requested: Instant,
+) -> Result<String, String> {
     #[cfg(debug_assertions)]
     let stop_start = Instant::now();
 
@@ -5999,6 +6088,8 @@ async fn stop_recording_with_mode(
     if queue_stop_during_start(
         state_before_queue,
         &app_state.pending_stop_after_start,
+        &app_state.pending_stop_requested,
+        stop_requested,
         || app_state.get_current_state(),
     ) {
         log::info!("stop_recording during Starting: queueing pending stop after start");
@@ -6096,6 +6187,9 @@ async fn stop_recording_with_mode(
         );
     } // MutexGuard dropped here BEFORE any await
 
+    let mut dictation_telemetry =
+        DictationCompletionGuard::new(&app, stop_requested, capture_metrics).await;
+
     crate::trigger::engine_host::rebuild_engine_bindings(&app);
 
     // Clean up ESC state
@@ -6119,6 +6213,7 @@ async fn stop_recording_with_mode(
     // finish (stop timeout / thread panic / finalize failure) is there no usable WAV: surface an
     // error and reset, having already run the media-resume + ESC cleanup above.
     if stop_integrity_failure {
+        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
         let user_message = "Recording was interrupted — please try again";
         take_and_remove_current_recording_path(&app_state, "interrupted");
         pill_toast_with_suggestion(
@@ -6145,6 +6240,7 @@ async fn stop_recording_with_mode(
     }
 
     if stop_unfinalized {
+        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
         // The recording worker may STILL hold the WAV open: `stop_recording`'s
         // bounded join detached it when it missed the finalize deadline. hound
         // finalizes the file via its `WavWriter::drop` on the worker's
@@ -6169,6 +6265,7 @@ async fn stop_recording_with_mode(
 
     // Check if cancellation was requested
     if app_state.is_cancellation_requested() {
+        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
         log::info!("Recording was cancelled, skipping transcription");
 
         // Clean up audio file if it exists
@@ -6198,7 +6295,10 @@ async fn stop_recording_with_mode(
     let audio_path = app_state
         .current_recording_path
         .lock()
-        .map_err(|e| format!("Failed to acquire path lock: {}", e))?
+        .map_err(|e| {
+            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
+            format!("Failed to acquire path lock: {}", e)
+        })?
         .take();
 
     // If no audio path, there was no recording
@@ -6213,6 +6313,7 @@ async fn stop_recording_with_mode(
             path
         }
         None => {
+            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
             log::warn!("No audio file found - no recording was made");
             // Make sure to transition back to Idle state
             update_recording_state(&app, RecordingState::Idle, None);
@@ -6236,6 +6337,7 @@ async fn stop_recording_with_mode(
     if let Ok(meta) = std::fs::metadata(&audio_path) {
         // A valid WAV header is typically 44 bytes; <= 44 implies no audio samples were written
         if meta.len() <= 44 {
+            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
             pill_toast_with_suggestion(
                 &app,
                 "No audio captured",
@@ -6262,6 +6364,8 @@ async fn stop_recording_with_mode(
         if evidence_class
             == crate::audio::speech_evidence::SpeechEvidenceClass::HighConfidenceNoSpeech
         {
+            dictation_telemetry.facts.outcome =
+                crate::product_analytics::DictationOutcome::NoSpeech;
             speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::SkippedNoSpeech);
             log::info!(
                 "Skipping speech engine: capture below calibrated no-speech floor (no sustained speech, negligible energy)"
@@ -6289,6 +6393,7 @@ async fn stop_recording_with_mode(
         }
 
         speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::SkippedNoInput);
+        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
         log::info!("Skipping speech engine: capture contained only exact digital zero samples");
         if let Err(error) = std::fs::remove_file(&audio_path) {
             log::debug!("Failed to remove no-input recording: {}", error);
@@ -6307,9 +6412,18 @@ async fn stop_recording_with_mode(
 
     // Decide engine early to optionally skip normalization for cloud providers
     let config = get_recording_config(&app).await.map_err(|e| {
+        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
         log::error!("Failed to load recording config: {}", e);
         format!("Configuration error: {}", e)
     })?;
+    if dictation_telemetry.facts.engine != crate::product_analytics::EngineKind::Remote {
+        dictation_telemetry.facts.engine = dictation_engine_from_id(&config.current_engine);
+        dictation_telemetry.facts.model = config.current_model.clone();
+        if dictation_telemetry.facts.engine == crate::product_analytics::EngineKind::Cloud {
+            dictation_telemetry.facts.transport =
+                crate::product_analytics::DictationTransport::Rest;
+        }
+    }
 
     let whisper_manager = app.state::<AsyncRwLock<WhisperManager>>();
 
@@ -6336,6 +6450,9 @@ async fn stop_recording_with_mode(
     );
 
     let engine_selection = if let Some(remote_conn) = active_remote {
+        dictation_telemetry.facts.engine = crate::product_analytics::EngineKind::Remote;
+        dictation_telemetry.facts.model.clear();
+        dictation_telemetry.facts.transport = crate::product_analytics::DictationTransport::Remote;
         if matches!(
             remote_conn.status,
             crate::remote::settings::ConnectionStatus::Online
@@ -6354,6 +6471,7 @@ async fn stop_recording_with_mode(
                 password: remote_conn.password,
             }
         } else {
+            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
             return abort_due_to_missing_model(
                 &app,
                 &audio_path,
@@ -6366,6 +6484,8 @@ async fn stop_recording_with_mode(
         match config.current_engine.as_str() {
             "parakeet" => {
                 if config.current_model.is_empty() {
+                    dictation_telemetry.facts.outcome =
+                        crate::product_analytics::DictationOutcome::Failed;
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
@@ -6379,6 +6499,8 @@ async fn stop_recording_with_mode(
                 let models = parakeet_manager.list_models();
                 if let Some(status) = models.into_iter().find(|m| m.name == config.current_model) {
                     if !status.downloaded {
+                        dictation_telemetry.facts.outcome =
+                            crate::product_analytics::DictationOutcome::Failed;
                         return abort_due_to_missing_model(
                             &app,
                             &audio_path,
@@ -6388,6 +6510,8 @@ async fn stop_recording_with_mode(
                         .await;
                     }
                 } else {
+                    dictation_telemetry.facts.outcome =
+                        crate::product_analytics::DictationOutcome::Failed;
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
@@ -6404,6 +6528,8 @@ async fn stop_recording_with_mode(
             engine if crate::cloud_stt::CloudProvider::from_id(engine).is_some() => {
                 let provider = crate::cloud_stt::CloudProvider::from_id(engine).unwrap();
                 if config.current_model.is_empty() {
+                    dictation_telemetry.facts.outcome =
+                        crate::product_analytics::DictationOutcome::Failed;
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
@@ -6414,6 +6540,8 @@ async fn stop_recording_with_mode(
                 }
 
                 if !crate::secure_store::secure_has(&app, provider.key_name()).unwrap_or(false) {
+                    dictation_telemetry.facts.outcome =
+                        crate::product_analytics::DictationOutcome::Failed;
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
@@ -6436,6 +6564,8 @@ async fn stop_recording_with_mode(
                 log::debug!("Downloaded Whisper models: {:?}", downloaded_models);
 
                 if downloaded_models.is_empty() {
+                    dictation_telemetry.facts.outcome =
+                        crate::product_analytics::DictationOutcome::Failed;
                     return abort_due_to_missing_model(
                     &app,
                     &audio_path,
@@ -6529,7 +6659,11 @@ async fn stop_recording_with_mode(
                     .read()
                     .await
                     .get_model_path(&chosen_model)
-                    .ok_or_else(|| format!("Model '{}' path not found", chosen_model))?;
+                    .ok_or_else(|| {
+                        dictation_telemetry.facts.outcome =
+                            crate::product_analytics::DictationOutcome::Failed;
+                        format!("Model '{}' path not found", chosen_model)
+                    })?;
 
                 ActiveEngineSelection::Whisper {
                     model_name: chosen_model,
@@ -6539,6 +6673,12 @@ async fn stop_recording_with_mode(
         }
     };
     let engine_route = engine_selection.route();
+    dictation_telemetry.facts.engine = engine_selection.analytics_kind();
+    dictation_telemetry.facts.model = match &engine_selection {
+        ActiveEngineSelection::Remote { .. } => String::new(),
+        _ => engine_selection.model_name().to_string(),
+    };
+    dictation_telemetry.facts.transport = dictation_transport(&engine_selection, None);
     let mut speech_evidence_attempt = SpeechEvidenceAttempt::new(
         engine_selection.engine_name().to_string(),
         engine_route,
@@ -6603,6 +6743,8 @@ async fn stop_recording_with_mode(
                         {
                             speech_evidence_attempt
                                 .set_outcome(SpeechEvidenceOutcome::PreparationFailure);
+                            dictation_telemetry.facts.outcome =
+                                crate::product_analytics::DictationOutcome::Failed;
                             log::error!("Audio normalization (decode) failed: {}", e);
                             update_recording_state(
                                 &app,
@@ -6667,6 +6809,8 @@ async fn stop_recording_with_mode(
             })();
 
             if matches!(duration_gate, Ok((true, _))) {
+                dictation_telemetry.facts.outcome =
+                    crate::product_analytics::DictationOutcome::Empty;
                 speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::RecordingTooShort);
                 emit_recording_too_short_feedback(&app, &min_duration_label);
                 if let Err(e) = std::fs::remove_file(&normalized_path) {
@@ -6707,11 +6851,12 @@ async fn stop_recording_with_mode(
             &config.speech_language,
         ))
     };
-    let transcription_task = resolve_transcription_task_for_audio(
-        &app,
-        false,
-        Some(config.transcription_task.as_str()),
-    )?;
+    let transcription_task =
+        resolve_transcription_task_for_audio(&app, false, Some(config.transcription_task.as_str()))
+            .inspect_err(|_| {
+                dictation_telemetry.facts.outcome =
+                    crate::product_analytics::DictationOutcome::Failed;
+            })?;
     let translate_to_english = task_uses_translate_to_english(&transcription_task);
 
     let engine_label = engine_selection.engine_name().to_string();
@@ -6752,6 +6897,7 @@ async fn stop_recording_with_mode(
         crate::whisper::transcriber::ATTEMPT_BACKEND.scope(
             std::cell::Cell::new(None),
             async move {
+        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
         let mut speech_evidence_attempt = speech_evidence_attempt_for_task;
         log::debug!("Transcription task started");
 
@@ -6809,7 +6955,9 @@ async fn stop_recording_with_mode(
                 } if transcription_job_for_task.task
                     == crate::transcription::TranscriptionTask::Transcribe =>
                 {
-                    if let Some(text) = take_cloud_ws_final(task_generation, *provider).await {
+                    let ws_final = take_cloud_ws_final(task_generation, *provider).await;
+                    dictation_telemetry.facts.transport = dictation_transport(&engine_selection_for_task, Some(ws_final.is_some()));
+                    if let Some(text) = ws_final {
                         log::info!(
                             "Cloud WS-final authoritative ({} chars); REST skipped",
                             text.chars().count()
@@ -7054,6 +7202,12 @@ async fn stop_recording_with_mode(
 
                 // Check if transcription is empty or just noise
                 if is_non_speech_transcript(&transcription.raw_text) {
+                    dictation_telemetry.facts.outcome = if transcription.raw_text.trim().is_empty() {
+                        crate::product_analytics::DictationOutcome::Empty
+                    } else {
+                        crate::product_analytics::DictationOutcome::NoSpeech
+                    };
+                    dictation_telemetry.text_ready("");
                     log::info!("Whisper returned empty transcription - no speech detected");
 
                     // Emit graceful feedback to user via pill toast
@@ -7155,6 +7309,10 @@ async fn stop_recording_with_mode(
                                     writing_result.mode,
                                     writing_result.ai_execution.is_some(),
                                 );
+                                dictation_telemetry.facts.polish = polish_outcome;
+                                dictation_telemetry.facts.app_category = writing_result.context_hint.as_ref()
+                                    .map(crate::writing::classify)
+                                    .unwrap_or(dictation_telemetry.facts.app_category);
                                 let (provider_id, model_id) = writing_result
                                     .ai_execution
                                     .as_ref()
@@ -7280,6 +7438,7 @@ async fn stop_recording_with_mode(
                                 (text_for_process.clone(), None, false, false)
                             }
                         };
+                    dictation_telemetry.text_ready(&final_text);
                     // PostHog formatting journey (telemetry funnel removed, plan 047).
                     crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
                         stage: crate::product_analytics::JourneyStage::Formatting,
@@ -7300,6 +7459,7 @@ async fn stop_recording_with_mode(
                     // which already passed. Abort before ANY side effect: no
                     // pill toast, no text insertion, no history; revoke audio.
                     if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
+                        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
                         log::info!(
                             "Delivery discarded after enhancement (cancelled/stale gen={})",
                             task_generation
@@ -7337,6 +7497,7 @@ async fn stop_recording_with_mode(
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
                     if !should_deliver {
+                        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
                         update_recording_state(&app_for_process, RecordingState::Idle, None);
                         return;
                     }
@@ -7357,6 +7518,7 @@ async fn stop_recording_with_mode(
                     // cancel arriving during the pill-hide / sleep / settings-
                     // read window above must not paste stale/cancelled text.
                     if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
+                        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
                         log::info!(
                             "Delivery discarded before insertion (cancelled/stale gen={})",
                             task_generation
@@ -7376,6 +7538,7 @@ async fn stop_recording_with_mode(
                             );
                         });
                         if cue_committed.is_none() {
+                            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
                             log::info!(
                                 "Skipped transcript-ready cue for stale/cancelled generation {}",
                                 task_generation
@@ -7397,6 +7560,7 @@ async fn stop_recording_with_mode(
                             )
                         });
                         let Some(insert_future) = insert_result else {
+                            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
                             log::info!(
                                 "Skipped text insertion for stale/cancelled generation {}",
                                 task_generation
@@ -7411,10 +7575,14 @@ async fn stop_recording_with_mode(
                         match insert_future.await {
                             Ok(_) => {
                                 delivery_journey.mark_succeeded();
+                                dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
+                                dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Succeeded;
                                 log::debug!("Text inserted at cursor successfully");
                             }
                             Err(e) => {
                                 delivery_journey.mark_failed();
+                                dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
+                                dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Failed;
                                 log::error!("Failed to insert text: {}", e);
                                 crate::telemetry::capture_paste_failure("insert");
 
@@ -7457,6 +7625,7 @@ async fn stop_recording_with_mode(
                             crate::commands::text::copy_text_to_clipboard(final_text.clone())
                         });
                         let Some(copy_future) = copy_result else {
+                            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
                             log::info!(
                                 "Skipped clipboard copy for stale/cancelled generation {}",
                                 task_generation
@@ -7471,11 +7640,15 @@ async fn stop_recording_with_mode(
                         match copy_future.await {
                             Ok(_) => {
                                 delivery_journey.mark_succeeded();
+                                dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
+                                dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Skipped;
                                 log::debug!("Text copied to clipboard (auto-paste disabled)");
                                 pill_toast(&app_for_process, "Transcription copied", 1500);
                             }
                             Err(e) => {
                                 delivery_journey.mark_failed();
+                                dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
+                                dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Skipped;
                                 log::error!("Failed to copy text to clipboard: {}", e);
                                 crate::telemetry::capture_paste_failure("clipboard");
                                 pill_toast(&app_for_process, "Copy failed", 1500);
@@ -7549,6 +7722,11 @@ async fn stop_recording_with_mode(
                 .await;
             }
             Err(failure) => {
+                dictation_telemetry.facts.outcome = if matches!(&failure, TranscriptionFailure::Local { message, .. } if message.contains("cancelled") || message.contains("Cancelled")) {
+                    crate::product_analytics::DictationOutcome::Cancelled
+                } else {
+                    crate::product_analytics::DictationOutcome::Failed
+                };
                 match &failure {
                     TranscriptionFailure::Local { message: e, .. }
                         if e.contains("cancelled") || e.contains("Cancelled") =>
@@ -8578,21 +8756,25 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     // user's paused media is restored — a failed ESC-cancel must never
     // strand a paused track or a stuck recording state.
     let recorder_state = app.state::<RecorderState>();
-    let stop_error: Option<String> = (|| -> Result<(), String> {
-        let mut guard = recorder_state
+    let cancel_stop_requested = Instant::now();
+    let (stop_result, cancelled_metrics) = (|| -> (Result<(), String>, Option<Option<crate::audio::recorder::CaptureAudioMetrics>>) {
+        let mut guard = match recorder_state
             .inner()
             .0
             .lock()
-            .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?;
+        {
+            Ok(guard) => guard,
+            Err(e) => return (Err(format!("Failed to acquire recorder lock: {}", e)), None),
+        };
         if !guard.is_recording() {
-            return Ok(());
+            return (Ok(()), None);
         }
         log::info!("Stopping recorder");
         // Just stop the recorder, don't do full stop_recording flow.
         // A stop error keeps the WAV on disk for the orphan cleanup when the
         // worker never finalized (same policy as stop_unfinalized); only a
         // clean stop may delete the cancelled recording.
-        match guard.stop_recording() {
+        let result = match guard.stop_recording() {
             Ok(_) => {
                 // Clean up audio file if it exists
                 if let Ok(path_guard) = app_state.current_recording_path.lock() {
@@ -8607,9 +8789,19 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
                 Ok(())
             }
             Err(e) => Err(e),
-        }
-    })()
-    .err();
+        };
+        (result, Some(guard.take_last_capture_metrics()))
+    })();
+    if let Some(metrics) = cancelled_metrics {
+        let mut completion =
+            DictationCompletionGuard::new(&app, cancel_stop_requested, metrics).await;
+        completion.facts.outcome = if stop_result.is_ok() {
+            crate::product_analytics::DictationOutcome::Cancelled
+        } else {
+            crate::product_analytics::DictationOutcome::Failed
+        };
+    }
+    let stop_error = stop_result.err();
 
     // Resume system media if we paused it
     MEDIA_CONTROLLER.resume_if_we_paused();
