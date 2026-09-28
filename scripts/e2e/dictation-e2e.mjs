@@ -192,9 +192,10 @@ async function newDocument(out) {
 function ensureTargetFront() {
   if (!testDocument) fail("No test document is open.");
   appleScript(`tell application "TextEdit"\nactivate\nset index of (first window whose name is "${testDocument}") to 1\nend tell`);
-  const front = appleScript('tell application "System Events" to get name of first application process whose frontmost is true');
+  // TextEdit's own `frontmost` avoids needing Automation access to System Events.
+  const frontmost = appleScript('tell application "TextEdit" to get frontmost');
   const frontWindow = appleScript('tell application "TextEdit" to get name of front window');
-  if (front !== "TextEdit" || frontWindow !== testDocument) fail(`Refusing to dictate: front window is "${front}/${frontWindow}", not the test document.`);
+  if (frontmost !== "true" || frontWindow !== testDocument) fail(`Refusing to dictate: TextEdit frontmost=${frontmost}, front window "${frontWindow}", not the test document.`);
 }
 function closeDocument() {
   if (!testDocument) return;
