@@ -18,6 +18,11 @@ on:
         required: true
         type: number
         default: 2
+      retries:
+        description: 'Additional attempts after a failed or empty transcript'
+        required: true
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -205,9 +210,11 @@ jobs:
         env:
           BENCH_MODELS: ${{ steps.select.outputs.models }}
           BENCH_REPS: ${{ inputs.reps || 2 }}
+          BENCH_RETRIES: ${{ inputs.retries }}
         run: |
           $bin = if ($env:RUNNER_OS -eq 'Windows') { 'D:/cargo-target/release/voicetypr.exe' } else { 'src-tauri/target/release/voicetypr' }
-          node scripts/model-bench.mjs --bin $bin --clips bench/clips --models $env:BENCH_MODELS --reps $env:BENCH_REPS --out bench/results
+          $retries = if ($env:BENCH_RETRIES -eq '') { 1 } else { $env:BENCH_RETRIES }
+          node scripts/model-bench.mjs --bin $bin --clips bench/clips --models $env:BENCH_MODELS --reps $env:BENCH_REPS --retries $retries --out bench/results
           if ($LASTEXITCODE -ne 0) { throw "Model bench failed with exit code $LASTEXITCODE" }
 
       - name: Add report to job summary

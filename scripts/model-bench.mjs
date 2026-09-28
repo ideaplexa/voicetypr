@@ -6,17 +6,24 @@ import { performance } from "node:perf_hooks";
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.bin || !args.clips || !args.models) {
-  fail("Usage: node scripts/model-bench.mjs --bin <path> --clips <dir> --models <name=path,...> [--reps 2] [--out <dir>]");
+  fail("Usage: node scripts/model-bench.mjs --bin <path> --clips <dir> --models <name=path,...> [--reps 2] [--retries 0] [--out <dir>]");
 }
 const bin = resolve(args.bin);
 const clipsDir = resolve(args.clips);
 const outDir = resolve(args.out || process.cwd());
 const reps = Number(args.reps || "2");
 if (!Number.isSafeInteger(reps) || reps < 1) fail("--reps must be a positive integer");
+const retries = Number(args.retries || "0");
+if (!Number.isSafeInteger(retries) || retries < 0) fail("--retries must be a nonnegative integer");
 if (!existsSync(bin)) fail("Missing CLI binary");
 const models = parseModels(args.models);
 const clips = readClips(join(clipsDir, "manifest.json"), clipsDir);
 mkdirSync(outDir, { recursive: true });
+const canMeasurePeakRss = process.platform === "darwin" && existsSync("/usr/bin/time") &&
+  (() => {
+    const probe = spawnSync("/usr/bin/time", ["-l", "/usr/bin/true"], { encoding: "utf8" });
+    return probe.status === 0 && /\d+\s+maximum resident set size/.test(probe.stderr || "");
+  })();
 
 const runs = [];
 for (const model of models) {
@@ -26,29 +33,50 @@ for (const model of models) {
       continue;
     }
     for (let rep = 1; rep <= reps; rep += 1) {
-      const start = performance.now();
-      const run = spawnSync(bin, [
-        "transcribe", "--file", clip.path, "--engine", "whisper",
-        "--model-file", model.path, "--language", clip.lang, "--json",
-      ], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-      const wall_ms = performance.now() - start;
-      if (run.error || run.status !== 0) {
-        const diagnostic = run.error?.message || firstLine(run.stderr) || firstLine(run.stdout) || `CLI exited ${run.status}`;
-        runs.push({ model: model.name, file: clip.file, lang: clip.lang, rep, status: "ERROR",
-          error: diagnostic.replaceAll(model.path, "[model file]").replaceAll(clip.path, "[clip]"), wall_ms });
-        continue;
-      }
-      try {
-        const payload = JSON.parse(run.stdout);
-        if (typeof payload.text !== "string") throw new Error("CLI JSON has no text field");
-        const timings_ms = payload.metadata?.timings_ms || {};
-        const transcribe_ms = finiteNumber(timings_ms.total) ?? finiteNumber(payload.metadata?.processing_duration_ms);
-        runs.push({ model: model.name, file: clip.file, lang: clip.lang, rep, status: "OK",
-          reference: clip.ref, transcript: payload.text, wer: wer(clip.ref, payload.text),
-          wall_ms, transcribe_ms, timings_ms });
-      } catch (error) {
-        runs.push({ model: model.name, file: clip.file, lang: clip.lang, rep, status: "ERROR",
-          error: `Invalid CLI JSON: ${error.message}`, wall_ms });
+      const attempt_errors = [];
+      for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
+        const start = performance.now();
+        const command = ["transcribe", "--file", clip.path, "--engine", "whisper",
+          "--model-file", model.path, "--language", clip.lang, "--json"];
+        // macOS time -l reports child peak RSS; spawnSync has no child resource usage API.
+        const measureMemory = canMeasurePeakRss;
+        const run = spawnSync(measureMemory ? "/usr/bin/time" : bin,
+          measureMemory ? ["-l", bin, ...command] : command,
+          { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+        const wall_ms = performance.now() - start;
+        const stderr = redact(lastLines(run.stderr, 40), model, clip);
+        const peak_rss_bytes = measureMemory
+          ? finiteNumber(Number(run.stderr?.match(/(\d+)\s+maximum resident set size/)?.[1])) : null;
+        let record;
+        if (run.error || run.status !== 0) {
+          const cliError = run.stderr?.split(/\r?\n/).map((line) => line.trim())
+            .filter((line) => line.startsWith('{"error":') || line.startsWith("Error:")).at(-1);
+          record = { status: "ERROR", error: redact(run.error?.message || cliError ||
+            `CLI exited ${run.status}`, model, clip) };
+        } else {
+          try {
+            const payload = JSON.parse(run.stdout);
+            if (typeof payload.text !== "string") throw new Error("CLI JSON has no text field");
+            if (!payload.text.trim()) throw new Error("CLI returned an empty transcript");
+            const timings_ms = payload.metadata?.timings_ms || {};
+            const transcribe_ms = finiteNumber(timings_ms.total) ?? finiteNumber(payload.metadata?.processing_duration_ms);
+            record = { status: "OK", reference: clip.ref, transcript: payload.text,
+              wer: wer(clip.ref, payload.text), transcribe_ms, timings_ms };
+          } catch (error) {
+            record = { status: "ERROR", error: redact(error.message, model, clip) };
+          }
+        }
+        if (record.status === "ERROR") {
+          attempt_errors.push({ attempt, error: record.error, stderr });
+          console.error(`${model.name} ${clip.file} rep ${rep} attempt ${attempt}: ${record.error}`);
+          if (stderr) console.error(stderr);
+        }
+        if (record.status === "OK" || attempt > retries) {
+          runs.push({ model: model.name, file: clip.file, lang: clip.lang, rep, attempts: attempt,
+            ...record, wall_ms, peak_rss_bytes, ...(record.status === "ERROR" ? { stderr } : {}),
+            ...(attempt_errors.length ? { attempt_errors } : {}) });
+          break;
+        }
       }
     }
   }
@@ -56,7 +84,7 @@ for (const model of models) {
 
 const report = {
   platform: `${process.platform}-${process.arch}`,
-  reps,
+  reps, retries,
   clips: clips.map(({ file, lang, ref }) => ({ file, lang, ref })),
   models: models.map((model) => summarize(model, runs)),
   runs,
@@ -70,7 +98,7 @@ function parseArgs(argv) {
   const parsed = {};
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i];
-    if (!["--bin", "--clips", "--models", "--reps", "--out"].includes(key) || !argv[i + 1]) {
+    if (!["--bin", "--clips", "--models", "--reps", "--retries", "--out"].includes(key) || !argv[i + 1]) {
       fail(`Invalid argument: ${key}`);
     }
     parsed[key.slice(2)] = argv[i + 1];
@@ -150,27 +178,36 @@ function summarize(model, runs) {
     return [lang, { n: values.length, mean_wer: mean(values) }];
   }));
   const transcribe = ok.map((run) => run.transcribe_ms).filter((value) => value !== null);
+  const peakRss = matching.map((run) => run.peak_rss_bytes).filter((value) => value !== null);
   return { name: model.name, file_size_bytes: model.file_size_bytes, english_only: model.english_only,
     completed: ok.length, errors: matching.filter((run) => run.status === "ERROR").length,
     skipped: matching.filter((run) => run.status === "SKIPPED").length,
+    retried: matching.filter((run) => run.attempts > 1).length,
+    max_peak_rss_bytes: peakRss.length ? Math.max(...peakRss) : null,
     mean_wer: mean(ok.map((run) => run.wer)), by_language,
     mean_transcribe_ms: mean(transcribe), p95_transcribe_ms: p95(transcribe),
     mean_wall_ms: mean(ok.map((run) => run.wall_ms)), p95_wall_ms: p95(ok.map((run) => run.wall_ms)) };
 }
 
 function renderMarkdown(report) {
-  const lines = ["# Whisper model bench", "", `Platform: ${report.platform}  `, `Repetitions: ${report.reps}  `,
+  const lines = ["# Whisper model bench", "", `Platform: ${report.platform}  `, `Repetitions: ${report.reps}  `, `Retries: ${report.retries}  `,
     "WER is a fraction (0.05 = 5%). Transcribe time uses CLI `timings_ms.total`, then `processing_duration_ms` if available. Wall time covers the entire CLI invocation.", "",
-    "| Model | Size MiB | Runs | Mean WER | WER by language | Mean transcribe ms | P95 transcribe ms | Mean wall ms | P95 wall ms | Errors |",
-    "|---|---:|---:|---:|---|---:|---:|---:|---:|---:|"];
+    "Peak RSS is available when macOS `/usr/bin/time -l` is permitted by the runner.", "",
+    "| Model | Size MiB | Runs | Mean WER | WER by language | Mean transcribe ms | P95 transcribe ms | Mean wall ms | P95 wall ms | Peak RSS MiB | Retried | Errors |",
+    "|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|"];
   for (const model of report.models) {
     const languages = Object.entries(model.by_language).map(([lang, value]) => `${lang}: ${fmt(value.mean_wer, 3)}`).join(", ");
-    lines.push(`| ${model.name} | ${fmt(model.file_size_bytes / 1048576, 1)} | ${model.completed} | ${fmt(model.mean_wer, 3)} | ${languages} | ${fmt(model.mean_transcribe_ms, 0)} | ${fmt(model.p95_transcribe_ms, 0)} | ${fmt(model.mean_wall_ms, 0)} | ${fmt(model.p95_wall_ms, 0)} | ${model.errors} |`);
+    lines.push(`| ${model.name} | ${fmt(model.file_size_bytes / 1048576, 1)} | ${model.completed} | ${fmt(model.mean_wer, 3)} | ${languages} | ${fmt(model.mean_transcribe_ms, 0)} | ${fmt(model.p95_transcribe_ms, 0)} | ${fmt(model.mean_wall_ms, 0)} | ${fmt(model.p95_wall_ms, 0)} | ${fmt(model.max_peak_rss_bytes === null ? null : model.max_peak_rss_bytes / 1048576, 0)} | ${model.retried} | ${model.errors} |`);
   }
-  const errors = report.runs.filter((run) => run.status === "ERROR");
-  if (errors.length) {
-    lines.push("", "## Errors", "", "| Model | Clip | Rep | Error |", "|---|---|---:|---|");
-    for (const run of errors) lines.push(`| ${run.model} | ${run.file} | ${run.rep} | ${run.error.replaceAll("|", "\\|")} |`);
+  const diagnosed = report.runs.filter((run) => run.attempt_errors?.length);
+  if (diagnosed.length) {
+    lines.push("", "## Failed attempt diagnostics", "");
+    for (const run of diagnosed) {
+      for (const failure of run.attempt_errors) {
+        lines.push(`### ${run.model} · ${run.file} · rep ${run.rep} · attempt ${failure.attempt}`,
+          "", failure.error, "", "```text", failure.stderr || "(no stderr)", "```", "");
+      }
+    }
   }
   return `${lines.join("\n")}\n`;
 }
@@ -179,8 +216,13 @@ function fmt(value, digits) {
   return value === null ? "—" : value.toFixed(digits);
 }
 
-function firstLine(value) {
-  return (value || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+function lastLines(value, count) {
+  return (value || "").split(/\r?\n/).filter((line) => line.trim()).slice(-count).join("\n");
+}
+
+function redact(value, model, clip) {
+  return value.replaceAll(model.path, "[model file]").replaceAll(clip.path, "[clip]")
+    .replaceAll(bin, "[CLI]");
 }
 
 function fail(message) {
