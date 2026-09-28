@@ -2293,7 +2293,13 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
 
     if let Some(model_name) = autoload_parakeet_model {
         if let Some(parakeet_manager) = app.try_state::<parakeet::ParakeetManager>() {
-            match parakeet_manager.load_model(&app, &model_name).await {
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            let load_result = parakeet_manager
+                .preload_selected_onnx(&app, &model_name)
+                .await;
+            #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+            let load_result = parakeet_manager.load_model(&app, &model_name).await;
+            match load_result {
                 Ok(_) => {
                     log::info!("✅ Parakeet model '{}' autoloaded from cache", model_name);
                     match parakeet_manager.warmup(&app).await {

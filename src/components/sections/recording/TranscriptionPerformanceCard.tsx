@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSettings } from "@/contexts/SettingsContext";
+import { useOptionalModelManagementContext } from "@/contexts/ModelManagementContext";
 import { createLogger } from "@/lib/logger";
 import { isWindows } from "@/lib/platform";
 import type { AccelerationStatus } from "@/types/acceleration";
@@ -32,6 +33,9 @@ const log = createLogger("recording-settings");
 
 export function TranscriptionPerformanceCard() {
   const { settings, updateSettings } = useSettings();
+  const modelManagement = useOptionalModelManagementContext();
+  const gpuControlsAvailable =
+    modelManagement?.models[settings?.current_model ?? ""]?.gpu_controls_available === true;
   const [accelerationStatus, setAccelerationStatus] = useState<AccelerationStatus | null>(null);
   const [testingAcceleration, setTestingAcceleration] = useState(false);
 
@@ -47,13 +51,14 @@ export function TranscriptionPerformanceCard() {
   }, []);
 
   useEffect(() => {
+    if (!isWindows || !gpuControlsAvailable) return;
     const timeoutId = window.setTimeout(() => {
       void loadAccelerationStatus();
     }, 0);
     return () => window.clearTimeout(timeoutId);
-  }, [loadAccelerationStatus]);
+  }, [gpuControlsAvailable, loadAccelerationStatus]);
 
-  if (!settings || !isWindows) return null;
+  if (!settings || !isWindows || !gpuControlsAvailable) return null;
 
   const handleAccelerationChange = async (value: TranscriptionAcceleration) => {
     await updateSettings({ transcription_acceleration: value });

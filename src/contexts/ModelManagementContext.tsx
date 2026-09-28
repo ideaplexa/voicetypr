@@ -25,3 +25,7 @@ export function useModelManagementContext() {
   }
   return context;
 }
+
+export function useOptionalModelManagementContext() {
+  return useContext(ModelManagementContext);
+}

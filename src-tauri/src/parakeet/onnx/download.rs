@@ -80,6 +80,32 @@ pub fn is_downloaded(directory: &Path, revision: &str, files: &[ModelFile]) -> b
     })
 }
 
+// A backup's marker was written only after its files were verified. An older
+// revision may have different file sizes, so do not compare it to today's pin.
+fn is_committed_backup(directory: &Path, manifest: &Manifest<'_>) -> bool {
+    let Ok(revision) = std::fs::read_to_string(directory.join(MARKER)) else {
+        return false;
+    };
+    if revision.is_empty() || revision.chars().any(char::is_whitespace) {
+        return false;
+    }
+    if revision == manifest.revision {
+        return is_downloaded(directory, manifest.revision, manifest.files);
+    }
+    // Published revisions are Hugging Face commit hashes. A stray marker is
+    // not enough to make an uncommitted backup recoverable.
+    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return false;
+    }
+    directory.is_dir()
+        && manifest.files.iter().all(|file| {
+            directory
+                .join(file.name)
+                .metadata()
+                .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+        })
+}
+
 fn available_space(parent: &Path) -> Result<u64, String> {
     let canonical = parent
         .canonicalize()
@@ -159,7 +185,7 @@ async fn reclaim_transactions(root: &Path, manifest: &Manifest<'_>) -> Result<()
         if let Some(backup) = backups
             .iter()
             .rev()
-            .find(|path| is_downloaded(path, manifest.revision, manifest.files))
+            .find(|path| is_committed_backup(path, manifest))
         {
             remove_directory(&destination, "uncommitted model").await?;
             fs::rename(backup, &destination).await.map_err(|_| {
@@ -585,6 +611,15 @@ mod tests {
         let backup = temp.path().join(format!(".replaced-{MODEL_ID}-incomplete"));
         fs::create_dir(&destination).await.unwrap();
         fs::create_dir(&backup).await.unwrap();
+        fs::write(
+            backup.join(MARKER),
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .await
+        .unwrap();
+        fs::write(backup.join(TEST_FILES[0].name), b"partial")
+            .await
+            .unwrap();
         reclaim_transactions(
             temp.path(),
             &Manifest {
@@ -595,6 +630,44 @@ mod tests {
         .await
         .unwrap();
         assert!(!destination.exists());
+        assert!(!backup.exists());
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_restores_older_committed_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = model_directory(temp.path());
+        let backup = temp.path().join(format!(".replaced-{MODEL_ID}-older"));
+        fs::create_dir(&destination).await.unwrap();
+        fs::write(destination.join("partial"), b"bad")
+            .await
+            .unwrap();
+        write_complete_test_model(&backup).await;
+        fs::write(
+            backup.join(MARKER),
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        .await
+        .unwrap();
+        // The previous revision's file size need not match the current pin.
+        fs::write(backup.join(TEST_FILES[0].name), b"older-bytes")
+            .await
+            .unwrap();
+        reclaim_transactions(
+            temp.path(),
+            &Manifest {
+                revision: "test-revision",
+                files: &TEST_FILES,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.join(MARKER)).await.unwrap(),
+            "0123456789abcdef0123456789abcdef01234567"
+        );
+        assert!(!is_downloaded(&destination, "test-revision", &TEST_FILES));
+        assert!(!destination.join("partial").exists());
         assert!(!backup.exists());
     }
 

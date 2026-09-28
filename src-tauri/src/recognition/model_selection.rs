@@ -37,27 +37,15 @@ fn selection_error(
     if availability.remote_selected {
         return None;
     }
-    match engine {
-        "parakeet" if model.is_empty() || !downloaded => Some(
-            "The selected Parakeet model is missing or incomplete. Download it in Models before recording.",
-        ),
-        "whisper" if model.is_empty() || !downloaded => Some(
-            "The selected Whisper model is missing or incomplete. Download it in Models before recording.",
-        ),
-        _ if crate::cloud_stt::CloudProvider::from_id(engine).is_some()
-            && (model.is_empty() || !availability.cloud_ready) => {
-            Some("The selected cloud transcription model is unavailable. Configure its key in Models before recording.")
-        }
-        "whisper" | "parakeet" => None,
-        _ if crate::cloud_stt::CloudProvider::from_id(engine).is_none() => {
-            Some("The selected transcription engine is unavailable. Choose a model in Models before recording.")
-        }
-        _ => None,
+    if engine == "parakeet" && !model.is_empty() && !downloaded {
+        Some("The selected Parakeet model is missing or incomplete. Download it in Models before recording.")
+    } else {
+        None
     }
 }
 
-/// Check the selected engine and id, not aggregate availability. An unrelated
-/// downloaded engine must not allow capture with a missing selection.
+/// Only a selected, missing Parakeet model needs an early capture guard.
+/// Other engines retain their existing stop-time selection and fallback paths.
 pub async fn selected_model_error(
     app: &tauri::AppHandle,
     availability: &RecognitionAvailabilitySnapshot,
@@ -74,29 +62,17 @@ pub async fn selected_model_error(
         .get("current_model")
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_default();
-    let downloaded = match engine.as_str() {
-        "parakeet" => app
-            .try_state::<parakeet::ParakeetManager>()
-            .is_some_and(|manager| {
-                manager
-                    .list_models()
-                    .iter()
-                    .any(|status| status.name == model && status.downloaded)
-            }),
-        "whisper" => {
-            if let Some(manager) = app.try_state::<AsyncRwLock<whisper::manager::WhisperManager>>()
-            {
-                manager
-                    .read()
-                    .await
-                    .get_downloaded_model_names()
-                    .contains(&model)
-            } else {
-                false
-            }
-        }
-        _ => true,
-    };
+    if engine != "parakeet" || model.is_empty() {
+        return None;
+    }
+    let downloaded = app
+        .try_state::<parakeet::ParakeetManager>()
+        .is_some_and(|manager| {
+            manager
+                .list_models()
+                .iter()
+                .any(|status| status.name == model && status.downloaded)
+        });
     selection_error(&engine, &model, downloaded, availability)
 }
 
@@ -124,6 +100,33 @@ mod selected_model_tests {
                 .contains("Download it in Models")
         );
         assert!(selection_error("parakeet", "parakeet-tdt-0.6b-v3", true, &availability).is_none());
+    }
+
+    #[test]
+    fn missing_selected_whisper_allows_capture_for_stop_time_fallback() {
+        let availability = available_whisper();
+        assert!(availability.any_available());
+        assert!(selection_error("whisper", "missing-whisper", false, &availability).is_none());
+    }
+
+    #[test]
+    fn empty_whisper_selection_allows_capture_for_stop_time_auto_selection() {
+        let availability = available_whisper();
+        assert!(availability.any_available());
+        assert!(selection_error("whisper", "", false, &availability).is_none());
+    }
+
+    fn available_whisper() -> RecognitionAvailabilitySnapshot {
+        RecognitionAvailabilitySnapshot {
+            whisper_available: true,
+            parakeet_available: false,
+            cloud_selected: false,
+            cloud_ready: false,
+            remote_selected: false,
+            remote_status: ConnectionStatus::Unknown,
+            remote_last_checked: 0,
+            remote_available: false,
+        }
     }
 }
 

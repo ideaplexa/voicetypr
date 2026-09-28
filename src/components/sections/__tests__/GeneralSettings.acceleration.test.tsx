@@ -15,9 +15,15 @@ const baseSettings = {
   pill_indicator_mode: "when_recording",
   pill_indicator_position: "bottom-center",
   pill_indicator_offset: 10,
+  current_model: "base.en",
 };
 
 let mockSettings: Record<string, unknown> = { ...baseSettings };
+let mockModels: Record<string, { gpu_controls_available: boolean }> = {};
+
+vi.mock("@/contexts/ModelManagementContext", () => ({
+  useOptionalModelManagementContext: () => ({ models: mockModels }),
+}));
 
 vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({
@@ -173,7 +179,8 @@ beforeEach(() => {
 
 describe("GeneralSettings transcription acceleration — Windows", () => {
   beforeEach(() => {
-    mockSettings = { ...baseSettings };
+    mockSettings = { ...baseSettings, current_model: "base.en" };
+    mockModels = { "base.en": { gpu_controls_available: true } };
     mockUpdateSettings.mockClear();
     platformMock.isWindows = true;
     platformMock.isMacOS = false;
@@ -184,6 +191,20 @@ describe("GeneralSettings transcription acceleration — Windows", () => {
     await waitFor(() => {
       expect(screen.getByText("Transcription performance")).toBeInTheDocument();
     });
+  });
+
+  it("hides GPU controls for Windows ONNX Parakeet", () => {
+    mockSettings = {
+      ...baseSettings,
+      current_model: "parakeet-tdt-0.6b-v3",
+      current_model_engine: "parakeet",
+      transcription_acceleration: "gpu",
+    };
+    mockModels = { "parakeet-tdt-0.6b-v3": { gpu_controls_available: false } };
+    render(<RecordingSettings />);
+    expect(screen.queryByText("Transcription performance")).not.toBeInTheDocument();
+    expect(screen.queryByText("Always use the GPU")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test GPU")).not.toBeInTheDocument();
   });
 
   it("renders Auto, GPU, and CPU select items", async () => {

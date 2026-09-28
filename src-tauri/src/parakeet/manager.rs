@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
@@ -117,11 +119,13 @@ impl Drop for TranscriptionActiveGuard<'_> {
 
 const PARAKEET_UNAVAILABLE_EVENT: &str = "parakeet-unavailable";
 
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 fn fluid_audio_model_dir(home: &Path, definition: &ParakeetModelDefinition) -> PathBuf {
     home.join("Library/Application Support/FluidAudio/Models")
         .join(definition.cache_subdir)
 }
 
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 fn model_files_complete(model_dir: &Path, definition: &ParakeetModelDefinition) -> bool {
     definition.files.iter().all(|file| {
         let path = model_dir.join(file.filename);
@@ -345,6 +349,10 @@ impl ParakeetManager {
 
     /// Check if a Parakeet model is available.
     /// FluidAudio stores models in ~/Library/Application Support/FluidAudio/Models/<repo-folder>/.
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     pub fn is_model_downloaded(&self, definition: &ParakeetModelDefinition) -> bool {
         #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         {
@@ -1121,6 +1129,10 @@ impl ParakeetManager {
         self.client.shutdown().await;
     }
 
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     fn friendly_spawn_message(details: &str) -> String {
         #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         {
@@ -1186,9 +1198,13 @@ impl ParakeetManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{fluid_audio_model_dir, model_files_complete, ParakeetManager};
+    use super::ParakeetManager;
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+    use super::{fluid_audio_model_dir, model_files_complete};
     use crate::parakeet::models::AVAILABLE_MODELS;
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     use std::fs;
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -1219,6 +1235,7 @@ mod tests {
         drop(held);
     }
 
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     #[test]
     fn fluid_audio_model_dir_matches_fluidaudio_cache_shape() {
         let temp = TempDir::new().expect("temp dir");
@@ -1233,6 +1250,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     #[test]
     fn model_files_complete_rejects_partial_cache() {
         let temp = TempDir::new().expect("temp dir");
@@ -1244,6 +1262,7 @@ mod tests {
         assert!(!model_files_complete(&model_dir, definition));
     }
 
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     #[test]
     fn model_files_complete_accepts_required_files() {
         let temp = TempDir::new().expect("temp dir");
