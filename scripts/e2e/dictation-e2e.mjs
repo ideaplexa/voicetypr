@@ -179,13 +179,22 @@ let testDocument = null;
 let documentCounter = 0;
 async function newDocument(out) {
   documentCounter += 1;
-  const file = join(out, `target-${documentCounter}.txt`);
+  const file = join(out, `target-${process.pid}-${documentCounter}.txt`); // unique across runs
   writeFileSync(file, "");
   testDocument = basename(file);
   command("open", ["-a", "TextEdit", file]);
   await until(() => appleScript(`tell application "TextEdit" to get (exists document "${testDocument}")`) === "true", 10000, "TextEdit test document");
   appleScript(`tell application "TextEdit"\nactivate\nset index of (first window whose name is "${testDocument}") to 1\nend tell`);
   if (documentText()) fail("TextEdit test document was not empty.");
+}
+// Never press the dictation hotkey unless our own test document is the front
+// TextEdit window: otherwise the paste could land in one of the user's documents.
+function ensureTargetFront() {
+  if (!testDocument) fail("No test document is open.");
+  appleScript(`tell application "TextEdit"\nactivate\nset index of (first window whose name is "${testDocument}") to 1\nend tell`);
+  const front = appleScript('tell application "System Events" to get name of first application process whose frontmost is true');
+  const frontWindow = appleScript('tell application "TextEdit" to get name of front window');
+  if (front !== "TextEdit" || frontWindow !== testDocument) fail(`Refusing to dictate: front window is "${front}/${frontWindow}", not the test document.`);
 }
 function closeDocument() {
   if (!testDocument) return;
@@ -296,6 +305,7 @@ async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, wi
     // first-word: speak as soon as the cue fires (a user reacting to it).
     // instant-speech: speech starts at the same instant as the key press; it
     // measures what a pre-roll buffer would recover, not a pass condition.
+    ensureTargetFront();
     if (kind !== "instant-speech") hotkey();
     const started = () => until(() => {
       const recent = logLines(paths).slice(startLogOffset);
@@ -317,6 +327,7 @@ async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, wi
     if (kind === "cancel") escape();
     else {
       if (kind !== "last-word" && kind !== "first-word" && kind !== "instant-speech") await delay(tailMs);
+      ensureTargetFront(); // the paste lands wherever focus is when text is ready
       hotkey();
       stoppedAt = Date.now();
     }
