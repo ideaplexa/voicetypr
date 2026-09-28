@@ -101,6 +101,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
+parakeet-rs = "=0.3.8"
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }

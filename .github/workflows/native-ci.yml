@@ -120,6 +120,7 @@ jobs:
     env:
       # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep dependency trees.
       CARGO_TARGET_DIR: D:\b\app
+      ORT_CACHE_DIR: D:\b\ort-cache
       VULKAN_RUNTIME_VERSION: 1.3.290.0
     steps:
       - uses: actions/checkout@v5
@@ -155,6 +156,15 @@ jobs:
           workspaces: |
             src-tauri -> ../../../../b/app
             sidecar/whisper-vulkan -> ../../../../../b/vulkan
+
+      # ort-sys 2.0.0-rc.13 downloads a hash-verified static archive into
+      # ORT_CACHE_DIR/dfbin/<target>/<archive hash> during its build script.
+      - name: Cache ONNX Runtime archive
+        uses: actions/cache@v5
+        with:
+          path: D:\b\ort-cache
+          key: ort-windows-x64-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ort-windows-x64-
 
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -223,6 +233,11 @@ jobs:
         shell: pwsh
         run: |
           & ./src-tauri/windows/assert-no-vulkan-import.ps1 -ExePath "$env:CARGO_TARGET_DIR/release/voicetypr.exe"
+
+      - name: Assert ONNX Runtime is not a DLL import
+        shell: pwsh
+        run: |
+          & ./src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath "$env:CARGO_TARGET_DIR/release/voicetypr.exe"
 
       - name: Upload preview artifact
         uses: actions/upload-artifact@v6

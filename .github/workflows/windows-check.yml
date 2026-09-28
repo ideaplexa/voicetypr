@@ -7,8 +7,8 @@ name: Windows Checks (fast)
 # correct on Windows. Mirrors the known-good macOS `build-macos` check steps.
 #
 # Run it on-demand from the Actions tab ("Run workflow") for high-confidence Windows
-# feedback in ~5-8 min instead of the ~25 min full build. Also runs automatically on
-# PRs so Windows clippy/test regressions surface fast.
+# feedback without the full installer build. The first run also downloads the static
+# ONNX Runtime archive; later runs restore it from cache. Runs automatically on PRs.
 
 on:
   workflow_dispatch: {}
@@ -25,6 +25,7 @@ jobs:
     env:
       # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep deps.
       CARGO_TARGET_DIR: D:\cargo-target
+      ORT_CACHE_DIR: D:\b\ort-cache
     steps:
       - uses: actions/checkout@v5
 
@@ -44,6 +45,22 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      - name: Cache ONNX Runtime archive
+        uses: actions/cache@v5
+        with:
+          path: D:\b\ort-cache
+          key: ort-windows-x64-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ort-windows-x64-
+
+      - name: Assert Parakeet ONNX dependency is absent on Windows ARM64
+        shell: pwsh
+        run: |
+          $tree = cargo tree --manifest-path src-tauri/Cargo.toml --target aarch64-pc-windows-msvc -p voicetypr --edges normal --prefix none
+          if ($LASTEXITCODE -ne 0) { throw "cargo tree failed with exit code $LASTEXITCODE" }
+          if (@($tree | Where-Object { $_ -match '^parakeet-rs v' }).Count -gt 0) {
+            throw 'parakeet-rs must not be a Windows ARM64 dependency'
+          }
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

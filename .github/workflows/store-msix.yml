@@ -83,6 +83,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       CARGO_TARGET_DIR: 'D:\b\app'
+      ORT_CACHE_DIR: 'D:\b\ort-cache'
       RUST_BACKTRACE: 1
       POSTHOG_PROJECT_TOKEN: ${{ vars.POSTHOG_PROJECT_TOKEN }}
       VULKAN_RUNTIME_VERSION: 1.3.290.0
@@ -163,6 +164,13 @@ jobs:
             src-tauri -> ../../../../b/app
             sidecar/whisper-vulkan -> ../../../../../b/vulkan
 
+      - name: Cache ONNX Runtime archive
+        uses: actions/cache@v5
+        with:
+          path: D:\b\ort-cache
+          key: ort-windows-x64-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ort-windows-x64-
+
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@b394a1abed9cb019d8e637eeadac93d73e0853da
         with:
@@ -185,6 +193,11 @@ jobs:
         shell: pwsh
         run: |
           & ./src-tauri/windows/assert-no-vulkan-import.ps1 -ExePath "$env:CARGO_TARGET_DIR\release\voicetypr.exe"
+
+      - name: Assert ONNX Runtime is not a DLL import
+        shell: pwsh
+        run: |
+          & ./src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath "$env:CARGO_TARGET_DIR\release\voicetypr.exe"
 
       - name: Upload Store MSIX artifact
         uses: actions/upload-artifact@v6
