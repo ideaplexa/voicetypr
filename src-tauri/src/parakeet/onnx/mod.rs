@@ -6,9 +6,14 @@
 )]
 pub mod chunking;
 #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+pub mod download;
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
 pub mod slot;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub static LOCAL_MODEL_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Serializes ONNX download and delete without blocking Whisper transcription.
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+pub static MODEL_OPERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub mod session;
 

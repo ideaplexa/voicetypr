@@ -476,6 +476,9 @@ pub async fn download_model(
                 }
                 ModelEngine::Parakeet => {
                     // Verify Parakeet reports the requested model as downloaded
+                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                    let verified = parakeet_manager.is_onnx_downloaded(&model_name);
+                    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
                     let verified = parakeet_manager
                         .list_models()
                         .into_iter()
@@ -483,7 +486,7 @@ pub async fn download_model(
 
                     if !verified {
                         let msg = format!(
-                            "Parakeet sidecar did not confirm '{}' as downloaded. Please try again.",
+                            "Parakeet did not confirm '{}' as downloaded. Please try again.",
                             model_name
                         );
                         log::warn!("{}", msg);
@@ -871,6 +874,15 @@ async fn identify_download_target(
             }
         }
         ModelEngine::Parakeet => {
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            if model_name == crate::parakeet::onnx::download::MODEL_ID {
+                return Ok(DownloadTarget {
+                    engine,
+                    size_bytes: crate::parakeet::onnx::download::total_size(
+                        &crate::parakeet::onnx::download::FILES,
+                    ),
+                });
+            }
             if let Some(definition) = parakeet_manager.get_model_definition(model_name) {
                 Ok(DownloadTarget {
                     engine,
@@ -899,6 +911,10 @@ async fn determine_model_engine(
     }
 
     if parakeet_manager.get_model_definition(model_name).is_some() {
+        return Ok(ModelEngine::Parakeet);
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if model_name == crate::parakeet::onnx::download::MODEL_ID {
         return Ok(ModelEngine::Parakeet);
     }
 

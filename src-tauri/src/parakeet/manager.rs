@@ -304,8 +304,25 @@ impl ParakeetManager {
             .map_err(|error| error.to_string())
     }
 
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     pub fn model_dir(&self, model_name: &str) -> PathBuf {
         self.root_dir.join(model_name)
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub fn is_onnx_downloaded(&self, model_name: &str) -> bool {
+        model_name == super::onnx::download::MODEL_ID
+            && super::onnx::download::is_downloaded(
+                &super::onnx::download::model_directory(
+                    &self
+                        .root_dir
+                        .parent()
+                        .unwrap_or(&self.root_dir)
+                        .join("parakeet-onnx"),
+                ),
+                super::onnx::download::REVISION,
+                &super::onnx::download::FILES,
+            )
     }
 
     /// Check if a Parakeet model is available.
@@ -335,78 +352,108 @@ impl ParakeetManager {
         cancel_flag: Option<Arc<AtomicBool>>,
         mut progress_callback: impl FnMut(u64, u64, Option<String>) + Send + 'static,
     ) -> Result<(), String> {
-        let Some(definition) = self.get_model_definition(model_name) else {
-            return Err(format!("Unknown Parakeet model: {model_name}"));
-        };
-
-        // For Swift sidecar, delegate download to FluidAudio
-        // Send load_model command which triggers download in Swift
-        let version = Self::model_version_for(definition);
-
-        let command = ParakeetCommand::LoadModel {
-            model_id: definition.id.to_string(),
-            model_version: Some(version.to_string()),
-            force_download: Some(true),
-            local_path: None,
-            cache_dir: None,
-            precision: "bf16".to_string(),
-            attention: "full".to_string(),
-            local_attention_context: 256,
-            chunk_duration: Some(120.0),
-            overlap_duration: Some(15.0),
-            eager_unload: Some(false),
-        };
-
-        // Send to sidecar and let it handle the download
-        let estimated_size = definition.estimated_size;
-        let mut last_downloaded = 0;
-        match self
-            .send_command_with_progress_and_cancel(
-                app,
-                &command,
-                cancel_flag.clone(),
-                |progress, phase| {
-                    let progress = progress.clamp(0.0, 1.0) as f64;
-                    let downloaded = (estimated_size as f64 * progress).round() as u64;
-                    last_downloaded = downloaded;
-                    progress_callback(downloaded, estimated_size, phase.map(str::to_string));
-                },
-            )
-            .await
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         {
-            Ok(ParakeetResponse::Status {
-                loaded_model: Some(id),
-                ..
-            }) if id == definition.id => {
-                if cancel_flag
-                    .as_ref()
-                    .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
-                {
-                    let _ = self.delete_model(app, model_name).await;
-                    return Err("Cancelled by user".to_string());
-                }
+            let _ = app;
+            if model_name != super::onnx::download::MODEL_ID {
+                return Err("This Parakeet model is not available on Windows.".into());
+            }
+            let cancel = cancel_flag.unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+            let root = self
+                .root_dir
+                .parent()
+                .unwrap_or(&self.root_dir)
+                .join("parakeet-onnx");
+            return super::onnx::download::download_pinned(
+                &self.http,
+                &root,
+                &super::onnx::MODEL_OPERATION_LOCK,
+                &super::onnx::LOCAL_MODEL_GATE,
+                self.onnx.unload(),
+                cancel,
+                move |downloaded, total| progress_callback(downloaded, total, None),
+            )
+            .await;
+        }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            let Some(definition) = self.get_model_definition(model_name) else {
+                return Err(format!("Unknown Parakeet model: {model_name}"));
+            };
 
-                // Download/load completed for the requested version
-                if last_downloaded < estimated_size {
-                    progress_callback(estimated_size, estimated_size, Some("complete".to_string()));
+            // For Swift sidecar, delegate download to FluidAudio
+            // Send load_model command which triggers download in Swift
+            let version = Self::model_version_for(definition);
+
+            let command = ParakeetCommand::LoadModel {
+                model_id: definition.id.to_string(),
+                model_version: Some(version.to_string()),
+                force_download: Some(true),
+                local_path: None,
+                cache_dir: None,
+                precision: "bf16".to_string(),
+                attention: "full".to_string(),
+                local_attention_context: 256,
+                chunk_duration: Some(120.0),
+                overlap_duration: Some(15.0),
+                eager_unload: Some(false),
+            };
+
+            // Send to sidecar and let it handle the download
+            let estimated_size = definition.estimated_size;
+            let mut last_downloaded = 0;
+            match self
+                .send_command_with_progress_and_cancel(
+                    app,
+                    &command,
+                    cancel_flag.clone(),
+                    |progress, phase| {
+                        let progress = progress.clamp(0.0, 1.0) as f64;
+                        let downloaded = (estimated_size as f64 * progress).round() as u64;
+                        last_downloaded = downloaded;
+                        progress_callback(downloaded, estimated_size, phase.map(str::to_string));
+                    },
+                )
+                .await
+            {
+                Ok(ParakeetResponse::Status {
+                    loaded_model: Some(id),
+                    ..
+                }) if id == definition.id => {
+                    if cancel_flag
+                        .as_ref()
+                        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+                    {
+                        let _ = self.delete_model(app, model_name).await;
+                        return Err("Cancelled by user".to_string());
+                    }
+
+                    // Download/load completed for the requested version
+                    if last_downloaded < estimated_size {
+                        progress_callback(
+                            estimated_size,
+                            estimated_size,
+                            Some("complete".to_string()),
+                        );
+                    }
+                    Ok(())
                 }
-                Ok(())
+                Ok(ParakeetResponse::Status {
+                    loaded_model: Some(other_id),
+                    ..
+                }) => Err(format!(
+                    "Sidecar loaded '{}' but '{}' was requested",
+                    other_id, definition.id
+                )),
+                Ok(ParakeetResponse::Ok { .. }) => {
+                    Err("Unexpected OK without status payload".to_string())
+                }
+                Ok(ParakeetResponse::Error { code, message, .. }) => {
+                    Err(format!("Failed to download model: {}: {}", code, message))
+                }
+                Err(e) => Err(format!("Failed to communicate with sidecar: {}", e)),
+                _ => Err("Unexpected response from sidecar".to_string()),
             }
-            Ok(ParakeetResponse::Status {
-                loaded_model: Some(other_id),
-                ..
-            }) => Err(format!(
-                "Sidecar loaded '{}' but '{}' was requested",
-                other_id, definition.id
-            )),
-            Ok(ParakeetResponse::Ok { .. }) => {
-                Err("Unexpected OK without status payload".to_string())
-            }
-            Ok(ParakeetResponse::Error { code, message, .. }) => {
-                Err(format!("Failed to download model: {}: {}", code, message))
-            }
-            Err(e) => Err(format!("Failed to communicate with sidecar: {}", e)),
-            _ => Err("Unexpected response from sidecar".to_string()),
         }
     }
 
@@ -502,51 +549,69 @@ impl ParakeetManager {
 
     pub async fn delete_model(&self, app: &AppHandle, model_name: &str) -> Result<(), String> {
         #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-        if model_name == "parakeet-tdt-0.6b-v3" {
-            let _gate = super::onnx::LOCAL_MODEL_GATE.lock().await;
-            self.onnx.unload().await;
-            return Err("Parakeet ONNX model deletion is not available yet.".into());
+        {
+            let _ = app;
+            if model_name != super::onnx::download::MODEL_ID {
+                return Err("This Parakeet model is not available on Windows.".into());
+            }
+            let directory = super::onnx::download::model_directory(
+                &self
+                    .root_dir
+                    .parent()
+                    .unwrap_or(&self.root_dir)
+                    .join("parakeet-onnx"),
+            );
+            return super::onnx::download::delete(
+                &super::onnx::MODEL_OPERATION_LOCK,
+                &super::onnx::LOCAL_MODEL_GATE,
+                &directory,
+                self.onnx.unload(),
+            )
+            .await;
         }
-        let Some(definition) = self.get_model_definition(model_name) else {
-            return Err(format!("Unknown Parakeet model: {model_name}"));
-        };
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            let Some(definition) = self.get_model_definition(model_name) else {
+                return Err(format!("Unknown Parakeet model: {model_name}"));
+            };
 
-        let version = Self::model_version_for(definition);
+            let version = Self::model_version_for(definition);
 
-        // Send delete_model command to Swift sidecar to remove FluidAudio cached files
-        let command = ParakeetCommand::DeleteModel {
-            model_id: Some(definition.id.to_string()),
-            model_version: Some(version.to_string()),
-        };
+            // Send delete_model command to Swift sidecar to remove FluidAudio cached files
+            let command = ParakeetCommand::DeleteModel {
+                model_id: Some(definition.id.to_string()),
+                model_version: Some(version.to_string()),
+            };
 
-        match self.send_command(app, &command).await {
-            Ok(ParakeetResponse::Ok { .. }) | Ok(ParakeetResponse::Status { .. }) => {
-                // Successfully deleted
+            match self.send_command(app, &command).await {
+                Ok(ParakeetResponse::Ok { .. }) | Ok(ParakeetResponse::Status { .. }) => {
+                    // Successfully deleted
+                }
+                Ok(ParakeetResponse::Error { code, message, .. }) => {
+                    return Err(format!("Failed to delete model: {}: {}", code, message));
+                }
+                Err(e) => {
+                    return Err(format!("Failed to communicate with sidecar: {}", e));
+                }
+                _ => {
+                    // Unexpected response but continue
+                }
             }
-            Ok(ParakeetResponse::Error { code, message, .. }) => {
-                return Err(format!("Failed to delete model: {}: {}", code, message));
+
+            // Remove our tracking directory if it exists (from old Python implementation)
+            let model_dir = self.model_dir(definition.id);
+            if model_dir.exists() {
+                std::fs::remove_dir_all(&model_dir).map_err(|e| {
+                    format!(
+                        "Failed to delete old model directory {}: {}",
+                        model_dir.display(),
+                        e
+                    )
+                })?;
             }
-            Err(e) => {
-                return Err(format!("Failed to communicate with sidecar: {}", e));
-            }
-            _ => {
-                // Unexpected response but continue
-            }
+
+            Ok(())
         }
-
-        // Remove our tracking directory if it exists (from old Python implementation)
-        let model_dir = self.model_dir(definition.id);
-        if model_dir.exists() {
-            std::fs::remove_dir_all(&model_dir).map_err(|e| {
-                format!(
-                    "Failed to delete old model directory {}: {}",
-                    model_dir.display(),
-                    e
-                )
-            })?;
-        }
-
-        Ok(())
     }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -675,12 +740,22 @@ impl ParakeetManager {
                 "This Parakeet model is not available on Windows.".into(),
             ));
         }
-        Ok(self
+        let directory = self
             .root_dir
             .parent()
             .unwrap_or(&self.root_dir)
             .join("parakeet-onnx")
-            .join(model_name))
+            .join(model_name);
+        if !super::onnx::download::is_downloaded(
+            &directory,
+            super::onnx::download::REVISION,
+            &super::onnx::download::FILES,
+        ) {
+            return Err(ParakeetError::Unavailable(
+                "Parakeet model files are missing or incomplete. Download the model again.".into(),
+            ));
+        }
+        Ok(directory)
     }
 
     pub async fn load_model(&self, app: &AppHandle, model_name: &str) -> Result<(), ParakeetError> {

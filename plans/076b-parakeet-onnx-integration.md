@@ -162,3 +162,13 @@ Additional requirements:
 Clearing the Whisper cache does not stop an active live-preview thread that
 holds its own `Arc<Transcriber>` (`commands/audio.rs`). Windows live preview
 with CPU Whisper is rare, and the preview ends when the recording ends.
+
+## Slice 3 carry-overs into slice 4 (review 2026-09-28)
+
+- Startup recovery on Windows: at app start, reclaim `.staging-*`, and for an
+  uncommitted destination (no marker) either restore a `.replaced-*` backup
+  or remove it; committed destinations stay.
+- UI: after a cancel request, a `model-downloaded` completion (post-commit)
+  must still refresh model status (`useModelManagement.ts` ~478).
+- Native Windows disk-full / antivirus-lock / process-exit behaviour stays
+  NEEDS-SMOKE.
