@@ -123,6 +123,12 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 /// Hide the main window and the macOS Dock icon — back to the menubar/tray.
+/// Startup model validation must not treat a cloud engine's selection (the
+/// provider id stored as `current_model`) as an unknown Whisper model.
+fn cloud_selection_is_kept(engine: &str) -> bool {
+    cloud_stt::CloudProvider::from_id(engine).is_some()
+}
+
 fn hide_main_window(app: &tauri::AppHandle) -> bool {
     // If the system tray failed to create (e.g. the Windows shell notification
     // area wasn't ready at startup), hiding the window would leave the app
@@ -2155,7 +2161,13 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                     .and_then(|v| v.as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| "whisper".to_string());
 
-                if engine == "parakeet" {
+                if cloud_selection_is_kept(&engine) {
+                    // Cloud engines (Soniox, Deepgram, …) store the provider id as
+                    // the model; there is no local file to validate, and treating
+                    // it as a Whisper id would reset the user's choice on every
+                    // launch. Key readiness is checked before recording.
+                    log::debug!("Keeping cloud model selection for engine '{}'", engine);
+                } else if engine == "parakeet" {
                     // Check ParakeetManager for Parakeet models
                     if let Some(parakeet_manager) = app.try_state::<parakeet::ParakeetManager>() {
                         let models = parakeet_manager.list_models();
@@ -2449,5 +2461,20 @@ mod ai_settings_migration_tests {
         let first = values.clone();
         assert!(!migrate_ai_settings_values(&mut values));
         assert_eq!(values, first);
+    }
+}
+
+#[cfg(test)]
+mod startup_selection_tests {
+    use super::cloud_selection_is_kept;
+
+    #[test]
+    fn cloud_engine_selection_is_kept_at_startup() {
+        for engine in ["soniox", "deepgram", "openai", "groq", "cohere"] {
+            assert!(cloud_selection_is_kept(engine), "{engine}");
+        }
+        for engine in ["whisper", "parakeet", "", "remote"] {
+            assert!(!cloud_selection_is_kept(engine), "{engine}");
+        }
     }
 }
