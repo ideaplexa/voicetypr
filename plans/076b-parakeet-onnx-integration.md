@@ -1,6 +1,6 @@
 # Plan 076b — Integrate ONNX Parakeet on Windows (batch first)
 
-Status: SPEC — Claude 2026-09-28; awaiting gpt-6-astra xhigh second opinion.
+Status: SPEC v2 — Claude 2026-09-28, revised after the gpt-6-astra xhigh second opinion (below).
 Evidence: plan 076 (spike). Code map verified 2026-09-28 on `feat/2.1-beta2`.
 
 ## Goal
@@ -98,3 +98,61 @@ WER ≈ spike on Windows runner, RTF < 0.2, peak memory recorded (target
 - Reuse Whisper's downloader for multi-file models vs a small new one.
 - Memory (2.1 GB peak on Mac CPU): session options (arena, threads) worth
   setting from day one?
+
+## Second opinion (gpt-6-astra xhigh) — decisions
+
+1. `ParakeetManager` stays the façade with compile-time backend dispatch;
+   `ActiveEngineSelection::Parakeet` unchanged (remote transcription calls the
+   manager directly, `remote/transcription.rs:429`). ONNX code in its own
+   files; one serialized model slot, no LRU.
+2. A small, dedicated multi-file downloader (staged beside the destination,
+   HTTP status checks, stall cancellation, exact bytes + sha256, cleanup on
+   every failure, aggregate progress, revision-bound marker written last,
+   download/delete/load serialized); reuse only the command/event plumbing.
+   Only encoder, decoder_joint and vocab are loaded by parakeet-rs
+   (`nemo128.onnx`/`config.json` unused); pin the HF revision.
+3. CPU EP, intra-op threads = min(4, available), inter-op 1 from day one;
+   measure Windows memory before arena tuning.
+
+Additional requirements:
+- **Cancellation/ownership:** the hard-timeout wrapper covers Whisper only
+  (`executor.rs:400`) and sidecar cancel kills a process; started
+  `spawn_blocking` work cannot be aborted. Check cancel before/after load and
+  between every chunk, keep worker ownership, reject late results, never
+  start overlapping workers.
+- **Unload contract:** close admission, cancel, wait for the worker, then
+  drop the session — before delete and at exit. Loading ONNX Parakeet unloads
+  Whisper and vice versa (only one heavy local model resident); stale preload
+  completions are discarded.
+- **Capabilities:** `EngineStreamCapabilities` final-only for Parakeet off
+  macOS; no EOU sidecar calls from capability queries; gate vocabulary
+  compilation, CTC commands and automatic upload diarization
+  (`executor.rs:240`, `upload.ts:98`); persisted live-preview setting must
+  degrade cleanly.
+- **Selected-but-missing model:** validate the *selected* model before
+  recording (today any available engine passes, `audio.rs:4857`), keep it
+  repairable, invalidate the warm session on delete.
+- **UX:** show the ≈ 670 MB download and temporary disk need, a loading state,
+  "language detected automatically", Whisper-only GPU controls; actionable
+  errors (missing/corrupt/download/memory/unsupported) instead of the macOS
+  quarantine/reinstall text; no paths or raw ORT errors in logs.
+- **Chunking:** overlap-free split at quiet gaps with tests for continuous
+  speech, boundary words, empty chunks and timestamp offsets; bounded memory
+  for long uploads; never report the requested language as detected.
+- **CLI:** own init/teardown for the ONNX backend; bench separates cold load
+  from warm RTF.
+- **Packaging:** import checks (no dynamic onnxruntime.dll) in native CI,
+  release and Store workflows; verify NSIS and the MSIX (static CRT, staged
+  runtime DLLs) on a clean install; `get_model_definition` must be
+  platform-filtered too; Windows ARM64 explicitly excluded (assert).
+- **CI time:** perf/WER evaluation stays out of fast PR checks; cache ORT,
+  pinned models and normalized clips; resolve the French discrepancy before
+  enforcing WER thresholds.
+
+## Slices
+
+1. Dependency, link and packaging proof (no user-visible change).
+2. Hidden ONNX backend with serialized lifecycle, cancellation and unload.
+3. Transactional download/delete.
+4. Catalog, settings, capabilities and UX exposure on Windows x64.
+5. Windows evaluation job + installed NSIS/MSIX check (NEEDS-SMOKE on hardware).
