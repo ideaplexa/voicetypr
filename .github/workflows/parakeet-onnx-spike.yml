@@ -1,0 +1,69 @@
+name: Parakeet ONNX spike (Windows)
+
+on:
+  # Temporary trigger for the spike branch; workflow_dispatch only lists
+  # workflows that exist on the default branch.
+  push:
+    branches: [feat/parakeet-windows-spike]
+    paths: ['.github/workflows/parakeet-onnx-spike.yml', 'tools/parakeet-onnx-spike/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      MODEL_DIR: ${{ github.workspace }}/.tmp/models/parakeet-tdt-0.6b-v3-onnx
+      CLIPS_DIR: ${{ github.workspace }}/.tmp/eval
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/parakeet-onnx-spike/target
+          key: spike-${{ runner.os }}-${{ hashFiles('tools/parakeet-onnx-spike/Cargo.lock') }}
+      - uses: actions/cache@v4
+        with:
+          path: .tmp/models
+          key: parakeet-tdt-0.6b-v3-onnx-int8
+      - name: Download model (int8)
+        run: |
+          mkdir -p "$MODEL_DIR"
+          for f in config.json vocab.txt nemo128.onnx decoder_joint-model.int8.onnx encoder-model.int8.onnx; do
+            [ -s "$MODEL_DIR/$f" ] || curl -sSfL -o "$MODEL_DIR/$f" "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/$f"
+          done
+          ls -l "$MODEL_DIR"
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Fetch eval clips (MLS test, CC BY 4.0)
+        run: python tools/parakeet-onnx-spike/fetch_eval.py "$CLIPS_DIR"
+      - name: Build spike (release)
+        working-directory: tools/parakeet-onnx-spike
+        run: cargo build --release
+      - name: Binary size
+        run: ls -l tools/parakeet-onnx-spike/target/release/parakeet-onnx-spike.exe
+      - name: Bench (4 threads)
+        working-directory: tools/parakeet-onnx-spike
+        run: ./target/release/parakeet-onnx-spike.exe --model "$MODEL_DIR" --bench "$CLIPS_DIR" --threads 4 | tee "$GITHUB_WORKSPACE/bench-windows.txt"
+      - name: Summary
+        if: always()
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -v '^{' bench-windows.txt >> "$GITHUB_STEP_SUMMARY" || true
+          tail -1 bench-windows.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parakeet-onnx-windows
+          path: bench-windows.txt
