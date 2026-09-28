@@ -191,12 +191,12 @@ async function newDocument(out) {
 // TextEdit window: otherwise the paste could land in one of the user's documents.
 function ensureTargetFront() {
   if (!testDocument) fail("No test document is open.");
-  // Activating TextEdit can pop its unnamed Open panel in front; closing it only
-  // cancels the panel (document windows always have names).
-  appleScript(`tell application "TextEdit"\nactivate\ntry\nclose (every window whose name is "")\nend try\nset index of (first window whose name is "${testDocument}") to 1\nend tell`);
+  // TextEdit can show small untitled overlay windows (no document, not closable);
+  // only titled document windows can receive the paste, so check the first one.
+  appleScript(`tell application "TextEdit"\nactivate\nset index of (first window whose name is "${testDocument}") to 1\nend tell`);
   // TextEdit's own `frontmost` avoids needing Automation access to System Events.
   const frontmost = appleScript('tell application "TextEdit" to get frontmost');
-  const frontWindow = appleScript('tell application "TextEdit" to get name of front window');
+  const frontWindow = appleScript('tell application "TextEdit" to get name of first window whose titled is true');
   if (frontmost !== "true" || frontWindow !== testDocument) fail(`Refusing to dictate: TextEdit frontmost=${frontmost}, front window "${frontWindow}", not the test document.`);
 }
 function closeDocument() {
