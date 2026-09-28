@@ -91,6 +91,30 @@ describe("useModelManagement", () => {
     vi.useRealTimers();
   });
 
+  it("refreshes recovered model status without claiming a download completed", async () => {
+    let recovered = false;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_model_status") {
+        return Promise.resolve({ models: [{ ...parakeetModel, downloaded: recovered }] });
+      }
+      return Promise.resolve(null);
+    });
+    const { result } = renderHook(() => useModelManagement());
+    await waitFor(() => expect(eventHandlers.has("model-downloaded")).toBe(true));
+
+    recovered = true;
+    await act(async () => {
+      await emitModelEvent("model-downloaded", {
+        model: parakeetModel.name,
+        engine: "parakeet",
+        refreshOnly: true,
+      });
+    });
+
+    await waitFor(() => expect(result.current.models[parakeetModel.name].downloaded).toBe(true));
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it("does not show a downloaded toast when completion arrives after cancellation", async () => {
     const { result } = renderHook(() => useModelManagement());
 

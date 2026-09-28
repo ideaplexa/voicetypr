@@ -819,19 +819,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let parakeet_manager = parakeet::ParakeetManager::new(parakeet_dir);
             app.manage(parakeet_manager);
             log::info!("🦜 Parakeet manager initialized");
-            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-            {
-                let onnx_root = models_dir.join("parakeet-onnx");
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = parakeet::onnx::download::recover_on_startup(
-                        &onnx_root,
-                        &parakeet::onnx::MODEL_OPERATION_LOCK,
-                    ).await {
-                        log::warn!("Parakeet download recovery: {error}");
-                    }
-                });
-            }
-
             // Manage active downloads for cancellation
             app.manage(Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new())));
 
@@ -2031,6 +2018,40 @@ fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {
         .any(|candidate| candidate.model_id == model)
 }
 
+fn selected_parakeet_preload_candidate<'a>(
+    engine: &str,
+    selected_model: &'a str,
+    downloaded: bool,
+) -> Option<&'a str> {
+    (engine == "parakeet" && !selected_model.is_empty() && downloaded).then_some(selected_model)
+}
+
+#[cfg(test)]
+mod startup_model_decision_tests {
+    use super::selected_parakeet_preload_candidate;
+
+    #[test]
+    fn preloads_only_a_downloaded_selected_parakeet_model() {
+        let model = "parakeet-tdt-0.6b-v3";
+        assert_eq!(
+            selected_parakeet_preload_candidate("parakeet", model, true),
+            Some(model)
+        );
+        assert_eq!(
+            selected_parakeet_preload_candidate("parakeet", model, false),
+            None
+        );
+        assert_eq!(
+            selected_parakeet_preload_candidate("whisper", model, true),
+            None
+        );
+        assert_eq!(
+            selected_parakeet_preload_candidate("parakeet", "", true),
+            None
+        );
+    }
+}
+
 /// Perform essential startup checks
 async fn perform_startup_checks(app: tauri::AppHandle) {
     let checks_start = Instant::now();
@@ -2061,6 +2082,44 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                 "Failed to refresh active remote status during startup checks: {}",
                 err
             );
+        }
+    }
+
+    // Startup checks run in a background task. Resolve interrupted downloads
+    // before taking the availability snapshot or choosing a model to preload.
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        let onnx_root = app
+            .path()
+            .app_data_dir()
+            .map(|path| path.join("models").join("parakeet-onnx"));
+        match onnx_root {
+            Ok(root) => {
+                let recovery = parakeet::onnx::download::recover_on_startup(
+                    &root,
+                    &parakeet::onnx::MODEL_OPERATION_LOCK,
+                )
+                .await;
+                // An error can follow an earlier cleanup, so refresh then too.
+                if matches!(&recovery, Ok(true) | Err(_)) {
+                    if let Err(error) = app.emit(
+                        "model-downloaded",
+                        serde_json::json!({
+                            "model": parakeet::onnx::download::MODEL_ID,
+                            "engine": "parakeet",
+                            "refreshOnly": true
+                        }),
+                    ) {
+                        log::warn!(
+                            "Failed to refresh Parakeet model status after recovery: {error}"
+                        );
+                    }
+                }
+                if let Err(error) = recovery {
+                    log::warn!("Parakeet download recovery: {error}");
+                }
+            }
+            Err(_) => log::warn!("Cannot locate the Parakeet model directory for recovery"),
         }
     }
 
@@ -2209,7 +2268,13 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                         let model_known = models.iter().any(|m| m.name == current_model);
                         if let Some(status) = models.iter().find(|m| m.name == current_model) {
                             _model_available = status.downloaded;
-                            if status.downloaded {
+                            if selected_parakeet_preload_candidate(
+                                &engine,
+                                &current_model,
+                                status.downloaded,
+                            )
+                            .is_some()
+                            {
                                 autoload_parakeet_model = Some(current_model.clone());
                             }
                         }
@@ -2298,9 +2363,12 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                 .preload_selected_onnx(&app, &model_name)
                 .await;
             #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
-            let load_result = parakeet_manager.load_model(&app, &model_name).await;
+            let load_result = parakeet_manager
+                .load_model(&app, &model_name)
+                .await
+                .map(|()| parakeet::manager::PreloadOutcome::Loaded);
             match load_result {
-                Ok(_) => {
+                Ok(parakeet::manager::PreloadOutcome::Loaded) => {
                     log::info!("✅ Parakeet model '{}' autoloaded from cache", model_name);
                     match parakeet_manager.warmup(&app).await {
                         Ok(Some(ms)) => {
@@ -2312,6 +2380,7 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                         }
                     }
                 }
+                Ok(parakeet::manager::PreloadOutcome::Superseded) => {}
                 Err(err) => {
                     log::warn!(
                         "Failed to autoload Parakeet model '{}': {}",

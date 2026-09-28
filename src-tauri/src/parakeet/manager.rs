@@ -99,6 +99,27 @@ pub struct ParakeetManager {
     http: Client,
 }
 
+#[cfg_attr(
+    not(all(target_os = "windows", target_arch = "x86_64")),
+    allow(dead_code)
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreloadOutcome {
+    Loaded,
+    Superseded,
+}
+
+impl PreloadOutcome {
+    #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+    fn for_selection(engine: Option<&str>, model: Option<&str>, expected_model: &str) -> Self {
+        if super::onnx::selected_model_matches(engine, model, "parakeet", expected_model) {
+            Self::Loaded
+        } else {
+            Self::Superseded
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct ParakeetTimingSnapshot {
     pub model_load_ms: u64,
@@ -689,12 +710,8 @@ impl ParakeetManager {
             let model = store
                 .get("current_model")
                 .and_then(|v| v.as_str().map(str::to_owned));
-            super::onnx::selected_model_matches(
-                engine.as_deref(),
-                model.as_deref(),
-                "parakeet",
-                model_name,
-            )
+            PreloadOutcome::for_selection(engine.as_deref(), model.as_deref(), model_name)
+                == PreloadOutcome::Loaded
         })
     }
 
@@ -741,29 +758,33 @@ impl ParakeetManager {
         &self,
         app: &AppHandle,
         model_name: &str,
-    ) -> Result<(), ParakeetError> {
-        let directory = self.onnx_model_dir(model_name)?;
+    ) -> Result<PreloadOutcome, ParakeetError> {
         let _gate = super::onnx::LOCAL_MODEL_GATE.lock().await;
         let remote_cache = crate::remote::lifecycle::remote_whisper_cache_handle();
         if !Self::is_selected_onnx(app, model_name) {
-            return Err(ParakeetError::Unavailable(
-                "Parakeet preload was superseded".into(),
-            ));
+            return Ok(PreloadOutcome::Superseded);
         }
-        self.load_onnx_locked(
-            app,
-            directory,
-            Arc::new(AtomicBool::new(false)),
-            remote_cache,
-        )
-        .await?;
+        let directory = match self.onnx_model_dir(model_name) {
+            Ok(directory) => directory,
+            Err(_) if !Self::is_selected_onnx(app, model_name) => {
+                return Ok(PreloadOutcome::Superseded);
+            }
+            Err(error) => return Err(error),
+        };
+        let load_result = self
+            .load_onnx_locked(
+                app,
+                directory,
+                Arc::new(AtomicBool::new(false)),
+                remote_cache,
+            )
+            .await;
         if !Self::is_selected_onnx(app, model_name) {
             self.onnx.unload().await;
-            return Err(ParakeetError::Unavailable(
-                "Parakeet preload was superseded".into(),
-            ));
+            return Ok(PreloadOutcome::Superseded);
         }
-        Ok(())
+        load_result?;
+        Ok(PreloadOutcome::Loaded)
     }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -1198,14 +1219,31 @@ impl ParakeetManager {
 
 #[cfg(test)]
 mod tests {
-    use super::ParakeetManager;
     #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     use super::{fluid_audio_model_dir, model_files_complete};
+    use super::{ParakeetManager, PreloadOutcome};
     use crate::parakeet::models::AVAILABLE_MODELS;
     #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     use std::fs;
     #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     use tempfile::TempDir;
+
+    #[test]
+    fn switched_selection_skips_preload_without_a_failure() {
+        let model = "parakeet-tdt-0.6b-v3";
+        assert_eq!(
+            PreloadOutcome::for_selection(Some("parakeet"), Some(model), model),
+            PreloadOutcome::Loaded
+        );
+        assert_eq!(
+            PreloadOutcome::for_selection(Some("whisper"), Some("base"), model),
+            PreloadOutcome::Superseded
+        );
+        assert_eq!(
+            PreloadOutcome::for_selection(Some("parakeet"), Some("other"), model),
+            PreloadOutcome::Superseded
+        );
+    }
 
     #[tokio::test]
     async fn cancelled_wait_for_local_model_gate_returns_promptly() {

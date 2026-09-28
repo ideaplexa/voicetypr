@@ -82,28 +82,71 @@ pub fn is_downloaded(directory: &Path, revision: &str, files: &[ModelFile]) -> b
 
 // A backup's marker was written only after its files were verified. An older
 // revision may have different file sizes, so do not compare it to today's pin.
-fn is_committed_backup(directory: &Path, manifest: &Manifest<'_>) -> bool {
-    let Ok(revision) = std::fs::read_to_string(directory.join(MARKER)) else {
-        return false;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Inspection {
+    Committed,
+    Uncommitted,
+    Unknown,
+}
+
+fn inspect_marker(directory: &Path) -> Result<Option<String>, ()> {
+    match std::fs::read_to_string(directory.join(MARKER)) {
+        Ok(revision) => Ok(Some(revision)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
+fn inspect_entry_exists(path: &Path) -> Result<bool, ()> {
+    match path.metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(()),
+    }
+}
+
+fn inspect_file(directory: &Path, file: &ModelFile, exact_size: bool) -> Inspection {
+    match directory.join(file.name).metadata() {
+        Ok(metadata)
+            if metadata.is_file()
+                && (!exact_size || metadata.len() == file.size)
+                && metadata.len() > 0 =>
+        {
+            Inspection::Committed
+        }
+        Ok(_) => Inspection::Uncommitted,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Inspection::Uncommitted,
+        Err(_) => Inspection::Unknown,
+    }
+}
+
+fn is_committed_backup(directory: &Path, manifest: &Manifest<'_>) -> Inspection {
+    let revision = match inspect_marker(directory) {
+        Ok(Some(revision)) => revision,
+        Ok(None) => return Inspection::Uncommitted,
+        Err(()) => return Inspection::Unknown,
     };
     if revision.is_empty() || revision.chars().any(char::is_whitespace) {
-        return false;
-    }
-    if revision == manifest.revision {
-        return is_downloaded(directory, manifest.revision, manifest.files);
+        return Inspection::Uncommitted;
     }
     // Published revisions are Hugging Face commit hashes. A stray marker is
     // not enough to make an uncommitted backup recoverable.
-    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return false;
+    if revision != manifest.revision
+        && (revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
+        return Inspection::Uncommitted;
     }
-    directory.is_dir()
-        && manifest.files.iter().all(|file| {
-            directory
-                .join(file.name)
-                .metadata()
-                .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
-        })
+    let mut result = Inspection::Committed;
+    for file in manifest.files {
+        match inspect_file(directory, file, revision == manifest.revision) {
+            Inspection::Unknown => result = Inspection::Unknown,
+            Inspection::Uncommitted if result != Inspection::Unknown => {
+                result = Inspection::Uncommitted;
+            }
+            _ => {}
+        }
+    }
+    result
 }
 
 fn available_space(parent: &Path) -> Result<u64, String> {
@@ -154,7 +197,7 @@ async fn remove_directory(path: &Path, purpose: &str) -> Result<(), String> {
     unreachable!()
 }
 
-async fn reclaim_transactions(root: &Path, manifest: &Manifest<'_>) -> Result<(), String> {
+async fn reclaim_transactions(root: &Path, manifest: &Manifest<'_>) -> Result<bool, String> {
     let destination = model_directory(root);
     let mut entries = fs::read_dir(root)
         .await
@@ -176,35 +219,67 @@ async fn reclaim_transactions(root: &Path, manifest: &Manifest<'_>) -> Result<()
             backups.push(entry.path());
         }
     }
+    // A marker is the publication point. Never replace a committed destination.
+    let destination_state = match inspect_marker(&destination) {
+        Ok(Some(_)) => Inspection::Committed,
+        Ok(None) => Inspection::Uncommitted,
+        Err(()) => Inspection::Unknown,
+    };
+    backups.sort();
+    let inspections: Vec<_> = backups
+        .iter()
+        .map(|path| is_committed_backup(path, manifest))
+        .collect();
+    let destination_exists = inspect_entry_exists(&destination);
+    if destination_state == Inspection::Unknown
+        || destination_exists.is_err()
+        || inspections.contains(&Inspection::Unknown)
+    {
+        log::warn!(
+            "Parakeet recovery could not inspect a transaction; preserving it for the next start"
+        );
+        return Ok(false);
+    }
+    let mut changed = false;
     for path in staging {
         remove_directory(&path, "leftover download transaction").await?;
+        changed = true;
     }
-    // A marker is the publication point. Never replace a committed destination.
-    if !destination.join(MARKER).exists() {
-        backups.sort();
-        if let Some(backup) = backups
+    if destination_state == Inspection::Uncommitted {
+        let backup = backups
             .iter()
+            .zip(&inspections)
             .rev()
-            .find(|path| is_committed_backup(path, manifest))
-        {
+            .find(|(_, state)| **state == Inspection::Committed)
+            .map(|(path, _)| path);
+        if destination_exists == Ok(true) {
             remove_directory(&destination, "uncommitted model").await?;
+            changed = true;
+        }
+        if let Some(backup) = backup {
             fs::rename(backup, &destination).await.map_err(|_| {
                 "Cannot restore the previous Parakeet model. Try downloading again.".to_string()
             })?;
-        } else {
-            remove_directory(&destination, "uncommitted model").await?;
+            changed = true;
         }
     }
     for path in backups {
-        remove_directory(&path, "leftover download transaction").await?;
+        match inspect_entry_exists(&path) {
+            Ok(true) => {
+                remove_directory(&path, "leftover download transaction").await?;
+                changed = true;
+            }
+            Ok(false) => {}
+            Err(()) => log::warn!("Parakeet recovery could not inspect a transaction; preserving it for the next start"),
+        }
     }
-    Ok(())
+    Ok(changed)
 }
 
 pub async fn recover_on_startup(
     root: &Path,
     operation_lock: &tokio::sync::Mutex<()>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let _guard = operation_lock.lock().await;
     fs::create_dir_all(root)
         .await
@@ -669,6 +744,61 @@ mod tests {
         assert!(!is_downloaded(&destination, "test-revision", &TEST_FILES));
         assert!(!destination.join("partial").exists());
         assert!(!backup.exists());
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_preserves_unreadable_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = model_directory(temp.path());
+        let backup = temp.path().join(format!(".replaced-{MODEL_ID}-unreadable"));
+        let staging = temp.path().join(format!(".staging-{MODEL_ID}-pending"));
+        fs::create_dir(&destination).await.unwrap();
+        fs::create_dir(&staging).await.unwrap();
+        fs::write(destination.join("partial"), b"keep")
+            .await
+            .unwrap();
+        fs::create_dir(&backup).await.unwrap();
+        // A directory at the marker path produces a read error on every host,
+        // unlike permission bits that an elevated test runner may bypass.
+        fs::create_dir(backup.join(MARKER)).await.unwrap();
+        let changed = reclaim_transactions(
+            temp.path(),
+            &Manifest {
+                revision: "test-revision",
+                files: &TEST_FILES,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!changed);
+        assert!(backup.join(MARKER).is_dir());
+        assert!(staging.is_dir());
+        assert_eq!(
+            fs::read(destination.join("partial")).await.unwrap(),
+            b"keep"
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_preserves_unreadable_destination_marker() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = model_directory(temp.path());
+        let backup = temp.path().join(format!(".replaced-{MODEL_ID}-complete"));
+        fs::create_dir(&destination).await.unwrap();
+        fs::create_dir(destination.join(MARKER)).await.unwrap();
+        write_complete_test_model(&backup).await;
+        let changed = reclaim_transactions(
+            temp.path(),
+            &Manifest {
+                revision: "test-revision",
+                files: &TEST_FILES,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!changed);
+        assert!(destination.join(MARKER).is_dir());
+        assert!(backup.is_dir());
     }
 
     async fn server(fail: Option<(&'static str, u16)>, stall: bool) -> String {

@@ -973,9 +973,12 @@ pub async fn save_settings(
                     .preload_selected_onnx(&app_clone, &model_name)
                     .await;
                 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
-                let load_result = parakeet_manager.load_model(&app_clone, &model_name).await;
+                let load_result = parakeet_manager
+                    .load_model(&app_clone, &model_name)
+                    .await
+                    .map(|()| crate::parakeet::manager::PreloadOutcome::Loaded);
                 match load_result {
-                    Ok(_) => {
+                    Ok(crate::parakeet::manager::PreloadOutcome::Loaded) => {
                         log::info!("Successfully preloaded new model: {}", model_name);
                         match parakeet_manager.warmup(&app_clone).await {
                             Ok(Some(ms)) => log::info!(
@@ -989,6 +992,7 @@ pub async fn save_settings(
                             Err(e) => log::warn!("Failed to warm new Parakeet model: {}", e),
                         }
                     }
+                    Ok(crate::parakeet::manager::PreloadOutcome::Superseded) => {}
                     Err(e) => log::warn!("Failed to preload new model: {}", e),
                 }
                 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]

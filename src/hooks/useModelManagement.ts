@@ -468,7 +468,12 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
         model: string;
         engine?: string;
         requestId?: string;
+        refreshOnly?: boolean;
       }>("model-downloaded", async (event) => {
+        if (event.refreshOnly) {
+          await loadModels();
+          return;
+        }
         const modelName = event.model;
         const requestId = event.requestId;
         const isCancelledCompletion = requestId
