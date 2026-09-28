@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 export const APP_ID = "com.ideaplexa.voicetypr";
 export const HOTKEY = "Control+Alt+F9";
-export const CASES = ["regular", "live-preview", "first-word", "last-word", "back-to-back", "cancel", "no-speech"];
+export const CASES = ["regular", "live-preview", "first-word", "instant-speech", "last-word", "back-to-back", "cancel", "no-speech"];
 export const PARAKEET_CACHE_SUBDIRS = {
   "parakeet-tdt-0.6b-v3": "parakeet-tdt-0.6b-v3",
   "parakeet-tdt-0.6b-v2": "parakeet-tdt-0.6b-v2",

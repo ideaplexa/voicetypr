@@ -206,7 +206,8 @@ function hidKey(args) {
   command(hidKeyBinary, args);
 }
 function hotkey() { hidKey(["101", "ctrl", "alt"]); } // Control+Alt+F9 (HOTKEY)
-function escape() { hidKey(["53"]); }
+// Voicetypr cancels on a double-tap of Escape (the first tap only arms it).
+function escape() { hidKey(["53"]); spawnSync("sleep", ["0.3"]); hidKey(["53"]); }
 function buildWindowFinder(out) {
   const swift = `import CoreGraphics\nimport Foundation\nlet owner = Int32(CommandLine.arguments.last!)!\nlet list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)! as! [[String: Any]]\nlet windows = list.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == owner }.filter { ($0[kCGWindowBounds as String] as? [String: Double]).map { let w = $0["Width"] ?? 0; let h = $0["Height"] ?? 0; return (200.0...600.0).contains(w) && (40.0...180.0).contains(h) && (3.8...4.3).contains(w / h) } ?? false }\nif let id = windows.compactMap({ ($0[kCGWindowNumber as String] as? NSNumber)?.intValue }).first { print(id) }`;
   const source = join(out, "pill-window-id.swift");
@@ -292,7 +293,10 @@ async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, wi
   for (let index = 0; index < (kind === "no-speech" ? 1 : rows.length); index += 1) {
     const beforePass = documentText();
     const startLogOffset = logLines(paths).length;
-    if (kind !== "first-word") hotkey();
+    // first-word: speak as soon as the cue fires (a user reacting to it).
+    // instant-speech: speech starts at the same instant as the key press; it
+    // measures what a pre-roll buffer would recover, not a pass condition.
+    if (kind !== "instant-speech") hotkey();
     const started = () => until(() => {
       const recent = logLines(paths).slice(startLogOffset);
       if (recent.some((line) => /Recording blocked|License required|License check failed|Cloud transcription key missing/u.test(line))) {
@@ -300,19 +304,19 @@ async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, wi
       }
       return recent.some((line) => line.includes("Toggle: Recording started successfully"));
     }, 10000, "recording start");
-    if (kind !== "first-word") await started();
+    if (kind !== "instant-speech") await started();
     if (kind === "no-speech") {
       await delay(400);
       screenshot = join(out, `${selection.engine}-${selection.model}-${language}-${livePreview ? "preview" : "regular"}-${kind}-${ordinal}-${index}.png`);
       pillScreenshot(windowFinder, pid, screenshot);
     } else {
       screenshot = join(out, `${selection.engine}-${selection.model}-${language}-${livePreview ? "preview" : "regular"}-${kind}-${ordinal}-${index}.png`);
-      await playClip(rows[index].file, outputIndex, pid, screenshot, windowFinder, kind === "first-word" ? hotkey : undefined);
+      await playClip(rows[index].file, outputIndex, pid, screenshot, windowFinder, kind === "instant-speech" ? hotkey : undefined);
     }
-    if (kind === "first-word") await started();
+    if (kind === "instant-speech") await started();
     if (kind === "cancel") escape();
     else {
-      if (kind !== "last-word" && kind !== "first-word") await delay(tailMs);
+      if (kind !== "last-word" && kind !== "first-word" && kind !== "instant-speech") await delay(tailMs);
       hotkey();
       stoppedAt = Date.now();
     }
@@ -327,7 +331,7 @@ async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, wi
     id: `${selection.engine}:${selection.model}:${language}:${livePreview ? "live_preview" : "regular"}:${kind}:${ordinal}:${rows.map((row) => basename(row.file)).join("+")}`,
     engine: selection.engine, model: selection.model, language, mode: livePreview ? "live_preview" : "regular", case: kind,
     clips: rows.map((row) => basename(row.file)), wer: kind === "cancel" || kind === "no-speech" ? null : wer(reference, actual),
-    first_word_present: kind === "first-word" ? words(actual)[0] === words(reference)[0] : null,
+    first_word_present: kind === "first-word" || kind === "instant-speech" ? words(actual)[0] === words(reference)[0] : null,
     last_word_present: kind === "last-word" ? words(actual).at(-1) === words(reference).at(-1) : null,
     stop_to_text_ms: stoppedAt && actual.length ? result.at - stoppedAt : null,
     ...timing(lines), screenshot: basename(screenshot),
