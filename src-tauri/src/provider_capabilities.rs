@@ -309,10 +309,13 @@ mod tests {
             .copied()
             .filter(|engine| engine.capabilities().supports_vocabulary_terms)
             .collect();
-        assert_eq!(
-            vocabulary_terms_engines,
+        // Parakeet vocabulary uses the macOS sidecar's CTC boosting only.
+        let expected_vocabulary_engines = if cfg!(target_os = "macos") {
             vec![ProviderEngine::Parakeet, ProviderEngine::Deepgram]
-        );
+        } else {
+            vec![ProviderEngine::Deepgram]
+        };
+        assert_eq!(vocabulary_terms_engines, expected_vocabulary_engines);
 
         let translate_task_engines: Vec<_> = engines
             .iter()

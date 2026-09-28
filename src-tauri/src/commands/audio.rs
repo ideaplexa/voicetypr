@@ -4238,11 +4238,13 @@ mod tests {
             "Parakeet preview must be ineligible in regular mode even with dev flags"
         );
 
-        // Live-preview mode: same dev flags, live preview ON → eligible
-        // (decode-ahead preview path preserved).
-        assert!(
+        // Live-preview mode: same dev flags, live preview ON → eligible on macOS
+        // (decode-ahead preview path preserved); the Windows ONNX backend is
+        // final-only, so it stays ineligible there.
+        assert_eq!(
             parakeet_preview_sink_eligible(true, true, true, &config),
-            "Parakeet preview must be eligible in live-preview mode"
+            cfg!(target_os = "macos"),
+            "Parakeet preview eligibility in live-preview mode"
         );
 
         // Guard still honors the other terms regardless of live-preview mode.
