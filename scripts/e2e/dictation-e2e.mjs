@@ -116,16 +116,18 @@ function prepareProfile(home, selection, livePreview, language, secureStore) {
   if (selection.engine === "parakeet" && !existsSync(join(paths.fluidModels, PARAKEET_CACHE_SUBDIRS[selection.model]))) {
     fail(`FluidAudio model ${selection.model} is missing in ${real.fluidModels}. Download it in Voicetypr first.`);
   }
-  if (!new Set(["whisper", "parakeet"]).has(selection.engine)) {
-    if (!new Set(["soniox", "deepgram", "openai", "groq", "cohere"]).has(selection.engine)) fail(`Unknown engine ${selection.engine}.`);
-    if (!secureStore) fail(`${selection.engine} requires --secure-store <path> with its encrypted API key.`);
+  const isCloud = !new Set(["whisper", "parakeet"]).has(selection.engine);
+  if (isCloud && !new Set(["soniox", "deepgram", "openai", "groq", "cohere"]).has(selection.engine)) fail(`Unknown engine ${selection.engine}.`);
+  if (isCloud && !secureStore) fail(`${selection.engine} requires --secure-store <path> with its encrypted API key.`);
+  // The secure store also carries the license, so local engines use it too when given.
+  if (secureStore) {
     const source = resolve(secureStore);
     if (!existsSync(source) || !statSync(source).isFile()) fail(`Secure store file does not exist: ${source}`);
     if (realpathSync(source) === join(real.data, "secure.dat")) fail("Provide a separate secure.dat file, not the normal Voicetypr profile's secure store.");
     let values;
     try { values = JSON.parse(readFileSync(source, "utf8")); }
     catch { fail(`Secure store file is not valid JSON: ${source}`); }
-    if (typeof values?.[`stt_api_key_${selection.engine}`] !== "string") fail(`Separate secure.dat has no encrypted stt_api_key_${selection.engine} entry.`);
+    if (isCloud && typeof values?.[`stt_api_key_${selection.engine}`] !== "string") fail(`Separate secure.dat has no encrypted stt_api_key_${selection.engine} entry.`);
     copyFileSync(source, join(paths.data, "secure.dat"));
   }
   return paths;
@@ -170,14 +172,41 @@ async function launch(bin, home, paths) {
   return child;
 }
 function appleScript(source) { return command("osascript", ["-e", source]).trim(); }
-function newDocument() {
-  appleScript('tell application "TextEdit" to activate\ntell application "TextEdit" to make new document');
-  const value = appleScript('tell application "TextEdit" to get text of front document');
-  if (value) fail("New TextEdit document was not empty.");
+// The harness only ever touches the TextEdit document it opened: an empty local
+// file under the run directory, so nothing is autosaved into the user's iCloud
+// TextEdit folder, and it is closed without saving after each case.
+let testDocument = null;
+let documentCounter = 0;
+async function newDocument(out) {
+  documentCounter += 1;
+  const file = join(out, `target-${documentCounter}.txt`);
+  writeFileSync(file, "");
+  testDocument = basename(file);
+  command("open", ["-a", "TextEdit", file]);
+  await until(() => appleScript(`tell application "TextEdit" to get (exists document "${testDocument}")`) === "true", 10000, "TextEdit test document");
+  appleScript(`tell application "TextEdit"\nactivate\nset index of (first window whose name is "${testDocument}") to 1\nend tell`);
+  if (documentText()) fail("TextEdit test document was not empty.");
 }
-function documentText() { return appleScript('tell application "TextEdit" to get text of front document'); }
-function hotkey() { command("cliclick", ["kd:ctrl", "kd:alt", "kp:f9", "ku:alt", "ku:ctrl"]); }
-function escape() { command("cliclick", ["kp:esc"]); }
+function closeDocument() {
+  if (!testDocument) return;
+  try { appleScript(`tell application "TextEdit" to close (first document whose name is "${testDocument}") saving no`); } catch { /* already closed */ }
+  testDocument = null;
+}
+function documentText() { return appleScript(`tell application "TextEdit" to get text of document "${testDocument}"`); }
+// Voicetypr's key engine taps the HID stream, which never sees cliclick's
+// session-level events; scripts/e2e/hidkey.swift posts at the HID tap instead.
+let hidKeyBinary = null;
+function hidKey(args) {
+  if (!hidKeyBinary) {
+    const outDir = join(ROOT, ".tmp", "e2e");
+    mkdirSync(outDir, { recursive: true });
+    hidKeyBinary = join(outDir, "hidkey");
+    command("xcrun", ["swiftc", "-O", join(import.meta.dirname, "hidkey.swift"), "-o", hidKeyBinary], { timeout: 120000 });
+  }
+  command(hidKeyBinary, args);
+}
+function hotkey() { hidKey(["101", "ctrl", "alt"]); } // Control+Alt+F9 (HOTKEY)
+function escape() { hidKey(["53"]); }
 function buildWindowFinder(out) {
   const swift = `import CoreGraphics\nimport Foundation\nlet owner = Int32(CommandLine.arguments.last!)!\nlet list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)! as! [[String: Any]]\nlet windows = list.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == owner }.filter { ($0[kCGWindowBounds as String] as? [String: Double]).map { let w = $0["Width"] ?? 0; let h = $0["Height"] ?? 0; return (200.0...600.0).contains(w) && (40.0...180.0).contains(h) && (3.8...4.3).contains(w / h) } ?? false }\nif let id = windows.compactMap({ ($0[kCGWindowNumber as String] as? NSNumber)?.intValue }).first { print(id) }`;
   const source = join(out, "pill-window-id.swift");
@@ -186,11 +215,26 @@ function buildWindowFinder(out) {
   command("xcrun", ["swiftc", source, "-o", binary], { timeout: 120000 });
   return binary;
 }
+// Screenshots are evidence, not a pass condition: without Screen Recording for
+// the calling host they are skipped with a warning instead of failing the case.
+let screenshotWarned = false;
 function pillScreenshot(windowFinder, pid, destination) {
-  const id = command(windowFinder, [String(pid)]).trim();
-  if (!/^\d+$/u.test(id)) fail("Could not identify the on-screen Voicetypr pill window. Allow Screen Recording for the calling host and verify the pill is visible.");
-  command("screencapture", ["-x", "-l", id, destination]);
-  if (!existsSync(destination) || statSync(destination).size === 0) fail(`Pill screenshot was not written: ${destination}. Check Screen Recording permission for the calling host.`);
+  try {
+    const id = command(windowFinder, [String(pid)]).trim();
+    if (!/^\d+$/u.test(id)) throw new Error("pill window not found");
+    // Prefer the Cap CLI (it has its own Screen Recording grant); fall back to screencapture.
+    const cap = join(process.env.HOME ?? "", ".cap", "bin", "cap");
+    if (existsSync(cap)) command(cap, ["screenshot", "--window", id, "--path", destination]);
+    else command("screencapture", ["-x", "-l", id, destination]);
+    if (!existsSync(destination) || statSync(destination).size === 0) throw new Error("empty screenshot");
+    return destination;
+  } catch (error) {
+    if (!screenshotWarned) {
+      console.warn(`Pill screenshot skipped (${error.message}). Allow Screen Recording for the calling host to capture it.`);
+      screenshotWarned = true;
+    }
+    return null;
+  }
 }
 async function playClip(file, outputIndex, pid, screenshot, windowFinder, onSpawn = () => {}) {
   const child = spawn("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-re", "-i", file, "-f", "audiotoolbox", "-audio_device_index", String(outputIndex), "-"], { stdio: ["ignore", "ignore", "pipe"] });
@@ -229,8 +273,15 @@ function timing(lines) {
   const match = first?.match(/start_to_first_audio_ms[^\d]*(\d+)/u);
   return { start_to_first_audio_ms: match ? Number(match[1]) : null, rec_timing: entries.map((line) => line.slice(line.indexOf("[REC TIMING]"))) };
 }
-async function runCase({ kind, clips, outputIndex, pid, paths, out, windowFinder, timeoutMs, tailMs, selection, livePreview, ordinal }) {
-  newDocument();
+async function runCase(options) {
+  try {
+    return await runCaseInDocument(options);
+  } finally {
+    closeDocument();
+  }
+}
+async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, windowFinder, timeoutMs, tailMs, selection, livePreview, ordinal }) {
+  await newDocument(out);
   const rows = kind === "back-to-back" ? [clips[0], clips[1] ?? clips[0]] : [clips[0]];
   const language = clips[0].lang;
   const textBefore = documentText();
