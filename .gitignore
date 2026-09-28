@@ -73,3 +73,4 @@ pi-session-*.html
 # Whisper Vulkan sidecar build artifacts
 sidecar/whisper-vulkan/target/
 .pi/extensions/emdash-hook.ts
+.tmp/
