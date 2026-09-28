@@ -27,7 +27,7 @@ export function ResetSection() {
 
   const handleResetAppData = async () => {
     const confirmed = await ask(
-      "This action cannot be undone. This will permanently delete all your Voicetypr data.\n\nThe app will restart after reset.\n\nAre you absolutely sure?",
+      "This action cannot be undone. This will permanently delete all your Voicetypr data except your license and API keys.\n\nThe app will restart after reset.\n\nAre you absolutely sure?",
       {
         title: "Reset App Data",
         okLabel: "Reset Everything",
@@ -56,7 +56,7 @@ export function ResetSection() {
     <SettingsCard
       icon={RotateCcw}
       title="Reset app / start over"
-      description="Re-run setup or wipe Voicetypr back to a clean state."
+      description="Re-run setup or clear app data while keeping your license and API keys."
     >
       <SettingRow title="Reset Onboarding" description="Re-run the initial setup wizard">
         <Button variant="outline" size="sm" onClick={handleResetOnboarding}>
@@ -68,13 +68,14 @@ export function ResetSection() {
       <div className="mt-4 border-t border-border pt-4">
         <p className="mb-1 text-[13.5px] font-semibold text-foreground">Reset App Data</p>
         <p className="mb-2 text-[12.5px] text-muted-foreground">
-          Completely reset Voicetypr to its initial state
+          Clear app data and settings to start over
         </p>
         <ul className="mb-3 list-inside list-disc space-y-0.5 text-xs text-muted-foreground">
           <li>Delete all transcription history</li>
           <li>Remove all downloaded models</li>
           <li>Clear all settings and preferences</li>
           <li>Reset system permissions</li>
+          <li>Keep your license and API keys</li>
         </ul>
         <Button
           variant="destructive"
