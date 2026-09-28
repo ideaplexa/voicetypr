@@ -638,6 +638,12 @@ pub async fn get_parakeet_vocabulary_status(
     app: AppHandle,
     parakeet_manager: State<'_, ParakeetManager>,
 ) -> Result<ParakeetVocabularyStatusResponse, String> {
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Ok(ParakeetVocabularyStatusResponse {
+            supported: false,
+            ready: false,
+        });
+    }
     match parakeet_manager.status(&app).await {
         Ok(response) => {
             let Some(status) = ParakeetManager::vocabulary_status_from_response(&response) else {
@@ -658,6 +664,9 @@ pub async fn download_parakeet_vocabulary_model(
     parakeet_manager: State<'_, ParakeetManager>,
     active_downloads: ActiveDownloadsState<'_>,
 ) -> Result<(), String> {
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Err("Parakeet CTC vocabulary is unavailable on Windows.".into());
+    }
     const MODEL_ID: &str = "parakeet-vocabulary-ctc-110m";
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1150,10 +1159,45 @@ pub async fn preload_model(
             .ok_or(format!("Model '{}' not found", model_name))?
     };
 
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let _local_model_gate = crate::parakeet::onnx::LOCAL_MODEL_GATE.lock().await;
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let still_selected = || {
+        app.store("settings").ok().is_some_and(|store| {
+            let engine = store
+                .get("current_model_engine")
+                .and_then(|v| v.as_str().map(str::to_owned));
+            let model = store
+                .get("current_model")
+                .and_then(|v| v.as_str().map(str::to_owned));
+            crate::parakeet::onnx::selected_model_matches(
+                engine.as_deref(),
+                model.as_deref(),
+                "whisper",
+                &model_name,
+            )
+        })
+    };
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if !still_selected() {
+        return Err("Whisper preload was superseded by another model selection".into());
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    app.state::<crate::parakeet::ParakeetManager>()
+        .unload_onnx()
+        .await;
+
     // On Windows with GPU acceleration, warm the Vulkan sidecar so the first transcription
     // after a manual preload isn't slow. No-op on non-Windows / CPU mode; when it does not
     // warm, fall through to loading the CPU transcriber cache.
     if crate::commands::audio::warm_whisper_gpu_sidecar_on_model_preload(&app, &model_path).await {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if !still_selected() {
+            app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
+                .abort_active_process()
+                .await;
+            return Err("Whisper preload was superseded by another model selection".into());
+        }
         log::info!(
             "Model '{}' preloaded successfully in Vulkan sidecar",
             model_name
@@ -1167,6 +1211,11 @@ pub async fn preload_model(
         let mut cache = cache_state.lock().await;
         let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app);
         cache.get_or_create(&model_path, speed_mode)?;
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if !still_selected() {
+            cache.clear();
+            return Err("Whisper preload was superseded by another model selection".into());
+        }
     }
 
     log::info!("Model '{}' preloaded successfully", model_name);

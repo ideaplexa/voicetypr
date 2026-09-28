@@ -47,6 +47,36 @@ pub struct ServerHandle {
 /// Generous upper bound while waiting for in-flight HTTP work during disable/restart.
 const GRACEFUL_SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 
+// The ONNX loader needs to evict the remote Whisper model even while the
+// manager is awaiting a draining request. Never hold this registry lock while
+// waiting for the cache or doing model work.
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+static REMOTE_WHISPER_CACHE: Mutex<Option<Arc<Mutex<crate::whisper::cache::TranscriberCache>>>> =
+    Mutex::new(None);
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+pub(crate) fn remote_whisper_cache_handle(
+) -> Option<Arc<Mutex<crate::whisper::cache::TranscriberCache>>> {
+    let handle = REMOTE_WHISPER_CACHE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    handle
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn set_remote_whisper_cache_handle(
+    handle: Option<Arc<Mutex<crate::whisper::cache::TranscriberCache>>>,
+) {
+    let previous = std::mem::replace(
+        &mut *REMOTE_WHISPER_CACHE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()),
+        handle,
+    );
+    drop(previous);
+}
+
 impl ServerHandle {
     /// Stop the server gracefully
     pub async fn stop(&mut self) {
@@ -196,14 +226,15 @@ impl RemoteServerManager {
 
         // Create the transcription context with shared state and app handle
         // App handle is needed for Parakeet engine support
-        let ctx = Arc::new(RwLock::new(
-            RealTranscriptionContext::new_with_shared_state(
-                server_name.clone(),
-                password,
-                shared_state.clone(),
-                app_handle.clone(),
-            ),
-        ));
+        let context = RealTranscriptionContext::new_with_shared_state(
+            server_name.clone(),
+            password,
+            shared_state.clone(),
+            app_handle.clone(),
+        );
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        let whisper_cache = context.whisper_cache_handle();
+        let ctx = Arc::new(RwLock::new(context));
         log::info!(
             "⏱️ [SERVER TIMING] Context created (+{}ms)",
             start_time.elapsed().as_millis()
@@ -365,6 +396,10 @@ impl RemoteServerManager {
             binding_results,
             discovery_handle,
         });
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            set_remote_whisper_cache_handle(Some(whisper_cache));
+        }
 
         log::info!(
             "⏱️ [SERVER TIMING] Server STARTED - total: {}ms (port={}, model='{}')",
@@ -389,6 +424,10 @@ impl RemoteServerManager {
         self.config = None;
         self.shared_state = None;
         self.client_activity = None;
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            set_remote_whisper_cache_handle(None);
+        }
     }
 
     /// Update the model being served (without restarting server)

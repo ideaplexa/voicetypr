@@ -92,6 +92,11 @@ pub(crate) async fn transcribe_whisper_with_acceleration<F>(
 where
     F: Fn() -> bool + Clone + Send + 'static,
 {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let local_model_gate = crate::parakeet::onnx::LOCAL_MODEL_GATE.lock().await;
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    app.state::<ParakeetManager>().unload_onnx().await;
+
     let speed_mode = speed_mode_override.unwrap_or_else(|| read_whisper_speed_mode(app));
 
     #[cfg(target_os = "windows")]
@@ -179,6 +184,8 @@ where
     let initial_prompt = initial_prompt.map(str::to_owned);
     let should_cancel_for_decode = should_cancel.clone();
     let result = tokio::task::spawn_blocking(move || {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        let _local_model_gate = local_model_gate;
         transcriber.transcribe_with_metadata_with_prompt(
             &audio_path,
             language.as_deref(),
@@ -400,6 +407,39 @@ pub(crate) async fn resolve_engine_for_model(
 #[cfg(test)]
 mod tests {
     use super::{should_use_active_remote, transcription_watchdog_budget, ActiveEngineSelection};
+
+    #[tokio::test]
+    async fn blocking_worker_keeps_gate_after_waiting_future_is_dropped() {
+        static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let guard = GATE.lock().await;
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        let waiting = tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                let _guard = guard;
+                started_tx.send(()).unwrap();
+                finish_rx.recv().unwrap();
+            })
+            .await
+            .unwrap();
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv().unwrap())
+            .await
+            .unwrap();
+        waiting.abort();
+        assert!(GATE.try_lock().is_err());
+        finish_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(_guard) = GATE.try_lock() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn active_engine_routes_are_stable_for_evidence_logs() {

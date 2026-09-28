@@ -118,6 +118,11 @@ pub struct RealTranscriptionContext {
 }
 
 impl RealTranscriptionContext {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub(crate) fn whisper_cache_handle(&self) -> Arc<StdMutex<TranscriberCache>> {
+        Arc::clone(&self.cache)
+    }
+
     /// Create a new transcription context with shared state and AppHandle
     pub fn new_with_shared_state(
         server_name: String,
@@ -365,7 +370,8 @@ impl RealTranscriptionContext {
         Ok(result)
     }
 
-    /// Transcribe using Whisper model
+    /// Transcribe using Whisper model. Call only from a blocking thread, never
+    /// from an async task: Windows takes a blocking model gate and unloads ONNX.
     fn transcribe_with_whisper(
         &self,
         audio_path: &Path,
@@ -374,6 +380,13 @@ impl RealTranscriptionContext {
         translate_to_english: bool,
         context: Option<&str>,
     ) -> Result<crate::whisper::transcriber::WhisperTranscriptionOutput, String> {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        let _local_model_gate = crate::parakeet::onnx::LOCAL_MODEL_GATE.blocking_lock();
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if let Some(app) = &self.app_handle {
+            use tauri::Manager;
+            app.state::<ParakeetManager>().unload_onnx_blocking();
+        }
         // Get transcriber from cache (blocking lock - serializes all transcriptions)
         let transcriber = {
             let mut cache = self

@@ -532,7 +532,6 @@ async fn retry_tray_creation(app: tauri::AppHandle) -> Result<tray_status::TrayS
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Retain the ONNX/ORT link probe in the Windows x64 exe without invoking it.
-    // The backend becomes callable only in the next slice.
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     std::hint::black_box(parakeet::onnx::can_initialize_runtime as fn() -> bool);
 
@@ -1387,12 +1386,32 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         if let Some(model_path) = model_path {
+                            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                            let _local_model_gate = crate::parakeet::onnx::LOCAL_MODEL_GATE.lock().await;
+                            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                            let still_selected = || {
+                                app_handle.store("settings").ok().is_some_and(|store| {
+                                    let engine = store.get("current_model_engine").and_then(|v| v.as_str().map(str::to_owned));
+                                    let model = store.get("current_model").and_then(|v| v.as_str().map(str::to_owned));
+                                    crate::parakeet::onnx::selected_model_matches(engine.as_deref(), model.as_deref(), "whisper", &current_model)
+                                })
+                            };
+                            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                            if !still_selected() { return; }
+                            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                            app_handle.state::<parakeet::ParakeetManager>().unload_onnx().await;
                             if crate::commands::audio::warm_whisper_gpu_sidecar_on_model_preload(
                                 &app_handle,
                                 &model_path,
                             )
                             .await
                             {
+                                #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                                if !still_selected() {
+                                    app_handle.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
+                                        .abort_active_process().await;
+                                    return;
+                                }
                                 log::info!(
                                     "Successfully preloaded model '{}' in Vulkan sidecar",
                                     current_model
@@ -1402,7 +1421,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     let cache_state = app_handle.state::<AsyncMutex<TranscriberCache>>();
                                     let mut cache = cache_state.lock().await;
                                     let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app_handle);
-                                    cache.get_or_create(&model_path, speed_mode).map(|_| ())
+                                    let result = cache.get_or_create(&model_path, speed_mode).map(|_| ());
+                                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                                    if !still_selected() {
+                                        cache.clear();
+                                        return;
+                                    }
+                                    result
                                 };
 
                                 match preload_result {
@@ -1828,6 +1853,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 tauri::async_runtime::block_on(async move {
                     if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {
                         cache.lock().await.clear();
+                    }
+                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                    if let Some(parakeet) = app_handle.try_state::<parakeet::ParakeetManager>() {
+                        parakeet.unload_onnx().await;
                     }
                     if let Some(remote) = app_handle
                         .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()

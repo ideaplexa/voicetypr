@@ -615,6 +615,10 @@ async fn run_stream_bench(
         ParakeetStreamConfig::streaming()
     };
 
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Err("Parakeet CLI streaming is unavailable on Windows.".into());
+    }
+
     let parakeet_manager = app.state::<ParakeetManager>();
     parakeet_manager
         .load_model(app, &model)

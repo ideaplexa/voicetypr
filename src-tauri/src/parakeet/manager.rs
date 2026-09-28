@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+use std::time::Duration;
 use std::time::Instant;
 
 use log::{trace, warn};
@@ -15,10 +17,13 @@ use super::messages::{
 };
 #[cfg(target_os = "macos")]
 use super::models::get_available_models;
-use super::models::{ParakeetModelDefinition, ParakeetModelKind, AVAILABLE_MODELS};
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+use super::models::AVAILABLE_MODELS;
+use super::models::{ParakeetModelDefinition, ParakeetModelKind};
 use super::sidecar::{
     ParakeetClient, ParakeetStreamHandle, ParakeetStreamOpenRequest, ParakeetStreamPartial,
 };
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 use crate::utils::logger::log_performance;
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,6 +51,9 @@ pub struct ParakeetEouModelStatus {
 const EOU_MODEL_SIZE_BYTES: u64 = 250 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
+// The Windows ONNX backend reads only the cancel flag (no language hint,
+// translation or CTC vocabulary).
+#[cfg_attr(all(target_os = "windows", target_arch = "x86_64"), allow(dead_code))]
 pub struct ParakeetTranscriptionOptions {
     pub language: Option<String>,
     pub translate: bool,
@@ -76,10 +84,13 @@ pub struct ParakeetVocabularyStatus {
 
 pub struct ParakeetManager {
     client: ParakeetClient,
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    onnx: super::onnx::session::OnnxSession,
     root_dir: PathBuf,
     last_model_load_ms: AtomicU64,
     last_inference_ms: AtomicU64,
     last_warmup_ms: AtomicU64,
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     real_transcription_active: AtomicBool,
     #[allow(dead_code)]
     http: Client,
@@ -93,8 +104,10 @@ pub struct ParakeetTimingSnapshot {
     pub total_ms: u64,
 }
 
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 struct TranscriptionActiveGuard<'a>(&'a AtomicBool);
 
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 impl Drop for TranscriptionActiveGuard<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
@@ -130,10 +143,13 @@ impl ParakeetManager {
     pub fn new(root_dir: PathBuf) -> Self {
         Self {
             client: ParakeetClient::new("parakeet-sidecar"),
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            onnx: super::onnx::session::OnnxSession::new(),
             root_dir,
             last_model_load_ms: AtomicU64::new(0),
             last_inference_ms: AtomicU64::new(0),
             last_warmup_ms: AtomicU64::new(0),
+            #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
             real_transcription_active: AtomicBool::new(false),
             http: Client::new(),
         }
@@ -151,6 +167,7 @@ impl ParakeetManager {
         }
     }
 
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     fn real_transcription_busy(&self, app: &AppHandle) -> bool {
         if self.real_transcription_active.load(Ordering::SeqCst) {
             return true;
@@ -169,6 +186,7 @@ impl ParakeetManager {
             .unwrap_or(false)
     }
 
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     fn mark_real_transcription_active(&self) -> TranscriptionActiveGuard<'_> {
         self.real_transcription_active.store(true, Ordering::SeqCst);
         TranscriptionActiveGuard(&self.real_transcription_active)
@@ -227,10 +245,21 @@ impl ParakeetManager {
         }
     }
 
+    // Windows returns early from a cfg block; other platforms fall through.
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     pub fn get_model_definition(
         &self,
         model_name: &str,
     ) -> Option<&'static ParakeetModelDefinition> {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            let _ = model_name;
+            return None; // Hidden until the Windows catalog is introduced in slice 4.
+        }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
         AVAILABLE_MODELS.iter().find(|m| m.id == model_name)
     }
 
@@ -472,6 +501,12 @@ impl ParakeetManager {
     }
 
     pub async fn delete_model(&self, app: &AppHandle, model_name: &str) -> Result<(), String> {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if model_name == "parakeet-tdt-0.6b-v3" {
+            let _gate = super::onnx::LOCAL_MODEL_GATE.lock().await;
+            self.onnx.unload().await;
+            return Err("Parakeet ONNX model deletion is not available yet.".into());
+        }
         let Some(definition) = self.get_model_definition(model_name) else {
             return Err(format!("Unknown Parakeet model: {model_name}"));
         };
@@ -514,134 +549,301 @@ impl ParakeetManager {
         Ok(())
     }
 
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub async fn unload_onnx(&self) {
+        self.onnx.unload().await;
+    }
+
+    /// Call only from a blocking thread, never from an async task.
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub fn unload_onnx_blocking(&self) {
+        self.onnx.unload_blocking();
+    }
+
+    #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+    async fn lock_local_model_gate_with_cancel<'a>(
+        gate: &'a tokio::sync::Mutex<()>,
+        cancel: &AtomicBool,
+    ) -> Result<tokio::sync::MutexGuard<'a, ()>, ParakeetError> {
+        loop {
+            if cancel.load(Ordering::SeqCst) {
+                return Err(ParakeetError::Unavailable("Transcription cancelled".into()));
+            }
+            tokio::select! {
+                guard = gate.lock() => {
+                    if cancel.load(Ordering::SeqCst) {
+                        return Err(ParakeetError::Unavailable("Transcription cancelled".into()));
+                    }
+                    return Ok(guard);
+                }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    fn is_selected_onnx(app: &AppHandle, model_name: &str) -> bool {
+        use tauri_plugin_store::StoreExt;
+        app.store("settings").ok().is_some_and(|store| {
+            let engine = store
+                .get("current_model_engine")
+                .and_then(|v| v.as_str().map(str::to_owned));
+            let model = store
+                .get("current_model")
+                .and_then(|v| v.as_str().map(str::to_owned));
+            super::onnx::selected_model_matches(
+                engine.as_deref(),
+                model.as_deref(),
+                "parakeet",
+                model_name,
+            )
+        })
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    async fn load_onnx_locked(
+        &self,
+        app: &AppHandle,
+        directory: PathBuf,
+        cancel: Arc<AtomicBool>,
+        remote_cache: Option<Arc<std::sync::Mutex<crate::whisper::cache::TranscriberCache>>>,
+    ) -> Result<(), ParakeetError> {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(ParakeetError::Unavailable("Transcription cancelled".into()));
+        }
+        if let Some(cache) =
+            app.try_state::<tauri::async_runtime::Mutex<crate::whisper::cache::TranscriberCache>>()
+        {
+            cache.lock().await.clear();
+        }
+        if let Some(cache) = remote_cache {
+            let _ = tokio::task::spawn_blocking(move || {
+                cache
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clear();
+            })
+            .await;
+        }
+        if let Some(gpu) = app.try_state::<crate::whisper::gpu_sidecar::GpuSidecarClient>() {
+            gpu.abort_active_process().await;
+        }
+        let start = Instant::now();
+        self.onnx
+            .load(directory, cancel)
+            .await
+            .map_err(ParakeetError::Unavailable)?;
+        self.last_model_load_ms
+            .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+        Ok(())
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub async fn preload_selected_onnx(
+        &self,
+        app: &AppHandle,
+        model_name: &str,
+    ) -> Result<(), ParakeetError> {
+        let directory = self.onnx_model_dir(model_name)?;
+        let _gate = super::onnx::LOCAL_MODEL_GATE.lock().await;
+        let remote_cache = crate::remote::lifecycle::remote_whisper_cache_handle();
+        if !Self::is_selected_onnx(app, model_name) {
+            return Err(ParakeetError::Unavailable(
+                "Parakeet preload was superseded".into(),
+            ));
+        }
+        self.load_onnx_locked(
+            app,
+            directory,
+            Arc::new(AtomicBool::new(false)),
+            remote_cache,
+        )
+        .await?;
+        if !Self::is_selected_onnx(app, model_name) {
+            self.onnx.unload().await;
+            return Err(ParakeetError::Unavailable(
+                "Parakeet preload was superseded".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    fn onnx_model_dir(&self, model_name: &str) -> Result<PathBuf, ParakeetError> {
+        if model_name != "parakeet-tdt-0.6b-v3" {
+            return Err(ParakeetError::Unavailable(
+                "This Parakeet model is not available on Windows.".into(),
+            ));
+        }
+        Ok(self
+            .root_dir
+            .parent()
+            .unwrap_or(&self.root_dir)
+            .join("parakeet-onnx")
+            .join(model_name))
+    }
+
     pub async fn load_model(&self, app: &AppHandle, model_name: &str) -> Result<(), ParakeetError> {
         self.load_model_with_cancel(app, model_name, None).await
     }
 
+    // Windows returns early from a cfg block; other platforms fall through.
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     pub async fn load_model_with_cancel(
         &self,
         app: &AppHandle,
         model_name: &str,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<(), ParakeetError> {
-        let load_start = Instant::now();
-        let Some(definition) = self.get_model_definition(model_name) else {
-            return Err(ParakeetError::SpawnError(format!(
-                "Unknown Parakeet model: {model_name}"
-            )));
-        };
-        if !self.is_model_downloaded(definition) {
-            return Err(ParakeetError::SidecarError {
-                code: "model_not_downloaded".to_string(),
-                message: format!("Parakeet model is not downloaded: {model_name}"),
-            });
-        }
-
-        let version = Self::model_version_for(definition);
-        let command = ParakeetCommand::LoadModel {
-            model_id: definition.id.to_string(),
-            model_version: Some(version.to_string()),
-            force_download: Some(false),
-            local_path: None,
-            cache_dir: None,
-            precision: "bf16".into(),
-            attention: "local".into(),
-            local_attention_context: 256,
-            chunk_duration: Some(120.0),
-            overlap_duration: Some(15.0),
-            eager_unload: Some(false),
-        };
-
-        let result = match self
-            .send_command_with_progress_and_cancel(app, &command, cancel_flag, |_, _| {})
-            .await?
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         {
-            ParakeetResponse::Ok { .. } => Ok(()),
-            ParakeetResponse::Status {
-                loaded_model,
-                model_version,
-                ..
-            } => {
-                let expected_v = version.to_string();
-                let ok = match (loaded_model.as_deref(), model_version.as_deref()) {
-                    (Some(id), mv) if mv == Some(expected_v.as_str()) => {
-                        // Accept exact match ("parakeet-...-v2") or prefix match for id variants
-                        id == definition.id
-                            || id == format!("{}-{}", definition.id, expected_v)
-                            || id.starts_with(definition.id)
-                    }
-                    _ => false,
-                };
-                if ok {
-                    Ok(())
-                } else {
-                    Err(ParakeetError::SidecarError {
+            let directory = self.onnx_model_dir(model_name)?;
+            let cancel = cancel_flag.unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+            let _gate =
+                Self::lock_local_model_gate_with_cancel(&super::onnx::LOCAL_MODEL_GATE, &cancel)
+                    .await?;
+            let remote_cache = crate::remote::lifecycle::remote_whisper_cache_handle();
+            self.load_onnx_locked(app, directory, cancel, remote_cache)
+                .await?;
+            return Ok(());
+        }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            let load_start = Instant::now();
+            let Some(definition) = self.get_model_definition(model_name) else {
+                return Err(ParakeetError::SpawnError(format!(
+                    "Unknown Parakeet model: {model_name}"
+                )));
+            };
+            if !self.is_model_downloaded(definition) {
+                return Err(ParakeetError::SidecarError {
+                    code: "model_not_downloaded".to_string(),
+                    message: format!("Parakeet model is not downloaded: {model_name}"),
+                });
+            }
+
+            let version = Self::model_version_for(definition);
+            let command = ParakeetCommand::LoadModel {
+                model_id: definition.id.to_string(),
+                model_version: Some(version.to_string()),
+                force_download: Some(false),
+                local_path: None,
+                cache_dir: None,
+                precision: "bf16".into(),
+                attention: "local".into(),
+                local_attention_context: 256,
+                chunk_duration: Some(120.0),
+                overlap_duration: Some(15.0),
+                eager_unload: Some(false),
+            };
+
+            let result = match self
+                .send_command_with_progress_and_cancel(app, &command, cancel_flag, |_, _| {})
+                .await?
+            {
+                ParakeetResponse::Ok { .. } => Ok(()),
+                ParakeetResponse::Status {
+                    loaded_model,
+                    model_version,
+                    ..
+                } => {
+                    let expected_v = version.to_string();
+                    let ok = match (loaded_model.as_deref(), model_version.as_deref()) {
+                        (Some(id), mv) if mv == Some(expected_v.as_str()) => {
+                            // Accept exact match ("parakeet-...-v2") or prefix match for id variants
+                            id == definition.id
+                                || id == format!("{}-{}", definition.id, expected_v)
+                                || id.starts_with(definition.id)
+                        }
+                        _ => false,
+                    };
+                    if ok {
+                        Ok(())
+                    } else {
+                        Err(ParakeetError::SidecarError {
                         code: "load_mismatch".to_string(),
                         message: format!(
                             "Sidecar loaded '{:?}' (version {:?}) but '{}' (version {}) was requested",
                             loaded_model, model_version, definition.id, expected_v
                         ),
                     })
+                    }
                 }
+                ParakeetResponse::Error { code, message, .. } => {
+                    Err(ParakeetError::SidecarError { code, message })
+                }
+                other => Err(ParakeetError::SidecarError {
+                    code: "unexpected_response".to_string(),
+                    message: format!("Unexpected response: {:?}", other),
+                }),
+            };
+            if result.is_ok() {
+                let elapsed_ms = load_start.elapsed().as_millis() as u64;
+                self.last_model_load_ms.store(elapsed_ms, Ordering::Relaxed);
+                log_performance(
+                    "PARAKEET_MODEL_LOAD",
+                    elapsed_ms,
+                    Some(&format!("model={model_name}")),
+                );
             }
-            ParakeetResponse::Error { code, message, .. } => {
-                Err(ParakeetError::SidecarError { code, message })
-            }
-            other => Err(ParakeetError::SidecarError {
-                code: "unexpected_response".to_string(),
-                message: format!("Unexpected response: {:?}", other),
-            }),
-        };
-        if result.is_ok() {
-            let elapsed_ms = load_start.elapsed().as_millis() as u64;
-            self.last_model_load_ms.store(elapsed_ms, Ordering::Relaxed);
-            log_performance(
-                "PARAKEET_MODEL_LOAD",
-                elapsed_ms,
-                Some(&format!("model={model_name}")),
-            );
+            result
         }
-        result
     }
 
+    // Windows returns early from a cfg block; other platforms fall through.
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     pub async fn warmup(&self, app: &AppHandle) -> Result<Option<u64>, ParakeetError> {
-        if self.real_transcription_busy(app) {
-            log::info!("Skipping Parakeet warmup because recording/transcription is active");
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            let _ = app;
             return Ok(None);
         }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            if self.real_transcription_busy(app) {
+                log::info!("Skipping Parakeet warmup because recording/transcription is active");
+                return Ok(None);
+            }
 
-        let warmup_start = Instant::now();
-        match self.send_command(app, &ParakeetCommand::Warmup {}).await? {
-            ParakeetResponse::Warmed { warmed, ms, error } => {
-                let elapsed_ms = if ms == 0 {
-                    warmup_start.elapsed().as_millis() as u64
-                } else {
-                    ms
-                };
-                log_performance(
-                    "PARAKEET_WARMUP",
-                    elapsed_ms,
-                    Some(&format!("warmed={warmed}")),
-                );
-                if warmed {
-                    self.last_warmup_ms.store(elapsed_ms, Ordering::Relaxed);
-                    Ok(Some(elapsed_ms))
-                } else {
-                    log::warn!(
-                        "Parakeet warmup did not complete: {}",
-                        error.unwrap_or_else(|| "unknown warmup error".to_string())
+            let warmup_start = Instant::now();
+            match self.send_command(app, &ParakeetCommand::Warmup {}).await? {
+                ParakeetResponse::Warmed { warmed, ms, error } => {
+                    let elapsed_ms = if ms == 0 {
+                        warmup_start.elapsed().as_millis() as u64
+                    } else {
+                        ms
+                    };
+                    log_performance(
+                        "PARAKEET_WARMUP",
+                        elapsed_ms,
+                        Some(&format!("warmed={warmed}")),
                     );
+                    if warmed {
+                        self.last_warmup_ms.store(elapsed_ms, Ordering::Relaxed);
+                        Ok(Some(elapsed_ms))
+                    } else {
+                        log::warn!(
+                            "Parakeet warmup did not complete: {}",
+                            error.unwrap_or_else(|| "unknown warmup error".to_string())
+                        );
+                        Ok(None)
+                    }
+                }
+                ParakeetResponse::Error { code, message, .. } => {
+                    log::warn!("Parakeet warmup failed: {code}: {message}");
                     Ok(None)
                 }
+                other => Err(ParakeetError::SidecarError {
+                    code: "unexpected_response".to_string(),
+                    message: format!("Unexpected warmup response: {:?}", other),
+                }),
             }
-            ParakeetResponse::Error { code, message, .. } => {
-                log::warn!("Parakeet warmup failed: {code}: {message}");
-                Ok(None)
-            }
-            other => Err(ParakeetError::SidecarError {
-                code: "unexpected_response".to_string(),
-                message: format!("Unexpected warmup response: {:?}", other),
-            }),
         }
     }
 
@@ -665,10 +867,23 @@ impl ParakeetManager {
         self.send_command(app, &ParakeetCommand::Status {}).await
     }
 
+    // Windows returns early from a cfg block; other platforms fall through.
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     pub async fn download_ctc_models(
         &self,
         app: &AppHandle,
     ) -> Result<ParakeetResponse, ParakeetError> {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            let _ = app;
+            return Err(ParakeetError::Unavailable(
+                "Parakeet CTC vocabulary is unavailable on Windows.".into(),
+            ));
+        }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
         self.send_command(app, &ParakeetCommand::DownloadCtcModels {})
             .await
     }
@@ -691,6 +906,11 @@ impl ParakeetManager {
         .await
     }
 
+    // Windows returns early from a cfg block; other platforms fall through.
+    #[cfg_attr(
+        all(target_os = "windows", target_arch = "x86_64"),
+        allow(clippy::needless_return)
+    )]
     pub async fn transcribe_with_custom_vocabulary(
         &self,
         app: &AppHandle,
@@ -698,38 +918,77 @@ impl ParakeetManager {
         audio_path: PathBuf,
         options: ParakeetTranscriptionOptions,
     ) -> Result<ParakeetResponse, ParakeetError> {
-        let _active_guard = self.mark_real_transcription_active();
-        let inference_start = Instant::now();
-        let command = ParakeetCommand::Transcribe {
-            audio_path: audio_path.to_string_lossy().to_string(),
-            language: options.language,
-            translate_to_english: options.translate,
-            prompt: None,
-            use_word_timestamps: Some(true),
-            chunk_duration: None,
-            overlap_duration: None,
-            attention: None,
-            local_attention_context: None,
-            custom_vocabulary: (!options.custom_vocabulary.is_empty())
-                .then_some(options.custom_vocabulary),
-        };
-
-        let result = self
-            .send_command_with_progress_and_cancel(app, &command, options.cancel_flag, |_, _| {})
-            .await;
-        if matches!(result, Ok(ParakeetResponse::Transcription { .. })) {
-            let elapsed_ms = inference_start.elapsed().as_millis() as u64;
-            self.last_inference_ms.store(elapsed_ms, Ordering::Relaxed);
-            log_performance(
-                "PARAKEET_INFERENCE",
-                elapsed_ms,
-                Some(&format!(
-                    "model={model_name}, audio_path={}",
-                    audio_path.display()
-                )),
-            );
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            let _ = app;
+            self.onnx_model_dir(model_name)?;
+            let cancel = options
+                .cancel_flag
+                .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+            let started = Instant::now();
+            let (output, duration) = self
+                .onnx
+                .transcribe_wav(audio_path, cancel)
+                .await
+                .map_err(ParakeetError::Unavailable)?;
+            self.last_inference_ms
+                .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            return Ok(ParakeetResponse::Transcription {
+                text: output.text,
+                segments: output
+                    .words
+                    .into_iter()
+                    .map(|word| super::messages::ParakeetSegment {
+                        text: word.text,
+                        start: Some(word.start),
+                        end: Some(word.end),
+                        tokens: None,
+                    })
+                    .collect(),
+                language: None,
+                duration: Some(duration),
+            });
         }
-        result
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            let _active_guard = self.mark_real_transcription_active();
+            let inference_start = Instant::now();
+            let command = ParakeetCommand::Transcribe {
+                audio_path: audio_path.to_string_lossy().to_string(),
+                language: options.language,
+                translate_to_english: options.translate,
+                prompt: None,
+                use_word_timestamps: Some(true),
+                chunk_duration: None,
+                overlap_duration: None,
+                attention: None,
+                local_attention_context: None,
+                custom_vocabulary: (!options.custom_vocabulary.is_empty())
+                    .then_some(options.custom_vocabulary),
+            };
+
+            let result = self
+                .send_command_with_progress_and_cancel(
+                    app,
+                    &command,
+                    options.cancel_flag,
+                    |_, _| {},
+                )
+                .await;
+            if matches!(result, Ok(ParakeetResponse::Transcription { .. })) {
+                let elapsed_ms = inference_start.elapsed().as_millis() as u64;
+                self.last_inference_ms.store(elapsed_ms, Ordering::Relaxed);
+                log_performance(
+                    "PARAKEET_INFERENCE",
+                    elapsed_ms,
+                    Some(&format!(
+                        "model={model_name}, audio_path={}",
+                        audio_path.display()
+                    )),
+                );
+            }
+            result
+        }
     }
 
     pub async fn diarize(
@@ -823,6 +1082,34 @@ mod tests {
     use crate::parakeet::models::AVAILABLE_MODELS;
     use std::fs;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn cancelled_wait_for_local_model_gate_returns_promptly() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let held = gate.lock().await;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let waiting_gate = Arc::clone(&gate);
+        let waiting_cancel = Arc::clone(&cancel);
+        let waiter = tokio::spawn(async move {
+            ParakeetManager::lock_local_model_gate_with_cancel(&waiting_gate, &waiting_cancel)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancel.store(true, Ordering::SeqCst);
+        let result = tokio::time::timeout(Duration::from_millis(250), waiter)
+            .await
+            .expect("cancelled waiter must not wait for the held gate")
+            .expect("waiter task must complete");
+        assert_eq!(result.unwrap_err(), "Transcription cancelled");
+        drop(held);
+    }
 
     #[test]
     fn fluid_audio_model_dir_matches_fluidaudio_cache_shape() {

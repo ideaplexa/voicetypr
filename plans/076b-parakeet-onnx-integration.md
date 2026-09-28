@@ -156,3 +156,9 @@ Additional requirements:
 3. Transactional download/delete.
 4. Catalog, settings, capabilities and UX exposure on Windows x64.
 5. Windows evaluation job + installed NSIS/MSIX check (NEEDS-SMOKE on hardware).
+
+## Known gap
+
+Clearing the Whisper cache does not stop an active live-preview thread that
+holds its own `Arc<Transcriber>` (`commands/audio.rs`). Windows live preview
+with CPU Whisper is rare, and the preview ends when the recording ends.

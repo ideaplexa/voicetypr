@@ -966,7 +966,13 @@ pub async fn save_settings(
             let model_name = settings.current_model.clone();
             tokio::spawn(async move {
                 let parakeet_manager = app_clone.state::<ParakeetManager>();
-                match parakeet_manager.load_model(&app_clone, &model_name).await {
+                #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                let load_result = parakeet_manager
+                    .preload_selected_onnx(&app_clone, &model_name)
+                    .await;
+                #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+                let load_result = parakeet_manager.load_model(&app_clone, &model_name).await;
+                match load_result {
                     Ok(_) => {
                         log::info!("Successfully preloaded new model: {}", model_name);
                         match parakeet_manager.warmup(&app_clone).await {

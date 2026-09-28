@@ -736,7 +736,7 @@ mod tests {
             json
         });
 
-        let local_handle = tokio::spawn(async move {
+        let local_handle = tokio::task::spawn_blocking(move || {
             println!("[Local] Starting direct transcription...");
 
             let result = local_context.transcribe(&audio_data_local, None, None);
