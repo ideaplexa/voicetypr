@@ -80,6 +80,22 @@ pub enum AppCategory {
     Other,
 }
 
+impl AppCategory {
+    pub const fn analytics_label(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Email => "email",
+            Self::Docs => "docs",
+            Self::Code => "code",
+            Self::Terminal => "terminal",
+            Self::Social => "social",
+            Self::Notes => "notes",
+            Self::Browser => "browser",
+            Self::Other => "other",
+        }
+    }
+}
+
 /// True when `name` contains any curated token as a whole-word occurrence.
 ///
 /// A token matches only when an occurrence is bounded on BOTH sides by a

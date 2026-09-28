@@ -121,6 +121,135 @@ pub enum PolishOutcome {
     Fallback,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DictationOutcome {
+    Delivered,
+    NoSpeech,
+    Empty,
+    Failed,
+    Cancelled,
+}
+
+impl DictationOutcome {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivered => "delivered",
+            Self::NoSpeech => "no_speech",
+            Self::Empty => "empty",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DictationTransport {
+    Local,
+    Ws,
+    Rest,
+    RestFallback,
+    Remote,
+}
+
+impl DictationTransport {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Ws => "ws",
+            Self::Rest => "rest",
+            Self::RestFallback => "rest_fallback",
+            Self::Remote => "remote",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DictationPaste {
+    Succeeded,
+    Failed,
+    Skipped,
+}
+
+impl DictationPaste {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Only typed, content-free facts may cross into the event builder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DictationFacts {
+    pub outcome: DictationOutcome,
+    pub engine: EngineKind,
+    pub model: String,
+    pub transport: DictationTransport,
+    pub live_preview: bool,
+    pub recording_ms: u64,
+    pub start_to_first_audio_ms: Option<u64>,
+    pub stop_to_text_ms: u64,
+    pub post_roll_speech_detected: bool,
+    pub post_roll_interrupted: bool,
+    pub words: usize,
+    pub polish: PolishOutcome,
+    pub paste: DictationPaste,
+    pub app_category: crate::writing::AppCategory,
+}
+
+pub fn build_dictation_completed(facts: DictationFacts) -> ProductEvent {
+    ProductEvent::DictationCompleted {
+        outcome: facts.outcome,
+        engine: facts.engine,
+        model: safe_dictation_model(facts.engine, &facts.model),
+        transport: facts.transport,
+        live_preview: facts.live_preview,
+        recording_ms: ((facts.recording_ms.min(600_000) + 5) / 10 * 10).min(600_000),
+        start_to_first_audio_ms: facts.start_to_first_audio_ms.map(|ms| ms.min(10_000)),
+        stop_to_text_ms: facts.stop_to_text_ms.min(600_000),
+        post_roll_speech_detected: facts.post_roll_speech_detected,
+        post_roll_interrupted: facts.post_roll_interrupted,
+        words_bucket: words_bucket(facts.words),
+        polish: facts.polish,
+        paste: facts.paste,
+        app_category: facts.app_category,
+    }
+}
+
+fn words_bucket(words: usize) -> &'static str {
+    match words {
+        0 => "0",
+        1..=5 => "1_5",
+        6..=20 => "6_20",
+        21..=60 => "21_60",
+        61..=200 => "61_200",
+        _ => "gt_200",
+    }
+}
+
+fn safe_dictation_model(engine: EngineKind, model: &str) -> String {
+    let known = match engine {
+        EngineKind::Whisper => matches!(
+            model,
+            "base.en" | "small.en" | "large-v3" | "large-v3-turbo"
+        ),
+        EngineKind::Parakeet => crate::parakeet::models::AVAILABLE_MODELS
+            .iter()
+            .any(|entry| entry.id == model),
+        EngineKind::Cloud => crate::cloud_stt::CloudProvider::ALL
+            .iter()
+            .any(|provider| provider.model_by_id(model).is_some()),
+        EngineKind::Remote => false,
+    };
+    if known {
+        model.to_string()
+    } else {
+        "other".to_string()
+    }
+}
+
 impl PolishOutcome {
     const fn as_str(self) -> &'static str {
         match self {
@@ -189,6 +318,22 @@ pub enum ProductEvent {
         provider_id: String,
         model_id: String,
     },
+    DictationCompleted {
+        outcome: DictationOutcome,
+        engine: EngineKind,
+        model: String,
+        transport: DictationTransport,
+        live_preview: bool,
+        recording_ms: u64,
+        start_to_first_audio_ms: Option<u64>,
+        stop_to_text_ms: u64,
+        post_roll_speech_detected: bool,
+        post_roll_interrupted: bool,
+        words_bucket: &'static str,
+        polish: PolishOutcome,
+        paste: DictationPaste,
+        app_category: crate::writing::AppCategory,
+    },
 }
 
 impl ProductEvent {
@@ -200,6 +345,7 @@ impl ProductEvent {
             Self::RecordingStopped { .. } => "recording.stopped",
             Self::StageFinished { .. } => "transcription.stage_finished",
             Self::PolishFinished { .. } => "polish.finished",
+            Self::DictationCompleted { .. } => "dictation.completed",
         }
     }
 }
@@ -396,6 +542,39 @@ fn insert_event_properties(event: &mut Event, product_event: ProductEvent) {
             let _ = event.insert_prop("provider", provider);
             let _ = event.insert_prop("model", model);
         }
+        ProductEvent::DictationCompleted {
+            outcome,
+            engine,
+            model,
+            transport,
+            live_preview,
+            recording_ms,
+            start_to_first_audio_ms,
+            stop_to_text_ms,
+            post_roll_speech_detected,
+            post_roll_interrupted,
+            words_bucket,
+            polish,
+            paste,
+            app_category,
+        } => {
+            let _ = event.insert_prop("outcome", outcome.as_str());
+            let _ = event.insert_prop("engine", engine.as_str());
+            let _ = event.insert_prop("model", model);
+            let _ = event.insert_prop("transport", transport.as_str());
+            let _ = event.insert_prop("live_preview", live_preview);
+            let _ = event.insert_prop("recording_ms", recording_ms);
+            if let Some(value) = start_to_first_audio_ms {
+                let _ = event.insert_prop("start_to_first_audio_ms", value);
+            }
+            let _ = event.insert_prop("stop_to_text_ms", stop_to_text_ms);
+            let _ = event.insert_prop("post_roll_speech_detected", post_roll_speech_detected);
+            let _ = event.insert_prop("post_roll_interrupted", post_roll_interrupted);
+            let _ = event.insert_prop("words_bucket", words_bucket);
+            let _ = event.insert_prop("polish", polish.as_str());
+            let _ = event.insert_prop("paste", paste.as_str());
+            let _ = event.insert_prop("app_category", app_category.analytics_label());
+        }
     }
 }
 
@@ -538,6 +717,113 @@ fn validated_dynamic_properties(event: &Event) -> Option<Vec<(&'static str, Valu
                 ("model", Value::String(model.to_string())),
             ])
         }
+        "dictation.completed" => {
+            const DYNAMIC_KEYS: &[&str] = &[
+                "outcome",
+                "engine",
+                "model",
+                "transport",
+                "live_preview",
+                "recording_ms",
+                "start_to_first_audio_ms",
+                "stop_to_text_ms",
+                "post_roll_speech_detected",
+                "post_roll_interrupted",
+                "words_bucket",
+                "polish",
+                "paste",
+                "app_category",
+            ];
+            const BASE_KEYS: &[&str] = &[
+                "$process_person_profile",
+                "$geoip_disable",
+                "app_version",
+                "release_channel",
+                "os",
+                "arch",
+                INTERNAL_GENERATION_PROPERTY,
+            ];
+            if properties.keys().any(|key| {
+                !DYNAMIC_KEYS.contains(&key.as_str()) && !BASE_KEYS.contains(&key.as_str())
+            }) {
+                return None;
+            }
+            let outcome = string("outcome")?;
+            let engine = string("engine")?;
+            let model = string("model")?;
+            let transport = string("transport")?;
+            let words_bucket = string("words_bucket")?;
+            let polish = string("polish")?;
+            let paste = string("paste")?;
+            let app_category = string("app_category")?;
+            let engine_kind = match engine {
+                "whisper" => EngineKind::Whisper,
+                "parakeet" => EngineKind::Parakeet,
+                "cloud" => EngineKind::Cloud,
+                "remote" => EngineKind::Remote,
+                _ => return None,
+            };
+            if !allowed(
+                outcome,
+                &["delivered", "no_speech", "empty", "failed", "cancelled"],
+            ) || safe_dictation_model(engine_kind, model) != model
+                || !allowed(
+                    transport,
+                    &["local", "ws", "rest", "rest_fallback", "remote"],
+                )
+                || !allowed(
+                    words_bucket,
+                    &["0", "1_5", "6_20", "21_60", "61_200", "gt_200"],
+                )
+                || !allowed(
+                    polish,
+                    &["disabled", "skipped", "applied", "unchanged", "fallback"],
+                )
+                || !allowed(paste, &["succeeded", "failed", "skipped"])
+                || !allowed(
+                    app_category,
+                    &[
+                        "chat", "email", "docs", "code", "terminal", "social", "notes", "browser",
+                        "other",
+                    ],
+                )
+            {
+                return None;
+            }
+            let boolean = |key: &str| properties.get(key)?.as_bool();
+            let integer =
+                |key: &str, max: u64| properties.get(key)?.as_u64().filter(|value| *value <= max);
+            let live_preview = boolean("live_preview")?;
+            let recording_ms = integer("recording_ms", 600_000)?;
+            if recording_ms % 10 != 0 {
+                return None;
+            }
+            let stop_to_text_ms = integer("stop_to_text_ms", 600_000)?;
+            let speech_detected = boolean("post_roll_speech_detected")?;
+            let interrupted = boolean("post_roll_interrupted")?;
+            let mut safe = vec![
+                ("outcome", Value::String(outcome.to_string())),
+                ("engine", Value::String(engine.to_string())),
+                ("model", Value::String(model.to_string())),
+                ("transport", Value::String(transport.to_string())),
+                ("live_preview", Value::Bool(live_preview)),
+                ("recording_ms", Value::from(recording_ms)),
+                ("stop_to_text_ms", Value::from(stop_to_text_ms)),
+                ("post_roll_speech_detected", Value::Bool(speech_detected)),
+                ("post_roll_interrupted", Value::Bool(interrupted)),
+                ("words_bucket", Value::String(words_bucket.to_string())),
+                ("polish", Value::String(polish.to_string())),
+                ("paste", Value::String(paste.to_string())),
+                ("app_category", Value::String(app_category.to_string())),
+            ];
+            if properties.contains_key("start_to_first_audio_ms") {
+                safe.push((
+                    "start_to_first_audio_ms",
+                    Value::from(integer("start_to_first_audio_ms", 10_000)?),
+                ));
+            }
+            Some(safe)
+        }
         _ => None,
     }
 }
@@ -554,6 +840,195 @@ const DURATION_BUCKETS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dictation_facts() -> DictationFacts {
+        DictationFacts {
+            outcome: DictationOutcome::Delivered,
+            engine: EngineKind::Cloud,
+            model: "stt-async-v5".to_string(),
+            transport: DictationTransport::Ws,
+            live_preview: true,
+            recording_ms: 1_234,
+            start_to_first_audio_ms: Some(120),
+            stop_to_text_ms: 830,
+            post_roll_speech_detected: false,
+            post_roll_interrupted: false,
+            words: 12,
+            polish: PolishOutcome::Applied,
+            paste: DictationPaste::Succeeded,
+            app_category: crate::writing::AppCategory::Chat,
+        }
+    }
+
+    fn dictation_event() -> Event {
+        let mut event = Event::new("dictation.completed".to_string(), "install-id".to_string());
+        insert_event_properties(&mut event, build_dictation_completed(dictation_facts()));
+        event
+    }
+
+    #[test]
+    fn dictation_completed_exact_property_set_and_rounding() {
+        let event = dictation_event();
+        let mut keys: Vec<&str> = event.properties().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "app_category",
+                "engine",
+                "live_preview",
+                "model",
+                "outcome",
+                "paste",
+                "polish",
+                "post_roll_interrupted",
+                "post_roll_speech_detected",
+                "recording_ms",
+                "start_to_first_audio_ms",
+                "stop_to_text_ms",
+                "transport",
+                "words_bucket",
+            ]
+        );
+        assert_eq!(event.properties()["recording_ms"], Value::from(1_230));
+        assert_eq!(event.properties()["words_bucket"], Value::from("6_20"));
+        assert!(validated_dynamic_properties(&event).is_some());
+        let mut no_first_audio = dictation_facts();
+        no_first_audio.start_to_first_audio_ms = None;
+        no_first_audio.recording_ms = u64::MAX;
+        no_first_audio.stop_to_text_ms = u64::MAX;
+        let mut event = Event::new("dictation.completed".to_string(), "install-id".to_string());
+        insert_event_properties(&mut event, build_dictation_completed(no_first_audio));
+        assert!(!event.properties().contains_key("start_to_first_audio_ms"));
+        assert_eq!(event.properties()["recording_ms"], Value::from(600_000));
+        assert_eq!(event.properties()["stop_to_text_ms"], Value::from(600_000));
+    }
+
+    #[test]
+    fn dictation_completed_builder_covers_outcomes_and_privacy() {
+        for outcome in [
+            DictationOutcome::Delivered,
+            DictationOutcome::NoSpeech,
+            DictationOutcome::Empty,
+            DictationOutcome::Failed,
+            DictationOutcome::Cancelled,
+        ] {
+            let mut facts = dictation_facts();
+            facts.outcome = outcome;
+            facts.model = "private/custom/model".to_string();
+            let mut event = Event::new("dictation.completed".to_string(), "install-id".to_string());
+            insert_event_properties(&mut event, build_dictation_completed(facts));
+            assert_eq!(event.properties()["outcome"], Value::from(outcome.as_str()));
+            assert_eq!(event.properties()["model"], Value::from("other"));
+            assert!(validated_dynamic_properties(&event).is_some());
+        }
+        assert_eq!(words_bucket(0), "0");
+        assert_eq!(words_bucket(5), "1_5");
+        assert_eq!(words_bucket(20), "6_20");
+        assert_eq!(words_bucket(60), "21_60");
+        assert_eq!(words_bucket(200), "61_200");
+        assert_eq!(words_bucket(201), "gt_200");
+    }
+
+    #[test]
+    fn dictation_completed_validator_drops_bad_values_and_extra_keys() {
+        for (key, wrong_type) in [
+            ("outcome", serde_json::json!(true)),
+            ("engine", serde_json::json!(true)),
+            ("model", serde_json::json!(true)),
+            ("transport", serde_json::json!(true)),
+            ("live_preview", serde_json::json!("true")),
+            ("recording_ms", serde_json::json!("1230")),
+            ("start_to_first_audio_ms", serde_json::json!("120")),
+            ("stop_to_text_ms", serde_json::json!("830")),
+            ("post_roll_speech_detected", serde_json::json!("false")),
+            ("post_roll_interrupted", serde_json::json!("false")),
+            ("words_bucket", serde_json::json!(true)),
+            ("polish", serde_json::json!(true)),
+            ("paste", serde_json::json!(true)),
+            ("app_category", serde_json::json!(true)),
+        ] {
+            let mut missing = dictation_event();
+            missing.remove_prop(key);
+            if key == "start_to_first_audio_ms" {
+                assert!(validated_dynamic_properties(&missing).is_some());
+            } else {
+                assert!(
+                    validated_dynamic_properties(&missing).is_none(),
+                    "accepted missing {key}"
+                );
+            }
+            for value in [serde_json::Value::Null, wrong_type] {
+                let mut event = dictation_event();
+                event.insert_prop(key, value).unwrap();
+                assert!(
+                    validated_dynamic_properties(&event).is_none(),
+                    "accepted invalid {key}"
+                );
+            }
+        }
+        let bad_values = [
+            ("outcome", serde_json::json!("private")),
+            ("engine", serde_json::json!("private")),
+            ("model", serde_json::json!("private")),
+            ("transport", serde_json::json!("private")),
+            ("live_preview", serde_json::json!("true")),
+            ("recording_ms", serde_json::json!(600_001)),
+            ("start_to_first_audio_ms", serde_json::json!(10_001)),
+            ("stop_to_text_ms", serde_json::json!(600_001)),
+            ("post_roll_speech_detected", serde_json::json!(1)),
+            ("post_roll_interrupted", serde_json::json!(1)),
+            ("words_bucket", serde_json::json!("private")),
+            ("polish", serde_json::json!("private")),
+            ("paste", serde_json::json!("private")),
+            ("app_category", serde_json::json!("private")),
+        ];
+        for (key, value) in bad_values {
+            let mut event = dictation_event();
+            event.insert_prop(key, value).unwrap();
+            assert!(
+                validated_dynamic_properties(&event).is_none(),
+                "accepted {key}"
+            );
+        }
+        for (key, value) in [
+            ("recording_ms", serde_json::json!(-1)),
+            ("recording_ms", serde_json::json!(1.5)),
+            ("recording_ms", serde_json::json!(11)),
+            ("start_to_first_audio_ms", serde_json::json!(-1)),
+            ("stop_to_text_ms", serde_json::json!(1.5)),
+        ] {
+            let mut event = dictation_event();
+            event.insert_prop(key, value).unwrap();
+            assert!(
+                validated_dynamic_properties(&event).is_none(),
+                "accepted {key}"
+            );
+        }
+        let mut event = dictation_event();
+        event.insert_prop("transcript", "private").unwrap();
+        assert!(validated_dynamic_properties(&event).is_none());
+        let mut event = dictation_event();
+        event.remove_prop("outcome");
+        assert!(validated_dynamic_properties(&event).is_none());
+    }
+
+    #[test]
+    fn dictation_completed_scrubber_keeps_only_closed_properties() {
+        let _guard = CONSENT_TEST_LOCK.lock();
+        let generation = {
+            let mut state = RUNTIME.write();
+            state.enabled = true;
+            state.generation
+        };
+        let mut event = event_with_generation("dictation.completed", generation);
+        insert_event_properties(&mut event, build_dictation_completed(dictation_facts()));
+        let scrubbed = scrub_event(event).expect("closed dictation event accepted");
+        assert_eq!(scrubbed.properties()["outcome"], Value::from("delivered"));
+        assert!(!scrubbed
+            .properties()
+            .contains_key(INTERNAL_GENERATION_PROPERTY));
+    }
 
     static CONSENT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 

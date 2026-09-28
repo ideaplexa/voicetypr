@@ -55,3 +55,9 @@ comes from whether `take_cloud_ws_final` supplied the text.
 by engine+transport, start_to_first_audio p50/p95 by OS, outcome mix, paste
 failure rate by app category) documented in `docs/ARCHITECTURE.md` telemetry
 section.
+
+## Known gaps
+
+- Quitting the app during a recording emits no completion event.
+- Captures stopped inside `start_recording` (quick PTT release during
+  microphone initialization or Escape before capture) emit no completion event.

@@ -50,6 +50,7 @@ pub struct AppState {
     pub should_cancel_recording: Arc<AtomicBool>,
     pub stop_in_flight: Arc<AtomicBool>,
     pub pending_stop_after_start: Arc<AtomicBool>,
+    pub pending_stop_requested: Arc<Mutex<Option<Instant>>>,
     pub esc_pressed_once: Arc<AtomicBool>,
     pub esc_timeout_handle: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
     pub window_manager: Arc<Mutex<Option<WindowManager>>>,
@@ -60,6 +61,7 @@ pub struct AppState {
     pub pill_event_queue: Arc<Mutex<Vec<QueuedPillEvent>>>,
     pub last_toggle_press: Arc<Mutex<Option<Instant>>>,
     pub recording_app_context: Arc<Mutex<Option<ContextHint>>>,
+    pub recording_live_preview: AtomicBool,
 }
 
 impl Default for AppState {
@@ -84,6 +86,7 @@ impl AppState {
             should_cancel_recording: Arc::new(AtomicBool::new(false)),
             stop_in_flight: Arc::new(AtomicBool::new(false)),
             pending_stop_after_start: Arc::new(AtomicBool::new(false)),
+            pending_stop_requested: Arc::new(Mutex::new(None)),
             esc_pressed_once: Arc::new(AtomicBool::new(false)),
             esc_timeout_handle: Arc::new(Mutex::new(None)),
             window_manager: Arc::new(Mutex::new(None)),
@@ -93,6 +96,7 @@ impl AppState {
             pill_event_queue: Arc::new(Mutex::new(Vec::new())),
             last_toggle_press: Arc::new(Mutex::new(None)),
             recording_app_context: Arc::new(Mutex::new(None)),
+            recording_live_preview: AtomicBool::new(false),
         }
     }
 

@@ -32,7 +32,7 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
-Plan 078 — IN PROGRESS — Claude 2026-09-28 (gpt-6-sol implements): one privacy-safe `dictation.completed` PostHog event with typed numbers (stop→text, start latency, transport, outcome, paste, preview) — observability 0.1b for beta.2. See `078-dictation-telemetry.md`.
+Plan 078 — LOCAL CHECKS PASSED / NEEDS PostHog delivery check — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed): one privacy-safe `dictation.completed` PostHog event with typed numbers (stop→text, start latency, transport, outcome, paste, preview) — observability 0.1b for beta.2. See `078-dictation-telemetry.md`.
 
 Plan 077 — SPEC — Claude 2026-09-28: smaller Whisper models (official q8_0/q5_0 ggml: turbo 1.6 GB → 874/574 MB) chosen by a CI model-bench workflow on macOS + Windows. See `077-whisper-quantized-catalog.md`.
 
