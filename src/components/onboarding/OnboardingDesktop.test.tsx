@@ -631,6 +631,7 @@ describe("OnboardingDesktop", () => {
   it("Windows GPU toggle ON→OFF persists 'cpu' (default state: acceleration undefined → switch ON)", async () => {
     platformMock.isMacOS = false;
     platformMock.isWindows = true;
+    modelManagement.models["base.en"].gpu_controls_available = true;
     // settingsState.transcription_acceleration is undefined → switch resolves to ON
     const user = userEvent.setup();
     renderOnboarding();
@@ -649,6 +650,7 @@ describe("OnboardingDesktop", () => {
   it("Windows GPU toggle OFF→ON persists 'auto' (prior state: acceleration 'cpu' → switch OFF)", async () => {
     platformMock.isMacOS = false;
     platformMock.isWindows = true;
+    modelManagement.models["base.en"].gpu_controls_available = true;
     (settingsState as Record<string, unknown>).transcription_acceleration = "cpu";
     const user = userEvent.setup();
     renderOnboarding();
@@ -661,6 +663,22 @@ describe("OnboardingDesktop", () => {
 
     await user.click(gpuSwitch);
     expect(updateSettingsMock).toHaveBeenCalledWith({ transcription_acceleration: "auto" });
+  });
+
+  it("hides GPU acceleration for backend-reported Windows ONNX Parakeet", async () => {
+    platformMock.isMacOS = false;
+    platformMock.isWindows = true;
+    modelManagement.models["base.en"] = {
+      ...modelManagement.models["base.en"],
+      engine: "parakeet",
+      runtime: "onnx",
+      gpu_controls_available: false,
+    };
+    const user = userEvent.setup();
+    renderOnboarding();
+    await user.click(screen.getByRole("button", { name: /start setup/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    expect(screen.queryByRole("switch", { name: /use gpu acceleration/i })).not.toBeInTheDocument();
   });
 
   it("does not show the GPU toggle on macOS", async () => {

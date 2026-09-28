@@ -28,6 +28,105 @@ impl RecognitionAvailabilitySnapshot {
     }
 }
 
+fn selection_error(
+    engine: &str,
+    model: &str,
+    downloaded: bool,
+    availability: &RecognitionAvailabilitySnapshot,
+) -> Option<&'static str> {
+    if availability.remote_selected {
+        return None;
+    }
+    match engine {
+        "parakeet" if model.is_empty() || !downloaded => Some(
+            "The selected Parakeet model is missing or incomplete. Download it in Models before recording.",
+        ),
+        "whisper" if model.is_empty() || !downloaded => Some(
+            "The selected Whisper model is missing or incomplete. Download it in Models before recording.",
+        ),
+        _ if crate::cloud_stt::CloudProvider::from_id(engine).is_some()
+            && (model.is_empty() || !availability.cloud_ready) => {
+            Some("The selected cloud transcription model is unavailable. Configure its key in Models before recording.")
+        }
+        "whisper" | "parakeet" => None,
+        _ if crate::cloud_stt::CloudProvider::from_id(engine).is_none() => {
+            Some("The selected transcription engine is unavailable. Choose a model in Models before recording.")
+        }
+        _ => None,
+    }
+}
+
+/// Check the selected engine and id, not aggregate availability. An unrelated
+/// downloaded engine must not allow capture with a missing selection.
+pub async fn selected_model_error(
+    app: &tauri::AppHandle,
+    availability: &RecognitionAvailabilitySnapshot,
+) -> Option<&'static str> {
+    if availability.remote_selected {
+        return None;
+    }
+    let store = app.store("settings").ok()?;
+    let engine = store
+        .get("current_model_engine")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "whisper".to_string());
+    let model = store
+        .get("current_model")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let downloaded = match engine.as_str() {
+        "parakeet" => app
+            .try_state::<parakeet::ParakeetManager>()
+            .is_some_and(|manager| {
+                manager
+                    .list_models()
+                    .iter()
+                    .any(|status| status.name == model && status.downloaded)
+            }),
+        "whisper" => {
+            if let Some(manager) = app.try_state::<AsyncRwLock<whisper::manager::WhisperManager>>()
+            {
+                manager
+                    .read()
+                    .await
+                    .get_downloaded_model_names()
+                    .contains(&model)
+            } else {
+                false
+            }
+        }
+        _ => true,
+    };
+    selection_error(&engine, &model, downloaded, availability)
+}
+
+#[cfg(test)]
+mod selected_model_tests {
+    use super::{selection_error, RecognitionAvailabilitySnapshot};
+    use crate::remote::settings::ConnectionStatus;
+
+    #[test]
+    fn missing_selected_parakeet_fails_even_with_whisper_available() {
+        let availability = RecognitionAvailabilitySnapshot {
+            whisper_available: true,
+            parakeet_available: false,
+            cloud_selected: false,
+            cloud_ready: false,
+            remote_selected: false,
+            remote_status: ConnectionStatus::Unknown,
+            remote_last_checked: 0,
+            remote_available: false,
+        };
+        assert!(availability.any_available());
+        assert!(
+            selection_error("parakeet", "parakeet-tdt-0.6b-v3", false, &availability)
+                .unwrap()
+                .contains("Download it in Models")
+        );
+        assert!(selection_error("parakeet", "parakeet-tdt-0.6b-v3", true, &availability).is_none());
+    }
+}
+
 pub(crate) fn remote_availability_from_settings(
     remote_settings: Option<&RemoteSettings>,
 ) -> (bool, ConnectionStatus, u64, bool) {

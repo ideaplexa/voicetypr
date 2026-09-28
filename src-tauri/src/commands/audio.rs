@@ -203,6 +203,7 @@ fn parakeet_preview_sink_eligible(
     streaming_tap_enabled
         && streaming_engine_enabled
         && live_preview_mode
+        && cfg!(target_os = "macos")
         && config.current_engine == "parakeet"
         && !config.current_model.is_empty()
 }
@@ -4854,6 +4855,21 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
         validate_start.elapsed().as_millis()
     );
 
+    if let Some(message) = crate::recognition::selected_model_error(app, &availability).await {
+        let _ = crate::commands::window::focus_main_window(app.clone()).await;
+        let _ = emit_to_window(
+            app,
+            "main",
+            "no-models-error",
+            serde_json::json!({
+                "title": "Selected Model Unavailable",
+                "message": message,
+                "action": "open-settings"
+            }),
+        );
+        return Err(message.to_string());
+    }
+
     if !availability.any_available()
         || (availability.remote_selected && !availability.remote_available)
     {
@@ -5427,6 +5443,13 @@ pub async fn start_recording(
             return Err(format!("Configuration error: {}", e));
         }
     };
+    if cfg!(all(target_os = "windows", target_arch = "x86_64"))
+        && config.current_engine == "parakeet"
+    {
+        app_state
+            .recording_live_preview
+            .store(false, AtomicOrdering::SeqCst);
+    }
     log::debug!(
         "Using recording config: show_pill={} pill_indicator_mode='{}' ai_enabled={} model={}",
         config.show_pill_widget,
@@ -5591,10 +5614,12 @@ pub async fn start_recording(
         let soniox_realtime = config.current_engine == "soniox"
             && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
             && !remote_server_online;
-        let streaming_engine_supported = matches!(
-            config.current_engine.as_str(),
-            "parakeet" | "whisper" | "soniox" | "deepgram"
-        );
+        let streaming_engine_supported =
+            matches!(
+                config.current_engine.as_str(),
+                "parakeet" | "whisper" | "soniox" | "deepgram"
+            ) && !(cfg!(all(target_os = "windows", target_arch = "x86_64"))
+                && config.current_engine == "parakeet");
         let streaming_tap_enabled =
             (streaming_tap_enabled || soniox_realtime) && streaming_engine_supported;
         let streaming_engine_enabled =

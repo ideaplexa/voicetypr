@@ -965,6 +965,8 @@ pub async fn save_settings(
             let app_clone = app.clone();
             let model_name = settings.current_model.clone();
             tokio::spawn(async move {
+                #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                let _ = app_clone.emit("parakeet-model-warming", model_name.clone());
                 let parakeet_manager = app_clone.state::<ParakeetManager>();
                 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
                 let load_result = parakeet_manager
@@ -989,6 +991,8 @@ pub async fn save_settings(
                     }
                     Err(e) => log::warn!("Failed to preload new model: {}", e),
                 }
+                #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                let _ = app_clone.emit("parakeet-model-warmed", model_name);
             });
         } else if !is_cloud_engine {
             // Preload the new Whisper model

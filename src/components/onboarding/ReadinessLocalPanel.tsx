@@ -4,7 +4,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
-import { isWindows } from "@/lib/platform";
 import type { ModelInfo, TranscriptionAcceleration } from "@/types";
 import { Info } from "lucide-react";
 
@@ -97,7 +96,7 @@ export function ReadinessLocalPanel({
           </div>
         </ScrollArea>
       </Card>
-      {isWindows && (
+      {models[currentModel ?? ""]?.gpu_controls_available === true && (
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-sm">
           <div>
             <p className="text-sm font-medium">Use GPU acceleration</p>

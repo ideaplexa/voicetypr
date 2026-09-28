@@ -43,6 +43,26 @@ describe("ModelCard", () => {
     expect(screen.getByText("Base")).toBeInTheDocument(); // Uses display_name
   });
 
+  it("shows Windows ONNX Parakeet download details and granular progress", () => {
+    const onnxModel: ModelInfo = {
+      ...mockModel,
+      name: "parakeet-tdt-0.6b-v3",
+      display_name: "Parakeet V3",
+      engine: "parakeet",
+      runtime: "onnx",
+      size: 670_479_942,
+      supported_languages: ["en", "fr"],
+    };
+    render(<ModelCard name={onnxModel.name} model={onnxModel} downloadProgress={45}
+      onDownload={mockOnDownload} onSelect={mockOnSelect} />);
+    expect(screen.getByText("670 MB")).toBeInTheDocument();
+    expect(screen.getByText(/2× the download size/)).toBeInTheDocument();
+    expect(screen.getByText(/Language is detected automatically/)).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.queryByText(/custom vocabulary/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/GPU acceleration/i)).not.toBeInTheDocument();
+  });
+
   it("should show download button when not downloaded", () => {
     render(
       <ModelCard

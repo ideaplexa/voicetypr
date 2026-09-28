@@ -8,6 +8,8 @@ import { Spinner } from "./ui/spinner";
 import { cn } from "@/lib/utils";
 import { getModelDisplayName } from "@/lib/model-display";
 import { createLogger } from "@/lib/logger";
+import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { useState } from "react";
 
 const log = createLogger("model-card");
 
@@ -44,12 +46,21 @@ export const ModelCard = function ModelCard({
   onRepair,
   showSelectButton = true,
 }: ModelCardProps) {
+  const [warming, setWarming] = useState(false);
+  useTauriEvent<string>("parakeet-model-warming", (modelName) => {
+    if (modelName === name) setWarming(true);
+  });
+  useTauriEvent<string>("parakeet-model-warmed", (modelName) => {
+    if (modelName === name) setWarming(false);
+  });
   if (!isLocalModel(model)) {
     log.debug(`[ModelCard] Skipping non-local model card for ${model.name}`);
     return null;
   }
+  const isOnnxParakeet = model.engine === "parakeet" && model.runtime === "onnx";
 
   const formatSize = () => {
+    if (isOnnxParakeet) return `${Math.round(model.size / 1_000_000)} MB`;
     const sizeInMB = model.size / (1024 * 1024);
     return sizeInMB >= 1024 ? `${(sizeInMB / 1024).toFixed(1)} GB` : `${Math.round(sizeInMB)} MB`;
   };
@@ -116,6 +127,14 @@ export const ModelCard = function ModelCard({
               <span className="font-mono text-foreground">{formatSize()}</span>
             </span>
           </div>
+          {isOnnxParakeet && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Language is detected automatically. About 2× the download size in free disk space is needed temporarily.
+            </p>
+          )}
+          {isOnnxParakeet && warming && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3.5" />Loading model…</p>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
@@ -156,7 +175,7 @@ export const ModelCard = function ModelCard({
             </Badge>
           ) : downloadProgress !== undefined ? (
             <>
-              {model.engine === "parakeet" ? (
+              {model.engine === "parakeet" && !isOnnxParakeet ? (
                 // FluidAudio reports progress only at coarse file/phase
                 // boundaries — it jumps 0→25→50→100 and sits between, so a
                 // determinate bar looks frozen mid-file. Show an always-animated

@@ -54,6 +54,10 @@ impl ProviderEngine {
     }
 
     pub fn capabilities(self) -> ProviderCapabilities {
+        self.capabilities_for_platform(std::env::consts::OS)
+    }
+
+    pub fn capabilities_for_platform(self, os: &str) -> ProviderCapabilities {
         match self {
             Self::Whisper => ProviderCapabilities {
                 shareable_remote: true,
@@ -66,7 +70,7 @@ impl ProviderEngine {
                 shareable_remote: true,
                 supports_initial_prompt: false,
                 supports_structured_terms: false,
-                supports_vocabulary_terms: true,
+                supports_vocabulary_terms: os == "macos",
                 supports_translate_task: false,
             },
             Self::Soniox => ProviderCapabilities {
@@ -164,6 +168,16 @@ mod tests {
 
     #[test]
     fn capabilities_match_static_truth_table() {
+        assert!(
+            !ProviderEngine::Parakeet
+                .capabilities_for_platform("windows")
+                .supports_vocabulary_terms
+        );
+        assert!(
+            ProviderEngine::Parakeet
+                .capabilities_for_platform("macos")
+                .supports_vocabulary_terms
+        );
         assert_eq!(
             ProviderEngine::Whisper.capabilities(),
             ProviderCapabilities {
@@ -180,7 +194,7 @@ mod tests {
                 shareable_remote: true,
                 supports_initial_prompt: false,
                 supports_structured_terms: false,
-                supports_vocabulary_terms: true,
+                supports_vocabulary_terms: cfg!(target_os = "macos"),
                 supports_translate_task: false,
             }
         );

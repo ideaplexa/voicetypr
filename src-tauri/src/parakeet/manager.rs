@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use log::{trace, warn};
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+use log::trace;
+use log::warn;
 use reqwest::Client;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -17,8 +19,6 @@ use super::messages::{
 };
 #[cfg(target_os = "macos")]
 use super::models::get_available_models;
-#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
-use super::models::AVAILABLE_MODELS;
 use super::models::{ParakeetModelDefinition, ParakeetModelKind};
 use super::sidecar::{
     ParakeetClient, ParakeetStreamHandle, ParakeetStreamOpenRequest, ParakeetStreamPartial,
@@ -39,6 +39,7 @@ pub struct ParakeetModelStatus {
     pub recommended: bool,
     pub engine: String,
     pub supported_languages: Vec<String>,
+    pub runtime: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,18 +204,43 @@ impl ParakeetManager {
 
     /// Returns available Parakeet models for the current architecture.
     ///
-    /// **Platform Support**: This returns an empty list on non-macOS platforms.
-    /// Parakeet uses Apple's Neural Engine via FluidAudio, which is macOS-only.
+    /// Platform-filtered catalog: CoreML on Apple Silicon, ONNX on Windows x64.
     ///
     /// # Platform Behavior
     /// - **macOS (Apple Silicon)**: Returns all Parakeet models
     /// - **macOS (Intel)**: Returns an empty list (Parakeet requires Apple Silicon)
-    /// - **Windows/Linux**: Returns empty vector (compile-time exclusion)
+    /// - **Windows x64**: Returns ONNX TDT v3 only
+    /// - **Windows ARM64/Linux**: Returns empty vector
     #[allow(clippy::needless_return)]
     pub fn list_models(&self) -> Vec<ParakeetModelStatus> {
-        // Parakeet Swift/FluidAudio integration is macOS-only
-        // On non-macOS platforms, this returns empty at compile time
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            return super::models::catalog_for_platform("windows", "x86_64")
+                .into_iter()
+                .map(|definition| ParakeetModelStatus {
+                    name: definition.id.to_string(),
+                    display_name: definition.display_name.to_string(),
+                    size: definition.estimated_size,
+                    url: format!("https://huggingface.co/{}", definition.repo_id),
+                    sha256: String::new(),
+                    downloaded: self.is_onnx_downloaded(definition.id),
+                    speed_score: definition.speed_score,
+                    accuracy_score: definition.accuracy_score,
+                    recommended: definition.recommended,
+                    engine: "parakeet".to_string(),
+                    supported_languages: definition
+                        .languages
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect(),
+                    runtime: "onnx".to_string(),
+                })
+                .collect();
+        }
+        #[cfg(not(any(
+            target_os = "macos",
+            all(target_os = "windows", target_arch = "x86_64")
+        )))]
         {
             return vec![];
         }
@@ -240,27 +266,19 @@ impl ParakeetManager {
                         .iter()
                         .map(|language| (*language).to_string())
                         .collect(),
+                    runtime: "coreml".to_string(),
                 })
                 .collect()
         }
     }
 
-    // Windows returns early from a cfg block; other platforms fall through.
-    #[cfg_attr(
-        all(target_os = "windows", target_arch = "x86_64"),
-        allow(clippy::needless_return)
-    )]
     pub fn get_model_definition(
         &self,
         model_name: &str,
     ) -> Option<&'static ParakeetModelDefinition> {
-        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-        {
-            let _ = model_name;
-            return None; // Hidden until the Windows catalog is introduced in slice 4.
-        }
-        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
-        AVAILABLE_MODELS.iter().find(|m| m.id == model_name)
+        super::models::catalog_for_platform(std::env::consts::OS, std::env::consts::ARCH)
+            .into_iter()
+            .find(|model| model.id == model_name)
     }
 
     pub async fn open_stream(
@@ -328,21 +346,28 @@ impl ParakeetManager {
     /// Check if a Parakeet model is available.
     /// FluidAudio stores models in ~/Library/Application Support/FluidAudio/Models/<repo-folder>/.
     pub fn is_model_downloaded(&self, definition: &ParakeetModelDefinition) -> bool {
-        let Some(home) = dirs::home_dir() else {
-            return false;
-        };
-
-        let fluid_audio_model_path = fluid_audio_model_dir(&home, definition);
-        let complete = model_files_complete(&fluid_audio_model_path, definition);
-
-        if complete {
-            trace!(
-                "Found complete FluidAudio model at: {:?}",
-                fluid_audio_model_path
-            );
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            return self.is_onnx_downloaded(definition.id);
         }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            let Some(home) = dirs::home_dir() else {
+                return false;
+            };
 
-        complete
+            let fluid_audio_model_path = fluid_audio_model_dir(&home, definition);
+            let complete = model_files_complete(&fluid_audio_model_path, definition);
+
+            if complete {
+                trace!(
+                    "Found complete FluidAudio model at: {:?}",
+                    fluid_audio_model_path
+                );
+            }
+
+            complete
+        }
     }
 
     pub async fn download_model(
@@ -1097,10 +1122,18 @@ impl ParakeetManager {
     }
 
     fn friendly_spawn_message(details: &str) -> String {
-        format!(
-            "Parakeet is unavailable. Please reinstall Voicetypr or remove the quarantine flag by running `xattr -dr com.apple.quarantine /Applications/Voicetypr.app`. Details: {}",
-            details
-        )
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            let _ = details;
+            return "Parakeet is unavailable on this Windows system. Try downloading the model again or choose another engine.".to_string();
+        }
+        #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+        {
+            format!(
+                "Parakeet is unavailable. Please reinstall Voicetypr or remove the quarantine flag by running `xattr -dr com.apple.quarantine /Applications/Voicetypr.app`. Details: {}",
+                details
+            )
+        }
     }
 
     fn emit_unavailable(app: &AppHandle, message: &str) {

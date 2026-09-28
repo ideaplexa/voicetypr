@@ -819,6 +819,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let parakeet_manager = parakeet::ParakeetManager::new(parakeet_dir);
             app.manage(parakeet_manager);
             log::info!("🦜 Parakeet manager initialized");
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            {
+                let onnx_root = models_dir.join("parakeet-onnx");
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = parakeet::onnx::download::recover_on_startup(
+                        &onnx_root,
+                        &parakeet::onnx::MODEL_OPERATION_LOCK,
+                    ).await {
+                        log::warn!("Parakeet download recovery: {error}");
+                    }
+                });
+            }
 
             // Manage active downloads for cancellation
             app.manage(Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new())));

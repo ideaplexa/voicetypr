@@ -145,6 +145,7 @@ describe("AudioUploadSection - Essential User Flows", () => {
                 name: "parakeet-tdt-0.6b-v3",
                 display_name: "Parakeet V3",
                 engine: "parakeet",
+                runtime: "coreml",
               },
             ],
           };
@@ -191,6 +192,18 @@ describe("AudioUploadSection - Essential User Flows", () => {
       expect(screen.getByRole("button", { name: "Copy" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Transcribe Another File" })).toBeVisible();
+    });
+
+    it("skips automatic diarization for backend-reported ONNX Parakeet", async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd) => {
+        if (cmd === "transcribe_audio_file") return { text: "Hello", words: null };
+        if (cmd === "get_model_status") return { models: [{ name: "parakeet-tdt-0.6b-v3", runtime: "onnx" }] };
+        return null;
+      });
+      useUploadStore.getState().select("/audio/interview.wav");
+      await useUploadStore.getState().start("parakeet-tdt-0.6b-v3", "parakeet");
+      expect(invoke).not.toHaveBeenCalledWith("diarize_audio_file", expect.anything());
+      expect(useUploadStore.getState().resultText).toBe("Hello");
     });
 
     it("user can copy transcribed text to clipboard", async () => {

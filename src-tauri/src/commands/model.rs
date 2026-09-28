@@ -77,7 +77,7 @@ pub async fn get_active_stream_capabilities(
     let provider_engine = provider_engine_from_settings(&active_engine);
     let capabilities = EngineStreamCapabilities::for_engine(provider_engine);
     let settings = crate::commands::settings::get_settings(app.clone()).await?;
-    let eou_status = if provider_engine == ProviderEngine::Parakeet {
+    let eou_status = if provider_engine == ProviderEngine::Parakeet && cfg!(target_os = "macos") {
         parakeet_manager
             .eou_model_status(&app, DEFAULT_EOU_CHUNK_MS)
             .await
@@ -96,7 +96,13 @@ pub async fn get_active_stream_capabilities(
         eou_model_downloaded: eou_status.downloaded,
         eou_model_path: eou_status.path,
         eou_chunk_ms: eou_status.chunk_ms,
-        transcription_mode: settings.transcription_mode,
+        transcription_mode: if cfg!(all(target_os = "windows", target_arch = "x86_64"))
+            && provider_engine == ProviderEngine::Parakeet
+        {
+            TRANSCRIPTION_MODE_REGULAR.to_string()
+        } else {
+            settings.transcription_mode
+        },
     })
 }
 
@@ -583,6 +589,8 @@ pub struct UnifiedModelInfo {
     pub available_models: Option<Vec<crate::cloud_stt::CloudSttModel>>,
     pub underlying_model: Option<String>,
     pub supported_languages: Option<Vec<String>>,
+    pub runtime: Option<String>,
+    pub gpu_controls_available: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -641,7 +649,7 @@ pub async fn get_parakeet_vocabulary_status(
     app: AppHandle,
     parakeet_manager: State<'_, ParakeetManager>,
 ) -> Result<ParakeetVocabularyStatusResponse, String> {
-    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+    if !cfg!(target_os = "macos") {
         return Ok(ParakeetVocabularyStatusResponse {
             supported: false,
             ready: false,
@@ -667,8 +675,8 @@ pub async fn download_parakeet_vocabulary_model(
     parakeet_manager: State<'_, ParakeetManager>,
     active_downloads: ActiveDownloadsState<'_>,
 ) -> Result<(), String> {
-    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        return Err("Parakeet CTC vocabulary is unavailable on Windows.".into());
+    if !cfg!(target_os = "macos") {
+        return Err("Parakeet CTC vocabulary is available only on macOS.".into());
     }
     const MODEL_ID: &str = "parakeet-vocabulary-ctc-110m";
 
@@ -937,6 +945,8 @@ fn convert_whisper_model(name: String, info: ModelInfo) -> UnifiedModelInfo {
         requires_setup: false,
         underlying_model: None,
         supported_languages: None,
+        runtime: None,
+        gpu_controls_available: cfg!(target_os = "windows"),
         available_models: None,
     }
 }
@@ -957,6 +967,8 @@ fn convert_parakeet_model(status: ParakeetModelStatus) -> UnifiedModelInfo {
         requires_setup: false,
         underlying_model: None,
         supported_languages: Some(status.supported_languages),
+        runtime: Some(status.runtime),
+        gpu_controls_available: false,
         available_models: None,
     }
 }
@@ -989,6 +1001,8 @@ fn collect_cloud_models(app: &AppHandle) -> Vec<UnifiedModelInfo> {
                 requires_setup: !has_key,
                 underlying_model: Some(provider.selected_model(app).id.to_string()),
                 supported_languages: None,
+                runtime: None,
+                gpu_controls_available: false,
                 available_models: Some(provider.available_models().to_vec()),
             }
         })

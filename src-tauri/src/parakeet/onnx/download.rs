@@ -1,4 +1,4 @@
-//! Transactional, platform-neutral ONNX model download. Catalog exposure is in slice 4.
+//! Transactional, platform-neutral ONNX model download.
 #![cfg_attr(
     not(all(target_os = "windows", target_arch = "x86_64")),
     allow(dead_code)
@@ -128,12 +128,15 @@ async fn remove_directory(path: &Path, purpose: &str) -> Result<(), String> {
     unreachable!()
 }
 
-async fn reclaim_transactions(root: &Path) -> Result<(), String> {
+async fn reclaim_transactions(root: &Path, manifest: &Manifest<'_>) -> Result<(), String> {
+    let destination = model_directory(root);
     let mut entries = fs::read_dir(root)
         .await
         .map_err(|_| "Cannot inspect the Parakeet model directory".to_string())?;
     let staging_prefix = format!(".staging-{MODEL_ID}-");
     let replaced_prefix = format!(".replaced-{MODEL_ID}-");
+    let mut staging = Vec::new();
+    let mut backups = Vec::new();
     while let Some(entry) = entries
         .next_entry()
         .await
@@ -141,11 +144,46 @@ async fn reclaim_transactions(root: &Path) -> Result<(), String> {
     {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with(&staging_prefix) || name.starts_with(&replaced_prefix) {
-            remove_directory(&entry.path(), "leftover download transaction").await?;
+        if name.starts_with(&staging_prefix) {
+            staging.push(entry.path());
+        } else if name.starts_with(&replaced_prefix) {
+            backups.push(entry.path());
         }
     }
+    for path in staging {
+        remove_directory(&path, "leftover download transaction").await?;
+    }
+    // A marker is the publication point. Never replace a committed destination.
+    if !destination.join(MARKER).exists() {
+        backups.sort();
+        if let Some(backup) = backups
+            .iter()
+            .rev()
+            .find(|path| is_downloaded(path, manifest.revision, manifest.files))
+        {
+            remove_directory(&destination, "uncommitted model").await?;
+            fs::rename(backup, &destination).await.map_err(|_| {
+                "Cannot restore the previous Parakeet model. Try downloading again.".to_string()
+            })?;
+        } else {
+            remove_directory(&destination, "uncommitted model").await?;
+        }
+    }
+    for path in backups {
+        remove_directory(&path, "leftover download transaction").await?;
+    }
     Ok(())
+}
+
+pub async fn recover_on_startup(
+    root: &Path,
+    operation_lock: &tokio::sync::Mutex<()>,
+) -> Result<(), String> {
+    let _guard = operation_lock.lock().await;
+    fs::create_dir_all(root)
+        .await
+        .map_err(|_| "Cannot inspect the Parakeet model directory".to_string())?;
+    reclaim_transactions(root, &PINNED).await
 }
 
 #[derive(Clone, Copy)]
@@ -258,7 +296,7 @@ async fn download_with_hook(
     fs::create_dir_all(root)
         .await
         .map_err(|_| "Cannot create the Parakeet model directory".to_string())?;
-    reclaim_transactions(root).await?;
+    reclaim_transactions(root, manifest).await?;
     cancelled(&cancel)?;
     if is_downloaded(&destination, manifest.revision, manifest.files) {
         progress(total, total);
@@ -460,15 +498,15 @@ pub async fn delete(
     unload: impl std::future::Future<Output = ()>,
 ) -> Result<(), String> {
     let _operation = operation_lock.lock().await;
+    let root = directory
+        .parent()
+        .ok_or_else(|| "Cannot inspect the Parakeet model directory".to_string())?;
+    reclaim_transactions(root, &PINNED).await?;
     {
         let _guard = gate.lock().await;
         unload.await;
         remove_directory(directory, "model directory").await?;
     }
-    let root = directory
-        .parent()
-        .ok_or_else(|| "Cannot inspect the Parakeet model directory".to_string())?;
-    reclaim_transactions(root).await?;
     Ok(())
 }
 
@@ -496,6 +534,69 @@ mod tests {
             sha256: "50ae61e841fac4e8f9e40baf2ad36ec868922ea48368c18f9535e47db56dd7fb",
         },
     ];
+
+    async fn write_complete_test_model(path: &Path) {
+        fs::create_dir_all(path).await.unwrap();
+        for (name, bytes) in [
+            ("encoder-model.int8.onnx", b"abc".as_slice()),
+            ("decoder_joint-model.int8.onnx", b"def".as_slice()),
+            ("vocab.txt", b"ghi".as_slice()),
+        ] {
+            fs::write(path.join(name), bytes).await.unwrap();
+        }
+        fs::write(path.join(MARKER), "test-revision").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_restores_complete_backup_and_preserves_commits() {
+        let manifest = Manifest {
+            revision: "test-revision",
+            files: &TEST_FILES,
+        };
+        for committed in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let destination = model_directory(temp.path());
+            let staging = temp.path().join(format!(".staging-{MODEL_ID}-abandoned"));
+            let backup = temp.path().join(format!(".replaced-{MODEL_ID}-abandoned"));
+            fs::create_dir(&staging).await.unwrap();
+            write_complete_test_model(&backup).await;
+            if committed {
+                write_complete_test_model(&destination).await;
+                fs::write(destination.join("keep"), b"yes").await.unwrap();
+            } else {
+                fs::create_dir(&destination).await.unwrap();
+                fs::write(destination.join("partial"), b"bad")
+                    .await
+                    .unwrap();
+            }
+            reclaim_transactions(temp.path(), &manifest).await.unwrap();
+            assert!(is_downloaded(&destination, "test-revision", &TEST_FILES));
+            assert!(!staging.exists());
+            assert!(!backup.exists());
+            assert_eq!(destination.join("keep").exists(), committed);
+            assert!(!destination.join("partial").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_removes_uncommitted_without_complete_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = model_directory(temp.path());
+        let backup = temp.path().join(format!(".replaced-{MODEL_ID}-incomplete"));
+        fs::create_dir(&destination).await.unwrap();
+        fs::create_dir(&backup).await.unwrap();
+        reclaim_transactions(
+            temp.path(),
+            &Manifest {
+                revision: "test-revision",
+                files: &TEST_FILES,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!destination.exists());
+        assert!(!backup.exists());
+    }
 
     async fn server(fail: Option<(&'static str, u16)>, stall: bool) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -896,6 +997,9 @@ mod tests {
         let destination = model_directory(temp.path());
         fs::create_dir(&destination).await.unwrap();
         fs::write(destination.join("old"), b"old").await.unwrap();
+        fs::write(destination.join(MARKER), "old-revision")
+            .await
+            .unwrap();
         let url = server(None, false).await;
         let cancel = Arc::new(AtomicBool::new(false));
         let hook_cancel = Arc::clone(&cancel);
@@ -945,6 +1049,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let directory = model_directory(temp.path());
         fs::create_dir(&directory).await.unwrap();
+        fs::write(directory.join(MARKER), REVISION).await.unwrap();
         let gate = Arc::new(tokio::sync::Mutex::new(()));
         let operation_lock = Arc::new(tokio::sync::Mutex::new(()));
         let held = gate.lock().await;

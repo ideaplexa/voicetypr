@@ -38,6 +38,8 @@ interface BaseModelInfo {
   url?: string;
   sha256?: string;
   supported_languages?: string[] | null;
+  runtime?: "onnx" | "coreml" | null;
+  gpu_controls_available?: boolean;
 }
 
 export interface LocalModelInfo extends BaseModelInfo {
