@@ -46,6 +46,23 @@ Decision: proceed to step 2, gated by (a) a larger German/European clip set to
 confirm de-0 is an outlier, (b) Windows runner speed + memory in the model-bench
 workflow (plan 077), (c) RSS within budget on 8 GB machines.
 
+## Wider eval + Windows runner (2026-09-28)
+
+36 MLS test clips (DE 15 / ES 15 / FR 6, fetched by `tools/parakeet-onnx-spike/fetch_eval.py`):
+
+| | CoreML sidecar (Mac) | ONNX int8 (Mac CPU) | ONNX int8 (windows-2022, 4 vCPU) |
+|---|---:|---:|---:|
+| Mean WER | 7.69% | 8.24% | 9.25% |
+| Speed (RTF) | — | 0.022 | 0.090 (~11× real time, 1.35 s per ~15 s clip) |
+| Peak RSS | — | 2.1 GB | n/a on Windows |
+
+The earlier de-0 gap was noise (per-clip wins/losses split evenly). Windows is
+~1 point worse than Mac ONNX, mostly one French clip (39% vs 6%) — check
+whether ffmpeg resampling differs (choco vs brew) before blaming the runtime.
+Windows binary 23 MB (ORT static). For comparison on the same runner class,
+Whisper turbo f16 runs ~7× slower than real time (plan 077) — Parakeet ONNX is
+the only usable large local model on CPU-only Windows. Decision: integrate.
+
 ## Step 2 — integrate (separate plan after the spike's numbers)
 
 In-process `ParakeetOnnx` backend behind the existing Parakeet engine on
