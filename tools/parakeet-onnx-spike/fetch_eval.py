@@ -37,7 +37,8 @@ def main(out):
                             os.path.join(out, name + ".wav")], check=True)
             os.remove(raw)
             manifest.append({"file": name + ".wav", "lang": lang, "ref": r["transcript"]})
-    json.dump(manifest, open(os.path.join(out, "manifest.json"), "w"), indent=1, ensure_ascii=False)
+    with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=1, ensure_ascii=False)
     print(f"{len(manifest)} clips")
 
 
