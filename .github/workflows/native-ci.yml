@@ -150,7 +150,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: windows-x64-build
+          shared-key: windows-x64-build-vk${{ env.VULKAN_RUNTIME_VERSION }}
           key: vulkan-${{ env.VULKAN_RUNTIME_VERSION }}
           workspaces: |
             src-tauri -> ../../../../b/app
