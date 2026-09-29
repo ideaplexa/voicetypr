@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Input } from "@/components/ui/input";
 import { SettingsCard } from "@/components/settings/settings-ui";
 import { Crown } from "lucide-react";

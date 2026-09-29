@@ -1,5 +1,5 @@
 import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { useSettings } from "@/contexts/SettingsContext";
 
 export function TranscriptHandlingCard() {
@@ -7,8 +7,8 @@ export function TranscriptHandlingCard() {
   if (!settings) return null;
   return (
     <>
-      <SettingsCard title="Paste automatically" description="Type the text where your cursor is.">
-        <div className="mt-3 flex justify-end">
+      <SettingsCard title="Paste automatically" description="Type the text where your cursor is." className="relative rounded-[12px] px-[14px] py-3 [&>div:first-child]:pr-10 [&_h2]:font-medium">
+        <div className="absolute right-[14px] top-1/2 -translate-y-1/2 flex justify-end">
           <Switch
             id="auto-paste-transcription"
             aria-label="Paste automatically"
@@ -19,8 +19,8 @@ export function TranscriptHandlingCard() {
           />
         </div>
       </SettingsCard>
-      <SettingsCard title="Keep in clipboard" description="Also copy it, so you can paste again.">
-        <div className="mt-3 flex justify-end">
+      <SettingsCard title="Keep in clipboard" description="Also copy it, so you can paste again." className="relative rounded-[12px] px-[14px] py-3 [&>div:first-child]:pr-10 [&_h2]:font-medium">
+        <div className="absolute right-[14px] top-1/2 -translate-y-1/2 flex justify-end">
           <Switch
             id="clipboard-retain"
             aria-label="Keep in clipboard"

@@ -18,7 +18,7 @@ export function KeyCaps({
             size === "onboarding"
               ? "inline-flex items-center rounded-[7px] border border-border bg-card px-[10px] py-[5px] font-sans text-[15px] font-semibold leading-[normal] text-foreground"
               : size === "lg"
-                ? "inline-flex min-h-11 items-center rounded-[9px] border border-border bg-secondary px-3 py-1 font-sans text-[24px] font-semibold text-foreground"
+                ? "inline-flex items-center rounded-[9px] border border-border bg-secondary px-3 py-1 font-sans text-[24px] leading-[normal] font-semibold text-foreground"
                 : "inline-flex min-h-9 items-center rounded-[9px] border border-border bg-secondary px-2.5 font-sans text-xs font-semibold text-foreground"
           }
         >

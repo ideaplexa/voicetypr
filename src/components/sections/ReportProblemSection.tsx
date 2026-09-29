@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CircleCheck, Check, Copy, Keyboard, Sparkles, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { FieldError } from "@/components/ui/field";
 import { getVersion } from "@tauri-apps/api/app";
 import { UpdateAnnouncementDialog } from "@/components/UpdateAnnouncementDialog";
@@ -34,6 +34,7 @@ export function ReportProblemSection({
   const [version, setVersion] = useState<string | null>(null);
   const [announcementOpen, setAnnouncementOpen] = useState(false);
   const [sent, setSent] = useState(false);
+  const [reportId, setReportId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
     void getVersion()
@@ -93,6 +94,7 @@ export function ReportProblemSection({
 
     resetSubmitFallback();
     setSent(false);
+    setReportId(null);
     const actionId = actionIdRef.current + 1;
     actionIdRef.current = actionId;
     setIsSubmitting(true);
@@ -116,11 +118,14 @@ export function ReportProblemSection({
 
       if (actionId !== actionIdRef.current) return;
 
+      setReportId(data.reportId);
+      setFallbackReportData(data);
       const result = await submitManualReport(data);
       if (actionId !== actionIdRef.current) return;
 
       if (result.success) {
         setSent(true);
+        setFallbackReportData(null);
         setMessage("");
         toast.success("Report submitted. Thank you.");
         return;
@@ -133,6 +138,16 @@ export function ReportProblemSection({
       toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCopyId = async () => {
+    if (!reportId) return;
+    try {
+      await navigator.clipboard.writeText(reportId);
+      toast.success("Report ID copied");
+    } catch {
+      toast.error("Failed to copy report ID");
     }
   };
 
@@ -158,7 +173,7 @@ export function ReportProblemSection({
   };
 
   return (
-    <SettingsPage className="max-w-none gap-[18px] px-7 pb-7 pl-6 pt-1">
+    <SettingsPage className="gap-[18px]">
       <PageHeader
         title="Help & feedback"
         description="Get unstuck fast, or tell us what broke."
@@ -251,10 +266,20 @@ export function ReportProblemSection({
               role="status"
               className="flex items-center gap-2 text-[12.5px] leading-[normal] text-muted-foreground"
             >
-              {sent ? (
+              {reportId ? (
                 <>
-                  <CircleCheck className="size-[15px] text-sage" />
-                  Report submitted. Thank you.
+                  {sent ? <CircleCheck className="size-[15px] text-sage" /> : null}
+                  {sent ? "Report sent · ID " : "Report ID "}
+                  <span className="font-mono">{reportId}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Copy report ID"
+                    onClick={() => void handleCopyId()}
+                  >
+                    <Copy className="size-3.5" />
+                  </Button>
                 </>
               ) : null}
             </div>

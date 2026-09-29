@@ -5,7 +5,7 @@ import { useSharingStatus } from "./network-sharing/useSharingStatus";
 import { BindingResultsList } from "./network-sharing/BindingResultsList";
 import { ConnectionSettingsPanel } from "./network-sharing/ConnectionSettingsPanel";
 import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { createLogger } from "@/lib/logger";

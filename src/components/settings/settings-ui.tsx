@@ -1,6 +1,6 @@
 import type { ComponentProps, ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { CircleHelp } from "lucide-react";
 
@@ -24,9 +24,10 @@ export function SettingsPage({
   return (
     <div className={cn("h-full min-h-0 overflow-auto", container && "@container")}>
       <div
+        data-pencil-name="Main"
         className={cn(
-          "mx-auto flex w-full flex-col gap-5 pb-4 pl-2 pr-4",
-          wide ? "max-w-5xl" : "max-w-3xl",
+          "mx-auto flex w-full flex-col gap-5 px-9 pt-10 pb-7 [&_[data-slot=select-trigger]]:rounded-[10px] [&_[data-slot=input]]:rounded-[10px]",
+          wide ? "max-w-5xl" : "max-w-[1024px]",
           className,
         )}
       >
@@ -48,11 +49,15 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <header className={cn("flex flex-wrap items-start gap-4", className)}>
+    <header data-pencil-name="Header" className={cn("flex flex-wrap items-start gap-4", className)}>
       <div className="min-w-0">
-        <h1 className="text-[24px] font-semibold tracking-tight text-foreground">{title}</h1>
+        <h1 className="text-[24px] font-semibold tracking-[-0.4px] leading-[normal] text-foreground">
+          {title}
+        </h1>
         {description ? (
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1 max-w-2xl text-[13.5px] leading-[normal] text-muted-foreground">
+            {description}
+          </p>
         ) : null}
       </div>
       {action ? <div className="ml-auto flex flex-wrap items-center gap-2">{action}</div> : null}
@@ -93,7 +98,9 @@ export function SettingsPaneCard({
   return (
     <section className={cn("rounded-[14px] border border-border bg-card px-5 py-1", className)}>
       {title ? (
-        <h3 className="pt-[14px] pb-1 text-sm font-semibold text-foreground">{title}</h3>
+        <h3 className="pt-[14px] pb-1 text-[13.5px] leading-[normal] font-semibold text-foreground">
+          {title}
+        </h3>
       ) : null}
       <div>{children}</div>
     </section>
@@ -119,7 +126,7 @@ export function SettingsPaneRow({
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="text-[13.5px] leading-[normal] font-medium text-foreground">{title}</p>
         {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
       </div>
       {control ? <div className="shrink-0">{control}</div> : null}
@@ -166,7 +173,7 @@ export function SettingsCard({
     <section
       className={cn(
         "rounded-[14px] border border-border bg-card",
-        compact ? "px-5 py-1" : "p-5",
+        compact ? "px-5 py-1" : "p-[18px]",
         className,
       )}
     >
@@ -177,7 +184,9 @@ export function SettingsCard({
             <h2
               className={cn(
                 "font-semibold text-foreground",
-                compact ? "pt-[14px] pb-1 text-sm" : "text-base",
+                compact
+                  ? "pt-[14px] pb-1 text-[13.5px] leading-[normal]"
+                  : "text-[13.5px] leading-[normal]",
               )}
             >
               {title}
@@ -186,7 +195,7 @@ export function SettingsCard({
           {description ? (
             <p
               className={cn(
-                "mt-1 text-sm leading-relaxed text-muted-foreground",
+                "mt-0.5 text-xs leading-[normal] text-muted-foreground",
                 Icon && "ml-[26px]",
               )}
             >
@@ -219,20 +228,23 @@ export function SettingRow({
   return (
     <div
       className={cn(
-        "flex flex-col items-start gap-3 border-t border-border pt-4 mt-4 first:mt-3 first:border-t-0 first:pt-0 sm:flex-row sm:items-center sm:gap-6",
+        "flex flex-col items-start gap-3 border-t border-border py-3 first:border-t-0 sm:flex-row sm:items-center sm:gap-5",
         className,
       )}
     >
       <div className="min-w-0 max-w-[440px]">
         {htmlFor ? (
-          <label htmlFor={htmlFor} className="block text-sm font-medium text-foreground">
+          <label
+            htmlFor={htmlFor}
+            className="block text-[13.5px] leading-[normal] font-medium text-foreground"
+          >
             {title}
           </label>
         ) : (
-          <p className="text-sm font-medium text-foreground">{title}</p>
+          <p className="text-[13.5px] leading-[normal] font-medium text-foreground">{title}</p>
         )}
         {description ? (
-          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-0.5 text-xs leading-[normal] text-muted-foreground">{description}</p>
         ) : null}
       </div>
       <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto sm:shrink-0">
@@ -268,7 +280,7 @@ export function Segmented({
         const next = values.find((candidate) => candidate !== value);
         if (next) onValueChange(next);
       }}
-      className="rounded-[7px] bg-muted p-0.5"
+      className="rounded-[10px] bg-muted p-[3px]"
       spacing={0.5}
     >
       {options.map((option) => (
@@ -276,7 +288,7 @@ export function Segmented({
           key={option.value}
           value={option.value}
           disabled={option.disabled}
-          className="rounded-[7px] border border-transparent bg-transparent px-3 font-medium text-muted-foreground aria-pressed:bg-card! aria-pressed:text-foreground aria-pressed:font-semibold aria-pressed:shadow-sm dark:aria-pressed:border-foreground/30"
+          className="h-auto rounded-[7px] border border-transparent bg-transparent px-3 py-1.5 text-[12.5px] leading-[normal] font-medium text-muted-foreground aria-pressed:bg-card! aria-pressed:text-foreground aria-pressed:font-semibold aria-pressed:shadow-sm dark:aria-pressed:border-foreground/30"
         >
           {option.label}
         </ToggleGroupItem>
@@ -315,7 +327,7 @@ export function ChoiceCard({
         "w-full rounded-[14px] border bg-card p-4 text-left whitespace-normal",
         layout === "row"
           ? "h-auto flex-row items-center justify-start gap-[14px]"
-          : "h-full min-h-36 flex-col items-start justify-start gap-2",
+          : "h-full flex-col items-start justify-start gap-2",
         (active ?? selected) && "border-sage ring-[1.5px] ring-sage",
         active === false && selected && "ring-[1.5px] ring-foreground/20",
       )}
@@ -323,30 +335,30 @@ export function ChoiceCard({
       {Icon ? (
         <span
           className={cn(
-            "shrink-0 rounded-[9px] text-sage",
-            layout === "row" ? "flex size-9 items-center justify-center" : "p-2",
+            "shrink-0 rounded-[9px]",
+            selected ? "text-sage" : "text-muted-foreground",
+            layout === "row"
+              ? "flex size-9 items-center justify-center"
+              : "flex size-[30px] items-center justify-center",
             selected ? "bg-sage-bg" : "bg-muted",
           )}
         >
           <Icon className={layout === "row" ? "size-[18px]" : "size-4"} />
         </span>
       ) : null}
-      <span className={cn(layout === "row" && "flex min-w-0 flex-1 flex-col gap-[3px]")}>
+      <span className={cn("flex min-w-0 flex-col", layout === "row" ? "flex-1 gap-[3px]" : "w-full gap-2")}>
         <span
           className={cn(
             "text-foreground",
-            layout === "row" ? "text-[14.5px] leading-[normal] font-semibold" : "font-medium",
+            layout === "row"
+              ? "text-[14.5px] leading-[normal] font-semibold"
+              : "text-[14px] leading-[normal] font-semibold",
           )}
         >
           {label}
         </span>
         {description ? (
-          <span
-            className={cn(
-              "text-[12.5px] text-muted-foreground",
-              layout === "row" ? "leading-[normal]" : "leading-snug",
-            )}
-          >
+          <span className={cn("text-[12.5px] font-normal text-muted-foreground", "leading-[normal]")}>
             {description}
           </span>
         ) : null}

@@ -3,6 +3,8 @@ import {
   buildCrashReportPayload,
   buildManualReportPayload,
   buildReportBody,
+  generateReportId,
+  formatManualReportMessage,
   submitManualReport,
   submitCrashReport,
   type CrashReportData,
@@ -10,6 +12,7 @@ import {
 } from "./crashReport";
 
 const baseReport: ManualReportData = {
+  reportId: "VT-ABCDE",
   message: "The app failed after recording.",
   appVersion: "1.12.2",
   platform: "macos",
@@ -184,7 +187,7 @@ describe("report submission payloads", () => {
   it("builds the manual report endpoint payload", () => {
     expect(buildManualReportPayload(baseReport)).toEqual({
       kind: "manual",
-      message: "The app failed after recording.",
+      message: "Report ID: VT-ABCDE\n\nThe app failed after recording.",
       environment: {
         appVersion: "1.12.2",
         platform: "macos",
@@ -215,7 +218,7 @@ describe("report submission payloads", () => {
     expect(payload).not.toHaveProperty("email");
     expect(payload).toMatchObject({
       kind: "manual",
-      message: baseReport.message,
+      message: formatManualReportMessage(baseReport.reportId, baseReport.message),
       environment: { deviceId: baseReport.deviceId },
       latestLog: { content: baseReport.logContent },
     });
@@ -354,5 +357,32 @@ describe("report submission payloads", () => {
       success: false,
       message: "Could not connect to Voicetypr Support. Please use Copy Report instead.",
     });
+  });
+});
+
+describe("manual report IDs", () => {
+  it("uses five Crockford base32 characters from cryptographic random bytes", () => {
+    const random = vi.spyOn(crypto, "getRandomValues");
+    expect(generateReportId()).toMatch(/^VT-[0-9A-HJKMNP-TV-Z]{5}$/);
+    expect(random).toHaveBeenCalledWith(expect.any(Uint8Array));
+    random.mockRestore();
+  });
+
+  it("puts the ID on the first line of the Discord message and copied report", () => {
+    const payload = buildManualReportPayload(baseReport);
+    expect(payload).toHaveProperty("message", "Report ID: VT-ABCDE\n\n" + baseReport.message);
+    expect(buildReportBody(baseReport)).toContain("Report ID: VT-ABCDE\n\n" + baseReport.message);
+  });
+
+  it("caps the message at 10000 characters while preserving the ID and user text prefix", () => {
+    const message = "x".repeat(10_000);
+    const payload = buildManualReportPayload({ ...baseReport, message });
+    expect(payload.kind).toBe("manual");
+    if (payload.kind !== "manual") throw new Error("Expected manual report");
+    expect(payload.message).toHaveLength(10_000);
+    expect(payload.message).toBe("Report ID: VT-ABCDE\n\n" + message.slice(0, 9979));
+    expect(formatManualReportMessage(baseReport.reportId, "short")).toBe(
+      "Report ID: VT-ABCDE\n\nshort",
+    );
   });
 });

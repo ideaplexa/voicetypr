@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { SettingsCard } from "@/components/settings/settings-ui";
 import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
 import {

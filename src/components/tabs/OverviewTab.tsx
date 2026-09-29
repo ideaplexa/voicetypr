@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { AudioLines, ChevronRight, Languages, Sparkles, TextCursorInput } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
@@ -37,8 +37,8 @@ function relativeTime(date: Date): string {
 }
 
 function RecentRow({ item }: { item: TranscriptionHistory }) {
-  return <li className="flex min-w-0 items-center gap-3 border-b border-border py-3.5 last:border-0">
-    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={item.text}>{item.text}</span>
+  return <li className="flex min-w-0 items-center gap-[14px] rounded-[10px] border-b border-border px-3 py-[11px] last:border-0">
+    <span className="min-w-0 flex-1 line-clamp-2 text-[13px] leading-[normal] text-foreground" title={item.text}>{item.text}</span>
     <span className="max-w-24 shrink-0 truncate text-xs text-muted-foreground">{item.writing?.context_hint?.app_name ?? "Voicetypr"}</span>
     <time dateTime={item.timestamp.toISOString()} className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{relativeTime(item.timestamp)}</time>
   </li>;
@@ -82,26 +82,26 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
     { label: "Live preview", value: settings?.transcription_mode === "live_preview" ? "On" : "Off", screen: "transcription" as const, icon: TextCursorInput },
   ];
 
-  return <SettingsPage wide container className="min-h-full gap-5 pt-0">
-    <section className="rounded-[14px] border border-border bg-card p-6 sm:p-7">
+  return <SettingsPage wide container className="min-h-full gap-[22px]">
+    <section data-pencil-name="Hero" className="flex flex-col gap-[14px] rounded-[16px] border border-border bg-card px-7 py-[26px]">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-2.5 py-1 text-xs font-medium text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
+        {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium text-sage"><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
         <Button variant="outline" size="sm" onClick={() => { setTryText(""); resetTryFeedback(); setTryOpen(true); }}>Try a test dictation</Button>
       </div>
-      <h1 className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-[clamp(1.5rem,3vw,2rem)] font-semibold leading-tight tracking-tight text-foreground">Press <KeyCaps caps={caps} size="lg" /> and start talking</h1>
-      <p className="mt-3 text-[13px] text-muted-foreground">{trigger.mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>
-      <div className="mt-5 flex flex-wrap gap-2">{chips.map(({ label, value, screen, icon: Icon }) => <button key={label} type="button" onClick={() => onNavigate?.(screen)} className="inline-flex min-h-8 max-w-full items-center gap-2 rounded-[10px] bg-muted px-3 text-xs text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /><span className="text-muted-foreground">{label}</span><strong className="truncate font-medium">{value}</strong></button>)}</div>
+      <h1 className="flex flex-wrap items-center gap-x-[10px] gap-y-1 text-[30px] font-semibold leading-[normal] tracking-[-0.6px] text-foreground">Press <KeyCaps caps={caps} size="lg" /> and start talking</h1>
+      <p className="text-[14px] leading-[normal] text-muted-foreground">{trigger.mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>
+      <div className="pt-2 flex flex-wrap gap-2">{chips.map(({ label, value, screen, icon: Icon }) => <button key={label} type="button" onClick={() => onNavigate?.(screen)} className="inline-flex max-w-full items-center gap-[7px] rounded-[9px] bg-muted px-[11px] py-[7px] text-xs leading-[normal] text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /><span className="text-muted-foreground">{label}</span><strong className="truncate font-medium">{value}</strong></button>)}</div>
     </section>
 
-    <div className="grid min-h-[340px] flex-1 gap-5 @min-[720px]:grid-cols-[minmax(0,1fr)_230px]">
-      <section aria-labelledby="recent-title" className="min-w-0">
-        <div className="flex items-center justify-between gap-3"><h2 id="recent-title" className="text-sm font-semibold text-foreground">Recent</h2><button type="button" onClick={() => onNavigate?.("history")} className="text-xs font-medium text-sage hover:underline focus-visible:outline-2 focus-visible:outline-ring">View all history →</button></div>
+    <div className="grid flex-1 gap-[22px] @min-[620px]:grid-cols-[minmax(0,1fr)_230px]">
+      <section aria-labelledby="recent-title" data-pencil-name="Recent" className="min-w-0">
+        <div className="flex items-center justify-between gap-3"><h2 id="recent-title" className="text-[15px] leading-[normal] font-semibold text-foreground">Recent</h2><button type="button" onClick={() => onNavigate?.("history")} className="text-[12.5px] leading-[normal] font-medium text-sage hover:underline focus-visible:outline-2 focus-visible:outline-ring">View all history →</button></div>
         {isLoading && history.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Loading dictations…</p> : loadError && history.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Couldn’t load history. <button type="button" onClick={() => void refreshHistory()} className="text-sage underline">Retry</button></p> : history.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Your dictations will show up here.</p> : <ul className="mt-2">{history.slice(0, 4).map((item) => <RecentRow key={item.id} item={item} />)}</ul>}
       </section>
-      <SettingsCard title="Last 7 days" className="min-h-[300px] [&>div:first-child_h2]:text-[13px] [&>div:first-child_h2]:font-medium [&>div:first-child_h2]:text-muted-foreground">
-        <div className="mt-4 font-sans text-[27px] font-semibold tracking-tight text-foreground">{weekTime}</div>
+      <SettingsCard title="Last 7 days" className="rounded-[16px] p-5 [&>div:first-child_h2]:text-[13px] [&>div:first-child_h2]:font-medium [&>div:first-child_h2]:text-muted-foreground">
+        <div className="mt-4 font-sans text-[28px] font-semibold tracking-tight text-foreground">{weekTime}</div>
         <p className="text-xs text-muted-foreground">{stats.weekCount === 0 ? "nothing yet in the last 7 days" : stats.weekSavedMinutes === 0 ? "less than a minute estimated saved" : "estimated saved vs typing at 40 wpm"}</p>
-        <div role="img" aria-label={`Dictations over the last seven days: ${stats.weekDays.map((day) => `${day.count} dictations on ${day.label}`).join(", ")}`} className="mt-5 flex h-20 items-end gap-2">{stats.weekDays.map((day) => <div key={day.key} className="flex h-full min-w-0 flex-1 flex-col justify-end gap-1"><div title={`${day.count} dictations on ${day.label}`} className={cn("min-h-1 rounded-sm", day.count === stats.weekMax && day.count > 0 ? "bg-sage" : "bg-sage-bg")} style={{ height: `${Math.max(6, Math.round(day.count / Math.max(1, stats.weekMax) * 70))}%` }} /><span className="text-center font-mono text-[10px] text-muted-foreground">{day.label.slice(0, 1)}</span></div>)}</div>
+        <div role="img" aria-label={`Dictations over the last seven days: ${stats.weekDays.map((day) => `${day.count} dictations on ${day.label}`).join(", ")}`} className="mt-4 flex h-[70px] items-end gap-1.5">{stats.weekDays.map((day) => <div key={day.key} className="flex h-full min-w-0 flex-1 flex-col justify-end gap-1"><div title={`${day.count} dictations on ${day.label}`} className={cn("min-h-1 rounded-sm", day.count === stats.weekMax && day.count > 0 ? "bg-sage" : "bg-sage-bg")} style={{ height: `${Math.max(6, Math.round(day.count / Math.max(1, stats.weekMax) * 70))}%` }} /><span className="text-center font-mono text-[10px] text-muted-foreground">{day.label.slice(0, 1)}</span></div>)}</div>
         <dl className="mt-5 grid grid-cols-2 gap-4"><div><dd className="font-mono text-base font-semibold text-foreground">{stats.weekWords.toLocaleString()}</dd><dt className="text-xs text-muted-foreground">words</dt></div><div><dd className="font-mono text-base font-semibold text-foreground">{stats.weekCount.toLocaleString()}</dd><dt className="text-xs text-muted-foreground">dictations</dt></div></dl>
         <Button variant="ghost" size="sm" className="mt-4 -ml-2 text-xs" onClick={() => setShareOpen(true)}>Share stats</Button>
       </SettingsCard>

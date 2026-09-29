@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { createLogger } from "@/lib/logger";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Copy, Loader2, RefreshCw } from "lucide-react";

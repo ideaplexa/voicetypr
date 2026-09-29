@@ -14,9 +14,9 @@ export function RecordingIndicatorCard() {
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
   return (
-    <SettingsCard title="Recording pill">
-      <div className="mt-4 grid gap-5 sm:grid-cols-[1fr_1.2fr]">
-        <div className="flex min-h-44 items-center justify-center rounded-[10px] bg-muted p-4">
+    <SettingsCard title="Recording pill" className="[&>div:first-child]:sr-only [&>div:last-child]:mt-0">
+      <div className="grid items-center gap-[18px] sm:grid-cols-[300px_minmax(0,1fr)]">
+        <div className="flex h-[120px] items-center justify-center rounded-[10px] bg-muted p-4">
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-[#121316] px-3 py-2 text-white shadow-xl">
             <div className="flex h-5 items-center gap-0.5">
               {[7, 13, 19, 11, 17, 9, 14, 6, 12].map((height, index) => (
@@ -31,7 +31,7 @@ export function RecordingIndicatorCard() {
             <span className="font-mono text-[10px] text-white/60">0:07</span>
           </div>
         </div>
-        <div>
+        <div className="flex flex-col gap-2.5 [&>div]:py-0 [&>div]:border-0">
           <SettingRow
             title="Show"
             control={

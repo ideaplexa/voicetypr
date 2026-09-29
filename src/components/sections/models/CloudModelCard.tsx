@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Radio } from "@base-ui/react/radio";
 import {
   Select,

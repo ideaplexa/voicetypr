@@ -6,7 +6,7 @@ import { SettingsPaneRow } from "@/components/settings/settings-ui";
 import { getTrayStatus, retryTrayCreation, type TrayStatus } from "@/lib/tray";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Dialog,
   DialogContent,

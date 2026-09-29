@@ -1,5 +1,5 @@
 import { PageHeader, InfoButton } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Dialog,
   DialogContent,

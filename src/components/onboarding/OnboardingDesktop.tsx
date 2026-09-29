@@ -5,7 +5,7 @@ import { PermissionsStep } from "@/components/onboarding/PermissionsStep";
 import { SourceStep } from "@/components/onboarding/SourceStep";
 import { SuccessStep } from "@/components/onboarding/SuccessStep";
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { MicrophoneCheck } from "@/components/onboarding/MicrophoneCheck";
 import { isMacOS } from "@/lib/platform";
 import { ReadinessLocalPanel } from "@/components/onboarding/ReadinessLocalPanel";

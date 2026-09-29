@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { createLogger } from "@/lib/logger";
 import { toast } from "sonner";
 import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";

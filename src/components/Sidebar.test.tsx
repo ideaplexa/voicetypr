@@ -47,14 +47,14 @@ describe("Sidebar navigation", () => {
       "Dictionary",
       "Recording",
     ]);
-    expect(main.getByText("Setup")).toHaveClass("text-muted-foreground");
+    expect(main.getByText("Setup")).toHaveClass("text-text-3");
     const support = within(screen.getByRole("navigation", { name: "Support navigation" }));
     expect(support.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Settings",
       "Help & feedback",
     ]);
     expect(main.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
-    expect(await screen.findByText("2.1.0")).toHaveClass("text-muted-foreground");
+    expect(await screen.findByText("2.1.0")).toHaveClass("text-text-3");
     expect(screen.queryByRole("button", { name: "Check for updates" })).not.toBeInTheDocument();
   });
 

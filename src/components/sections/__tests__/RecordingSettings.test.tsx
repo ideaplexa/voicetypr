@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordingSettings } from "../RecordingSettings";
 import { invoke } from "@tauri-apps/api/core";
@@ -238,6 +238,19 @@ describe("Recording screen", () => {
     await waitFor(() =>
       expect(mockUpdateSettings).toHaveBeenCalledWith({ pill_indicator_position: "top-center" }),
     );
+  });
+
+  it("keeps the compact Sounds summary separate from all per-sound rows in More", () => {
+    render(<RecordingSettings />);
+    const sounds = screen.getByRole("heading", { name: "Sounds" }).closest("section")!;
+    const more = screen.getByRole("heading", { name: "More" }).closest("section")!;
+    expect(within(sounds).getByText("Choose recording, transcript and paste sounds in More.")).toBeInTheDocument();
+    expect(within(sounds).queryByRole("switch")).not.toBeInTheDocument();
+    for (const label of ["Recording started", "Transcript ready", "Paste completed"]) {
+      expect(within(more).getByText(label)).toBeInTheDocument();
+      expect(within(more).getByRole("switch", { name: label })).toBeInTheDocument();
+      expect(within(sounds).queryByText(label)).not.toBeInTheDocument();
+    }
   });
 
   it("preserves each audio feedback setting", () => {

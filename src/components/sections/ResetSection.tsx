@@ -1,5 +1,5 @@
 import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
 import { invoke } from "@tauri-apps/api/core";

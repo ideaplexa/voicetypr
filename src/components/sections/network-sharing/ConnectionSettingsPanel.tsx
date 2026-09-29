@@ -1,9 +1,9 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { Check, Eye, EyeOff } from "lucide-react";
 import { SettingsPaneRow } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { useState } from "react";
 
 interface ConnectionSettingsPanelProps {

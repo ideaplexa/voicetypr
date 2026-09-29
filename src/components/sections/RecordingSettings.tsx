@@ -10,7 +10,7 @@ export function RecordingSettings() {
   const { settings } = useSettings();
   if (!settings) return null;
   return (
-    <SettingsPage>
+    <SettingsPage className="gap-4">
       <PageHeader
         title="Recording"
         description="Your shortcut, microphone and what happens after you speak."
@@ -18,7 +18,7 @@ export function RecordingSettings() {
       />
       <CaptureControlsCard />
       <RecordingIndicatorCard />
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-[14px] sm:grid-cols-3">
         <TranscriptHandlingCard />
         <AudioFeedbackCard />
       </div>

@@ -40,6 +40,7 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2
 let writeTextMock: MockInstance<(data: string) => Promise<void>>;
 
 const reportData = {
+  reportId: "VT-ABCDE",
   message: "The app broke",
   appVersion: "1.0.0",
   platform: "windows",
@@ -143,8 +144,11 @@ describe("ReportProblemSection", () => {
     );
     expect(issue).toHaveValue("");
     expect(toast.success).toHaveBeenCalledWith("Report submitted. Thank you.");
-    expect(screen.getByRole("status")).toHaveTextContent("Report submitted. Thank you.");
-    expect(screen.queryByText(/ID VT-/)).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Report sent · ID VT-ABCDE");
+    expect(screen.getByText("VT-ABCDE")).toHaveClass("font-mono");
+    await user.click(screen.getByRole("button", { name: "Copy report ID" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("VT-ABCDE");
+    expect(screen.getByRole("button", { name: "Copy report ID" })).toBeEnabled();
     const submitted = vi.mocked(submitManualReport).mock.calls[0][0];
     expect(submitted).not.toHaveProperty("name");
     expect(submitted).not.toHaveProperty("email");
@@ -176,9 +180,11 @@ describe("ReportProblemSection", () => {
     await fillRequiredReportFields(user, "Copy this report");
     await user.click(screen.getByRole("button", { name: /send report/i }));
 
-    const copyButton = await screen.findByRole("button", { name: /copy report/i });
+    const copyButton = await screen.findByRole("button", { name: /^copy report$/i });
     expect(copyButton).toBeEnabled();
     expect(screen.getByText("Report not sent")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Report ID VT-ABCDE");
+    expect(screen.getByRole("button", { name: "Copy report ID" })).toBeEnabled();
     expect(screen.getByText(/copy the prepared report/i)).toBeInTheDocument();
 
     await user.click(copyButton);
@@ -205,12 +211,12 @@ describe("ReportProblemSection", () => {
 
     await fillRequiredReportFields(user, "Retry this report");
     await user.click(screen.getByRole("button", { name: /send report/i }));
-    await user.click(await screen.findByRole("button", { name: /copy report/i }));
+    await user.click(await screen.findByRole("button", { name: /^copy report$/i }));
     expect(writeTextMock).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: /send report/i }));
     await waitFor(() => expect(submitManualReport).toHaveBeenCalledTimes(2));
-    await screen.findByRole("button", { name: /copy report/i });
+    await screen.findByRole("button", { name: /^copy report$/i });
 
     await act(async () => {
       resolveClipboard?.();

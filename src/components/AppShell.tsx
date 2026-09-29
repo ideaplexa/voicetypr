@@ -70,14 +70,14 @@ export function AppShell({
       className="bg-background"
       style={
         {
-          "--sidebar-width": "14rem",
+          "--sidebar-width": "212px",
         } as CSSProperties
       }
     >
       <header
         data-tauri-drag-region
-        className={`fixed inset-x-0 top-0 z-50 flex h-9 items-center bg-sidebar pr-3 ${
-          isMacOS ? "pl-[4.75rem]" : "pl-3"
+        className={`fixed top-0 z-50 flex h-9 items-center bg-transparent pr-3 ${
+          isMacOS ? "inset-x-0 pl-[4.75rem]" : "right-0 pl-3"
         }`}
       >
         <SidebarTrigger
@@ -86,7 +86,7 @@ export function AppShell({
         />
       </header>
       <Sidebar activeSection={activeSection} onSectionChange={onSectionChange} />
-      <SidebarInset className="mb-2 mr-2 mt-9 h-[calc(100svh-2.75rem)] min-h-0 min-w-0 overflow-hidden rounded-2xl bg-background">
+      <SidebarInset className="m-0 h-svh min-h-0 min-w-0 overflow-hidden rounded-none bg-background">
         {trayUnavailable ? (
           <Alert variant="destructive" className="mx-4 mt-4">
             <CircleAlert />

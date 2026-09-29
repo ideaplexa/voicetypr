@@ -3,7 +3,7 @@ import {
   SettingsPaneCard,
   SettingsPaneRow,
 } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Spinner } from "@/components/ui/spinner";
 import { AlertTriangle } from "lucide-react";
 import { ShortcutSectionGroup } from "./shortcuts/ShortcutSectionGroup";

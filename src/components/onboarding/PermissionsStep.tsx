@@ -1,6 +1,6 @@
 import type { PermissionState } from "@/components/onboarding/onboardingTypes";
 import { SettingsPaneCard } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Keyboard, Mic } from "lucide-react";
 
 export function PermissionsStep({

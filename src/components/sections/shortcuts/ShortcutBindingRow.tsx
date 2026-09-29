@@ -1,5 +1,5 @@
 import { HotkeyInput } from "@/components/HotkeyInput";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Spinner } from "@/components/ui/spinner";
 import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import type { ShortcutActionDefinition, ShortcutBinding } from "@/types/shortcuts";

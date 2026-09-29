@@ -1,4 +1,4 @@
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { AlertTriangle, Network } from "lucide-react";
 import { SettingsPaneRow } from "@/components/settings/settings-ui";
 

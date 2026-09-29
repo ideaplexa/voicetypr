@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   SettingsPaneCard,
   SettingsPaneHeader,
@@ -52,9 +52,9 @@ export function SettingsTab({
   onNavigate?: (screen: ScreenId) => void;
 }) {
   return (
-    <div className="h-full min-h-0 overflow-auto px-9 pb-7 pt-10">
+    <div data-pencil-name="Main" className="h-full min-h-0 overflow-auto px-9 pb-7 pt-10 [&_[data-slot=select-trigger]]:rounded-[10px] [&_[data-slot=input]]:rounded-[10px]">
       <div className="mx-auto w-full max-w-[880px]">
-        <h1 className="mb-[18px] text-[24px] font-semibold tracking-[-0.4px]">Settings</h1>
+        <h1 className="mb-[18px] text-[24px] leading-[normal] font-semibold tracking-[-0.4px]">Settings</h1>
         <div className="flex flex-col gap-7 md:flex-row">
           <nav
             aria-label="Settings panes"

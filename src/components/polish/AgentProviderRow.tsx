@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Select,
   SelectContent,
@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { Brain, RefreshCw } from "lucide-react";
 import { formatReasoningLevel } from "./agentCli";
 import { AgentModelPickerDialog } from "./AgentModelPickerDialog";

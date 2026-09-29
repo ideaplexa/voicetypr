@@ -42,14 +42,14 @@ describe("Home", () => {
   it("shows the active local engine, key caps, recording mode and setup chips", async () => {
     const onNavigate = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} />);
-    expect(screen.getByText("Ready · Parakeet V3 runs on this Mac")).toHaveClass("text-foreground");
+    expect(screen.getByText("Ready · Parakeet v3 runs on this Mac")).toHaveClass("text-sage");
     expect(screen.getByRole("heading", { name: /Press.*and start talking/ })).toBeInTheDocument();
     expect(screen.getByText("⌥")).toBeInTheDocument();
     expect(screen.getByText("Space")).toBeInTheDocument();
     expect(screen.getByText(/Hold to talk, release to paste/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /PolishClean/ })).toBeInTheDocument());
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /EngineParakeet V3/ }));
+    await user.click(screen.getByRole("button", { name: /EngineParakeet v3/ }));
     await user.click(screen.getByRole("button", { name: /LanguageEnglish/ }));
     await user.click(screen.getByRole("button", { name: /PolishClean/ }));
     await user.click(screen.getByRole("button", { name: /Live previewOn/ }));
@@ -149,7 +149,7 @@ describe("Home", () => {
     mock.readiness = { ...mock.readiness, canRecord: false, selectedModelAvailable: false };
     mock.downloadProgress = { "parakeet-tdt-0.6b-v3": 42 };
     const { rerender } = render(<OverviewTab />);
-    expect(screen.getByRole("button", { name: /Downloading Parakeet V3 · 42%/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Downloading Parakeet v3 · 42%/ })).toBeInTheDocument();
     mock.downloadProgress = {};
     rerender(<OverviewTab />);
     expect(screen.queryByRole("button", { name: /Downloading/ })).not.toBeInTheDocument();

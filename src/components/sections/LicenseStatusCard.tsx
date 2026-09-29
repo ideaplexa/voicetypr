@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
 import { AlertTriangle, Check, Clock, RefreshCw, Shield } from "lucide-react";
 import type { LicenseStatus } from "@/types";

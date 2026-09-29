@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingsCard } from "@/components/settings/settings-ui";
 import type { SelectedFile, SpeakerSegment } from "@/state/upload";

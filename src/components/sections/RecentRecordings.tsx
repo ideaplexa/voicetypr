@@ -110,7 +110,7 @@ export function RecentRecordings({
   ) : null;
 
   return (
-    <div className="@container flex h-full min-h-0 flex-col gap-4 overflow-hidden px-9 pt-10 [&>header]:items-end">
+    <div data-pencil-name="Main" className="@container flex h-full min-h-0 flex-col gap-4 overflow-hidden px-9 pt-10 [&>header]:items-end">
       <RecentRecordingsHeader
         historyLength={history.length}
         onTranscribeFile={onTranscribeFile}

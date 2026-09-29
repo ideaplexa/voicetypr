@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { SettingRow, SettingsPaneRow } from "@/components/settings/settings-ui";
 import {
   Select,

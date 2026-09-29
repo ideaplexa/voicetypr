@@ -1,12 +1,24 @@
 import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { useSettings } from "@/contexts/SettingsContext";
 
 export function AudioFeedbackCard() {
+  const { settings } = useSettings();
+  if (!settings) return null;
+  return (
+    <SettingsCard
+      title="Sounds"
+      description="Choose recording, transcript and paste sounds in More."
+      className="rounded-[12px] px-[14px] py-3 [&_h2]:font-medium"
+    />
+  );
+}
+
+export function AudioFeedbackDetailRows() {
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
   return (
-    <SettingsCard title="Sounds">
+    <>
       <SettingRow
         title="Recording started"
         description="Play a sound when the microphone is ready for speech."
@@ -19,15 +31,6 @@ export function AudioFeedbackCard() {
           />
         }
       />
-    </SettingsCard>
-  );
-}
-
-export function AudioFeedbackDetailRows() {
-  const { settings, updateSettings } = useSettings();
-  if (!settings) return null;
-  return (
-    <>
       <SettingRow
         title="Transcript ready"
         htmlFor="sound-on-transcription-complete"

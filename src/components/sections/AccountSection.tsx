@@ -57,7 +57,7 @@ export function AccountSection() {
       status.status === "trial");
 
   return (
-    <SettingsPage className="max-w-none gap-[18px] px-9 pb-7 pt-1 [&_button[data-slot=button]]:rounded-[10px] [&_input]:rounded-[10px]">
+    <SettingsPage className="gap-[18px] [&_button[data-slot=button]]:rounded-[10px] [&_input]:rounded-[10px]">
       <PageHeader
         title="License"
         description="Trial status, license activation, and purchase access."

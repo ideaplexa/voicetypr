@@ -6,7 +6,7 @@ import {
 } from "@/components/onboarding/onboardingTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { Info, Keyboard } from "lucide-react";
 
 export function HotkeyStep({

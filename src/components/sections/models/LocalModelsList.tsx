@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Radio } from "@base-ui/react/radio";
 import {
   DropdownMenu,
@@ -45,7 +45,7 @@ export function LocalModelsList({
         return (
           <div
             key={name}
-            className={cn("flex min-h-15 items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}
+            className={cn("flex min-h-[60px] items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}
           >
             <Radio.Root
               value={name}
@@ -58,8 +58,8 @@ export function LocalModelsList({
               )}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium text-foreground">{displayName}</p>
-              <p className="truncate text-xs text-muted-foreground">{detail}</p>
+              <p className="truncate text-[13.5px] leading-[normal] font-medium text-foreground">{displayName}</p>
+              <p className="mt-0.5 truncate text-xs leading-[normal] text-muted-foreground">{detail}</p>
               {downloadErrors[name] && !usable && progress === undefined ? (
                 <p className="text-xs text-destructive">{downloadErrors[name]}</p>
               ) : null}

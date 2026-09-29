@@ -106,8 +106,11 @@ export function ModelsSection({
         return server?.name || getModelDisplayName(server?.model) || "Another computer";
       })()
     : selectedModel && isCloudModel(selectedModel)
-      ? resolveCloudModelLabel(selectedModel) || getModelDisplayName(currentModel, Object.fromEntries(models)) || "Cloud"
-      : getModelDisplayName(currentModel, Object.fromEntries(models)) || (currentModel ? humanizeModelId(currentModel) : "No model selected");
+      ? resolveCloudModelLabel(selectedModel) ||
+        getModelDisplayName(currentModel, Object.fromEntries(models)) ||
+        "Cloud"
+      : getModelDisplayName(currentModel, Object.fromEntries(models)) ||
+        (currentModel ? humanizeModelId(currentModel) : "No model selected");
   const activeSourceFamily = sourceCards.find((source) => source.value === trackedSource)?.label;
   const selectModel = (name: string) => {
     void remotes.clearActiveRemote().then(() => onSelect(name));
@@ -141,11 +144,11 @@ export function ModelsSection({
                   : "Choose an offline model for this PC"}
               </span>
             }
-            className="!p-0 [&>div:first-child]:px-4 [&>div:first-child]:pt-4 [&>div:last-child]:mt-3"
+            className="!p-0 overflow-hidden [&>div:first-child]:px-4 [&>div:first-child]:py-3 [&>div:first-child]:border-b [&>div:first-child]:border-border [&>div:last-child]:mt-0"
           >
             <RadioGroup
               aria-label="Local models"
-              value={trackedSource === "local" ? currentModel ?? "" : ""}
+              value={trackedSource === "local" ? (currentModel ?? "") : ""}
               onValueChange={selectModel}
             >
               <LocalModelsList
@@ -175,12 +178,12 @@ export function ModelsSection({
           <SettingsCard
             title="Cloud providers"
             description="Your own API key connects each provider. Personal Library words and corrections may be sent as context; snippets are not sent."
-            className="!p-0 [&>div:first-child]:px-4 [&>div:first-child]:pt-4 [&>div:last-child]:mt-3"
+            className="!p-0 overflow-hidden [&>div:first-child]:px-4 [&>div:first-child]:py-3 [&>div:first-child]:border-b [&>div:first-child]:border-border [&>div:last-child]:mt-0"
           >
             <RadioGroup
               className="divide-y divide-border"
               aria-label="Cloud providers"
-              value={trackedSource === "cloud" ? currentModel ?? "" : ""}
+              value={trackedSource === "cloud" ? (currentModel ?? "") : ""}
               onValueChange={selectModel}
             >
               {providers.map(([name, model]) => (
@@ -207,17 +210,18 @@ export function ModelsSection({
         ) : null}
         <RemoteServersBlock remotes={remotes} visible={sourceFilter === "remote"} />
         <div className="grid gap-3 sm:grid-cols-2">
-          <SettingsCard title="Spoken language">
+          <section
+            data-pencil-name="Opt Spoken language"
+            className="rounded-[14px] border border-border bg-card px-4 py-3"
+          >
             <ModelsLanguageRow
               languageValue={language.languageValue}
               currentEngine={language.currentEngine}
               isEnglishOnlyModel={language.isEnglishOnlyModel}
               supportedLanguages={language.supportedLanguages}
-              hasDownloading={Object.keys(downloadProgress).length > 0}
-              hasVerifying={verifyingModels.size > 0}
               onLanguageChange={language.handleLanguageChange}
             />
-          </SettingsCard>
+          </section>
           <TranscriptionControls
             engine={language.currentEngine}
             modelName={language.currentModelName}

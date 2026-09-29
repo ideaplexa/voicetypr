@@ -1,6 +1,6 @@
 import { InfoButton, PageHeader } from "@/components/settings/settings-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { useState } from "react";
 
 export function EnhancementsHeader({

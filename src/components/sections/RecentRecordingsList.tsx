@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from "react";
 import { AlertTriangle, Search } from "lucide-react";
 import { KeyCaps } from "@/components/KeyCaps";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { isMacOS } from "@/lib/platform";
 import type { TranscriptionHistory } from "@/types";

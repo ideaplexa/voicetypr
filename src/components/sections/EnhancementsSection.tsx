@@ -15,7 +15,7 @@ import {
 } from "@/components/polish/agentCli";
 import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { SettingsPage } from "@/components/settings/settings-ui";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
   const { settings, updateSettings } = useSettings();
@@ -146,7 +146,7 @@ export function EnhancementsSection() {
 
   return (
     <div className="h-full min-h-0 min-w-0 flex flex-col overflow-x-hidden">
-      <div className="mx-auto w-full max-w-3xl px-4 pt-5">
+      <SettingsPage className="gap-[18px]">
       <EnhancementsHeader
         hasSelectedModel={hasSelectedModel}
         activeProviderName={activeProviderName}
@@ -155,10 +155,7 @@ export function EnhancementsSection() {
         onToggleEnabled={handleToggleEnabled}
         onOpenProviderSetup={openProviderSetup}
       />
-      </div>
 
-      <ScrollArea className="flex-1 min-h-0 min-w-0 overflow-x-hidden">
-        <div className="mx-auto min-w-0 w-full max-w-3xl overflow-x-hidden pt-5 pb-4 pl-2 pr-4">
           <EnhancementSettingsPanel
             preset={enhancementOptions.preset}
             finalTextLanguage={effectiveFinalTextLanguage}
@@ -180,8 +177,7 @@ export function EnhancementsSection() {
               activeReasoningName,
             }}
           />
-        </div>
-      </ScrollArea>
+      </SettingsPage>
 
       <ProviderSetupDialog
         open={providerSetupOpen}

@@ -1,6 +1,6 @@
 import type { BareModifierSpec } from "@/components/HotkeyInput";
 import { formatBareModifierLabel } from "@/components/onboarding/onboardingTypes";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Spinner } from "@/components/ui/spinner";
 import { KeyCaps } from "@/components/KeyCaps";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";

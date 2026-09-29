@@ -1,8 +1,8 @@
 import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import { SettingsPaneCard } from "@/components/settings/settings-ui";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Progress } from "@/components/ui/progress";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { isWindows } from "@/lib/platform";
 import type { ModelInfo, TranscriptionAcceleration } from "@/types";
 

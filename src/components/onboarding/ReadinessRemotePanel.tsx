@@ -4,7 +4,7 @@ import { isRemoteServerOnline } from "@/components/onboarding/onboardingTypes";
 import type { SavedConnection } from "@/components/RemoteServerCard";
 import { AddServerModal } from "@/components/sections/AddServerModal";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Card,
   CardAction,

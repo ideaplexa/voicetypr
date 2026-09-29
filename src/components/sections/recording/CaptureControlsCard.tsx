@@ -1,8 +1,8 @@
 import { HotkeyInput } from "@/components/HotkeyInput";
 import { KeyCaps } from "@/components/KeyCaps";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/settings/SettingsButton";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { Segmented, SettingsCard } from "@/components/settings/settings-ui";
 import { useCanAutoInsert } from "@/contexts/ReadinessContext";
 import { useSettings } from "@/contexts/SettingsContext";
@@ -78,9 +78,9 @@ export function CaptureControlsCard() {
     ? shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows")
     : [label];
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-[14px] sm:grid-cols-2">
       <SettingsCard title="Dictation shortcut">
-        <div className="mt-4 flex min-h-12 flex-wrap items-center gap-2 rounded-[10px] bg-muted p-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-[10px] bg-muted px-[14px] py-3">
           {isEditingHotkey ? (
             <div className="w-full space-y-2">
               <HotkeyInput
@@ -181,7 +181,7 @@ export function CaptureControlsCard() {
         ) : null}
       </SettingsCard>
       <SettingsCard title="Microphone">
-        <div className="mt-4">
+        <div className="mt-3">
           <MicrophoneSelection
             value={settings.selected_microphone || undefined}
             onValueChange={async (deviceName) => {
@@ -197,7 +197,7 @@ export function CaptureControlsCard() {
         </div>
         {recording ? (
           <div
-            className="mt-5 flex h-3 items-center gap-0.5"
+            className="mt-3 flex h-[18px] items-center gap-[3px]"
             role="meter"
             aria-label="Microphone level"
             aria-valuemin={0}
@@ -212,7 +212,7 @@ export function CaptureControlsCard() {
             ))}
           </div>
         ) : null}
-        <p className="mt-4 text-xs text-muted-foreground">
+        <p className="mt-3 text-xs text-muted-foreground">
           Speak to test — start a dictation to see the level.
         </p>
       </SettingsCard>

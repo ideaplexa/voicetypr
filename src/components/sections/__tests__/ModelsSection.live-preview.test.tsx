@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelsSection } from "../ModelsSection";
@@ -145,6 +145,19 @@ describe("ModelsSection live preview mode", () => {
           return null;
       }
     });
+  });
+
+  it.each(["downloading", "verifying"] as const)("keeps %s status in the model list, outside Spoken language", async (phase) => {
+    const pendingModel: ModelInfo = { ...parakeetModel, name: "pending-model", display_name: "Pending model", downloaded: false };
+    render(<ModelsSection {...baseProps}
+      models={[...baseProps.models, [pendingModel.name, pendingModel]]}
+      downloadProgress={phase === "downloading" ? { [pendingModel.name]: 42 } : {}}
+      verifyingModels={new Set(phase === "verifying" ? [pendingModel.name] : [])} />);
+    await screen.findByRole("switch", { name: "Live preview" });
+    const language = screen.getByRole("heading", { name: "Spoken language" }).closest("section")!;
+    expect(screen.getByText(phase === "downloading" ? "Downloading 42%" : "Verifying")).toBeInTheDocument();
+    expect(within(language).queryByText(/Downloading|Verifying/)).not.toBeInTheDocument();
+    expect(within(language).getByTestId("language-selection")).toBeInTheDocument();
   });
 
   it("shows a disabled switch and reason when streaming is unavailable", async () => {

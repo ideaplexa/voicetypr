@@ -1,6 +1,6 @@
 import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
 import type { ActiveStreamCapabilities, SpeechModelEngine } from "@/types";
@@ -102,9 +102,13 @@ export function TranscriptionControls({
       </SettingsCard>
     ) : null
   ) : (
-    <SettingsCard title="Live preview">
+    <section
+      data-pencil-name="Opt Live preview"
+      className="rounded-[14px] border border-border bg-card px-4 py-3"
+    >
       <SettingRow
-        title="See words as you talk"
+        title="Live preview"
+        className="border-0 p-0! flex-row! items-center! gap-4! [&>div:first-child]:flex-1"
         description={
           previewAvailable
             ? "See words in the pill as you talk."
@@ -127,6 +131,6 @@ export function TranscriptionControls({
           <Spinner className="inline size-3" /> Enabling live preview…
         </p>
       ) : null}
-    </SettingsCard>
+    </section>
   );
 }

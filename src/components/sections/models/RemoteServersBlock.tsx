@@ -1,7 +1,7 @@
 import { AddServerModal } from "../AddServerModal";
 import { RemoteServerCard } from "@/components/RemoteServerCard";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Card } from "@/components/ui/card";
 import {
   Empty,

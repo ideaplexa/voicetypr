@@ -1,7 +1,7 @@
 import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import { ApiKeyModal } from "@/components/ApiKeyModal";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Card,
   CardAction,

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import type { ShortcutActionDefinition, ShortcutBinding } from "@/types/shortcuts";
 import { Plus } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";

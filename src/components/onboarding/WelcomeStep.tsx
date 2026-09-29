@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { ChevronRight } from "lucide-react";
 
 export function WelcomeStep({ onNext }: { onNext: () => void | Promise<void> }) {
