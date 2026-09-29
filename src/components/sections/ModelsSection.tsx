@@ -1,29 +1,23 @@
 import { useTauriEvent } from "@/hooks/useTauriEvent";
-import { SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChoiceCard, SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
+import { SonioxStorageCard } from "@/components/SonioxStorageCard";
 import { useSettings } from "@/contexts/SettingsContext";
-import { getModelDisplayName } from "@/lib/model-display";
+import { isMacOS } from "@/lib/platform";
 import { isCloudModel, isLocalModel } from "@/types";
-import { Download } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createLogger } from "@/lib/logger";
-import {
-  CloudApiKeyModal,
-  CloudProvidersBlock,
-  CloudSetupGrid,
-} from "./models/CloudProvidersBlock";
-import { LocalModelsList, LocalSetupGrid } from "./models/LocalModelsList";
-import { ModelsEmptyStates } from "./models/ModelsEmptyStates";
+import { Cloud, Laptop, Network } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CloudApiKeyModal } from "./models/CloudProvidersBlock";
+import { CloudModelCard } from "./models/CloudModelCard";
+import { LocalModelsList } from "./models/LocalModelsList";
 import { ModelsLanguageRow } from "./models/ModelsLanguageRow";
 import { ModelsSourcesHeader } from "./models/ModelsSourcesHeader";
 import { RemoteServersBlock } from "./models/RemoteServersBlock";
 import { TranscriptionControls } from "./models/TranscriptionControls";
+import { TranscriptionPerformanceCard } from "./recording/TranscriptionPerformanceCard";
 import type { ModelsSectionProps, SourceFilter } from "./models/types";
 import { useCloudProviders } from "./models/useCloudProviders";
 import { useRemoteServers } from "./models/useRemoteServers";
 import { useSpokenLanguage } from "./models/useSpokenLanguage";
-
-const log = createLogger("models");
 
 export function ModelsSection({
   sourceFilter: controlledSourceFilter,
@@ -51,70 +45,14 @@ export function ModelsSection({
     refreshModels,
     clearActiveRemote: remotes.clearActiveRemote,
   });
-  const selectedSourceType = selectedModel && isCloudModel(selectedModel) ? "cloud" : "local";
-  const trackedSource = remotes.activeRemoteServer ? "remote" : selectedSourceType;
+  const trackedSource: SourceFilter = remotes.activeRemoteServer
+    ? "remote"
+    : selectedModel && isCloudModel(selectedModel)
+      ? "cloud"
+      : "local";
   const [localSourceFilter, setLocalSourceFilter] = useState<SourceFilter>(trackedSource);
   const sourceFilter = controlledSourceFilter ?? localSourceFilter;
   const setSourceFilter = onSourceFilterChange ?? setLocalSourceFilter;
-
-  const { availableToUse, availableToSetup } = useMemo(() => {
-    const useList: typeof models = [];
-    const setupList: typeof models = [];
-
-    models.forEach(([name, model]) => {
-      const isReady = !!model.downloaded && !model.requires_setup;
-      if (isReady) {
-        useList.push([name, model]);
-      } else {
-        setupList.push([name, model]);
-      }
-    });
-
-    // Locals first within each list
-    const sortFn = ([, a]: (typeof models)[number], [, b]: (typeof models)[number]) => {
-      if (isLocalModel(a) && isCloudModel(b)) return -1;
-      if (isCloudModel(a) && isLocalModel(b)) return 1;
-      return 0;
-    };
-    useList.sort(sortFn);
-    setupList.sort(sortFn);
-
-    return { availableToUse: useList, availableToSetup: setupList };
-  }, [models]);
-
-  const prioritizeCurrent = ([left]: (typeof models)[number], [right]: (typeof models)[number]) =>
-    Number(right === currentModel) - Number(left === currentModel);
-  const readyLocalModels = availableToUse
-    .filter(([, model]) => isLocalModel(model))
-    .sort(prioritizeCurrent);
-  const readyCloudModels = availableToUse
-    .filter(([, model]) => isCloudModel(model))
-    .sort(prioritizeCurrent);
-  const setupLocalModels = availableToSetup.filter(([, model]) => isLocalModel(model));
-  const setupCloudModels = availableToSetup.filter(([, model]) => isCloudModel(model));
-
-  const localCount = readyLocalModels.length + setupLocalModels.length;
-  const cloudCount = readyCloudModels.length + setupCloudModels.length;
-  const remoteCount = remotes.remoteServers.length;
-  const showLocal = sourceFilter === "local";
-  const showCloud = sourceFilter === "cloud";
-  const showRemote = sourceFilter === "remote";
-
-  const activeRemote = remotes.remoteServers.find(
-    (server) => server.id === remotes.activeRemoteServer,
-  );
-  const currentSourceType = remotes.activeRemoteServer
-    ? "Remote"
-    : selectedSourceType === "cloud"
-      ? "Cloud"
-      : "Local";
-  const currentSourceLabel = remotes.activeRemoteServer
-    ? activeRemote?.name ||
-      (activeRemote ? `${activeRemote.host}:${activeRemote.port}` : "Remote Voicetypr")
-    : getModelDisplayName(currentModel) || "No source selected";
-
-  // Preserve an explicit navigation destination on mount. Only a later source
-  // change should override the filter the user is browsing.
   const lastTrackedSource = useRef(trackedSource);
   useEffect(() => {
     if (trackedSource !== lastTrackedSource.current) {
@@ -122,118 +60,155 @@ export function ModelsSection({
       setSourceFilter(trackedSource);
     }
   }, [trackedSource, setSourceFilter]);
-
-  useTauriEvent<{ model: string; engine: string }>("model-changed", (payload) => {
-    log.debug("[ModelsSection] model-changed event received:", payload);
-    // Refresh all model-related state
+  useTauriEvent<{ model: string; engine: string }>("model-changed", () => {
     void remotes.fetchActiveRemoteServer();
     void remotes.fetchRemoteServers();
     void refreshSettings();
   });
 
-  const hasDownloading = useMemo(
-    () => Object.keys(downloadProgress).length > 0,
-    [downloadProgress],
-  );
-  const hasVerifying = verifyingModels.size > 0;
-
-  const localActions = {
-    downloadProgress,
-    downloadPhases,
-    verifyingModels,
-    downloadErrors,
-    onDownload,
-    onDelete,
-    onCancelDownload,
-    onRepair,
-    onSelect,
-    currentModel,
-    activeRemoteServer: remotes.activeRemoteServer,
-    clearActiveRemote: remotes.clearActiveRemote,
-    speedModeRecommended:
-      language.currentEngine === "whisper" && language.settings?.whisper_speed_mode === true,
-  };
-
-  const cloudBindings = {
-    currentModel,
-    activeRemoteServer: remotes.activeRemoteServer,
-    onSelect,
-    clearActiveRemote: remotes.clearActiveRemote,
-    cloud,
-  };
-
+  const local = models
+    .filter(([, model]) => isLocalModel(model))
+    .sort(([a], [b]) => Number(b === currentModel) - Number(a === currentModel));
+  const providers = models
+    .filter(([, model]) => isCloudModel(model))
+    .sort(([a], [b]) => Number(b === currentModel) - Number(a === currentModel));
+  const sourceCards = [
+    {
+      value: "local" as const,
+      label: isMacOS ? "On this Mac" : "On this PC",
+      description: "Private and offline. No account, no cost per minute.",
+      tag: "Recommended",
+      icon: Laptop,
+    },
+    {
+      value: "cloud" as const,
+      label: "Cloud",
+      description: "Soniox, Deepgram and more with your own API key.",
+      tag: providers.some(([, model]) => model.downloaded && !model.requires_setup)
+        ? "Key added"
+        : "Needs a key",
+      icon: Cloud,
+    },
+    {
+      value: "remote" as const,
+      label: "Another computer",
+      description: "Use a stronger Voicetypr on your network.",
+      tag: "Local network",
+      icon: Network,
+    },
+  ];
   return (
     <>
       <SettingsPage>
-        <ModelsSourcesHeader
-          currentSourceType={currentSourceType}
-          currentSourceLabel={currentSourceLabel}
-        >
-          <ModelsLanguageRow
-            languageValue={language.languageValue}
-            currentEngine={language.currentEngine}
-            isEnglishOnlyModel={language.isEnglishOnlyModel}
-            supportedLanguages={language.supportedLanguages}
-            hasDownloading={hasDownloading}
-            hasVerifying={hasVerifying}
-            onLanguageChange={language.handleLanguageChange}
-          />
-        </ModelsSourcesHeader>
-
-        <TranscriptionControls
-          engine={language.currentEngine}
-          modelName={language.currentModelName}
-        />
-
-        <Tabs
-          value={sourceFilter}
-          onValueChange={(value) => setSourceFilter(value as typeof sourceFilter)}
-        >
-          <TabsList aria-label="Transcription source type">
-            <TabsTrigger value="local">Local ({localCount})</TabsTrigger>
-            <TabsTrigger value="cloud">Cloud ({cloudCount})</TabsTrigger>
-            <TabsTrigger value="remote">Remote ({remoteCount})</TabsTrigger>
-          </TabsList>
-          {showLocal && localCount > 0 && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {localCount} available · {readyLocalModels.length} downloaded
-            </p>
-          )}
-        </Tabs>
-
-        {showLocal && <LocalModelsList readyLocalModels={readyLocalModels} {...localActions} />}
-
-        {showCloud && (
-          <CloudProvidersBlock readyCloudModels={readyCloudModels} {...cloudBindings} />
-        )}
-
-        {((showLocal && setupLocalModels.length > 0) ||
-          (showCloud && setupCloudModels.length > 0)) && (
+        <ModelsSourcesHeader />
+        <div className="grid gap-3 sm:grid-cols-3" aria-label="Transcription sources">
+          {sourceCards.map((source) => (
+            <ChoiceCard
+              key={source.value}
+              {...source}
+              selected={sourceFilter === source.value}
+              onSelect={() => setSourceFilter(source.value)}
+            />
+          ))}
+        </div>
+        {sourceFilter === "local" ? (
           <SettingsCard
-            icon={Download}
-            title="Set up sources"
-            description="Download local models or connect cloud providers before selecting them."
+            title="Model"
+            action={
+              <span className="text-xs text-muted-foreground">
+                {isMacOS
+                  ? "Fastest on Apple Silicon: Parakeet"
+                  : "Choose an offline model for this PC"}
+              </span>
+            }
+            className="!p-0 [&>div:first-child]:px-4 [&>div:first-child]:pt-4 [&>div:last-child]:mt-3"
           >
-            <div className="mt-4 space-y-3">
-              {showLocal && setupLocalModels.length > 0 && (
-                <LocalSetupGrid setupLocalModels={setupLocalModels} {...localActions} />
-              )}
-              {showCloud && setupCloudModels.length > 0 && (
-                <CloudSetupGrid setupCloudModels={setupCloudModels} {...cloudBindings} />
-              )}
+            <div role="radiogroup" aria-label="Local models">
+              <LocalModelsList
+                models={local}
+                downloadProgress={downloadProgress}
+                downloadPhases={downloadPhases}
+                verifyingModels={verifyingModels}
+                downloadErrors={downloadErrors}
+                onDownload={onDownload}
+                onDelete={onDelete}
+                onCancelDownload={onCancelDownload}
+                onRepair={onRepair}
+                onSelect={onSelect}
+                currentModel={currentModel}
+                activeRemoteServer={remotes.activeRemoteServer}
+                clearActiveRemote={remotes.clearActiveRemote}
+              />
             </div>
+            {local.length === 0 && (
+              <p className="px-4 pb-4 text-sm text-muted-foreground">
+                {isLoading ? "Loading models…" : "No local models available."}
+              </p>
+            )}
           </SettingsCard>
-        )}
-
-        <RemoteServersBlock remotes={remotes} visible={showRemote} />
-
-        <ModelsEmptyStates
-          isLoading={isLoading}
-          hasModels={availableToUse.length > 0 || availableToSetup.length > 0}
-          hasRemoteServers={remotes.remoteServers.length > 0}
-        />
+        ) : null}
+        {sourceFilter === "cloud" ? (
+          <SettingsCard
+            title="Cloud providers"
+            description="Your own API key connects each provider. Personal Library words and corrections may be sent as context; snippets are not sent."
+            className="!p-0 [&>div:first-child]:px-4 [&>div:first-child]:pt-4 [&>div:last-child]:mt-3"
+          >
+            <div className="divide-y divide-border" role="radiogroup" aria-label="Cloud providers">
+              {providers.map(([name, model]) => (
+                <CloudModelCard
+                  key={name}
+                  name={name}
+                  model={model}
+                  currentModel={currentModel}
+                  activeRemoteServer={remotes.activeRemoteServer}
+                  onSelect={onSelect}
+                  clearActiveRemote={remotes.clearActiveRemote}
+                  openCloudModal={cloud.openCloudModal}
+                  onDisconnect={cloud.handleCloudDisconnect}
+                  onModelChange={cloud.handleCloudModelChange}
+                />
+              ))}
+            </div>
+            {providers.length === 0 && (
+              <p className="px-4 pb-4 text-sm text-muted-foreground">
+                No cloud providers available.
+              </p>
+            )}
+          </SettingsCard>
+        ) : null}
+        <RemoteServersBlock remotes={remotes} visible={sourceFilter === "remote"} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SettingsCard title="Spoken language">
+            <ModelsLanguageRow
+              languageValue={language.languageValue}
+              currentEngine={language.currentEngine}
+              isEnglishOnlyModel={language.isEnglishOnlyModel}
+              supportedLanguages={language.supportedLanguages}
+              hasDownloading={Object.keys(downloadProgress).length > 0}
+              hasVerifying={verifyingModels.size > 0}
+              onLanguageChange={language.handleLanguageChange}
+            />
+          </SettingsCard>
+          <TranscriptionControls
+            engine={language.currentEngine}
+            modelName={language.currentModelName}
+          />
+        </div>
+        {language.currentEngine === "whisper" ? (
+          <TranscriptionControls
+            engine={language.currentEngine}
+            modelName={language.currentModelName}
+            speedOnly
+          />
+        ) : null}
+        {sourceFilter === "cloud" &&
+        providers.some(
+          ([name, model]) => name === "soniox" && model.downloaded && !model.requires_setup,
+        ) ? (
+          <SonioxStorageCard />
+        ) : null}
+        <TranscriptionPerformanceCard />
       </SettingsPage>
-
       <CloudApiKeyModal cloud={cloud} />
     </>
   );

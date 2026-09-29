@@ -1,6 +1,4 @@
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -11,8 +9,7 @@ import {
 import { getCloudProviderByModel, resolveCloudModelLabel } from "@/lib/cloudProviders";
 import { getModelDisplayName } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
-import { ModelInfo, isCloudModel } from "@/types";
-import { CheckCircle, Zap } from "lucide-react";
+import { type ModelInfo, isCloudModel } from "@/types";
 
 export interface CloudModelCardProps {
   name: string;
@@ -38,10 +35,9 @@ export function CloudModelCard({
   onModelChange,
 }: CloudModelCardProps) {
   if (!isCloudModel(model)) return null;
-
   const provider = getCloudProviderByModel(name) ?? getCloudProviderByModel(model.engine);
-  const requiresSetup = model.requires_setup;
-  const isActive = currentModel === name && !activeRemoteServer;
+  const ready = !!model.downloaded && !model.requires_setup;
+  const selected = ready && currentModel === name && !activeRemoteServer;
   const availableModels = model.available_models ?? [];
   const selectedModelId =
     (model.underlying_model &&
@@ -53,129 +49,74 @@ export function CloudModelCard({
     getModelDisplayName(name, { [name]: model }) ||
     provider?.displayName ||
     name;
-  const providerDisplayName = provider?.displayName || provider?.providerName;
-  const showModelSelector = availableModels.length > 1;
-
+  const providerName = provider?.displayName || provider?.providerName || name;
   return (
-    <Card
-      key={name}
-      className={cn(
-        "group rounded-xl border border-border bg-card p-4 transition-colors",
-        requiresSetup ? "" : "cursor-pointer",
-        isActive ? "border-sage/50 bg-sage-bg/40" : "hover:border-sage/40 hover:bg-muted/30",
-      )}
-      onClick={async () => {
-        if (requiresSetup) {
-          openCloudModal(name, "connect");
-          return;
-        }
-        await clearActiveRemote();
-        void onSelect(name);
-      }}
-    >
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3
-              className={cn(
-                "truncate text-sm font-semibold tracking-tight",
-                isActive && "text-sage",
-              )}
-            >
-              {modelDisplayName}
-            </h3>
-            {providerDisplayName && (
-              <Badge variant="outline" className="gap-1 text-muted-foreground">
-                {providerDisplayName}
-              </Badge>
-            )}
-            {isActive && (
-              <Badge className="gap-1 bg-sage text-sage-foreground">
-                <CheckCircle className="size-3" />
-                Active
-              </Badge>
-            )}
-          </div>
-          {provider?.description && (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {provider.description}
-            </p>
-          )}
-          {showModelSelector ? (
-            <div
-              className="mt-2"
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <Select
-                items={availableModels.map((option) => ({
-                  value: option.id,
-                  label: option.display_name,
-                }))}
-                value={selectedModelId}
-                onValueChange={(modelId) => {
-                  if (modelId != null) {
-                    void onModelChange(name, modelId, requiresSetup);
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="h-8 w-full sm:w-[220px]"
-                  aria-label={`${providerDisplayName ?? name} transcription model`}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <SelectValue placeholder={modelDisplayName} />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableModels.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <Zap className="size-3.5 text-sage" />
-              Speed <span className="font-medium text-foreground">{model.speed_score ?? "—"}</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <CheckCircle className="size-3.5 text-sage" />
-              Accuracy{" "}
-              <span className="font-medium text-foreground">{model.accuracy_score ?? "—"}</span>
-            </span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {requiresSetup ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={(event) => {
-                event.stopPropagation();
-                openCloudModal(name, "connect");
-              }}
-            >
-              {provider?.setupCta ?? "Add API Key"}
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDisconnect(name);
-              }}
-            >
-              Remove API Key
-            </Button>
-          )}
-        </div>
+    <div className={cn("flex flex-wrap items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        aria-label={`Use ${providerName}`}
+        disabled={!ready}
+        onClick={() => {
+          void clearActiveRemote().then(() => onSelect(name));
+        }}
+        className={cn(
+          "size-4 shrink-0 rounded-full border border-border",
+          selected && "border-[5px] border-sage",
+        )}
+      />
+      <div className="min-w-36 flex-1">
+        <p className="text-[13px] font-medium text-foreground">{providerName}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {modelDisplayName} · {ready ? "Key added" : "Needs a key"}
+        </p>
       </div>
-    </Card>
+      {availableModels.length > 1 ? (
+        <Select
+          items={availableModels.map((option) => ({
+            value: option.id,
+            label: option.display_name,
+          }))}
+          value={selectedModelId}
+          onValueChange={(modelId) => {
+            if (modelId != null) void onModelChange(name, modelId, model.requires_setup);
+          }}
+        >
+          <SelectTrigger
+            size="sm"
+            className="w-40"
+            aria-label={`${providerName} transcription model`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {availableModels.map((option) => (
+              <SelectItem key={option.id} value={option.id}>
+                {option.display_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
+      {selected ? <span className="text-xs font-medium text-sage">In use</span> : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => openCloudModal(name, ready ? "update" : "connect")}
+      >
+        {ready ? "Replace key" : "Add key"}
+      </Button>
+      {ready ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground"
+          onClick={() => onDisconnect(name)}
+        >
+          Remove key
+        </Button>
+      ) : null}
+    </div>
   );
 }

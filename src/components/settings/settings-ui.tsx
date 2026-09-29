@@ -213,11 +213,15 @@ export function Segmented({
 export function ChoiceCard({
   label,
   description,
+  icon: Icon,
+  tag,
   selected,
   onSelect,
 }: {
   label: string;
   description?: string;
+  icon?: ComponentType<IconProps>;
+  tag?: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -225,16 +229,28 @@ export function ChoiceCard({
     <Button
       type="button"
       variant="outline"
-      role="option"
-      aria-selected={selected}
+      aria-label={label}
+      aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "h-auto w-full flex-col items-start rounded-[14px] border bg-card p-4 text-left",
+        "h-full min-h-36 w-full flex-col items-start justify-start gap-2 rounded-[14px] border bg-card p-4 text-left whitespace-normal",
         selected && "border-sage ring-[1.5px] ring-sage",
       )}
     >
-      <span className="font-medium">{label}</span>
-      {description ? <span className="text-xs text-muted-foreground">{description}</span> : null}
+      {Icon ? (
+        <span className="rounded-lg bg-muted p-2 text-sage">
+          <Icon className="size-4" />
+        </span>
+      ) : null}
+      <span className="font-medium text-foreground">{label}</span>
+      {description ? (
+        <span className="text-xs leading-snug text-muted-foreground">{description}</span>
+      ) : null}
+      {tag ? (
+        <span className="mt-auto rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+          {tag}
+        </span>
+      ) : null}
     </Button>
   );
 }

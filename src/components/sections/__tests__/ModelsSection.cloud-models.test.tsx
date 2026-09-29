@@ -126,71 +126,71 @@ function renderModels(overrides: Partial<Parameters<typeof ModelsSection>[0]> = 
     ...overrides,
   };
 
-  render(<ModelsSection {...props} />);
-  return props;
+  const view = render(<ModelsSection {...props} />);
+  return { ...props, rerender: view.rerender };
 }
 
-describe("ModelsSection cloud model labels", () => {
+describe("Transcription source cards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listen).mockResolvedValue(vi.fn());
     vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "list_remote_servers" || command === "discover_remote_servers") {
+      if (command === "list_remote_servers" || command === "discover_remote_servers")
         return Promise.resolve([]);
-      }
       if (command === "get_active_remote_server") return Promise.resolve(null);
       return Promise.resolve(undefined);
     });
   });
 
-  it("opens the active Cloud source on ordinary first navigation without an explicit destination", async () => {
+  it("starts on the active Cloud family and switches visible lists without selecting an engine", async () => {
     const user = userEvent.setup();
-    render(<ControlledSources currentModel="openai" />);
-    expect(await screen.findByRole("heading", { name: "Soniox v5" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Cloud/ })).toHaveAttribute("aria-selected", "true");
-    await user.click(screen.getByRole("tab", { name: /Local/ }));
-    expect(screen.getByRole("tab", { name: /Local/ })).toHaveAttribute("aria-selected", "true");
+    const props = renderModels();
+    expect(screen.getByRole("button", { name: "Cloud" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Soniox v5 · Key added")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Another computer" }));
+    expect(screen.getByRole("button", { name: "Another computer" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("No remote Voicetyprs configured")).toBeInTheDocument();
+    expect(screen.queryByText("Soniox v5 · Key added")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "On this Mac" }));
+    expect(screen.getByRole("button", { name: "On this Mac" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Cloud" }));
+    expect(screen.getByRole("radio", { name: "Use OpenAI" })).toHaveAttribute("aria-checked", "true");
+    expect(props.onSelect).not.toHaveBeenCalled();
   });
 
-  it("preserves a controlled Cloud destination with a local active model without render-phase parent updates", async () => {
+  it("preserves a controlled Cloud destination with a local active model without render-phase parent updates", () => {
     const errorSpy = vi.spyOn(console, "error");
     try {
       render(<ControlledSources currentModel="tiny" initialFilter="cloud" />);
-      expect(await screen.findByRole("heading", { name: "Soniox v5" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: /Cloud/ })).toHaveAttribute("aria-selected", "true");
-      expect(
-        errorSpy.mock.calls.some((args) =>
-          args.some((arg) => typeof arg === "string" && arg.includes("Cannot update a component")),
-        ),
-      ).toBe(false);
+      expect(screen.getByRole("button", { name: "Cloud" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByText("Soniox v5 · Key added")).toBeInTheDocument();
+      expect(errorSpy.mock.calls.flat().some((arg) => typeof arg === "string" && arg.includes("Cannot update a component"))).toBe(false);
     } finally {
       errorSpy.mockRestore();
     }
   });
 
-  it("follows later source changes once while preserving user browsing across unrelated renders", async () => {
+  it("follows a later engine-family change, but preserves browsing within the same family", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<ControlledSources currentModel="tiny" />);
-    await user.click(screen.getByRole("tab", { name: /Remote/ }));
-    rerender(<ControlledSources currentModel="tiny" />);
-    expect(screen.getByRole("tab", { name: /Remote/ })).toHaveAttribute("aria-selected", "true");
-
+    await user.click(screen.getByRole("button", { name: "Another computer" }));
+    expect(screen.getByRole("button", { name: "Another computer" })).toHaveAttribute("aria-pressed", "true");
     rerender(<ControlledSources currentModel="openai" />);
-    expect(screen.getByRole("tab", { name: /Cloud/ })).toHaveAttribute("aria-selected", "true");
-    await user.click(screen.getByRole("tab", { name: /Remote/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cloud" })).toHaveAttribute("aria-pressed", "true"),
+    );
+    await user.click(screen.getByRole("button", { name: "Another computer" }));
     rerender(<ControlledSources currentModel="soniox" />);
-    expect(screen.getByRole("tab", { name: /Remote/ })).toHaveAttribute("aria-selected", "true");
-
+    expect(screen.getByRole("button", { name: "Another computer" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("No remote Voicetyprs configured")).toBeInTheDocument();
     rerender(<ControlledSources currentModel="tiny" />);
-    expect(screen.getByRole("tab", { name: /Local/ })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByRole("button", { name: "On this Mac" })).toHaveAttribute("aria-pressed", "true"));
   });
 
-  it("shows curated labels and omits a redundant selector for one-model providers", async () => {
+  it("shows curated model labels and a picker only when a provider has choices", () => {
     renderModels();
-
-    expect(await screen.findByRole("heading", { name: "GPT Transcribe" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Soniox v5" })).toBeInTheDocument();
-    expect(screen.queryByText("gpt-transcribe")).not.toBeInTheDocument();
+    expect(screen.getByText("GPT Transcribe · Key added")).toBeInTheDocument();
+    expect(screen.getByText("Soniox v5 · Key added")).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "OpenAI transcription model" }),
     ).toBeInTheDocument();
@@ -199,53 +199,52 @@ describe("ModelsSection cloud model labels", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("uses source tabs for browsing without changing the active source", async () => {
+  it("selects a downloaded local model through its radio", async () => {
     const user = userEvent.setup();
-    const props = renderModels();
-
-    expect(await screen.findByRole("tab", { name: "Cloud (2)" })).toHaveAttribute("data-active");
-    expect(screen.getByRole("tab", { name: "Local (0)" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Remote (0)" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /all/i })).not.toBeInTheDocument();
-    expect(screen.getAllByText("Spoken language")).toHaveLength(1);
-
-    await user.click(screen.getByRole("tab", { name: "Remote (0)" }));
-    expect(await screen.findByText("No remote Voicetyprs configured")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Local (0)" }));
-
-    expect(props.onSelect).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalledWith("set_active_remote_server", {
-      serverId: expect.anything(),
+    const props = renderModels({
+      models: [["tiny", whisper]],
+      currentModel: "openai",
+      sourceFilter: "local",
     });
-    expect(screen.getByText("OpenAI (Cloud)")).toBeInTheDocument();
-    expect(screen.getByText("Cloud")).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Use Whisper Tiny" }));
+    await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("tiny"));
+    expect(invoke).toHaveBeenCalledWith("set_active_remote_server", { serverId: null });
+  });
+
+  it("starts and cancels a model download", async () => {
+    const user = userEvent.setup();
+    const unavailable = {
+      ...whisper,
+      name: "small",
+      display_name: "Whisper Small",
+      downloaded: false,
+    };
+    const props = renderModels({
+      models: [["small", unavailable]],
+      currentModel: "openai",
+      sourceFilter: "local",
+    });
+    await user.click(screen.getByRole("button", { name: "Download" }));
+    expect(props.onDownload).toHaveBeenCalledWith("small");
+    props.rerender(<ModelsSection {...props} downloadProgress={{ small: 42 }} />);
+    expect(screen.getByText(/42%/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel Whisper Small download" }));
+    expect(props.onCancelDownload).toHaveBeenCalledWith("small");
+    props.rerender(<ModelsSection {...props} downloadProgress={{}} />);
   });
 
   it("persists and activates a selected curated model", async () => {
     const user = userEvent.setup();
     const props = renderModels();
-
-    await user.click(
-      await screen.findByRole("combobox", {
-        name: "OpenAI transcription model",
-      }),
-    );
-    await user.click(
-      await screen.findByRole("option", {
-        name: "GPT-4o mini Transcribe",
-      }),
-    );
-
-    await waitFor(() => {
+    await user.click(screen.getByRole("combobox", { name: "OpenAI transcription model" }));
+    await user.click(await screen.findByRole("option", { name: "GPT-4o mini Transcribe" }));
+    await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("set_cloud_stt_model", {
         providerId: "openai",
         modelId: "gpt-4o-mini-transcribe",
-      });
-    });
+      }),
+    );
     expect(props.refreshModels).toHaveBeenCalled();
-    expect(invoke).toHaveBeenCalledWith("set_active_remote_server", {
-      serverId: null,
-    });
     expect(props.onSelect).toHaveBeenCalledWith("openai");
   });
 });

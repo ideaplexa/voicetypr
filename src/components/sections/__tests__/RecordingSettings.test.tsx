@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordingSettings } from "../RecordingSettings";
 import { invoke } from "@tauri-apps/api/core";
+import { emitMockEvent } from "@/test/setup";
 
 const mockUpdateSettings = vi.fn().mockResolvedValue(undefined);
 const baseSettings = {
@@ -75,16 +76,19 @@ vi.mock("@/components/ui/switch", () => ({
     checked,
     onCheckedChange,
     disabled,
+    "aria-label": ariaLabel,
   }: {
     id?: string;
     checked?: boolean;
     onCheckedChange?: (checked: boolean) => void;
     disabled?: boolean;
+    "aria-label"?: string;
   }) => (
     <button
       type="button"
       role="switch"
       id={id}
+      aria-label={ariaLabel}
       data-testid={id ? `switch-${id}` : "switch"}
       aria-checked={checked}
       disabled={disabled}
@@ -107,13 +111,13 @@ vi.mock("@/components/ui/select", () => ({
     <div
       data-testid="select"
       data-value={value}
-      onClick={() => onValueChange?.(value === "compact" ? "full" : "top-center")}
+      onClick={() => onValueChange?.(value === "compact" ? "full" : value === "when_recording" ? "always" : "top-center")}
     >
       {children}
     </div>
   ),
-  SelectTrigger: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <button type="button" data-testid="select-trigger" className={className}>
+  SelectTrigger: ({ children, className, "aria-label": ariaLabel }: { children: React.ReactNode; className?: string; "aria-label"?: string }) => (
+    <button type="button" data-testid="select-trigger" className={className} aria-label={ariaLabel}>
       {children}
     </button>
   ),
@@ -145,276 +149,226 @@ function setupDefaultInvoke() {
   });
 }
 
-// ============================================================================
-// Recording Indicator Mode Tests
-// ============================================================================
-
-describe("GeneralSettings recording indicator", () => {
+describe("Recording screen", () => {
   beforeEach(() => {
     mockSettings = { ...baseSettings };
     vi.clearAllMocks();
     setupDefaultInvoke();
   });
 
-  it("hides the position selector when mode is never", async () => {
+  it("shows the S3 cards and all remaining controls", () => {
+    render(<RecordingSettings />);
+    for (const title of [
+      "Dictation shortcut",
+      "Microphone",
+      "Recording pill",
+      "Paste automatically",
+      "Keep in clipboard",
+      "Sounds",
+      "More",
+      "Pause media during recording",
+      "Transcript history cleanup",
+      "Save recording audio",
+      "Transcript ready",
+      "Paste completed",
+    ]) {
+      expect(screen.getByText(title)).toBeInTheDocument();
+    }
+    expect(
+      screen.getByText("Your shortcut, microphone and what happens after you speak."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Speak to test — start a dictation to see the level."),
+    ).toBeInTheDocument();
+  });
+
+  it("switches the recording mode through the segmented control", () => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Hold to talk" }));
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ recording_mode: "push_to_talk" });
+  });
+
+  it("opens the existing hotkey capture from Change", () => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByTestId("hotkey-input")).toBeInTheDocument();
+  });
+
+  it("keeps the shortcut key caps visible", () => {
+    render(<RecordingSettings />);
+    expect(screen.getByLabelText("Current shortcut: Ctrl+Shift+Space")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl")).toBeInTheDocument();
+    expect(screen.getByText("Shift")).toBeInTheDocument();
+  });
+
+  it("shows microphone level only during recording", async () => {
+    render(<RecordingSettings />);
+    expect(screen.queryByRole("meter", { name: "Microphone level" })).not.toBeInTheDocument();
+    await act(async () => {
+      emitMockEvent("recording-state-changed", { state: "recording" });
+    });
+    const meter = await screen.findByRole("meter", { name: "Microphone level" });
+    await act(async () => {
+      emitMockEvent("audio-level", 0.42);
+    });
+    expect(meter).toHaveAttribute("aria-valuenow", "42");
+    await act(async () => {
+      emitMockEvent("recording-state-changed", { state: "idle" });
+    });
+    expect(screen.queryByRole("meter", { name: "Microphone level" })).not.toBeInTheDocument();
+  });
+
+  it("hides pill position and detail when visibility is never", () => {
     mockSettings.pill_indicator_mode = "never";
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.queryByText("Indicator Position")).not.toBeInTheDocument();
-    });
+    expect(screen.queryByText("Position")).not.toBeInTheDocument();
+    expect(screen.queryByText("Detail")).not.toBeInTheDocument();
   });
 
-  it("shows the position selector when mode is always", async () => {
-    mockSettings.pill_indicator_mode = "always";
+  it("changes the pill position using the existing setting", async () => {
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Indicator Position")).toBeInTheDocument();
-    });
-  });
-
-  it("shows the position selector when mode is when_recording", async () => {
-    mockSettings.pill_indicator_mode = "when_recording";
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Indicator Position")).toBeInTheDocument();
-    });
-  });
-
-  it("displays Recording Indicator Visibility label", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Recording indicator")).toBeInTheDocument();
-    });
-  });
-
-  it("displays all indicator mode options", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByTestId("select-item-never")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-always")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-when_recording")).toBeInTheDocument();
-    });
-  });
-
-  it("offers compact and full indicator detail", async () => {
-    render(<RecordingSettings />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Indicator detail")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-compact")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-full")).toBeInTheDocument();
-    });
-
-    const styleSelect = screen
-      .getAllByTestId("select")
-      .find((select) => select.getAttribute("data-value") === "compact");
-    expect(styleSelect).toBeDefined();
-    fireEvent.click(styleSelect!);
-    await waitFor(() => {
-      expect(mockUpdateSettings).toHaveBeenCalledWith({
-        pill_indicator_style: "full",
-      });
-    });
-  });
-
-  it("displays all indicator position options when mode is not never", async () => {
-    mockSettings.pill_indicator_mode = "always";
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByTestId("select-item-top-left")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-top-center")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-top-right")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-bottom-left")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-bottom-center")).toBeInTheDocument();
-      expect(screen.getByTestId("select-item-bottom-right")).toBeInTheDocument();
-    });
-  });
-
-  it("calls updateSettings when position is changed", async () => {
-    mockSettings.pill_indicator_mode = "always";
-    render(<RecordingSettings />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Indicator Position")).toBeInTheDocument();
-    });
-
-    const selects = screen.getAllByTestId("select");
-    const positionSelect = selects.find((select) =>
-      select.getAttribute("data-value")?.includes("center"),
+    const position = screen.getByText("Position").closest("div")?.parentElement;
+    expect(position).not.toBeNull();
+    fireEvent.click(position!.querySelector("[data-testid=select]")!);
+    await waitFor(() =>
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ pill_indicator_position: "top-center" }),
     );
+  });
 
-    if (positionSelect) {
-      fireEvent.click(positionSelect);
-      await waitFor(() => {
-        expect(mockUpdateSettings).toHaveBeenCalledWith({
-          pill_indicator_position: "top-center",
-        });
-      });
-    }
+  it("preserves each audio feedback setting", () => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getByTestId("switch-sound-on-recording"));
+    fireEvent.click(screen.getByTestId("switch-sound-on-transcription-complete"));
+    fireEvent.click(screen.getByTestId("switch-sound-on-paste-success"));
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ play_sound_on_recording: false });
+    expect(mockUpdateSettings).toHaveBeenCalledWith({
+      play_sound_on_transcription_complete: false,
+    });
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ play_sound_on_paste_success: false });
   });
 });
 
-// ============================================================================
-// Sound Settings Tests
-// ============================================================================
-
-describe("GeneralSettings audio feedback settings", () => {
+describe("Recording pill behavior", () => {
   beforeEach(() => {
     mockSettings = { ...baseSettings };
     vi.clearAllMocks();
     setupDefaultInvoke();
   });
 
-  it("describes the three exact audio feedback events", async () => {
+  it.each(["always", "when_recording"] as const)("shows position and detail when visibility is %s", (mode) => {
+    mockSettings.pill_indicator_mode = mode;
     render(<RecordingSettings />);
+    expect(screen.getByText("Position")).toBeInTheDocument();
+    expect(screen.getByText("Detail")).toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("Recording started")).toBeInTheDocument();
-    expect(screen.getByText("Transcript ready")).toBeInTheDocument();
-    expect(screen.getByText("Paste completed")).toBeInTheDocument();
-    expect(
-      screen.getByText("Play a sound when the microphone is ready for speech."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Play a sound after transcription and optional AI formatting finish."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Play a sound after Voicetypr successfully sends the paste command."),
-    ).toBeInTheDocument();
+  it("labels the recording pill and its visibility control", () => {
+    render(<RecordingSettings />);
+    expect(screen.getByText("Recording pill")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pill visibility" })).toBeInTheDocument();
+  });
+
+  it.each(["never", "always", "when_recording"] as const)("offers visibility option %s", (mode) => {
+    render(<RecordingSettings />);
+    expect(screen.getByTestId(`select-item-${mode}`)).toBeInTheDocument();
+  });
+
+  it("updates the visibility setting", () => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getAllByTestId("select").find((element) => element.getAttribute("data-value") === "when_recording")!);
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ pill_indicator_mode: "always" });
+  });
+
+  it.each(["compact", "full"] as const)("offers %s pill detail", (detail) => {
+    render(<RecordingSettings />);
+    expect(screen.getByTestId(`select-item-${detail}`)).toBeInTheDocument();
+  });
+
+  it("updates pill detail", () => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getAllByTestId("select").find((element) => element.getAttribute("data-value") === "compact")!);
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ pill_indicator_style: "full" });
+  });
+
+  it.each(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"] as const)("offers pill position %s", (position) => {
+    render(<RecordingSettings />);
+    expect(screen.getByTestId(`select-item-${position}`)).toBeInTheDocument();
+  });
+
+  it("reflects the stored pill visibility and position", () => {
+    mockSettings = { ...baseSettings, pill_indicator_mode: "always", pill_indicator_position: "top-left" };
+    render(<RecordingSettings />);
+    expect(screen.getAllByTestId("select").some((element) => element.getAttribute("data-value") === "always")).toBe(true);
+    expect(screen.getAllByTestId("select").some((element) => element.getAttribute("data-value") === "top-left")).toBe(true);
+  });
+});
+
+describe("Recording audio and clipboard behavior", () => {
+  beforeEach(() => {
+    mockSettings = { ...baseSettings };
+    vi.clearAllMocks();
+    setupDefaultInvoke();
+  });
+
+  it("describes the three exact sound events", () => {
+    render(<RecordingSettings />);
+    expect(screen.getByText("A soft tick when recording starts and ends.")).toBeInTheDocument();
+    expect(screen.getByText("Play a sound after transcription and optional AI formatting finish.")).toBeInTheDocument();
+    expect(screen.getByText("Play a sound after Voicetypr successfully sends the paste command.")).toBeInTheDocument();
   });
 
   it.each([
-    ["Recording started", "play_sound_on_recording"],
-    ["Transcript ready", "play_sound_on_transcription_complete"],
-    ["Paste completed", "play_sound_on_paste_success"],
-  ] as const)("updates %s independently", async (label, setting) => {
+    ["sound-on-recording", "play_sound_on_recording"],
+    ["sound-on-transcription-complete", "play_sound_on_transcription_complete"],
+    ["sound-on-paste-success", "play_sound_on_paste_success"],
+  ] as const)("updates %s independently", (id, setting) => {
     render(<RecordingSettings />);
-    fireEvent.click(await screen.findByRole("switch", { name: label }));
-
-    await waitFor(() => {
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ [setting]: false });
-    });
+    fireEvent.click(screen.getByTestId(`switch-${id}`));
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ [setting]: false });
   });
 
   it.each([
-    ["Recording started", "play_sound_on_recording"],
-    ["Transcript ready", "play_sound_on_transcription_complete"],
-    ["Paste completed", "play_sound_on_paste_success"],
-  ] as const)("reflects disabled state for %s", async (label, setting) => {
+    ["sound-on-recording", "play_sound_on_recording"],
+    ["sound-on-transcription-complete", "play_sound_on_transcription_complete"],
+    ["sound-on-paste-success", "play_sound_on_paste_success"],
+  ] as const)("reflects disabled %s", (id, setting) => {
     mockSettings = { ...baseSettings, [setting]: false };
     render(<RecordingSettings />);
+    expect(screen.getByTestId(`switch-${id}`)).toHaveAttribute("aria-checked", "false");
+  });
 
-    expect(await screen.findByRole("switch", { name: label })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
+  it("describes clipboard retention and renders its switch", () => {
+    render(<RecordingSettings />);
+    expect(screen.getByText("Keep in clipboard")).toBeInTheDocument();
+    expect(screen.getByText("Also copy it, so you can paste again.")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Keep in clipboard" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("updates clipboard retention", () => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getByRole("switch", { name: "Keep in clipboard" }));
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ keep_transcription_in_clipboard: true });
+  });
+
+  it("reflects enabled clipboard retention", () => {
+    mockSettings = { ...baseSettings, keep_transcription_in_clipboard: true };
+    render(<RecordingSettings />);
+    expect(screen.getByRole("switch", { name: "Keep in clipboard" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("renders safely with null settings", () => {
+    mockSettings = null as unknown as typeof baseSettings;
+    const { container } = render(<RecordingSettings />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("defaults undefined sound settings to enabled", () => {
+    mockSettings = { ...baseSettings, play_sound_on_recording: undefined, play_sound_on_transcription_complete: undefined, play_sound_on_paste_success: undefined } as unknown as typeof baseSettings;
+    render(<RecordingSettings />);
+    for (const id of ["sound-on-recording", "sound-on-transcription-complete", "sound-on-paste-success"])
+      expect(screen.getByTestId(`switch-${id}`)).toHaveAttribute("aria-checked", "true");
   });
 });
-
-// ============================================================================
-// Clipboard Settings Tests
-// ============================================================================
-
-describe("GeneralSettings clipboard settings", () => {
-  beforeEach(() => {
-    mockSettings = { ...baseSettings };
-    vi.clearAllMocks();
-    setupDefaultInvoke();
-  });
-
-  it("displays Keep Transcript in Clipboard label", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Keep Transcript in Clipboard")).toBeInTheDocument();
-    });
-  });
-
-  it("displays clipboard description", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(
-        screen.getByText("Leave transcribed text available for manual pastes"),
-      ).toBeInTheDocument();
-    });
-  });
-
-  it("renders clipboard retain switch", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByTestId("switch-clipboard-retain")).toBeInTheDocument();
-    });
-  });
-
-  it("calls updateSettings when clipboard switch is clicked", async () => {
-    render(<RecordingSettings />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("switch-clipboard-retain")).toBeInTheDocument();
-    });
-
-    const switchButton = screen.getByTestId("switch-clipboard-retain");
-    fireEvent.click(switchButton);
-
-    await waitFor(() => {
-      expect(mockUpdateSettings).toHaveBeenCalledWith({
-        keep_transcription_in_clipboard: true,
-      });
-    });
-  });
-});
-
-// ============================================================================
-// UI Structure Tests
-// ============================================================================
-
-describe("RecordingSettings UI structure", () => {
-  beforeEach(() => {
-    mockSettings = { ...baseSettings };
-    vi.clearAllMocks();
-    setupDefaultInvoke();
-  });
-
-  it("renders the Recording header", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Recording", level: 1 })).toBeInTheDocument();
-    });
-  });
-
-  it("separates capture controls from transcript handling", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Capture controls")).toBeInTheDocument();
-      expect(screen.getByText("Transcript handling")).toBeInTheDocument();
-    });
-  });
-
-  it("shows hotkey input after clicking Edit", async () => {
-    render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await waitFor(() => {
-      expect(screen.getByTestId("hotkey-input")).toBeInTheDocument();
-    });
-  });
-
-  it("renders the microphone selection component", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByTestId("microphone-selection")).toBeInTheDocument();
-    });
-  });
-
-  it("does not render global startup settings", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.queryByText("Launch at Startup")).not.toBeInTheDocument();
-    });
-  });
-});
-
-// ============================================================================
-// Recording Hotkey Editor Tests
-// ============================================================================
 
 describe("RecordingSettings hotkey editor", () => {
   beforeEach(() => {
@@ -423,400 +377,155 @@ describe("RecordingSettings hotkey editor", () => {
     setupDefaultInvoke();
   });
 
-  it("displays the current combo hotkey in view mode", async () => {
-    render(<RecordingSettings />);
-    await waitFor(() => {
-      // The label appears in both FieldDescription and the display box
-      expect(screen.getAllByText("Ctrl+Shift+Space").length).toBeGreaterThan(0);
+  function edit() {
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    return screen.getByTestId("hotkey-input");
+  }
+
+  function nativeBinding(triggerKind: "isolated_tap" | "modifier_hold", id = "onboarding-primary-hold") {
+    const hold = triggerKind === "modifier_hold";
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_shortcut_settings") return Promise.resolve({ bindings: [{ id, action: hold ? "hold_to_record" : "toggle_recording", shortcut: "", trigger: hold ? "hold" : "pressed", enabled: true, allow_risky_combo: false, trigger_kind: triggerKind, modifier: { modifier: "control", side: "left" } }] });
+      return Promise.resolve(undefined);
     });
+  }
+
+  it("shows the current combo in view mode", () => {
+    render(<RecordingSettings />);
+    expect(screen.getByLabelText("Current shortcut: Ctrl+Shift+Space")).toBeInTheDocument();
   });
 
-  it('displays "Not set" when no hotkey is configured', async () => {
+  it("shows Not set when no shortcut exists", async () => {
     mockSettings = { ...baseSettings, hotkey: "" };
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getAllByText("Not set").length).toBeGreaterThan(0);
-    });
+    expect(screen.getByLabelText("Current shortcut: Not set")).toBeInTheDocument();
   });
 
-  it("shows the Recording Hotkey field title", async () => {
+  it("labels the shortcut field and enters capture on Change", () => {
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Recording Hotkey")).toBeInTheDocument();
-    });
+    expect(screen.getByText("Dictation shortcut")).toBeInTheDocument();
+    edit();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
-  it("clicking Edit enters capture mode and shows HotkeyInput", async () => {
+  it("Cancel returns to view without saving", () => {
     render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await waitFor(() => {
-      expect(screen.getByTestId("hotkey-input")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
-    });
+    edit();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("hotkey-input")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change" })).toBeInTheDocument();
+    expect(mockUpdateSettings).not.toHaveBeenCalled();
   });
 
-  it("Cancel returns to view mode without saving", async () => {
-    render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
-    const cancelButton = screen.getByRole("button", { name: /cancel/i });
-    fireEvent.click(cancelButton);
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("hotkey-input")).not.toBeInTheDocument();
-      expect(mockUpdateSettings).not.toHaveBeenCalled();
-    });
-  });
-
-  it("Save is disabled until a key is captured when no prior hotkey", async () => {
+  it("disables Save until a new shortcut is captured", () => {
     mockSettings = { ...baseSettings, hotkey: "" };
     render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
-    const saveButton = screen.getByRole("button", { name: /save/i });
-    expect(saveButton).toBeDisabled();
+    edit();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("capturing a combo enables Save and calls set_global_shortcut + updateSettings", async () => {
+  it("saves a captured combo through the native shortcut and settings", async () => {
     render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
-    // Simulate capturing a combo
+    edit();
     fireEvent.click(screen.getByTestId("mock-trigger-combo"));
-
-    const saveButton = screen.getByRole("button", { name: /save/i });
-    expect(saveButton).not.toBeDisabled();
-    fireEvent.click(saveButton);
-
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_global_shortcut", {
-        shortcut: "Control+Space",
-      });
+      expect(invoke).toHaveBeenCalledWith("set_global_shortcut", { shortcut: "Control+Space" });
       expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "Control+Space" });
     });
   });
 
-  it("after saving a combo, view mode returns showing the new hotkey", async () => {
-    render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
+  it("returns to view mode showing the saved combo", async () => {
+    const { rerender } = render(<RecordingSettings />);
+    edit();
     fireEvent.click(screen.getByTestId("mock-trigger-combo"));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("hotkey-input")).not.toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByTestId("hotkey-input")).not.toBeInTheDocument());
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "Control+Space" });
+    mockSettings = { ...baseSettings, hotkey: "Control+Space" };
+    rerender(<RecordingSettings />);
+    expect(screen.getByLabelText("Current shortcut: Ctrl+Space")).toBeInTheDocument();
   });
 
-  it("capturing a bare modifier shows the Hold-to-talk switch", async () => {
+  it("shows Hold to talk after capturing a bare modifier", () => {
     render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
+    edit();
     fireEvent.click(screen.getByTestId("mock-trigger-bare-modifier"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("switch-hold-to-talk")).toBeInTheDocument();
-      expect(screen.getByText(/hold to talk/i)).toBeInTheDocument();
-    });
-  });
-
-  it("clears the combo hotkey BEFORE saving a bare-modifier binding (regression #100)", async () => {
-    // Fix A's startup migration treats a non-empty settings.hotkey as the
-    // authoritative primary and disables a bare-modifier primary. So when the
-    // user switches from a combo to a bare modifier, the combo MUST be cleared
-    // before update_shortcut_settings rebuilds the engine — otherwise the new
-    // bare-modifier binding is disabled the instant it is saved.
-    render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
-    fireEvent.click(screen.getByTestId("mock-trigger-bare-modifier"));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-
-    await waitFor(() => {
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "" });
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("update_shortcut_settings", expect.anything());
-    });
-
-    const clearIdx = mockUpdateSettings.mock.calls.findIndex(
-      ([arg]) => (arg as { hotkey?: string } | undefined)?.hotkey === "",
-    );
-    const clearOrder = mockUpdateSettings.mock.invocationCallOrder[clearIdx];
-    const saveIdx = vi
-      .mocked(invoke)
-      .mock.calls.findIndex(([cmd]) => cmd === "update_shortcut_settings");
-    const saveOrder = vi.mocked(invoke).mock.invocationCallOrder[saveIdx];
-
-    expect(clearOrder).toBeLessThan(saveOrder);
-  });
-
-  it("bare modifier + Hold-to-talk OFF → persists isolated_tap/toggle_recording/pressed", async () => {
-    render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
-    // Capture bare modifier (Hold-to-talk defaults to OFF)
-    fireEvent.click(screen.getByTestId("mock-trigger-bare-modifier"));
-    await screen.findByTestId("switch-hold-to-talk");
-
-    // Verify switch is off (aria-checked=false)
     expect(screen.getByTestId("switch-hold-to-talk")).toHaveAttribute("aria-checked", "false");
-
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
-        "update_shortcut_settings",
-        expect.objectContaining({
-          settings: expect.objectContaining({
-            bindings: expect.arrayContaining([
-              expect.objectContaining({
-                trigger_kind: "isolated_tap",
-                action: "toggle_recording",
-                trigger: "pressed",
-                modifier: { modifier: "control", side: "left" },
-              }),
-            ]),
-          }),
-        }),
-      );
-    });
+    expect(screen.getByText("Hold to talk (push-to-talk)")).toBeInTheDocument();
   });
 
-  it("bare modifier + Hold-to-talk ON → persists modifier_hold/hold_to_record/hold", async () => {
+  it("clears the combo before saving a bare modifier (regression #100)", async () => {
     render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
+    edit();
     fireEvent.click(screen.getByTestId("mock-trigger-bare-modifier"));
-    await screen.findByTestId("switch-hold-to-talk");
-
-    // Toggle hold-to-talk ON
-    fireEvent.click(screen.getByTestId("switch-hold-to-talk"));
-
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-
-    await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith(
-        "update_shortcut_settings",
-        expect.objectContaining({
-          settings: expect.objectContaining({
-            bindings: expect.arrayContaining([
-              expect.objectContaining({
-                trigger_kind: "modifier_hold",
-                action: "hold_to_record",
-                trigger: "hold",
-                modifier: { modifier: "control", side: "left" },
-              }),
-            ]),
-          }),
-        }),
-      );
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_shortcut_settings", expect.anything()));
+    const clear = mockUpdateSettings.mock.calls.findIndex(([value]) => value?.hotkey === "");
+    const save = vi.mocked(invoke).mock.calls.findIndex(([cmd]) => cmd === "update_shortcut_settings");
+    expect(clear).toBeGreaterThanOrEqual(0);
+    expect(mockUpdateSettings.mock.invocationCallOrder[clear]).toBeLessThan(vi.mocked(invoke).mock.invocationCallOrder[save]);
   });
 
-  it("saves bare modifier with stable id from existing binding", async () => {
-    vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_autostart_status") return Promise.resolve(false);
-      if (cmd === "get_shortcut_settings")
-        return Promise.resolve({
-          bindings: [
-            {
-              id: "onboarding-primary-hold",
-              action: "hold_to_record",
-              shortcut: "",
-              trigger: "hold",
-              enabled: true,
-              allow_risky_combo: false,
-              trigger_kind: "modifier_hold",
-              modifier: { modifier: "alt", side: "right" },
-            },
-          ],
-        });
-      return Promise.resolve(undefined);
-    });
-
+  it.each([
+    [false, "isolated_tap", "toggle_recording", "pressed"],
+    [true, "modifier_hold", "hold_to_record", "hold"],
+  ] as const)("persists bare modifier with hold=%s", async (hold, triggerKind, action, trigger) => {
     render(<RecordingSettings />);
-    const editButton = await screen.findByRole("button", { name: /edit/i });
-    fireEvent.click(editButton);
-    await screen.findByTestId("hotkey-input");
-
+    edit();
     fireEvent.click(screen.getByTestId("mock-trigger-bare-modifier"));
-    await screen.findByTestId("switch-hold-to-talk");
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-
-    await waitFor(() => {
-      const calls = vi.mocked(invoke).mock.calls;
-      const saveCall = calls.find(([cmd]) => cmd === "update_shortcut_settings");
-      expect(saveCall).toBeDefined();
-      const payload = saveCall![1] as { settings: { bindings: Array<{ id: string }> } };
-      expect(payload.settings.bindings[0].id).toBe("onboarding-primary-hold");
-    });
+    if (hold) fireEvent.click(screen.getByTestId("switch-hold-to-talk"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_shortcut_settings", expect.objectContaining({ settings: expect.objectContaining({ bindings: expect.arrayContaining([expect.objectContaining({ trigger_kind: triggerKind, action, trigger, modifier: { modifier: "control", side: "left" } })]) }) })));
   });
 
-  it('displays isolated_tap native binding as "Tap Left Control to toggle"', async () => {
-    mockSettings = { ...baseSettings, hotkey: "" };
-    vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_autostart_status") return Promise.resolve(false);
-      if (cmd === "get_shortcut_settings")
-        return Promise.resolve({
-          bindings: [
-            {
-              id: "onboarding-primary-hold",
-              action: "toggle_recording",
-              shortcut: "",
-              trigger: "pressed",
-              enabled: true,
-              allow_risky_combo: false,
-              trigger_kind: "isolated_tap",
-              modifier: { modifier: "control", side: "left" },
-            },
-          ],
-        });
-      return Promise.resolve(undefined);
-    });
-
+  it("keeps the existing native binding id", async () => {
+    nativeBinding("modifier_hold", "existing-primary");
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getAllByText("Tap Left Control to toggle").length).toBeGreaterThan(0);
-    });
+    edit();
+    fireEvent.click(screen.getByTestId("mock-trigger-bare-modifier"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_shortcut_settings", expect.objectContaining({ settings: expect.objectContaining({ bindings: expect.arrayContaining([expect.objectContaining({ id: "existing-primary" })]) }) })));
   });
 
-  it('displays modifier_hold native binding as "Hold Left Control to talk"', async () => {
+  it.each([
+    ["isolated_tap", "Tap Left Control to toggle"],
+    ["modifier_hold", "Hold Left Control to talk"],
+  ] as const)("displays %s native binding", async (kind, label) => {
     mockSettings = { ...baseSettings, hotkey: "" };
-    vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "get_autostart_status") return Promise.resolve(false);
-      if (cmd === "get_shortcut_settings")
-        return Promise.resolve({
-          bindings: [
-            {
-              id: "onboarding-primary-hold",
-              action: "hold_to_record",
-              shortcut: "",
-              trigger: "hold",
-              enabled: true,
-              allow_risky_combo: false,
-              trigger_kind: "modifier_hold",
-              modifier: { modifier: "control", side: "left" },
-            },
-          ],
-        });
-      return Promise.resolve(undefined);
-    });
-
+    nativeBinding(kind);
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getAllByText("Hold Left Control to talk").length).toBeGreaterThan(0);
-    });
+    expect(await screen.findByLabelText(`Current shortcut: ${label}`)).toBeInTheDocument();
   });
 });
 
-// ============================================================================
-// Null Settings Handling Tests
-// ============================================================================
-
-describe("GeneralSettings null handling", () => {
-  beforeEach(() => {
-    setupDefaultInvoke();
-  });
-
-  it("returns null when settings is null", async () => {
-    // Create a separate mock for null settings
-    const originalMock = vi.fn();
-    vi.doMock("@/contexts/SettingsContext", () => ({
-      useSettings: () => ({
-        settings: null,
-        updateSettings: originalMock,
-      }),
-    }));
-
-    // With current mock setup, we can test the base case
-    // The component should handle null gracefully
-  });
-
-  it("handles undefined sound settings with enabled defaults", async () => {
-    const settingsWithoutSound = {
-      recording_mode: "toggle",
-      hotkey: "CommandOrControl+Shift+Space",
-      keep_transcription_in_clipboard: false,
-      pill_indicator_mode: "when_recording",
-      pill_indicator_position: "bottom-center",
-    };
-    mockSettings = settingsWithoutSound as typeof mockSettings;
-
-    render(<RecordingSettings />);
-    for (const label of ["Recording started", "Transcript ready", "Paste completed"]) {
-      expect(await screen.findByRole("switch", { name: label })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-    }
-  });
-});
-
-// ============================================================================
-// Settings Value Display Tests
-// ============================================================================
-
-describe("GeneralSettings settings values", () => {
+describe("Recording screen structure", () => {
   beforeEach(() => {
     mockSettings = { ...baseSettings };
     vi.clearAllMocks();
     setupDefaultInvoke();
   });
 
-  it("displays the current hotkey string in view mode", async () => {
-    mockSettings.hotkey = "CommandOrControl+Shift+Space";
+  it("shows the Recording heading", () => {
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getAllByText("Ctrl+Shift+Space").length).toBeGreaterThan(0);
-    });
+    expect(screen.getByRole("heading", { name: "Recording", level: 1 })).toBeInTheDocument();
   });
 
-  it("displays correct pill indicator mode value", async () => {
-    mockSettings.pill_indicator_mode = "always";
+  it("separates shortcut capture from transcript handling", () => {
     render(<RecordingSettings />);
-    // The first Select should have the indicator mode
-    await waitFor(() => {
-      const selects = screen.getAllByTestId("select");
-      expect(selects.length).toBeGreaterThan(0);
-    });
+    expect(screen.getByText("Dictation shortcut")).toBeInTheDocument();
+    expect(screen.getByText("Paste automatically")).toBeInTheDocument();
   });
 
-  it("shows all three indicator visibility options", async () => {
+  it("renders microphone selection", () => {
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Never")).toBeInTheDocument();
-      expect(screen.getByText("Always")).toBeInTheDocument();
-      expect(screen.getByText("When Recording")).toBeInTheDocument();
-    });
+    expect(screen.getByTestId("microphone-selection")).toBeInTheDocument();
   });
 
-  it("shows all indicator position options when indicator is visible", async () => {
-    mockSettings.pill_indicator_mode = "always";
+  it("does not show global startup controls", () => {
     render(<RecordingSettings />);
-    await waitFor(() => {
-      expect(screen.getByText("Top Left")).toBeInTheDocument();
-      expect(screen.getByText("Top Center")).toBeInTheDocument();
-      expect(screen.getByText("Top Right")).toBeInTheDocument();
-      expect(screen.getByText("Bottom Left")).toBeInTheDocument();
-      expect(screen.getByText("Bottom Center")).toBeInTheDocument();
-      expect(screen.getByText("Bottom Right")).toBeInTheDocument();
-    });
+    expect(screen.queryByText("Launch at Startup")).not.toBeInTheDocument();
   });
 });

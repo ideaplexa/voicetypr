@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { SettingsCard } from "@/components/settings/settings-ui";
 import { Spinner } from "@/components/ui/spinner";
 import { getErrorMessage } from "@/utils/error";
 import { invoke } from "@tauri-apps/api/core";
@@ -97,29 +97,12 @@ export function SonioxStorageCard() {
   };
 
   return (
-    <Card className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <HardDrive className="size-4 shrink-0 text-sage" />
-            <h3 className="text-sm font-semibold tracking-tight">Soniox stored files</h3>
-          </div>
-          <p className="mt-2.5 text-xs text-muted-foreground">
-            Soniox caps stored files (1,000) and transcription records (2,000) per account. Cleanup
-            retries records created by this app session. Older records and records from other apps
-            or devices stay untouched; review those in the Soniox console.
-          </p>
-          <p className="mt-2 text-xs text-muted-foreground" data-testid="soniox-storage-counts">
-            {counts
-              ? `Stored files: ${counts.filesTotal} · Stored transcriptions: ${counts.transcriptionsTotal}`
-              : countError
-                ? `Could not read storage usage: ${countError}`
-                : "Reading storage usage…"}
-          </p>
-        </div>
+    <SettingsCard
+      icon={HardDrive}
+      title="Soniox stored files"
+      action={
         <Button
           size="sm"
-          className="shrink-0"
           onClick={() => void handleCleanup()}
           disabled={cleaning}
           aria-label="Clean up stored files"
@@ -133,7 +116,20 @@ export function SonioxStorageCard() {
             "Clean up stored files"
           )}
         </Button>
-      </div>
-    </Card>
+      }
+    >
+      <p className="mt-2 text-xs text-muted-foreground">
+        Soniox caps stored files (1,000) and transcription records (2,000) per account. Cleanup
+        retries records created by this app session. Older records and records from other apps or
+        devices stay untouched; review those in the Soniox console.
+      </p>
+      <p className="mt-2 text-xs text-muted-foreground" data-testid="soniox-storage-counts">
+        {counts
+          ? `Stored files: ${counts.filesTotal} · Stored transcriptions: ${counts.transcriptionsTotal}`
+          : countError
+            ? `Could not read storage usage: ${countError}`
+            : "Reading storage usage…"}
+      </p>
+    </SettingsCard>
   );
 }

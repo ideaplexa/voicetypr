@@ -20,7 +20,9 @@ describe("settings choices", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "System" }).className).toContain("data-pressed:bg-card");
+    expect(screen.getByRole("button", { name: "System" }).className).toContain(
+      "data-pressed:bg-card",
+    );
     act(() => screen.getByRole("button", { name: "Light" }).focus());
     await user.keyboard("{Enter}");
     expect(changed).toHaveBeenCalledWith("light");
@@ -39,17 +41,14 @@ describe("settings choices", () => {
     expect(screen.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("group", { name: "Theme" })).not.toHaveAttribute("data-spacing", "0");
     expect(screen.getByRole("button", { name: "Light" }).className).toContain("rounded-[7px]");
-    expect(screen.getByRole("button", { name: "System" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("selects a choice card with Enter and exposes aria-selected", async () => {
+  it("selects a choice card with Enter and exposes aria-pressed", async () => {
     const user = userEvent.setup();
     const selected = vi.fn();
     render(
-      <div role="listbox" aria-label="Engine">
+      <div aria-label="Engine">
         <ChoiceCard
           label="On this computer"
           description="Private transcription"
@@ -59,8 +58,8 @@ describe("settings choices", () => {
         <ChoiceCard label="Cloud" selected onSelect={vi.fn()} />
       </div>,
     );
-    expect(screen.getByRole("option", { name: /Cloud/ })).toHaveAttribute("aria-selected", "true");
-    screen.getByRole("option", { name: /On this computer/ }).focus();
+    expect(screen.getByRole("button", { name: /Cloud/ })).toHaveAttribute("aria-pressed", "true");
+    screen.getByRole("button", { name: /On this computer/ }).focus();
     await user.keyboard("{Enter}");
     expect(selected).toHaveBeenCalledOnce();
   });

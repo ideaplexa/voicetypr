@@ -151,7 +151,7 @@ describe("GeneralSettings combo-hotkey save", () => {
     render(<RecordingSettings />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change" }));
     });
 
     // Simulate the user entering a combo via the inline HotkeyInput.

@@ -48,7 +48,7 @@ export function RemoteServersBlock({ remotes, visible }: RemoteServersBlockProps
       {visible && (
         <SettingsCard
           icon={Server}
-          title={`Remote Voicetypr (${remoteServers.length})`}
+          title={`Another computer (${remoteServers.length})`}
           description="Use another Voicetypr device on your network without copying audio to the cloud."
           action={
             <div className="flex flex-wrap gap-2">
@@ -75,9 +75,9 @@ export function RemoteServersBlock({ remotes, visible }: RemoteServersBlockProps
             </div>
           }
         >
-          <div className="mt-4 space-y-3">
+          <div className="mt-4">
             {discoveredServers.length > 0 && (
-              <div className="grid gap-3">
+              <div className="divide-y divide-border">
                 {discoveredServers.map((server) => {
                   const alreadySaved = remoteServers.some(
                     (saved) => saved.host === server.host && saved.port === server.port,
@@ -125,10 +125,11 @@ export function RemoteServersBlock({ remotes, visible }: RemoteServersBlockProps
               </div>
             )}
             {remoteServers.length > 0 ? (
-              <div className="grid gap-3">
+              <div className="divide-y divide-border">
                 {remoteServers.map((server) => (
                   <RemoteServerCard
                     key={server.id}
+                    compact
                     server={server}
                     isActive={activeRemoteServer === server.id}
                     onSelect={handleSelectRemoteServer}
