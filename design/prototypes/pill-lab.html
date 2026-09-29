@@ -1,0 +1,319 @@
+<title>Voicetypr Pill Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a lab bench — controls on top, four live "desktops" in a 2×2 grid, each with the target app window and its pill. */
+:root{
+  --bg:#F4F3EF; --panel:#FFFFFF; --ink:#18181A; --muted:#62625E; --line:#E4E4E0; --accent:#3F7D5C; --accent-soft:#E3EFE7;
+  --chip:#EFEEE9; --chip-on:#18181A; --chip-on-ink:#FFFFFF;
+  --font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  /* The pill is always dark by design, in both themes */
+  --pill:#121316; --pill-line:rgba(255,255,255,.12); --pill-ink:rgba(255,255,255,.9); --pill-dim:rgba(255,255,255,.5);
+  --wall-light:linear-gradient(160deg,#EAE6DE 0%,#D8DDE5 100%);
+  --wall-dark:linear-gradient(160deg,#20242B 0%,#101215 100%);
+  --wall-vivid:radial-gradient(120% 90% at 10% 10%,#F4B183 0%,transparent 55%),radial-gradient(100% 90% at 90% 20%,#7FB5E6 0%,transparent 60%),radial-gradient(120% 120% at 50% 110%,#5C4B8A 0%,#2A2440 70%);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121314;--panel:#1B1C1E;--ink:#F1F1EE;--muted:#A3A3A0;--line:#2C2D30;--accent:#8FD1A8;--accent-soft:#1F3328;--chip:#26272A;--chip-on:#F1F1EE;--chip-on-ink:#121314;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#121314;--panel:#1B1C1E;--ink:#F1F1EE;--muted:#A3A3A0;--line:#2C2D30;--accent:#8FD1A8;--accent-soft:#1F3328;--chip:#26272A;--chip-on:#F1F1EE;--chip-on-ink:#121314;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:28px 48px;display:flex;flex-direction:column;gap:22px}
+header h1{font-size:28px;font-weight:600;letter-spacing:-.02em;margin:0;text-wrap:balance}
+header p{margin:6px 0 0;color:var(--muted);max-width:68ch}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.group>span{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.seg{display:inline-flex;background:var(--chip);border-radius:10px;padding:3px;gap:2px}
+.seg button,.btn{font:inherit;font-size:12.5px;border:0;background:transparent;color:var(--ink);padding:5px 10px;border-radius:7px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel);box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:600}
+.btn{background:var(--chip-on);color:var(--chip-on-ink);font-weight:500;padding:6px 12px}
+button:focus-visible,label:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.file{font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.file input{max-width:190px;font-size:12px}
+.states{display:flex;flex-wrap:wrap;gap:6px}
+.states button{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--muted);padding:4px 10px;border-radius:999px;cursor:pointer}
+.states button.on{background:var(--accent-soft);color:var(--ink);border-color:transparent;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.card .head{padding:14px 16px 10px;display:flex;flex-direction:column;gap:2px}
+.card .head b{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.card .head b small{font-weight:500;color:var(--muted);font-size:12px;margin-left:6px}
+.card .head span{color:var(--muted);font-size:12.5px}
+.stage{position:relative;height:236px;background:var(--wall-light);overflow:hidden}
+.stage[data-wall="dark"]{background:var(--wall-dark)}
+.stage[data-wall="vivid"]{background:var(--wall-vivid)}
+.win{position:absolute;left:50%;top:18px;transform:translateX(-50%);width:min(78%,360px);background:rgba(255,255,255,.92);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:9px 12px 12px;color:#1c1c1e;font-size:12.5px}
+.stage[data-wall="dark"] .win{background:rgba(38,40,45,.95);color:#EDEDEA}
+.win .dots{display:flex;gap:5px;margin-bottom:8px}.win .dots i{width:8px;height:8px;border-radius:50%;background:#d6d4cf}
+.stage[data-wall="dark"] .win .dots i{background:#4a4c52}
+.win .doc{min-height:38px;line-height:1.45}
+.win .doc em{font-style:normal;background:rgba(143,209,168,.35);border-radius:3px;transition:background .9s ease}
+.caret{display:inline-block;width:1.5px;height:14px;background:currentColor;vertical-align:-2px;margin-left:1px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.pillzone{position:absolute;left:0;right:0;bottom:20px;display:flex;justify-content:center;pointer-events:none}
+.pill{background:var(--pill);border:1px solid var(--pill-line);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 8px 24px rgba(0,0,0,.28);color:var(--pill-ink);display:flex;flex-direction:column;overflow:hidden;will-change:width,height}
+.pill .row{display:flex;align-items:center;height:34px;padding:0 12px;gap:0;flex:none}
+.pill canvas{display:block;flex:none}
+.pill .lab{overflow:hidden;white-space:nowrap;flex:none;font-size:12.5px}
+.pill .lab span{display:inline-block;padding-left:9px}
+.pill .lab .t{font-family:var(--mono);color:var(--pill-dim);font-size:12px;font-variant-numeric:tabular-nums}
+.pill .live{overflow:hidden;flex:none;padding:0 13px;display:flex;align-items:flex-end;justify-content:flex-end;white-space:nowrap;font-size:13px;-webkit-mask-image:linear-gradient(to right,transparent,#000 22px);mask-image:linear-gradient(to right,transparent,#000 22px)}
+.pill .live .c{color:var(--pill-ink)}.pill .live .tn{color:rgba(255,255,255,.45);font-style:italic;padding-left:4px}
+.stateTag{position:absolute;right:10px;bottom:8px;font-family:var(--mono);font-size:10.5px;color:rgba(0,0,0,.45)}
+.stage[data-wall="dark"] .stateTag,.stage[data-wall="vivid"] .stateTag{color:rgba(255,255,255,.55)}
+.why{padding:10px 16px 14px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line)}
+.why li{margin-left:16px}
+.notes{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 24px}
+.notes h2{grid-column:1/-1;margin:0;font-size:15px}
+.notes p{margin:0;font-size:12.5px;color:var(--muted)}
+.notes p b{color:var(--ink);font-weight:600}
+.notes a{color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Pill Lab</h1>
+    <p>Four candidates for Voicetypr's recording pill, running live on a simulated voice: today's pill and three techy directions. Watch a full dictation play through, compare them on light, dark and busy wallpapers, or slow the motion down to study it.</p>
+  </header>
+
+  <div class="bar" role="toolbar" aria-label="Lab controls">
+    <div class="group"><button class="btn" id="play" type="button">Pause</button></div>
+    <div class="group"><span>Scenario</span><div class="seg" id="scenario"><button type="button" data-v="pasted" aria-pressed="true">Pastes</button><button type="button" data-v="copied" aria-pressed="false">Can't paste</button></div></div>
+    <div class="group"><span>Speed</span><div class="seg" id="speed"><button type="button" data-v="1" aria-pressed="true">1×</button><button type="button" data-v="0.35" aria-pressed="false">Slow-mo</button></div></div>
+    <div class="group"><span>Wallpaper</span><div class="seg" id="wall"><button type="button" data-v="light" aria-pressed="true">Light</button><button type="button" data-v="dark" aria-pressed="false">Dark</button><button type="button" data-v="vivid" aria-pressed="false">Vivid</button></div></div>
+    <label class="file" for="audio">Drive with an audio file <input id="audio" type="file" accept="audio/*"></label>
+  </div>
+
+  <div class="states" id="states" aria-label="Jump to a state"></div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="notes">
+    <h2>Motion rules shared by every direction</h2>
+    <p><b>Honest level.</b> The meter only moves with real sound. A flat meter means the mic is really quiet, so it doubles as a mic check.</p>
+    <p><b>Fast attack, slow release.</b> Levels rise in about 30 ms and fall over about 180 ms. That's what makes a meter feel alive instead of jittery.</p>
+    <p><b>Springs you can interrupt.</b> Every size change chases one target on a spring, so a new dictation mid-animation just retargets. Nothing queues.</p>
+    <p><b>One accent, with meaning.</b> Sage means done, amber means it needs you. Working states use motion, not colour, so "still busy" never looks like "act now".</p>
+    <p><b>Still when it should be.</b> Nothing loops while ready, pasted or needing you, apart from a brief first pulse. Motion only while there's something happening.</p>
+    <p><b>Where this comes from.</b> Nothing's dot-matrix Glyph UI, Teenage Engineering's one-accent screens, and the interaction craft of <a href="https://emilkowal.ski/ui/great-animations">Emil Kowalski</a> and <a href="https://rauno.me/craft/interaction-design">Rauno Freiberg</a>.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+const SAGE = "#8FD1A8", AMBER = "#F2B35B", CYAN = "#7DD3FC", INK = "rgba(255,255,255,.9)";
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const SENTENCE = "let's move the design review to Thursday and send the updated agenda to the team".split(" ");
+const FINAL = "Let's move the design review to Thursday and send the updated agenda to the team.";
+
+// ---------- scenario ----------
+const SEQ = {
+  pasted: [["ready",1.6],["silence",0.9],["speaking",2.8],["live",4.2],["transcribing",1.4],["polishing",1.6],["pasted",1.8]],
+  copied: [["ready",1.6],["silence",0.9],["speaking",2.8],["live",4.2],["transcribing",1.4],["polishing",1.6],["copied",2.8]],
+};
+const LABEL = {ready:"Ready",silence:"Listening · silence",speaking:"Listening · speaking",live:"Live words",transcribing:"Transcribing",polishing:"Polishing",pasted:"Pasted",copied:"Needs you"};
+let scenario = "pasted", speed = 1, playing = true, idx = 0, stateT = 0, clock = 0;
+const state = () => SEQ[scenario][idx][0];
+
+// ---------- voice ----------
+let syl = [], nextSyl = 0, pauseUntil = 0, env = 0;
+const BINS = 24, target = new Float32Array(BINS), sm = new Float32Array(BINS), peak = new Float32Array(BINS), peakT = new Float32Array(BINS);
+const buf = new Float32Array(180); let bufPos = 0;
+let audioCtx, analyser, freq, timeD, audioOn = false;
+function voice(t) {
+  if (t < pauseUntil) return 0.015 * Math.random();
+  if (t >= nextSyl) { syl.push({t0: t, a: 0.35 + Math.random() * 0.65}); nextSyl = t + 0.11 + Math.random() * 0.12; if (Math.random() < 0.09) pauseUntil = t + 0.25 + Math.random() * 0.3; }
+  let v = 0; syl = syl.filter(s => t - s.t0 < 0.8);
+  for (const s of syl) { const d = t - s.t0; v += s.a * (d < 0.025 ? d / 0.025 : Math.exp(-(d - 0.025) / 0.12)); }
+  return Math.min(1, v);
+}
+function sampleAudio() {
+  analyser.getByteFrequencyData(freq); analyser.getFloatTimeDomainData(timeD);
+  let rms = 0; for (const x of timeD) rms += x * x; rms = Math.sqrt(rms / timeD.length);
+  const lv = Math.min(1, rms * 6.5);
+  for (let i = 0; i < BINS; i++) { const lo = Math.floor(2 * Math.pow(freq.length / 2, i / BINS)), hi = Math.max(lo + 1, Math.floor(2 * Math.pow(freq.length / 2, (i + 1) / BINS))); let m = 0; for (let k = lo; k < hi && k < freq.length; k++) m = Math.max(m, freq[k]); target[i] = Math.min(1, (m / 255) * 1.25); }
+  return lv;
+}
+function updateVoice(dt, t) {
+  const s = state(), listening = s === "silence" || s === "speaking" || s === "live";
+  let lv = 0;
+  if (listening && audioOn && analyser) lv = sampleAudio();
+  else if (s === "speaking" || s === "live") lv = voice(t);
+  else if (s === "silence") lv = 0.01 * Math.random();
+  if (!(listening && audioOn && analyser)) {
+    const f1 = 5 + 2 * Math.sin(t * 1.7), f2 = 14 + 4 * Math.sin(t * 1.1 + 1);
+    for (let i = 0; i < BINS; i++) { const g = Math.exp(-((i - f1) ** 2) / 18) + 0.7 * Math.exp(-((i - f2) ** 2) / 18); target[i] = lv * Math.min(1, 0.3 + 0.7 * g + 0.12 * Math.random()); }
+  }
+  const up = 1 - Math.exp(-dt / 0.03), down = 1 - Math.exp(-dt / 0.18);
+  env += (lv - env) * (lv > env ? up : down);
+  for (let i = 0; i < BINS; i++) {
+    sm[i] += (target[i] - sm[i]) * (target[i] > sm[i] ? up : down);
+    if (sm[i] >= peak[i]) { peak[i] = sm[i]; peakT[i] = t; } else if (t - peakT[i] > 0.3) peak[i] = Math.max(sm[i], peak[i] - dt * 1.4);
+  }
+  buf[bufPos = (bufPos + 1) % buf.length] = env;
+}
+
+// ---------- spring ----------
+function spring(x) { return {x, v: 0, to: x}; }
+function step(s, dt, k = 300, zeta = 0.78) { if (reduce) { s.x = s.to; s.v = 0; return; } const c = 2 * Math.sqrt(k) * zeta; const n = Math.max(1, Math.ceil(dt / 0.008)); const h = dt / n; for (let i = 0; i < n; i++) { s.v += (k * (s.to - s.x) - c * s.v) * h; s.x += s.v * h; } }
+
+// ---------- drawing helpers ----------
+const ease = p => 1 - Math.pow(1 - Math.min(1, Math.max(0, p)), 3);
+const inout = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+function checkPts(cx, cy, s) { return [[cx - s, cy], [cx - s * 0.35, cy + s * 0.62], [cx + s, cy - s * 0.7]]; }
+function drawCheck(g, cx, cy, s, p, col, lw) {
+  const P = checkPts(cx, cy, s), L1 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), L2 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]), d = (L1 + L2) * ease(p);
+  g.strokeStyle = col; g.lineWidth = lw; g.lineCap = "round"; g.lineJoin = "round"; g.beginPath(); g.moveTo(...P[0]);
+  if (d <= L1) g.lineTo(P[0][0] + (P[1][0] - P[0][0]) * d / L1, P[0][1] + (P[1][1] - P[0][1]) * d / L1);
+  else { g.lineTo(...P[1]); const r = (d - L1) / L2; g.lineTo(P[1][0] + (P[2][0] - P[1][0]) * r, P[1][1] + (P[2][1] - P[1][1]) * r); }
+  g.stroke();
+}
+function glyphIcon(g, kind, cx, cy, t, st) {
+  if (kind === "pasted") drawCheck(g, cx, cy, 4.8, st / 0.28, SAGE, 1.8);
+  if (kind === "copied") { g.strokeStyle = AMBER; g.lineWidth = 1.5; g.strokeRect(cx - 4.5, cy - 5, 9, 11); g.beginPath(); g.moveTo(cx - 2, cy + 1); g.lineTo(cx - .5, cy + 2.5); g.lineTo(cx + 2.5, cy - 1); g.stroke(); }
+}
+
+// ---------- pill model ----------
+// Each direction: vis(state) -> visual width; draw(g,w,h,t,state,st)
+const DIRS = [
+  {id:"current", name:"Today's pill", tag:"shipping in beta.3", blurb:"Dark capsule, green level bars and a timer. Clean, but it looks like every other dictation app.",
+   why:["Familiar and readable","Motion is plain: bars and a timer, nothing else changes"],
+   vis:s => ({ready:22,silence:52,speaking:52,live:52,transcribing:26,polishing:16,pasted:16,copied:16})[s],
+   draw(g,w,h,t,s,st){
+    const cy=h/2;
+    if(s==="ready"){for(let i=0;i<3;i++){g.fillStyle="rgba(255,255,255,.4)";g.beginPath();g.arc(5+i*6,cy,2,0,7);g.fill();}return;}
+    if(s==="silence"||s==="speaking"||s==="live"){const W=[.55,.72,.9,1,1,1,.9,.72,.55];for(let i=0;i<9;i++){const v=sm[Math.floor(i*BINS/9)]*W[i];const bh=3+v*16;g.fillStyle=SAGE;g.beginPath();g.roundRect(2+i*5.4,cy-bh/2,2.6,bh,1.3);g.fill();}return;}
+    if(s==="transcribing"){for(let i=0;i<3;i++){const a=.35+.65*Math.max(0,Math.sin(t*6-i*.9));g.fillStyle=`rgba(125,211,252,${a})`;g.beginPath();g.arc(5+i*8,cy,2.6,0,7);g.fill();}return;}
+    if(s==="polishing"){g.fillStyle=SAGE;g.save();g.translate(8,cy);g.rotate(t*1.2);g.beginPath();for(let i=0;i<8;i++){const r=i%2?2:6;g.lineTo(Math.cos(i*Math.PI/4)*r,Math.sin(i*Math.PI/4)*r);}g.closePath();g.fill();g.restore();return;}
+    glyphIcon(g,s,8,cy,t,st);
+   }},
+  {id:"segment", name:"Segment", tag:"dot-matrix LED strip", blurb:"A tiny instrument: a grid of dots that lights up with your voice, like Nothing's Glyph screens and Teenage Engineering meters.",
+   why:["Energy is shown as light, not as a jumping shape","Peak dots linger for a beat, which makes the meter feel physical","Every state is drawn in the same dot language: sweep, check, alert"],
+   vis:s => ({ready:24,silence:110,speaking:110,live:52,transcribing:74,polishing:74,pasted:26,copied:26})[s],
+   draw(g,w,h,t,s,st){
+    const rows=5,pitch=4.6,r=1.2,cols=Math.max(1,Math.floor((w+1)/pitch)),x0=(w-(cols-1)*pitch)/2,y0=h/2-2*pitch;
+    const dot=(c,rr,col)=>{g.fillStyle=col;g.beginPath();g.arc(x0+c*pitch,y0+rr*pitch,r,0,7);g.fill();};
+    const dim="rgba(255,255,255,.07)";
+    if(s==="pasted"){const P=[[4,0],[3,1],[0,2],[2,2],[1,3]];for(let c=0;c<cols;c++)for(let rr=0;rr<rows;rr++)dot(c,rr,dim);const off=Math.floor((cols-5)/2);P.forEach(([c,rr],i)=>{const a=ease((st-i*.04)/.18);if(a>0)dot(c+off,rr,`rgba(143,209,168,${a})`);});return;}
+    if(s==="copied"){const on=st<.9?(Math.floor(st/.22)%2===0):true;const off=Math.floor(cols/2);for(let c=0;c<cols;c++)for(let rr=0;rr<rows;rr++)dot(c,rr,dim);if(on)[0,1,2,4].forEach(rr=>dot(off,rr,AMBER));return;}
+    for(let c=0;c<cols;c++)for(let rr=0;rr<rows;rr++){
+      let col=dim;
+      if(s==="ready"){if(c===0&&rr===2)col=`rgba(143,209,168,${.55+.3*Math.sin(t*Math.PI/2)})`;}
+      else if(s==="silence"||s==="speaking"||s==="live"){const b=Math.floor(c*BINS/cols);const v=sm[b],pk=peak[b];const n=Math.round(v*2.4),pn=Math.round(pk*2.4),d=Math.abs(rr-2);
+        if(d<=n&&(v>.04||d===0&&s!=="silence"&&false))col=d===0?"rgba(255,255,255,.95)":"rgba(255,255,255,.8)";else if(d===pn&&pn>n)col="rgba(255,255,255,.4)";}
+      else if(s==="transcribing"||s==="polishing"){const per=s==="transcribing"?.9:1.4;const p=inout((t%per)/per);const head=p*(cols-1);const dd=head-c;
+        if(rr===2&&dd>=0&&dd<3){const a=[1,.45,.18][Math.floor(dd)];col=s==="transcribing"?`rgba(255,255,255,${a})`:`rgba(143,209,168,${a*.85})`;}
+        else if(s==="polishing"&&Math.abs(rr-2)===1&&dd>=0&&dd<1)col="rgba(143,209,168,.25)";}
+      dot(c,rr,col);
+    }
+   }},
+  {id:"trace", name:"Trace", tag:"oscilloscope line", blurb:"One phosphor line that draws your voice, marches while it works and folds itself into a check when the text lands.",
+   why:["The calmest option: a single line, with nothing boxy","Shape continuity: the same line becomes the check, so the eye follows it","A soft glow keyed to your voice, never above 35%"],
+   vis:s => ({ready:34,silence:118,speaking:118,live:56,transcribing:76,polishing:76,pasted:30,copied:30})[s],
+   draw(g,w,h,t,s,st){
+    const cy=h/2;g.lineCap="round";g.lineJoin="round";
+    if(s==="ready"){g.strokeStyle="rgba(255,255,255,.35)";g.lineWidth=1.3;g.beginPath();g.moveTo(8,cy);g.lineTo(w-3,cy);g.stroke();g.fillStyle=`rgba(143,209,168,${.6+.3*Math.sin(t*Math.PI/2)})`;g.beginPath();g.arc(3,cy,2.1,0,7);g.fill();return;}
+    if(s==="silence"||s==="speaking"||s==="live"){g.save();g.shadowColor=`rgba(143,209,168,${Math.min(.35,env*.5)})`;g.shadowBlur=8;g.strokeStyle="rgba(255,255,255,.92)";g.lineWidth=1.5;g.beginPath();
+      for(let x=0;x<=w;x+=1){const a=buf[(bufPos-Math.floor((w-x)*1.2)+buf.length*4)%buf.length];const taper=Math.sin(Math.PI*x/w);const y=cy+Math.sin(x*.55-t*10)*a*9*taper+Math.sin(x*.12+t*2)*.8*taper;x?g.lineTo(x,y):g.moveTo(x,y);}g.stroke();g.restore();return;}
+    if(s==="transcribing"){g.strokeStyle="rgba(255,255,255,.85)";g.lineWidth=1.5;g.setLineDash([4,5]);g.lineDashOffset=-t*34;g.beginPath();g.moveTo(3,cy);g.lineTo(w-3,cy);g.stroke();g.setLineDash([]);return;}
+    if(s==="polishing"){const p=inout((t%1.6)/1.6),A=6*(1-p)+.6;[["rgba(143,209,168,.9)",0],["rgba(255,255,255,.45)",Math.PI*(1-p)]].forEach(([c,ph])=>{g.strokeStyle=c;g.lineWidth=1.4;g.beginPath();for(let x=0;x<=w;x++){const y=cy+Math.sin(x*.22+t*5+ph)*A*Math.sin(Math.PI*x/w);x?g.lineTo(x,y):g.moveTo(x,y);}g.stroke();});return;}
+    if(s==="pasted"){const p=ease(st/.32),N=24,P=checkPts(w/2,cy,6.5),pts=[];const segs=[[P[0],P[1]],[P[1],P[2]]],L=segs.map(([a,b])=>Math.hypot(b[0]-a[0],b[1]-a[1])),T=L[0]+L[1];
+      for(let i=0;i<N;i++){const f=i/(N-1),fx=3+(w-6)*f;let d=f*T,k=d<=L[0]?0:1;d=k?d-L[0]:d;const [a,b]=segs[k],r=d/L[k];const tx=a[0]+(b[0]-a[0])*r,ty=a[1]+(b[1]-a[1])*r;pts.push([fx+(tx-fx)*p,cy+(ty-cy)*p]);}
+      g.strokeStyle=p>.95?SAGE:"rgba(255,255,255,.9)";g.lineWidth=1.5+p*.4;g.beginPath();pts.forEach((q,i)=>i?g.lineTo(...q):g.moveTo(...q));g.stroke();return;}
+    if(s==="copied"){g.strokeStyle="rgba(255,255,255,.35)";g.lineWidth=1.3;g.beginPath();g.moveTo(3,cy);g.lineTo(w/2-6,cy);g.moveTo(w/2+6,cy);g.lineTo(w-3,cy);g.stroke();const a=st<.3?.5+.5*Math.sin(st/.3*Math.PI):1;g.fillStyle=`rgba(242,179,91,${a})`;g.beginPath();g.arc(w/2,cy,2.6,0,7);g.fill();}
+   }},
+  {id:"halo", name:"Halo", tag:"Glyph-style tick ring", blurb:"A ring of 24 ticks, like a watch bezel. The ring lights with your voice and a single arc of light orbits while it works.",
+   why:["A compact, memorable shape, readable even in peripheral vision","Cheapest to render: only brightness changes","The ring closes into a check on paste, a small moment of payoff"],
+   vis:s => 22,
+   draw(g,w,h,t,s,st){
+    const cx=w/2,cy=h/2,R=8.6;
+    const tick=(i,a,len,col)=>{const ang=-Math.PI/2+i*Math.PI*2/24;g.strokeStyle=col.replace("A",a);g.lineWidth=1.4;g.lineCap="round";g.beginPath();g.moveTo(cx+Math.cos(ang)*(R-len),cy+Math.sin(ang)*(R-len));g.lineTo(cx+Math.cos(ang)*R,cy+Math.sin(ang)*R);g.stroke();};
+    const W="rgba(255,255,255,A)",S="rgba(143,209,168,A)",Am="rgba(242,179,91,A)";
+    if(s==="silence"||s==="speaking"||s==="live"){const e=Math.min(1,env*1.3);if(e>.05){const gr=g.createRadialGradient(cx,cy,2,cx,cy,R+4);gr.addColorStop(0,`rgba(143,209,168,${e*.28})`);gr.addColorStop(1,"rgba(143,209,168,0)");g.fillStyle=gr;g.fillRect(0,0,w,h);}
+      for(let i=0;i<24;i++){const v=sm[i];tick(i,.14+v*.86,2.2+v*2.8,v>.85?S:W);}return;}
+    if(s==="ready"){for(let i=0;i<24;i++)tick(i,i===0?(.6+.3*Math.sin(t*Math.PI/2)):.12,2.2,i===0?S:W);return;}
+    if(s==="transcribing"||s==="polishing"){const per=s==="transcribing"?1.1:2.2;const head=((t%per)/per)*24;for(let i=0;i<24;i++){let a=.12;const arcs=s==="transcribing"?[head]:[head,(head+12)%24];for(const hd of arcs){const d=(hd-i+24)%24;if(d<4)a=Math.max(a,[1,.6,.32,.15][Math.floor(d)]);}tick(i,a,2.4,s==="polishing"&&a>.12?S:W);}return;}
+    if(s==="pasted"){const fade=Math.max(0,1-(st-.12)/.25);for(let i=0;i<24;i++)tick(i,st<.12?.9:.12+.78*fade,2.4,S);if(st>.1)drawCheck(g,cx,cy,4.2,(st-.1)/.25,SAGE,1.7);return;}
+    if(s==="copied"){const pulse=st<.3?.6+.4*Math.sin(st/.3*Math.PI):1;for(let i=0;i<24;i++)if(i>1&&i<23)tick(i,.85*pulse,2.4,Am);}
+   }},
+];
+
+// ---------- build DOM ----------
+const grid = document.getElementById("grid"), pills = [];
+const text = s => ({ready:"",silence:"",speaking:"",live:"",transcribing:"Transcribing",polishing:"Polishing",pasted:"Pasted · 14 words",copied:"Copied — press ⌘V"})[s];
+for (const d of DIRS) {
+  const card = document.createElement("article"); card.className = "card";
+  card.innerHTML = `<div class="head"><b>${d.name}<small>${d.tag}</small></b><span>${d.blurb}</span></div>
+  <div class="stage" data-wall="light"><div class="win"><div class="dots"><i></i><i></i><i></i></div><div class="doc"><span class="typed"></span><span class="caret"></span></div></div>
+  <div class="pillzone"><div class="pill"><div class="live"><span class="c"></span><span class="tn"></span></div><div class="row"><canvas></canvas><div class="lab"><span class="lt"></span></div></div></div></div><div class="stateTag"></div></div>
+  <ul class="why">${d.why.map(w => `<li>${w}</li>`).join("")}</ul>`;
+  grid.appendChild(card);
+  const q = sel => card.querySelector(sel);
+  pills.push({d, stage: q(".stage"), pill: q(".pill"), canvas: q("canvas"), lab: q(".lab"), lt: q(".lt"), live: q(".live"), c: q(".live .c"), tn: q(".live .tn"), typed: q(".typed"), tag: q(".stateTag"),
+    visW: spring(20), labW: spring(0), liveH: spring(0), rad: spring(17), lastState: "", st: 0, g: q("canvas").getContext("2d")});
+}
+
+// ---------- controls ----------
+const statesEl = document.getElementById("states");
+function renderStateChips() { statesEl.innerHTML = ""; SEQ[scenario].forEach(([s], i) => { const b = document.createElement("button"); b.type = "button"; b.textContent = LABEL[s]; b.onclick = () => { idx = i; stateT = 0; playing = false; syncPlay(); }; statesEl.appendChild(b); }); }
+function syncChips() { [...statesEl.children].forEach((b, i) => b.classList.toggle("on", i === idx)); }
+function seg(id, fn) { const el = document.getElementById(id); el.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; [...el.children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); fn(b.dataset.v); }); }
+seg("scenario", v => { scenario = v; idx = 0; stateT = 0; renderStateChips(); });
+seg("speed", v => speed = +v);
+seg("wall", v => pills.forEach(p => p.stage.dataset.wall = v));
+const playBtn = document.getElementById("play");
+function syncPlay() { playBtn.textContent = playing ? "Pause" : "Play"; }
+playBtn.onclick = () => { playing = !playing; syncPlay(); };
+document.getElementById("audio").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  try {
+    audioCtx = audioCtx || new AudioContext(); await audioCtx.resume();
+    const data = await audioCtx.decodeAudioData(await f.arrayBuffer());
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 1024; freq = new Uint8Array(analyser.frequencyBinCount); timeD = new Float32Array(analyser.fftSize);
+    const src = audioCtx.createBufferSource(); src.buffer = data; src.loop = true; src.connect(analyser); analyser.connect(audioCtx.destination); src.start();
+    audioOn = true;
+  } catch (err) { audioOn = false; e.target.value = ""; }
+});
+renderStateChips();
+
+// ---------- loop ----------
+const dpr = Math.min(2, devicePixelRatio || 1);
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000) * speed; last = now; clock += dt;
+  if (playing) { stateT += dt; const [, dur] = SEQ[scenario][idx]; if (stateT > dur) { idx = (idx + 1) % SEQ[scenario].length; stateT = 0; } }
+  const s = state(); syncChips(); updateVoice(dt, clock);
+  const liveWords = s === "live" ? Math.min(SENTENCE.length, Math.floor(stateT / (4.2 / SENTENCE.length)) + 3) : 0;
+  for (const p of pills) {
+    if (p.lastState !== s) { p.lastState = s; p.st = 0; const tx = text(s); p.lt.textContent = tx; p.lt.className = "lt"; p.tag.textContent = LABEL[s];
+      if (s === "ready") p.typed.innerHTML = "";
+      if (s === "pasted") p.typed.innerHTML = `<em>${FINAL}</em>`;
+      if (s === "copied") p.typed.innerHTML = "";
+      setTimeout(() => { const em = p.typed.querySelector("em"); if (em) em.style.background = "transparent"; }, 900 / speed);
+    } else p.st += dt;
+    // timer label while listening
+    if (s === "silence" || s === "speaking" || s === "live") { const secs = s === "silence" ? 1 : s === "speaking" ? 1 + Math.floor(stateT) : 4 + Math.floor(stateT); p.lt.textContent = `0:${String(secs).padStart(2, "0")}`; p.lt.className = "lt t"; }
+    const labelNatural = p.lt.textContent ? p.lt.offsetWidth : 0;
+    p.visW.to = p.d.vis(s); p.labW.to = labelNatural; p.liveH.to = s === "live" ? 30 : 0; p.rad.to = s === "live" ? 16 : 18;
+    [p.visW, p.labW, p.liveH, p.rad].forEach(sp => step(sp, dt));
+    const vw = Math.max(1, p.visW.x), lw = Math.max(0, p.labW.x);
+    p.lab.style.width = lw + "px";
+    const rowW = 24 + vw + lw; const liveW = s === "live" || p.liveH.x > 1 ? Math.max(rowW, 280 * Math.min(1, p.liveH.x / 30)) : rowW;
+    p.pill.style.width = liveW + "px"; p.pill.style.borderRadius = p.rad.x + "px";
+    p.live.style.height = Math.max(0, p.liveH.x) + "px"; p.live.style.opacity = Math.min(1, p.liveH.x / 30);
+    if (s === "live") { const committed = SENTENCE.slice(0, Math.max(0, liveWords - 2)).join(" "); const tent = SENTENCE.slice(Math.max(0, liveWords - 2), liveWords).join(" "); p.c.textContent = committed; p.tn.textContent = tent; }
+    // canvas
+    const cw = Math.round(vw), ch = 24;
+    if (p.canvas.width !== cw * dpr) { p.canvas.width = cw * dpr; p.canvas.height = ch * dpr; p.canvas.style.width = cw + "px"; p.canvas.style.height = ch + "px"; }
+    const g = p.g; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cw, ch);
+    p.d.draw(g, cw, ch, clock, s, p.st);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>

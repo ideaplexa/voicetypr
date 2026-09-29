@@ -32,6 +32,8 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
+Plan 080 — SPEC — Claude 2026-09-30: UI completion for 2.1.0-beta.4 — pill focus safety + alive/techy pill redesign (directions D/E/F in design/voicetypr-2.1.pen, motion in design/prototypes/pill-lab.html), tray menu, icons, all dialogs, toast window, Windows visual pass; one phase, one review. See `080-ui-completion.md`.
+
 Plan 079 — SPEC — Claude 2026-09-29: 2.1 UI redesign — 8-item IA (Home, History · SETUP: Transcription, Polish, Dictionary, Recording · Settings w/ Advanced, Help & feedback), one header/card/row kit, retuned tokens, pill Pasted/Copied states, onboarding; slices S0–S9 on `feat/2.1-ui`. Design: `design/voicetypr-2.1.pen`. See `079-ui-redesign-2-1.md`.
 
 Plan 078 — LOCAL CHECKS PASSED / NEEDS PostHog delivery check — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed): one privacy-safe `dictation.completed` PostHog event with typed numbers (stop→text, start latency, transport, outcome, paste, preview) — observability 0.1b for beta.2. See `078-dictation-telemetry.md`.
