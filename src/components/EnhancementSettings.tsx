@@ -89,7 +89,7 @@ export function EnhancementSettings({
                 disabled={writingSettingsDisabled} onChange={(event) => updateRule(index, { app_name: event.target.value })}
                 className="min-w-24 flex-1 bg-transparent text-[13px] font-medium text-muted-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" />
               <Select value={rule.preset} disabled={writingSettingsDisabled} onValueChange={(value) => updateRule(index, { preset: value as EnhancementPreset })}>
-                <SelectTrigger size="sm" aria-label={`Style for ${rule.app_name || `app ${index + 1}`}`} className="h-7 w-28 border-0 bg-transparent text-xs text-muted-foreground shadow-none"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" aria-label={`Style for ${rule.app_name || `app ${index + 1}`}`} className="h-7 w-28 border-0 bg-transparent text-xs text-muted-foreground shadow-none"><SelectValue>{modes.find((mode) => mode.value === rule.preset)?.label ?? rule.preset}</SelectValue></SelectTrigger>
                 <SelectContent>{modes.map((mode) => <SelectItem key={mode.value} value={mode.value}
                   disabled={!aiFormattingEnabled && presetRequiresAiFormatting(mode.value) && rule.preset !== mode.value}>{mode.label}</SelectItem>)}</SelectContent>
               </Select>

@@ -333,7 +333,10 @@ use commands::{
     },
     reset::reset_app_data,
     settings::*,
-    shortcuts::{get_shortcut_settings, list_shortcut_actions, update_shortcut_settings},
+    shortcuts::{
+        get_effective_primary_shortcut, get_shortcut_settings, list_shortcut_actions,
+        set_primary_recording_shortcut, update_shortcut_settings,
+    },
     stt::{
         cleanup_soniox_storage, clear_stt_key_cache, get_soniox_storage_counts, validate_stt_key,
     },
@@ -1656,6 +1659,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             validate_microphone_selection,
             set_global_shortcut,
             get_shortcut_settings,
+            get_effective_primary_shortcut,
+            set_primary_recording_shortcut,
             update_shortcut_settings,
             list_shortcut_actions,
             get_supported_languages,

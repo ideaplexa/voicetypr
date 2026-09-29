@@ -325,7 +325,7 @@ async function openPolishTab(
   if (name === "Dictionary" || name === "Corrections" || name === "Snippets") {
     if (!screen.queryByRole("heading", { name: "Dictionary" })) render(<DictionarySection />);
     if (name !== "Dictionary") {
-      await user.click(screen.getByRole("button", { name: new RegExp(`^${name} \\d+$`) }));
+      await user.click(screen.getByRole("tab", { name: new RegExp(`^${name} \\d+$`) }));
     }
   }
   await screen.findByRole("region", { name });
@@ -333,6 +333,13 @@ async function openPolishTab(
 
 async function openModes(user: ReturnType<typeof userEvent.setup>) {
   await openPolishTab(user, "Modes");
+}
+
+async function addCorrection(user: ReturnType<typeof userEvent.setup>, from: string) {
+  await user.click(await screen.findByRole("button", { name: /add rule/i }));
+  fireEvent.change(screen.getByLabelText("Match"), { target: { value: from } });
+  fireEvent.change(screen.getByLabelText("Replace"), { target: { value: "replacement" } });
+  await user.click(screen.getByRole("button", { name: "Save" }));
 }
 
 async function getProviderSetupPanel() {
@@ -1434,17 +1441,16 @@ describe("EnhancementsSection", () => {
     resolveWritingSettings(loadedWritingSettings);
     await waitFor(() => expect(addRuleButton).toBeEnabled());
     await user.click(addRuleButton);
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("update_writing_settings", {
-        settings: expect.objectContaining({
-          replacements: [
-            ...loadedWritingSettings.replacements,
-            expect.objectContaining({ from: "", to: "", enabled: true }),
-          ],
-        }),
-      });
-    });
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Match"), { target: { value: "new phrase" } });
+    fireEvent.change(screen.getByLabelText("Replace"), { target: { value: "new text" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_writing_settings", {
+      settings: expect.objectContaining({ replacements: [
+        ...loadedWritingSettings.replacements,
+        expect.objectContaining({ from: "new phrase", to: "new text", enabled: true }),
+      ] }),
+    }));
   });
 
   it("adds an app mode override and persists writing settings", async () => {
@@ -1452,7 +1458,9 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     await openModes(user);
 
-    await user.click(await screen.findByRole("button", { name: /add override/i }));
+    const addOverride = await screen.findByRole("button", { name: /add override/i });
+    await waitFor(() => expect(addOverride).toBeEnabled());
+    await user.click(addOverride);
 
     const appInput = await screen.findByPlaceholderText("App name, e.g. Slack");
     await user.type(appInput, "Slack");
@@ -1477,21 +1485,10 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     await openPolishTab(user, "Corrections");
 
-    await user.click(await screen.findByRole("button", { name: /add rule/i }));
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("update_writing_settings", {
-        settings: expect.objectContaining({
-          replacements: [
-            expect.objectContaining({
-              from: "",
-              to: "",
-              enabled: true,
-            }),
-          ],
-        }),
-      });
-    });
+    await addCorrection(user, "new phrase");
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_writing_settings", {
+      settings: expect.objectContaining({ replacements: [expect.objectContaining({ from: "new phrase", to: "replacement", enabled: true })] }),
+    }));
   });
 
   it("coalesces rapid writing settings saves so the latest edit wins on disk", async () => {
@@ -1556,12 +1553,8 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     await openPolishTab(user, "Corrections");
 
-    const addRuleButton = await screen.findByRole("button", {
-      name: /add rule/i,
-    });
-
-    await user.click(addRuleButton);
-    await user.click(addRuleButton);
+    await addCorrection(user, "first");
+    await addCorrection(user, "second");
 
     resolveFirstSave?.();
 
@@ -1586,12 +1579,8 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     await openPolishTab(user, "Corrections");
 
-    const addRuleButton = await screen.findByRole("button", {
-      name: /add rule/i,
-    });
-
-    await user.click(addRuleButton);
-    await user.click(addRuleButton);
+    await addCorrection(user, "first");
+    await addCorrection(user, "second");
 
     await waitFor(() => {
       const updateCalls = (invoke as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -1666,13 +1655,9 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     await openPolishTab(user, "Corrections");
 
-    const addRuleButton = await screen.findByRole("button", {
-      name: /add rule/i,
-    });
-
-    await user.click(addRuleButton);
+    await addCorrection(user, "first");
     await waitFor(() => expect(saveCount).toBe(1));
-    await user.click(addRuleButton);
+    await addCorrection(user, "second");
     rejectFirstSave?.();
 
     await waitFor(() => {
@@ -1688,13 +1673,12 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     await openPolishTab(user, "Corrections");
 
-    await user.click(await screen.findByRole("button", { name: /add rule/i }));
-
+    await addCorrection(user, "failure case");
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("disk full");
     });
     await waitFor(() => {
-      expect(screen.queryByText("Rule 1")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Delete row 1" })).not.toBeInTheDocument();
     });
   });
 

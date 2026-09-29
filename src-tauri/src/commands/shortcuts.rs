@@ -201,6 +201,286 @@ pub fn get_shortcut_settings(app: AppHandle) -> Result<ShortcutSettings, String>
     load_shortcut_settings(&app)
 }
 
+const FALLBACK_PRIMARY: &str = "CommandOrControl+Shift+Space";
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimaryShortcutKind {
+    Combo,
+    BareModifier,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimaryShortcutMode {
+    Hold,
+    Toggle,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetPrimaryRecordingShortcutRequest {
+    pub kind: PrimaryShortcutKind,
+    /// Combo accelerator, or a native modifier in `modifier:side` form.
+    pub value: String,
+    pub mode: PrimaryShortcutMode,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EffectivePrimaryShortcut {
+    pub hotkey: Option<String>,
+    pub binding: Option<ShortcutBinding>,
+    pub mode: &'static str,
+}
+
+fn active_native_primary(bindings: &[ShortcutBinding]) -> Option<&ShortcutBinding> {
+    let eligible = |binding: &&ShortcutBinding| {
+        binding.enabled
+            && matches!(
+                binding.action,
+                ShortcutAction::HoldToRecord | ShortcutAction::ToggleRecording
+            )
+            && matches!(
+                binding.trigger_kind,
+                TriggerKind::ModifierHold | TriggerKind::IsolatedTap
+            )
+    };
+    bindings
+        .iter()
+        .filter(eligible)
+        .find(|binding| binding.id == "onboarding-primary-hold")
+        .or_else(|| bindings.iter().find(eligible))
+}
+
+fn effective_primary(
+    hotkey: &str,
+    recording_mode: &str,
+    bindings: &[ShortcutBinding],
+) -> EffectivePrimaryShortcut {
+    if !hotkey.trim().is_empty() {
+        return EffectivePrimaryShortcut {
+            hotkey: Some(hotkey.to_string()),
+            binding: None,
+            mode: if recording_mode == "push_to_talk" {
+                "hold"
+            } else {
+                "toggle"
+            },
+        };
+    }
+    if let Some(binding) = active_native_primary(bindings) {
+        return EffectivePrimaryShortcut {
+            hotkey: None,
+            binding: Some(binding.clone()),
+            mode: if binding.action == ShortcutAction::HoldToRecord {
+                "hold"
+            } else {
+                "toggle"
+            },
+        };
+    }
+    EffectivePrimaryShortcut {
+        hotkey: Some(FALLBACK_PRIMARY.to_string()),
+        binding: None,
+        mode: if recording_mode == "push_to_talk" {
+            "hold"
+        } else {
+            "toggle"
+        },
+    }
+}
+
+#[tauri::command]
+pub fn get_effective_primary_shortcut(app: AppHandle) -> Result<EffectivePrimaryShortcut, String> {
+    let store = app.store("settings").map_err(|e| e.to_string())?;
+    let hotkey = store
+        .get("hotkey")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| FALLBACK_PRIMARY.to_string());
+    let mode = store
+        .get("recording_mode")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "toggle".to_string());
+    let bindings = load_shortcut_settings(&app)?;
+    Ok(effective_primary(&hotkey, &mode, &bindings.bindings))
+}
+
+fn parse_modifier(value: &str) -> Result<ModifierSpec, String> {
+    let (modifier, side) = value.split_once(':').ok_or("Invalid bare modifier")?;
+    let modifier = match modifier {
+        "alt" => ModifierKind::Alt,
+        "control" => ModifierKind::Control,
+        "meta" => ModifierKind::Meta,
+        "shift" => ModifierKind::Shift,
+        _ => return Err("Invalid bare modifier".to_string()),
+    };
+    let side = match side {
+        "left" => SideKind::Left,
+        "right" => SideKind::Right,
+        "either" => SideKind::Either,
+        _ => return Err("Invalid modifier side".to_string()),
+    };
+    Ok(ModifierSpec { modifier, side })
+}
+
+fn replace_primary(
+    hotkey: &str,
+    recording_mode: &str,
+    settings: &ShortcutSettings,
+    request: &SetPrimaryRecordingShortcutRequest,
+) -> Result<(String, String, ShortcutSettings), String> {
+    let captured = effective_primary(hotkey, recording_mode, &settings.bindings);
+    let mut next = settings.clone();
+    if let Some(id) = captured.binding.as_ref().map(|binding| &binding.id) {
+        if let Some(binding) = next.bindings.iter_mut().find(|binding| &binding.id == id) {
+            binding.enabled = false;
+        }
+    }
+    let requested_mode = match request.mode {
+        PrimaryShortcutMode::Hold => "push_to_talk",
+        PrimaryShortcutMode::Toggle => "toggle",
+    };
+    // A combo replacement inherits the native primary's real mode, even if
+    // recording_mode still contains a stale value. Explicit mode changes to an
+    // existing combo (or to a bare modifier) use the requested mode.
+    let mode = if matches!(request.kind, PrimaryShortcutKind::Combo) && captured.binding.is_some() {
+        if captured.mode == "hold" {
+            "push_to_talk"
+        } else {
+            "toggle"
+        }
+    } else {
+        requested_mode
+    };
+    match request.kind {
+        PrimaryShortcutKind::Combo => {
+            let normalized = normalize_shortcut_keys(&request.value);
+            if normalized.is_empty() || normalized.len() > 100 {
+                return Err("Invalid shortcut format".to_string());
+            }
+            validate_key_combination_allowing_safe_single_key(&normalized)?;
+            crate::trigger::mapping::parse_combo(&normalized)
+                .map_err(|_| "Invalid shortcut format".to_string())?;
+            Ok((normalized, mode.to_string(), next))
+        }
+        PrimaryShortcutKind::BareModifier => {
+            let modifier = parse_modifier(&request.value)?;
+            // Reuse the intended record, including one disabled by a previous combo.
+            let reuse = captured
+                .binding
+                .as_ref()
+                .map(|binding| binding.id.clone())
+                .or_else(|| {
+                    next.bindings
+                        .iter()
+                        .find(|b| {
+                            b.id == "onboarding-primary-hold"
+                                && matches!(
+                                    b.action,
+                                    ShortcutAction::HoldToRecord | ShortcutAction::ToggleRecording
+                                )
+                                && matches!(
+                                    b.trigger_kind,
+                                    TriggerKind::ModifierHold | TriggerKind::IsolatedTap
+                                )
+                        })
+                        .map(|b| b.id.clone())
+                });
+            let id = reuse.unwrap_or_else(|| {
+                let mut id = "onboarding-primary-hold".to_string();
+                let mut suffix = 2;
+                while next.bindings.iter().any(|binding| binding.id == id) {
+                    id = format!("onboarding-primary-hold-{suffix}");
+                    suffix += 1;
+                }
+                id
+            });
+            let binding = ShortcutBinding {
+                id: id.clone(),
+                action: if matches!(request.mode, PrimaryShortcutMode::Hold) {
+                    ShortcutAction::HoldToRecord
+                } else {
+                    ShortcutAction::ToggleRecording
+                },
+                shortcut: String::new(),
+                trigger: if matches!(request.mode, PrimaryShortcutMode::Hold) {
+                    ShortcutTrigger::Hold
+                } else {
+                    ShortcutTrigger::Pressed
+                },
+                enabled: true,
+                allow_risky_combo: false,
+                trigger_kind: if matches!(request.mode, PrimaryShortcutMode::Hold) {
+                    TriggerKind::ModifierHold
+                } else {
+                    TriggerKind::IsolatedTap
+                },
+                modifier: Some(modifier),
+            };
+            if let Some(stored) = next.bindings.iter_mut().find(|stored| stored.id == id) {
+                *stored = binding;
+            } else {
+                next.bindings.push(binding);
+            }
+            Ok((String::new(), mode.to_string(), next))
+        }
+    }
+}
+
+#[tauri::command]
+pub fn set_primary_recording_shortcut(
+    app: AppHandle,
+    request: SetPrimaryRecordingShortcutRequest,
+) -> Result<EffectivePrimaryShortcut, String> {
+    let store = app.store("settings").map_err(|e| e.to_string())?;
+    let old_hotkey = store
+        .get("hotkey")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| FALLBACK_PRIMARY.to_string());
+    let old_mode = store
+        .get("recording_mode")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "toggle".to_string());
+    let old_bindings = load_shortcut_settings(&app)?;
+    let (hotkey, mode, bindings) =
+        replace_primary(&old_hotkey, &old_mode, &old_bindings, &request)?;
+    let ptt_hotkey = if mode == "push_to_talk"
+        && store
+            .get("use_different_ptt_key")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    {
+        store
+            .get("ptt_hotkey")
+            .and_then(|value| value.as_str().map(str::to_string))
+            .filter(|value| !value.trim().is_empty())
+    } else {
+        None
+    };
+    let prepared = prepare_shortcut_settings(
+        bindings,
+        &ExistingShortcutStrings {
+            primary_hotkey: Some(hotkey.clone()),
+            ptt_hotkey,
+        },
+    )?;
+    let bindings = ShortcutSettings { bindings: prepared };
+    store.set("hotkey", serde_json::json!(hotkey));
+    store.set("recording_mode", serde_json::json!(mode));
+    store.set(
+        SHORTCUT_BINDINGS_KEY,
+        serde_json::to_value(&bindings).map_err(|e| e.to_string())?,
+    );
+    if let Err(error) = store.save() {
+        let _ = store.reload();
+        return Err(format!("Failed to save settings: {error}"));
+    }
+    crate::trigger::engine_host::rebuild_engine_bindings(&app);
+    let app_state = app.state::<AppState>();
+    clear_active_custom_shortcut_state(&app_state);
+    let _ = app.emit("shortcut-settings-changed", ());
+    Ok(effective_primary(&hotkey, &mode, &bindings.bindings))
+}
+
 #[tauri::command]
 pub fn list_shortcut_actions() -> Vec<ShortcutActionDefinition> {
     shortcut_action_definitions()
@@ -783,4 +1063,161 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
             allows_single_key: true,
         },
     ]
+}
+
+#[cfg(test)]
+mod primary_replacement_tests {
+    use super::*;
+
+    fn bare(id: &str, action: ShortcutAction, enabled: bool) -> ShortcutBinding {
+        ShortcutBinding {
+            id: id.into(),
+            action,
+            shortcut: String::new(),
+            trigger: if action == ShortcutAction::HoldToRecord {
+                ShortcutTrigger::Hold
+            } else {
+                ShortcutTrigger::Pressed
+            },
+            enabled,
+            allow_risky_combo: false,
+            trigger_kind: if action == ShortcutAction::HoldToRecord {
+                TriggerKind::ModifierHold
+            } else {
+                TriggerKind::IsolatedTap
+            },
+            modifier: Some(ModifierSpec {
+                modifier: ModifierKind::Alt,
+                side: SideKind::Left,
+            }),
+        }
+    }
+    fn request(
+        kind: PrimaryShortcutKind,
+        value: &str,
+        mode: PrimaryShortcutMode,
+    ) -> SetPrimaryRecordingShortcutRequest {
+        SetPrimaryRecordingShortcutRequest {
+            kind,
+            value: value.into(),
+            mode,
+        }
+    }
+    #[test]
+    fn native_hold_survives_stale_toggle_when_replaced_by_combo() {
+        let settings = ShortcutSettings {
+            bindings: vec![bare(
+                "onboarding-primary-hold",
+                ShortcutAction::HoldToRecord,
+                true,
+            )],
+        };
+        assert_eq!(
+            effective_primary("", "toggle", &settings.bindings).mode,
+            "hold"
+        );
+        let (hotkey, mode, next) = replace_primary(
+            "",
+            "toggle",
+            &settings,
+            &request(
+                PrimaryShortcutKind::Combo,
+                "CommandOrControl+Space",
+                PrimaryShortcutMode::Toggle,
+            ),
+        )
+        .unwrap();
+        assert_eq!(hotkey, "CommandOrControl+Space");
+        assert_eq!(mode, "push_to_talk");
+        assert!(!next.bindings[0].enabled);
+    }
+    #[test]
+    fn combo_replacement_disables_only_captured_primary() {
+        let settings = ShortcutSettings {
+            bindings: vec![
+                bare("A", ShortcutAction::HoldToRecord, true),
+                bare("B", ShortcutAction::ToggleRecording, true),
+                ShortcutBinding {
+                    id: "cancel".into(),
+                    action: ShortcutAction::CancelRecording,
+                    shortcut: "Escape".into(),
+                    trigger: ShortcutTrigger::Pressed,
+                    enabled: true,
+                    allow_risky_combo: false,
+                    trigger_kind: TriggerKind::Combo,
+                    modifier: None,
+                },
+            ],
+        };
+        let (_, _, next) = replace_primary(
+            "",
+            "toggle",
+            &settings,
+            &request(
+                PrimaryShortcutKind::Combo,
+                "CommandOrControl+Space",
+                PrimaryShortcutMode::Hold,
+            ),
+        )
+        .unwrap();
+        assert!(!next.bindings[0].enabled);
+        assert!(next.bindings[1].enabled);
+        assert!(next.bindings[2].enabled);
+    }
+    #[test]
+    fn bare_combo_bare_round_trip_reuses_id() {
+        let empty = ShortcutSettings::default();
+        let (_, _, first) = replace_primary(
+            "",
+            "toggle",
+            &empty,
+            &request(
+                PrimaryShortcutKind::BareModifier,
+                "alt:left",
+                PrimaryShortcutMode::Hold,
+            ),
+        )
+        .unwrap();
+        let (_, _, combo) = replace_primary(
+            "",
+            "toggle",
+            &first,
+            &request(
+                PrimaryShortcutKind::Combo,
+                "CommandOrControl+Space",
+                PrimaryShortcutMode::Hold,
+            ),
+        )
+        .unwrap();
+        let (_, _, second) = replace_primary(
+            "CommandOrControl+Space",
+            "push_to_talk",
+            &combo,
+            &request(
+                PrimaryShortcutKind::BareModifier,
+                "alt:right",
+                PrimaryShortcutMode::Toggle,
+            ),
+        )
+        .unwrap();
+        assert_eq!(second.bindings.len(), 1);
+        assert_eq!(second.bindings[0].id, "onboarding-primary-hold");
+        assert_eq!(second.bindings[0].modifier.unwrap().side, SideKind::Right);
+        assert!(second.bindings[0].enabled);
+    }
+    #[test]
+    fn empty_and_disabled_only_resolve_backend_fallback() {
+        for bindings in [
+            vec![],
+            vec![bare(
+                "onboarding-primary-hold",
+                ShortcutAction::HoldToRecord,
+                false,
+            )],
+        ] {
+            let effective = effective_primary("", "toggle", &bindings);
+            assert_eq!(effective.hotkey.as_deref(), Some(FALLBACK_PRIMARY));
+            assert!(effective.binding.is_none());
+        }
+    }
 }

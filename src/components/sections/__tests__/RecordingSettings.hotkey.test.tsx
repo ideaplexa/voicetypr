@@ -1,232 +1,79 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordingSettings } from "../RecordingSettings";
 import type { AppSettings } from "@/types";
 import type { ShortcutBinding } from "@/types/shortcuts";
 
-const mockUpdateSettings = vi.fn().mockResolvedValue(undefined);
-
-// A bare-modifier primary is active: `hotkey` is intentionally empty.
-const baseSettings: AppSettings = {
-  recording_mode: "toggle",
-  hotkey: "",
-  current_model: "",
-  speech_language: "en",
-  theme: "system",
-  keep_transcription_in_clipboard: false,
-  play_sound_on_recording: true,
-  pill_indicator_mode: "when_recording",
-  pill_indicator_position: "bottom-center",
-  pill_indicator_offset: 10,
-};
-let mockSettings: AppSettings = { ...baseSettings };
-
-vi.mock("@/contexts/SettingsContext", () => ({
-  useSettings: () => ({ settings: mockSettings, updateSettings: mockUpdateSettings }),
-}));
+const refreshSettings = vi.fn().mockResolvedValue(undefined);
+let settings: AppSettings;
+vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => ({ settings, refreshSettings, updateSettings: vi.fn() }) }));
 vi.mock("@/contexts/ReadinessContext", () => ({ useCanAutoInsert: () => true }));
 vi.mock("@/lib/platform", () => ({ isMacOS: true, isWindows: false }));
+const input = vi.hoisted(() => ({ onChange: null as null | ((value: string) => void) }));
+vi.mock("@/components/HotkeyInput", () => ({ HotkeyInput: ({ onChange }: { onChange?: (value: string) => void }) => { input.onChange = onChange ?? null; return <div />; } }));
+const invoke = vi.fn<(command: string, args?: { request?: { kind: string; value: string; mode: string } }) => Promise<unknown>>();
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (command: string, args?: { request?: { kind: string; value: string; mode: string } }) => invoke(command, args) }));
+vi.mock("@tauri-apps/plugin-autostart", () => ({ enable: vi.fn(), disable: vi.fn(), isEnabled: vi.fn() }));
+vi.mock("@/components/MicrophoneSelection", () => ({ MicrophoneSelection: () => <div /> }));
+vi.mock("@/components/sections/NetworkSharingCard", () => ({ NetworkSharingCard: () => <div /> }));
+vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-// Capture the inline HotkeyInput's onChange so we can drive a combo entry.
-const hotkeyInput = vi.hoisted(() => ({
-  onChange: null as null | ((v: string) => void),
-}));
-vi.mock("@/components/HotkeyInput", () => ({
-  HotkeyInput: ({ onChange }: { onChange?: (v: string) => void }) => {
-    hotkeyInput.onChange = onChange ?? null;
-    return <div data-testid="hotkey-input" />;
-  },
-}));
-
-const mockInvoke = vi.fn<(cmd: string, args?: Record<string, unknown>) => Promise<unknown>>();
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (cmd: string, args?: Record<string, unknown>) => mockInvoke(cmd, args),
-}));
-vi.mock("@tauri-apps/plugin-autostart", () => ({
-  enable: vi.fn(),
-  disable: vi.fn(),
-  isEnabled: vi.fn(),
-}));
-
-// Keep the DOM focused on the hotkey flow.
-vi.mock("@/components/MicrophoneSelection", () => ({
-  MicrophoneSelection: () => <div data-testid="microphone-selection" />,
-}));
-vi.mock("@/components/sections/NetworkSharingCard", () => ({
-  NetworkSharingCard: () => <div data-testid="network-sharing-card" />,
-}));
-vi.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-vi.mock("@/components/ui/switch", () => ({
-  Switch: (props: { checked?: boolean; onCheckedChange?: (v: boolean) => void; id?: string }) => (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={props.checked}
-      aria-label={props.id}
-      data-testid={props.id}
-      onClick={() => props.onCheckedChange?.(!props.checked)}
-    />
-  ),
-}));
-vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectValue: () => <div />,
-}));
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
-}));
-
-const nativePrimary: ShortcutBinding = {
-  id: "onboarding-primary-hold",
-  action: "hold_to_record",
-  shortcut: "",
-  trigger: "hold",
-  enabled: true,
-  allow_risky_combo: false,
-  trigger_kind: "modifier_hold",
-  modifier: { modifier: "meta", side: "right" },
-};
-const cancelBinding: ShortcutBinding = {
-  id: "cancel-recording",
-  action: "cancel_recording",
-  shortcut: "Escape",
-  trigger: "pressed",
-  enabled: true,
-  allow_risky_combo: false,
-  trigger_kind: "combo",
+const binding = (id: string, enabled = true, action: ShortcutBinding["action"] = "hold_to_record"): ShortcutBinding => ({
+  id, enabled, action, shortcut: "", trigger: action === "hold_to_record" ? "hold" : "pressed",
+  allow_risky_combo: false, trigger_kind: "modifier_hold", modifier: { modifier: "meta", side: "right" },
+});
+const base = { hotkey: "", recording_mode: "toggle", current_model: "", speech_language: "en", theme: "system" } as AppSettings;
+let bindings: ShortcutBinding[];
+let hotkey: string;
+const effective = () => {
+  const primary = hotkey ? null : bindings.find((item) => item.enabled && (item.action === "hold_to_record" || item.action === "toggle_recording")) ?? null;
+  return { binding: primary, hotkey: hotkey || (primary ? null : "CommandOrControl+Shift+Space"), mode: primary?.action === "hold_to_record" ? "hold" : "toggle" };
 };
 
-/** Runtime-narrow the `update_shortcut_settings` payload to its bindings list. */
-function readBindings(args: unknown): ShortcutBinding[] {
-  if (args && typeof args === "object" && "settings" in args) {
-    const settings = args.settings;
-    if (settings && typeof settings === "object" && "bindings" in settings) {
-      const bindings = settings.bindings;
-      if (Array.isArray(bindings)) {
-        return bindings;
-      }
+beforeEach(() => {
+  settings = { ...base };
+  hotkey = "";
+  bindings = [binding("primary-A"), binding("additional-B", true, "toggle_recording"), binding("cancel", true, "cancel_recording")];
+  vi.clearAllMocks();
+  invoke.mockImplementation(async (command, args) => {
+    if (command === "get_effective_primary_shortcut") return effective();
+    if (command === "set_primary_recording_shortcut") {
+      const captured = effective();
+      if (captured.binding) bindings = bindings.map((item) => item.id === captured.binding?.id ? { ...item, enabled: false } : item);
+      hotkey = args?.request?.kind === "combo" ? args.request.value : "";
+      return { binding: null, hotkey, mode: args?.request?.mode };
     }
-  }
-  throw new Error("update_shortcut_settings was not called with { settings: { bindings } }");
+    if (command === "get_autostart_status") return false;
+    return undefined;
+  });
+});
+
+async function saveCombo() {
+  render(<RecordingSettings />);
+  await screen.findByLabelText("Current shortcut: Hold Right ⌘ to talk");
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  act(() => input.onChange?.("CommandOrControl+Shift+Space"));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_primary_recording_shortcut", { request: { kind: "combo", value: "CommandOrControl+Shift+Space", mode: "hold" } }));
 }
 
-describe("GeneralSettings combo-hotkey save", () => {
-  beforeEach(() => {
-    mockSettings = { ...baseSettings };
-    vi.clearAllMocks();
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      switch (cmd) {
-        case "get_autostart_status":
-          return false;
-        case "get_transcription_acceleration_status":
-          return {
-            message: "ok",
-            effective_backend: "cpu",
-            diagnostic_code: "ready",
-            recommended_action: "none",
-          };
-        case "get_shortcut_settings":
-          return { bindings: [nativePrimary, cancelBinding] };
-        case "set_global_shortcut":
-          return undefined;
-        case "update_shortcut_settings":
-          return { bindings: [nativePrimary, cancelBinding] };
-        default:
-          return undefined;
-      }
-    });
+describe("atomic primary replacement", () => {
+  it("captures native Hold before the Rust state mutation despite stale toggle", async () => {
+    await saveCombo();
+    expect(bindings.find((item) => item.id === "primary-A")?.enabled).toBe(false);
+    expect(settings.recording_mode).toBe("toggle");
+    expect(invoke).not.toHaveBeenCalledWith("set_global_shortcut", expect.anything());
   });
-
-  it("disables the existing native primary when saving a combo", async () => {
-    render(<RecordingSettings />);
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Change" }));
-    });
-
-    // Simulate the user entering a combo via the inline HotkeyInput.
-    await act(async () => {
-      hotkeyInput.onChange?.("CommandOrControl+Shift+Space");
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    });
-
-    await waitFor(() => {
-      expect(mockUpdateSettings).toHaveBeenCalledWith({
-        hotkey: "CommandOrControl+Shift+Space",
-        recording_mode: "push_to_talk",
-      });
-    });
-
-    const calls = mockInvoke.mock.calls;
-    const setGlobal = calls.find(([cmd]) => cmd === "set_global_shortcut");
-    expect(setGlobal, "combo should be registered as the global shortcut").toBeDefined();
-    expect(setGlobal?.[1]).toEqual({ shortcut: "CommandOrControl+Shift+Space" });
-
-    const updateCall = calls.find(([cmd]) => cmd === "update_shortcut_settings");
-    expect(
-      updateCall,
-      "saving a combo must replace the native primary so only one trigger fires",
-    ).toBeDefined();
-
-    const bindings = readBindings(updateCall?.[1]);
-    const primary = bindings.find((b) => b.id === "onboarding-primary-hold");
-    expect(primary?.enabled).toBe(false);
-    // Other bindings must be left intact.
-    const cancel = bindings.find((b) => b.id === "cancel-recording");
-    expect(cancel?.enabled).toBe(true);
+  it("disables only the captured primary and leaves additional and cancel bindings", async () => {
+    await saveCombo();
+    expect(bindings.find((item) => item.id === "additional-B")?.enabled).toBe(true);
+    expect(bindings.find((item) => item.id === "cancel")?.enabled).toBe(true);
+    expect(invoke.mock.calls.filter(([command]) => command === "set_primary_recording_shortcut")).toHaveLength(1);
   });
-
-  it("carries an effective native Hold mode into a replacement combo and preserves other shortcuts", async () => {
-    mockSettings.recording_mode = "toggle";
-    const disabledPreferred = { ...nativePrimary, enabled: false };
-    const active = { ...nativePrimary, id: "custom-hold" };
-    mockInvoke.mockImplementation(async (cmd) => cmd === "get_shortcut_settings"
-      ? { bindings: [disabledPreferred, active, cancelBinding] }
-      : undefined);
-    render(<RecordingSettings />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Hold to talk" })).toHaveAttribute("aria-pressed", "true"));
-    fireEvent.click(screen.getByRole("button", { name: "Change" }));
-    act(() => hotkeyInput.onChange?.("CommandOrControl+Shift+Space"));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalledWith({
-      hotkey: "CommandOrControl+Shift+Space", recording_mode: "push_to_talk",
-    }));
-    const update = mockInvoke.mock.calls.find(([cmd]) => cmd === "update_shortcut_settings");
-    expect(readBindings(update?.[1])).toEqual([
-      disabledPreferred,
-      expect.objectContaining({ id: "custom-hold", enabled: false }),
-      cancelBinding,
-    ]);
-  });
-
-  it.each([
-    ["Press to start / stop", "isolated_tap", "toggle_recording", "pressed"],
-    ["Hold to talk", "modifier_hold", "hold_to_record", "hold"],
-  ] as const)("updates the active native binding for %s", async (label, kind, action, trigger) => {
-    mockSettings.recording_mode = label === "Hold to talk" ? "toggle" : "push_to_talk";
-    mockInvoke.mockImplementation(async (cmd) =>
-      cmd === "get_shortcut_settings"
-        ? { bindings: [{ ...nativePrimary, ...(label === "Hold to talk" ? { action: "toggle_recording", trigger: "pressed", trigger_kind: "isolated_tap" } : {}) }, cancelBinding] }
-        : undefined,
-    );
-    render(<RecordingSettings />);
-    await waitFor(() => expect(screen.getByRole("button", { name: label === "Hold to talk" ? "Press to start / stop" : "Hold to talk" })).toHaveAttribute("aria-pressed", "true"));
-    fireEvent.click(screen.getByRole("button", { name: label }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("update_shortcut_settings", expect.anything()));
-    const save = mockInvoke.mock.calls.find(([cmd]) => cmd === "update_shortcut_settings");
-    expect(readBindings(save?.[1])).toEqual([
-      expect.objectContaining({ id: nativePrimary.id, trigger_kind: kind, action, trigger, modifier: nativePrimary.modifier }),
-      cancelBinding,
-    ]);
-    expect(mockUpdateSettings).not.toHaveBeenCalledWith({ recording_mode: label === "Hold to talk" ? "push_to_talk" : "toggle" });
+  it("uses the active binding when the preferred id is disabled", async () => {
+    bindings = [binding("onboarding-primary-hold", false), binding("custom-hold"), binding("cancel", true, "cancel_recording")];
+    await saveCombo();
+    expect(bindings.find((item) => item.id === "custom-hold")?.enabled).toBe(false);
   });
 });

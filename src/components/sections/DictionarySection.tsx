@@ -3,12 +3,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { PageHeader, Segmented, SettingsPage } from "@/components/settings/settings-ui";
+import { PageHeader, SettingsPage } from "@/components/settings/settings-ui";
+import { DictionaryTabs } from "@/components/settings/DictionaryTabs";
 import { useWritingSettings } from "@/state/writingSettings";
-import type { CustomWord, Snippet, TextReplacementRule, WritingSettings } from "@/types/writing";
+import type { CustomWord, Snippet, TextReplacementRule } from "@/types/writing";
+import { dictionaryEntryError, type DictionaryEntry, type DictionaryKind } from "@/lib/dictionary-validation";
 import { Lightbulb, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
-type DictionaryTab = "words" | "corrections" | "snippets";
+type DictionaryTab = DictionaryKind;
+type Editor = { id: number; kind: DictionaryTab; source: DictionaryEntry | null; sourceIndex: number; draft: DictionaryEntry };
+let nextEditorId = 0;
+const entryIds = new WeakMap<DictionaryEntry, number>();
+function entryId(entry: DictionaryEntry): number {
+  let id = entryIds.get(entry);
+  if (id === undefined) {
+    id = ++nextEditorId;
+    entryIds.set(entry, id);
+  }
+  return id;
+}
 const emptyCopy: Record<DictionaryTab, string> = {
   words: "No words yet — add names, brands and jargon so Voicetypr spells them right.",
   corrections: "No corrections yet — add a phrase and its exact replacement.",
@@ -27,81 +40,90 @@ export function DictionarySection() {
   const update = useWritingSettings((state) => state.update);
   const [tab, setTab] = useState<DictionaryTab>("words");
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState<number | null>(null);
-
+  const [editing, setEditing] = useState<Editor | null>(null);
   useEffect(() => { void load(); }, [load]);
+  const list = (kind: DictionaryTab): DictionaryEntry[] => kind === "words" ? settings.custom_words : kind === "corrections" ? settings.replacements : settings.snippets;
+  const sourcePresent = !editing || editing.source === null || list(editing.kind)[editing.sourceIndex] === editing.source;
+  if (!sourcePresent && editing) setEditing(null);
+  const activeEditor = sourcePresent && editing?.kind === tab ? editing : null;
   const changeTab = (next: DictionaryTab) => { setTab(next); setSearch(""); setEditing(null); };
-  const updateList = <K extends keyof WritingSettings>(key: K, items: WritingSettings[K]) => update({ [key]: items });
-  const add = (kind: DictionaryTab) => {
-    changeTab(kind);
-    if (kind === "words") {
-      setEditing(settings.custom_words.length);
-      updateList("custom_words", [...settings.custom_words, { phrase: "", spoken_form: null, language: null, enabled: true }]);
-    } else if (kind === "corrections") {
-      setEditing(settings.replacements.length);
-      updateList("replacements", [...settings.replacements, { from: "", to: "", language: null, enabled: true }]);
-    } else {
-      setEditing(settings.snippets.length);
-      updateList("snippets", [...settings.snippets, { trigger: "", body: "", language: null, enabled: true, preserve_literal: true }]);
-    }
+  const newEditor = (kind: DictionaryTab, source: DictionaryEntry | null) => {
+    const draft = source ?? (kind === "words"
+      ? { phrase: "", spoken_form: null, language: null, enabled: true }
+      : kind === "corrections"
+        ? { from: "", to: "", language: null, enabled: true }
+        : { trigger: "", body: "", language: null, enabled: true, preserve_literal: true });
+    setEditing({ id: ++nextEditorId, kind, source, sourceIndex: source ? list(kind).indexOf(source) : -1, draft: { ...draft } });
   };
-  const updateWord = (index: number, patch: Partial<CustomWord>) => updateList("custom_words", settings.custom_words.map((word, current) => current === index ? { ...word, ...patch } : word));
-  const updateCorrection = (index: number, patch: Partial<TextReplacementRule>) => updateList("replacements", settings.replacements.map((rule, current) => current === index ? { ...rule, ...patch } : rule));
-  const updateSnippet = (index: number, patch: Partial<Snippet>) => updateList("snippets", settings.snippets.map((snippet, current) => current === index ? { ...snippet, ...patch } : snippet));
-  const remove = (index: number) => {
-    if (tab === "words") updateList("custom_words", settings.custom_words.filter((_, current) => current !== index));
-    if (tab === "corrections") updateList("replacements", settings.replacements.filter((_, current) => current !== index));
-    if (tab === "snippets") updateList("snippets", settings.snippets.filter((_, current) => current !== index));
+  const patchDraft = (patch: Partial<CustomWord & TextReplacementRule & Snippet>) => {
+    setEditing((current) => current ? { ...current, draft: { ...current.draft, ...patch } } : current);
+  };
+  const add = (kind: DictionaryTab) => { changeTab(kind); newEditor(kind, null); };
+  const updateList = (kind: DictionaryTab, items: DictionaryEntry[]) => {
+    if (kind === "words") update({ custom_words: items as CustomWord[] });
+    if (kind === "corrections") update({ replacements: items as TextReplacementRule[] });
+    if (kind === "snippets") update({ snippets: items as Snippet[] });
+  };
+  const save = () => {
+    if (!activeEditor || dictionaryEntryError(tab, activeEditor.draft, settings, activeEditor.source)) return;
+    const existing = list(tab);
+    if (activeEditor.source && existing[activeEditor.sourceIndex] !== activeEditor.source) { setEditing(null); return; }
+    updateList(tab, activeEditor.source
+      ? existing.map((item) => item === activeEditor.source ? activeEditor.draft : item)
+      : [...existing, activeEditor.draft]);
     setEditing(null);
+  };
+  const remove = (item: DictionaryEntry) => {
+    updateList(tab, list(tab).filter((candidate) => candidate !== item));
+    if (editing?.source === item) setEditing(null);
   };
   const normalized = search.trim().toLocaleLowerCase();
   const visible = tab === "words"
-    ? settings.custom_words.map((word, index) => ({ index, values: [word.phrase, word.spoken_form ?? "", word.language ?? "", word.enabled ? "On" : "Off"] }))
+    ? settings.custom_words.map((item, index) => ({ item, index, values: [item.phrase, item.spoken_form ?? "", item.language ?? "", item.enabled ? "On" : "Off"] }))
     : tab === "corrections"
-      ? settings.replacements.map((rule, index) => ({ index, values: [rule.from, rule.to, rule.language ?? "", rule.enabled ? "On" : "Off"] }))
-      : settings.snippets.map((snippet, index) => ({ index, values: [snippet.trigger, snippet.body, snippet.language ?? "", snippet.enabled ? "On" : "Off"] }));
+      ? settings.replacements.map((item, index) => ({ item, index, values: [item.from, item.to, item.language ?? "", item.enabled ? "On" : "Off"] }))
+      : settings.snippets.map((item, index) => ({ item, index, values: [item.trigger, item.body, item.language ?? "", item.enabled ? "On" : "Off"] }));
   const filtered = visible.filter((row) => row.values.some((value) => value.toLocaleLowerCase().includes(normalized)));
   const label = tab === "words" ? "word" : tab === "corrections" ? "correction" : "snippet";
+  const error = activeEditor ? dictionaryEntryError(tab, activeEditor.draft, settings, activeEditor.source) : null;
 
   return <SettingsPage wide className="pt-5">
     <PageHeader title="Dictionary" description="Teach Voicetypr your names and words. Works with every engine, with or without Polish."
       action={<Button disabled={!loaded} onClick={() => add("words")}><Plus className="size-4" /> Add word</Button>} />
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="max-w-full overflow-x-auto"><Segmented label="Dictionary tabs" value={tab} onValueChange={(value) => changeTab(value as DictionaryTab)} options={[
-        { value: "words", label: `Words ${settings.custom_words.length}` },
-        { value: "corrections", label: `Corrections ${settings.replacements.length}` },
-        { value: "snippets", label: `Snippets ${settings.snippets.length}` },
-      ]} /></div>
-      <div className="relative min-w-40 flex-1 sm:max-w-64">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input aria-label={`Search ${tab}`} placeholder={`Search ${tab}`} value={search} onChange={(event) => { setSearch(event.target.value); setEditing(null); }} className="pl-9" />
+    <DictionaryTabs value={tab} onValueChange={changeTab} counts={{ words: settings.custom_words.length, corrections: settings.replacements.length, snippets: settings.snippets.length }}>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="relative min-w-40 flex-1 sm:max-w-64">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input aria-label={`Search ${tab}`} placeholder={`Search ${tab}`} value={search} onChange={(event) => { setSearch(event.target.value); setEditing(null); }} className="pl-9" />
+        </div>
+        {tab !== "words" ? <Button variant="outline" aria-label={tab === "corrections" ? "Add rule" : "Add saved text"} disabled={!loaded} onClick={() => add(tab)}><Plus className="size-4" /> Add {label}</Button> : null}
       </div>
-      {tab !== "words" ? <Button variant="outline" aria-label={tab === "corrections" ? "Add rule" : "Add saved text"} disabled={!loaded} onClick={() => add(tab)}><Plus className="size-4" /> Add {label}</Button> : null}
-    </div>
-    <section aria-label={tab === "words" ? "Dictionary" : tab === "corrections" ? "Corrections" : "Snippets"} className="overflow-hidden rounded-[14px] border border-border bg-card">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[650px] table-fixed text-left">
-          <thead className="bg-muted text-[11px] uppercase tracking-wide text-muted-foreground"><tr>
-            {columns[tab].map((column) => <th key={column} scope="col" className="px-4 py-2.5 font-medium">{column}</th>)}
-            <th scope="col" className="w-24 px-4 py-2.5 font-medium">Actions</th>
-          </tr></thead>
-          <tbody>{filtered.map(({ index, values }) => <Row key={`${tab}-${index}`} index={index} values={values}
-            editing={editing === index} onEdit={() => setEditing(editing === index ? null : index)} onDelete={() => remove(index)} />)}</tbody>
-        </table>
-      </div>
-      {filtered.length === 0 ? <div className="px-5 py-10 text-center text-sm text-muted-foreground">{normalized ? `No ${tab} match “${search}”.` : emptyCopy[tab]}</div> : null}
-      {editing !== null && (tab === "words" ? settings.custom_words[editing] : tab === "corrections" ? settings.replacements[editing] : settings.snippets[editing]) ?
-        <div className="border-t border-border bg-muted/40 p-4">
-          {tab === "words" ? <WordFields item={settings.custom_words[editing]} index={editing} onChange={updateWord} /> : null}
-          {tab === "corrections" ? <CorrectionFields item={settings.replacements[editing]} index={editing} onChange={updateCorrection} /> : null}
-          {tab === "snippets" ? <SnippetFields item={settings.snippets[editing]} index={editing} onChange={updateSnippet} /> : null}
-          <Button className="mt-3" size="sm" variant="outline" onClick={() => setEditing(null)}>Done</Button>
+      <section aria-label={tab === "words" ? "Dictionary" : tab === "corrections" ? "Corrections" : "Snippets"} className="overflow-hidden rounded-[14px] border border-border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[650px] table-fixed text-left">
+            <thead className="bg-muted text-[11px] uppercase tracking-wide text-muted-foreground"><tr>
+              {columns[tab].map((column) => <th key={column} scope="col" className="px-4 py-2.5 font-medium">{column}</th>)}
+              <th scope="col" className="w-24 px-4 py-2.5 font-medium">Actions</th>
+            </tr></thead>
+            <tbody>{filtered.map(({ item, index, values }) => <Row key={`${tab}-${entryId(item)}`} index={index} values={values}
+              editing={activeEditor?.source === item} onEdit={() => activeEditor?.source === item ? setEditing(null) : newEditor(tab, item)} onDelete={() => remove(item)} />)}</tbody>
+          </table>
+        </div>
+        {filtered.length === 0 ? <div className="px-5 py-10 text-center text-sm text-muted-foreground">{normalized ? `No ${tab} match “${search}”.` : emptyCopy[tab]}</div> : null}
+        {activeEditor ? <div key={activeEditor.id} className="border-t border-border bg-muted/40 p-4">
+          {tab === "words" ? <WordFields item={activeEditor.draft as CustomWord} index={0} onChange={(_, patch) => patchDraft(patch)} /> : null}
+          {tab === "corrections" ? <CorrectionFields item={activeEditor.draft as TextReplacementRule} index={0} onChange={(_, patch) => patchDraft(patch)} /> : null}
+          {tab === "snippets" ? <SnippetFields item={activeEditor.draft as Snippet} index={0} onChange={(_, patch) => patchDraft(patch)} /> : null}
+          {error ? <p role="alert" className="mt-2 text-xs text-muted-foreground">{error}</p> : null}
+          <div className="mt-3 flex gap-2"><Button size="sm" disabled={!!error} onClick={save}>Save</Button>
+            <Button size="sm" variant="outline" onClick={() => setEditing(null)}>Cancel</Button></div>
         </div> : null}
-    </section>
-    <div className="flex items-start gap-2 rounded-[10px] bg-sage-bg p-3.5 text-sm text-foreground">
-      <Lightbulb className="mt-0.5 size-4 shrink-0 text-sage" aria-hidden="true" />
-      {tab === "words" ? "Words correct spelling after transcription. Supported engines can also use them while recognizing speech." : tab === "corrections" ? "Corrections apply exact replacements after transcription, with or without Polish." : "Say “insert” followed by a snippet trigger to add saved text."}
-    </div>
+      </section>
+      <div className="mt-3 flex items-start gap-2 rounded-[10px] bg-sage-bg p-3.5 text-sm text-foreground">
+        <Lightbulb className="mt-0.5 size-4 shrink-0 text-sage" aria-hidden="true" />
+        {tab === "words" ? "Words correct spelling after transcription. Supported engines can also use them while recognizing speech." : tab === "corrections" ? "Corrections apply exact replacements after transcription, with or without Polish." : "Say “insert” followed by a snippet trigger to add saved text."}
+      </div>
+    </DictionaryTabs>
   </SettingsPage>;
 }
 

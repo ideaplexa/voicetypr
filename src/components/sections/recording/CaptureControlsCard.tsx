@@ -10,7 +10,6 @@ import { createLogger } from "@/lib/logger";
 import { isMacOS } from "@/lib/platform";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { formatPrimaryHotkeyLabel } from "@/lib/shortcut-display";
-import { resolvePrimaryShortcut } from "@/lib/primary-shortcut";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
@@ -58,6 +57,7 @@ export function CaptureControlsCard() {
     };
   }, []);
   const {
+    effective,
     nativeBinding,
     isEditingHotkey,
     pendingHotkey,
@@ -72,9 +72,10 @@ export function CaptureControlsCard() {
     changeRecordingMode,
   } = useRecordingHotkey();
   if (!settings) return null;
-  const label = formatPrimaryHotkeyLabel(nativeBinding, settings.hotkey);
-  const caps = settings.hotkey
-    ? shortcutKeyCaps(settings.hotkey, isMacOS ? "darwin" : "windows")
+  const hotkey = effective?.hotkey ?? (effective ? undefined : settings.hotkey);
+  const label = !effective && !settings.hotkey ? "Loading shortcut…" : formatPrimaryHotkeyLabel(nativeBinding, hotkey ?? undefined);
+  const caps = hotkey
+    ? shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows")
     : [label];
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -134,7 +135,7 @@ export function CaptureControlsCard() {
         <div className="mt-3">
           <Segmented
             label="Recording mode"
-            value={resolvePrimaryShortcut(settings, nativeBinding ? [nativeBinding] : []).mode}
+            value={effective?.mode === "hold" ? "push_to_talk" : "toggle"}
             onValueChange={(value) => {
               void changeRecordingMode(value as "toggle" | "push_to_talk");
             }}

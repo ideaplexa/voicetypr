@@ -148,9 +148,8 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
     );
 
     // One-time durable migration (Issue A): when the combo hotkey is
-    // authoritative, persist-disable the single stale bare-modifier recording
-    // primary it superseded, so the next rebuild (and the Settings UI) no
-    // longer see an enabled binding that would suppress combo synthesis.
+    // authoritative, persist-disable only the onboarding-owned stale primary.
+    // Later rebuilds leave additional recording bindings untouched.
     if let Some(id) = stale_id {
         let mut repaired = settings;
         if let Some(binding) = repaired.bindings.iter_mut().find(|b| b.id == id) {
@@ -179,7 +178,7 @@ fn escape_cancel_eligible(state: RecordingState) -> bool {
 /// Pure decision core for [`rebuild_engine_bindings`]. Given the persisted
 /// bindings and runtime state, returns:
 ///   * the final engine binding list to install, and
-///   * the id of a SINGLE stale bare-modifier recording primary to
+///   * the id of the onboarding-owned stale bare-modifier primary to
 ///     persist-disable as a one-time migration, or `None`.
 ///
 /// When the combo `hotkey` is non-empty it is authoritative: the combo
@@ -238,8 +237,8 @@ fn plan_engine_bindings(
     // Issue A: a non-empty combo hotkey makes the combo `primary` authoritative.
     // A stale enabled bare-modifier recording binding left by an older migration
     // would otherwise suppress combo synthesis below; repair it by removing the
-    // SINGLE active-primary candidate from this rebuild and flagging it for a
-    // durable disable. Additional bare-modifier shortcuts are preserved.
+    // onboarding-owned primary from this rebuild and flagging it for a durable
+    // disable. Additional bare-modifier shortcuts are preserved.
     let stale_id = stale_primary_candidate(&bindings, hotkey);
     if let Some(id) = &stale_id {
         bindings.retain(|b| b.id != *id);
@@ -330,16 +329,9 @@ fn plan_engine_bindings(
     (bindings, stale_id)
 }
 
-/// Identify the single stale bare-modifier recording primary to disable so a
-/// non-empty combo `hotkey` can own recording. Returns its id, or `None` when
-/// the combo is not authoritative (empty hotkey) or no enabled recording
-/// bare-modifier binding exists.
-///
-/// Precedence mirrors the frontend's primary selection (GeneralSettings.tsx /
-/// shortcut-display.ts): prefer the binding whose id is `onboarding-primary-hold`,
-/// else the FIRST enabled recording bare-modifier binding. Only this single
-/// candidate is ever returned; any additional bare-modifier recording bindings
-/// the user added as separate shortcuts are preserved. Pure (no app state).
+/// Identify only the onboarding-owned stale primary. Once it is disabled,
+/// subsequent rebuilds return `None` even if additional recording bindings
+/// remain enabled. Pure (no app state).
 fn stale_primary_candidate(bindings: &[ShortcutBinding], hotkey: &str) -> Option<String> {
     if hotkey.trim().is_empty() {
         return None;
@@ -355,10 +347,11 @@ fn stale_primary_candidate(bindings: &[ShortcutBinding], hotkey: &str) -> Option
                 TriggerKind::ModifierHold | TriggerKind::IsolatedTap
             )
     };
+    // Only the onboarding-owned primary is migrated. Once disabled, later
+    // rebuilds must never consume an additional user recording shortcut.
     bindings
         .iter()
         .find(|b| b.id == "onboarding-primary-hold" && is_primary_candidate(b))
-        .or_else(|| bindings.iter().find(|b| is_primary_candidate(b)))
         .map(|b| b.id.clone())
 }
 
@@ -663,13 +656,29 @@ mod tests {
             .iter()
             .any(|b| b.id == "primary" && b.trigger_kind == TriggerKind::Combo));
         assert!(!bindings.iter().any(|b| b.id == "onboarding-primary-hold"));
+        let mut persisted = vec![
+            modifier_hold_binding("onboarding-primary-hold"),
+            modifier_hold_binding("my-extra-mod"),
+        ];
+        persisted[0].enabled = false;
+        let (_, repeated_stale_id) = plan_engine_bindings(
+            &persisted,
+            "CommandOrControl+Space",
+            RecordingMode::Toggle,
+            false,
+            None,
+            false,
+        );
+        assert_eq!(
+            repeated_stale_id, None,
+            "later rebuilds must preserve the additional binding"
+        );
     }
 
-    /// Precedence: without an `onboarding-primary-hold` id, the FIRST enabled
-    /// recording bare-modifier binding is the primary candidate; a second one is
-    /// an additional shortcut and is preserved.
+    /// Without the onboarding-owned id, no candidate is migrated. A rebuild
+    /// must not consume arbitrary additional recording bindings.
     #[test]
-    fn stale_primary_falls_back_to_first_bare_modifier_binding() {
+    fn repeated_rebuild_does_not_disable_additional_bindings() {
         let first = modifier_hold_binding("legacy-hold");
         let mut second = modifier_hold_binding("legacy-hold-2");
         second.modifier = Some(ModifierSpec {
@@ -685,8 +694,8 @@ mod tests {
             false,
         );
 
-        assert_eq!(stale_id.as_deref(), Some("legacy-hold"));
-        assert!(!bindings.iter().any(|b| b.id == "legacy-hold"));
+        assert_eq!(stale_id, None);
+        assert!(bindings.iter().any(|b| b.id == "legacy-hold" && b.enabled));
         assert!(bindings
             .iter()
             .any(|b| b.id == "legacy-hold-2" && b.enabled));

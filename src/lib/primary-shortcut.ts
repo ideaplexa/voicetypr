@@ -1,4 +1,5 @@
 import type { ShortcutBinding } from "@/types/shortcuts";
+import { invoke } from "@tauri-apps/api/core";
 
 export type PrimaryMode = "toggle" | "push_to_talk";
 
@@ -6,6 +7,17 @@ export interface PrimaryShortcut {
   binding: ShortcutBinding | null;
   hotkey: string | undefined;
   mode: PrimaryMode;
+}
+
+export interface EffectivePrimaryShortcut {
+  binding: ShortcutBinding | null;
+  hotkey: string | null;
+  mode: "hold" | "toggle";
+}
+
+/** Read the engine's resolved primary, including its synthesized fallback. */
+export function loadEffectivePrimaryShortcut(): Promise<EffectivePrimaryShortcut> {
+  return invoke<EffectivePrimaryShortcut>("get_effective_primary_shortcut");
 }
 
 /** Resolve the recording trigger and behavior that the user actually has active. */

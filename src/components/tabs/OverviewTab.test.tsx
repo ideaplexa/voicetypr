@@ -22,7 +22,7 @@ vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () 
 vi.mock("@/contexts/ModelManagementContext", () => ({ useModelManagementContext: () => ({ downloadProgress: mock.downloadProgress }) }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: true } : command === "get_shortcut_settings" ? { bindings: mock.shortcutBindings } : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => { mock.listeners[name] = handler; return () => { delete mock.listeners[name]; }; }) }));
 vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: () => null }));
 
@@ -77,6 +77,18 @@ describe("Home", () => {
     expect(screen.queryByText("Left ⌘")).not.toBeInTheDocument();
     expect(screen.queryByText("your recording shortcut")).not.toBeInTheDocument();
   });
+
+  it.each([{ bindings: [] }, { bindings: [{ id: "onboarding-primary-hold", action: "hold_to_record", shortcut: "", trigger: "hold", enabled: false, allow_risky_combo: false, trigger_kind: "modifier_hold", modifier: { modifier: "alt", side: "right" } }] }])(
+    "shows the backend fallback for empty or disabled-only native bindings",
+    async ({ bindings }) => {
+      mock.settings = { ...mock.settings, hotkey: "", recording_mode: "toggle" };
+      mock.shortcutBindings = bindings;
+      render(<OverviewTab />);
+      expect(await screen.findByText("⌘")).toBeInTheDocument();
+      expect(screen.getByText("⇧")).toBeInTheDocument();
+      expect(screen.getByText("Space")).toBeInTheDocument();
+    },
+  );
 
   it.each([
     ["license", { licenseValid: false, licenseStatus: "expired", canRecord: false }, "License needs attention", "license", undefined],

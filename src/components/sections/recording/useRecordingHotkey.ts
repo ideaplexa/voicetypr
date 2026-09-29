@@ -1,198 +1,106 @@
 import type { BareModifierSpec } from "@/components/HotkeyInput";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
-import { findActivePrimaryBinding, resolvePrimaryShortcut } from "@/lib/primary-shortcut";
-import type {
-  ModifierKind,
-  ModifierSide,
-  ShortcutBinding,
-  ShortcutSettings,
-} from "@/types/shortcuts";
+import { loadEffectivePrimaryShortcut, type EffectivePrimaryShortcut } from "@/lib/primary-shortcut";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 const log = createLogger("recording-settings");
 
 export function useRecordingHotkey() {
-  const { settings, updateSettings } = useSettings();
-  const [nativeBinding, setNativeBinding] = useState<ShortcutBinding | null>(null);
+  const { settings, refreshSettings } = useSettings();
+  const [effective, setEffective] = useState<EffectivePrimaryShortcut | null>(null);
   const [isEditingHotkey, setIsEditingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState("");
   const [pendingBareModifier, setPendingBareModifier] = useState<BareModifierSpec | null>(null);
   const [holdToTalk, setHoldToTalk] = useState(false);
+  const [modeEdited, setModeEdited] = useState(false);
 
-  // Clear the native binding whenever a custom hotkey appears — adjusted
-  // during render (no sync setState in an effect).
-  const [lastHotkey, setLastHotkey] = useState(settings?.hotkey);
-  if (lastHotkey !== settings?.hotkey) {
-    setLastHotkey(settings?.hotkey);
-    if (settings?.hotkey) {
-      setNativeBinding(null);
-    }
-  }
-
+  const refreshPrimary = useCallback(async () => {
+    const result = await loadEffectivePrimaryShortcut();
+    setEffective(result);
+    return result;
+  }, []);
   useEffect(() => {
-    const hotkey = settings?.hotkey;
-    if (hotkey) {
-      return;
-    }
     let cancelled = false;
-    invoke<ShortcutSettings>("get_shortcut_settings")
-      .then((result) => {
-        if (cancelled) return;
-        setNativeBinding(resolvePrimaryShortcut(settings, result.bindings).binding);
-      })
-      .catch(() => {
-        if (!cancelled) setNativeBinding(null);
-      });
-    return () => {
-      cancelled = true;
+    let unlisten: (() => void) | undefined;
+    const refresh = () => {
+      void loadEffectivePrimaryShortcut()
+        .then((result) => { if (!cancelled) setEffective(result); })
+        .catch(() => undefined);
     };
+    refresh();
+    void listen("shortcut-settings-changed", refresh).then((dispose) => {
+      if (cancelled) dispose(); else unlisten = dispose;
+    }).catch(() => undefined);
+    return () => { cancelled = true; unlisten?.(); };
   }, [settings?.hotkey]);
 
   const startEditing = () => {
     if (!settings) return;
-    setPendingHotkey(settings.hotkey || "");
+    if (!effective) void refreshPrimary().then((current) => setHoldToTalk(current.mode === "hold")).catch(() => undefined);
+    setPendingHotkey(effective?.binding ? "" : settings.hotkey || "");
     setPendingBareModifier(null);
-    setHoldToTalk(resolvePrimaryShortcut(settings, nativeBinding ? [nativeBinding] : []).mode === "push_to_talk");
+    setHoldToTalk(effective?.mode === "hold");
+    setModeEdited(false);
     setIsEditingHotkey(true);
   };
-
   const handleCancelHotkey = () => {
     setIsEditingHotkey(false);
     setPendingHotkey("");
     setPendingBareModifier(null);
   };
-
+  const setPrimary = async (kind: "combo" | "bare_modifier", value: string, mode: "hold" | "toggle") => {
+    const result = await invoke<EffectivePrimaryShortcut>("set_primary_recording_shortcut", {
+      request: { kind, value, mode },
+    });
+    setEffective(result);
+    await refreshSettings();
+  };
   const changeRecordingMode = async (mode: "toggle" | "push_to_talk") => {
     if (!settings) return;
-    if (settings.hotkey) {
-      await updateSettings({ recording_mode: mode });
-      return;
-    }
     try {
-      const current = await invoke<ShortcutSettings>("get_shortcut_settings");
-      const active = resolvePrimaryShortcut(settings, current.bindings).binding;
-      if (!active) {
-        await updateSettings({ recording_mode: mode });
-        return;
+      const current = effective ?? await refreshPrimary();
+      const modifier = current.binding?.modifier;
+      if (modifier) {
+        await setPrimary("bare_modifier", `${modifier.modifier}:${modifier.side}`, mode === "push_to_talk" ? "hold" : "toggle");
+      } else if (current.hotkey) {
+        await setPrimary("combo", current.hotkey, mode === "push_to_talk" ? "hold" : "toggle");
       }
-      const updated: ShortcutBinding = {
-        ...active,
-        action: mode === "push_to_talk" ? "hold_to_record" : "toggle_recording",
-        trigger_kind: mode === "push_to_talk" ? "modifier_hold" : "isolated_tap",
-        trigger: mode === "push_to_talk" ? "hold" : "pressed",
-      };
-      await invoke("update_shortcut_settings", {
-        settings: { bindings: current.bindings.map((binding) => binding.id === active.id ? updated : binding) },
-      });
-      setNativeBinding(updated);
     } catch (error) {
       log.error("Failed to update recording mode:", error);
       toast.error("Failed to update recording mode.");
     }
   };
-
   const handleSaveHotkey = async () => {
-    if (!settings) return;
-    if (pendingBareModifier) {
-      try {
-        const existing = await invoke<ShortcutSettings>("get_shortcut_settings");
-        const existingPrimary = resolvePrimaryShortcut(settings, existing.bindings).binding;
-        const stableId = existingPrimary?.id ?? "onboarding-primary-hold";
-        const newBinding: ShortcutBinding = holdToTalk
-          ? {
-              id: stableId,
-              action: "hold_to_record",
-              shortcut: "",
-              trigger: "hold",
-              enabled: true,
-              allow_risky_combo: false,
-              trigger_kind: "modifier_hold",
-              modifier: {
-                modifier: pendingBareModifier.modifier as ModifierKind,
-                side: pendingBareModifier.side as ModifierSide,
-              },
-            }
-          : {
-              id: stableId,
-              action: "toggle_recording",
-              shortcut: "",
-              trigger: "pressed",
-              enabled: true,
-              allow_risky_combo: false,
-              trigger_kind: "isolated_tap",
-              modifier: {
-                modifier: pendingBareModifier.modifier as ModifierKind,
-                side: pendingBareModifier.side as ModifierSide,
-              },
-            };
-        const updatedBindings = existingPrimary
-          ? existing.bindings.map((b) => (b.id === stableId ? newBinding : b))
-          : [...existing.bindings, newBinding];
-        // Clear the combo hotkey BEFORE saving the bare-modifier binding:
-        // update_shortcut_settings rebuilds the engine from settings.hotkey, and
-        // if the combo is still set the migration treats it as authoritative and
-        // disables the bare-modifier primary we just created (onboarding clears
-        // first for this exact reason).
-        if (settings.hotkey) {
-          await updateSettings({ hotkey: "" });
-        }
-        await invoke("update_shortcut_settings", {
-          settings: { bindings: updatedBindings },
-        });
-        setNativeBinding(newBinding);
-        setIsEditingHotkey(false);
-        setPendingHotkey("");
-        setPendingBareModifier(null);
-        toast.success("Hotkey updated successfully!");
-      } catch (err) {
-        log.error("Failed to save bare modifier hotkey:", err);
-        toast.error("Failed to save hotkey. Please try again.");
+    if (!settings || (!pendingHotkey && !pendingBareModifier)) return;
+    try {
+      if (pendingBareModifier) {
+        const current = effective ?? await refreshPrimary();
+        await setPrimary("bare_modifier", `${pendingBareModifier.modifier}:${pendingBareModifier.side}`, modeEdited ? (holdToTalk ? "hold" : "toggle") : current.mode);
+      } else {
+        // The backend captures the real primary and its mode before any write.
+        const current = effective ?? await refreshPrimary();
+        await setPrimary("combo", pendingHotkey, current.mode);
       }
-    } else if (pendingHotkey) {
-      try {
-        await invoke("set_global_shortcut", { shortcut: pendingHotkey });
-        // Replacing a bare-modifier primary with a combo: disable the existing
-        // native primary binding so only the combo fires. Otherwise both the
-        // native trigger and the new combo global shortcut stay active at once.
-        const existing = await invoke<ShortcutSettings>("get_shortcut_settings");
-        const primary = findActivePrimaryBinding(existing.bindings);
-        const mode = resolvePrimaryShortcut({ ...settings, hotkey: "" }, existing.bindings).mode;
-        if (primary) {
-          const updatedBindings = existing.bindings.map((b) =>
-            b.id === primary.id ? { ...b, enabled: false } : b,
-          );
-          await invoke("update_shortcut_settings", {
-            settings: { bindings: updatedBindings },
-          });
-        }
-        await updateSettings({ hotkey: pendingHotkey, recording_mode: mode });
-        setNativeBinding(null);
-        setIsEditingHotkey(false);
-        setPendingHotkey("");
-        toast.success("Hotkey updated successfully!");
-      } catch (err) {
-        log.error("Failed to update hotkey:", err);
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        toast.error(errorMessage || "Failed to update hotkey. Please try a different combination.");
-      }
+      setIsEditingHotkey(false);
+      setPendingHotkey("");
+      setPendingBareModifier(null);
+      toast.success("Hotkey updated successfully!");
+    } catch (error) {
+      log.error("Failed to update hotkey:", error);
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   };
 
   return {
-    nativeBinding,
-    isEditingHotkey,
-    pendingHotkey,
-    setPendingHotkey,
-    pendingBareModifier,
-    setPendingBareModifier,
-    holdToTalk,
-    setHoldToTalk,
-    startEditing,
-    handleCancelHotkey,
-    handleSaveHotkey,
-    changeRecordingMode,
+    effective,
+    nativeBinding: effective?.binding ?? null,
+    isEditingHotkey, pendingHotkey, setPendingHotkey,
+    pendingBareModifier, setPendingBareModifier,
+    holdToTalk, setHoldToTalk: (value: boolean) => { setHoldToTalk(value); setModeEdited(true); }, startEditing,
+    handleCancelHotkey, handleSaveHotkey, changeRecordingMode,
   };
 }
