@@ -46,7 +46,7 @@ const macScreens = [
   ["Help & feedback", "help"],
 ];
 const panes = [
-  ["Shortcuts", "settings-shortcuts"], ["Network sharing", "settings-network"],
+  ["Shortcuts", "settings-shortcuts"], ["Privacy", "settings-privacy"], ["Storage", "settings-storage"], ["Network sharing", "settings-network"],
   ["CLI & API", "settings-agent"], ["Troubleshooting", "settings-advanced"],
 ];
 const shouldCapture = (platform, theme, name) => !only || `${platform}-${theme}-${name}.png`.includes(only);
@@ -62,7 +62,7 @@ try {
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
       const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "recording", "settings-general"].includes(id));
-      const selectedPanes = platform === "macos" ? panes : panes.slice(0, 1);
+      const selectedPanes = panes;
       const hasShot = screens.some(([, id]) => shouldCapture(platform, theme, id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCapture(platform, theme, shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCapture(platform, theme, paneId)))) || (platform === "macos" && shouldCapture(platform, theme, "license"));
       if (!hasShot) continue;
       const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });

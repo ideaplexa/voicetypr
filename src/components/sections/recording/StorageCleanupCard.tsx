@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { SettingRow } from "@/components/settings/settings-ui";
+import { SettingRow, SettingsPaneRow } from "@/components/settings/settings-ui";
 import {
   Select,
   SelectContent,
@@ -22,7 +22,8 @@ const periods = [
   { value: "90", label: "90 days" },
 ];
 
-export function StorageCleanupCard() {
+export function StorageCleanupCard({ pane = false }: { pane?: boolean } = {}) {
+  const Row = pane ? SettingsPaneRow : SettingRow;
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
   const audioValue = !settings.save_recordings
@@ -32,9 +33,14 @@ export function StorageCleanupCard() {
       : String(settings.recording_retention_days ?? 30);
   return (
     <>
-      <SettingRow
-        title="Transcript history cleanup"
-        description="Automatically remove old transcript history after a set number of days."
+      <Row
+        className={pane ? "min-h-[76px]" : undefined}
+        title={pane ? "Keep history" : "Transcript history cleanup"}
+        description={
+          pane
+            ? "Automatically remove old transcripts after a set number of days."
+            : "Automatically remove old transcript history after a set number of days."
+        }
         control={
           <Select
             items={periods}
@@ -63,9 +69,14 @@ export function StorageCleanupCard() {
           </Select>
         }
       />
-      <SettingRow
-        title="Save recording audio"
-        description="Keeps the original audio for re-transcription and retrying a failed transcription from History, then deletes it after your chosen period. With this off, failed recordings can't be retried."
+      <Row
+        className={pane ? "min-h-[60px]" : undefined}
+        title={pane ? "Keep audio recordings" : "Save recording audio"}
+        description={
+          pane
+            ? "Save the audio of each dictation so you can re-transcribe it."
+            : "Keeps the original audio for re-transcription and retrying a failed transcription from History, then deletes it after your chosen period. With this off, failed recordings can't be retried."
+        }
         control={
           <div className="flex flex-wrap items-center gap-2">
             <Select
@@ -96,7 +107,7 @@ export function StorageCleanupCard() {
                 ))}
               </SelectContent>
             </Select>
-            {settings.save_recordings ? (
+            {settings.save_recordings && !pane ? (
               <Button
                 type="button"
                 variant="outline"

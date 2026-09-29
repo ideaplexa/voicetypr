@@ -64,6 +64,7 @@ export function TabContainer({
       content = (
         <SettingsTab
           pane={destination.pane ?? settingsPane ?? localSettingsPane}
+          onNavigate={onNavigate}
           onPaneChange={(pane) => {
             setLocalSettingsPane(pane);
             onSettingsPaneChange?.(pane);

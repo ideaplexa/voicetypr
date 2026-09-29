@@ -6,6 +6,7 @@ import type { AISettings, EnhancementOptions } from "@/types/ai";
 import type { AccelerationStatus } from "@/types/acceleration";
 import type { DistributionInfo } from "@/types/distribution";
 import type { SharingStatus, FirewallStatus } from "@/components/sections/network-sharing/types";
+import type { EffectivePrimaryShortcut } from "@/lib/primary-shortcut";
 
 export type PreviewOptions = {
   theme: "light" | "dark";
@@ -274,6 +275,11 @@ export function createFixtures(options: PreviewOptions) {
       },
     ],
   };
+  const effectivePrimaryShortcut: EffectivePrimaryShortcut = {
+    hotkey,
+    binding: null,
+    mode: "hold",
+  };
   const providers: AiProvider[] = [
     { id: "openai", name: "OpenAI", status: "production", requires_api_key: true },
     { id: "anthropic", name: "Anthropic", status: "production", requires_api_key: true },
@@ -306,13 +312,13 @@ export function createFixtures(options: PreviewOptions) {
     package_family_name: null,
   };
   const sharing: SharingStatus = {
-    enabled: false,
+    enabled: true,
     port: 4894,
     model_name: "Parakeet v3",
     server_name: "Demo Mac",
-    active_connections: 0,
-    password_configured: false,
-    binding_results: [],
+    active_connections: 1,
+    password_configured: true,
+    binding_results: [{ ip: "192.168.1.20", success: true, error: null, interface_name: "Wi-Fi" }],
     allow_model_control: false,
   };
   const firewall: FirewallStatus = {
@@ -345,6 +351,7 @@ export function createFixtures(options: PreviewOptions) {
     get_writing_settings: writing,
     update_writing_settings: null,
     get_shortcut_settings: shortcuts,
+    get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
     get_ai_settings: aiSettings,
     get_ai_settings_for_provider: aiSettings,

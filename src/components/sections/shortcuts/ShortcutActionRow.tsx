@@ -6,6 +6,7 @@ import { ShortcutBindingRow } from "./ShortcutBindingRow";
 import type { EditingCapture } from "./shortcutUtils";
 
 type ShortcutActionRowProps = {
+  pane?: boolean;
   action: ShortcutActionDefinition;
   bindings: ShortcutBinding[];
   editingCapture: EditingCapture | null;
@@ -21,6 +22,7 @@ type ShortcutActionRowProps = {
 };
 
 export function ShortcutActionRow({
+  pane = false,
   action,
   bindings,
   editingCapture,
@@ -37,10 +39,18 @@ export function ShortcutActionRow({
   const isCancelRecording = action.action === "cancel_recording";
 
   return (
-    <div role="group" aria-label={action.label} className="py-3 first:pt-1 last:pb-0">
+    <div
+      role="group"
+      aria-label={action.label}
+      className={
+        pane
+          ? "flex min-h-[62px] items-center justify-between gap-5 py-[13px]"
+          : "py-3 first:pt-1 last:pb-0"
+      }
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="min-w-0">
-          <h3 className="text-[13.5px] font-medium text-foreground">{action.label}</h3>
+          <h3 className="text-sm font-medium text-foreground">{action.label}</h3>
           <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
             {isCancelRecording
               ? "Press Escape twice while recording to cancel the current take."
@@ -63,10 +73,11 @@ export function ShortcutActionRow({
       </div>
 
       {bindings.length > 0 && (
-        <div className="mt-2 flex flex-col gap-2">
+        <div className={pane ? "flex shrink-0 flex-col gap-1" : "mt-2 flex flex-col gap-2"}>
           {bindings.map((binding) => (
             <ShortcutBindingRow
               key={binding.id}
+              pane={pane}
               binding={binding}
               action={action}
               editingCapture={editingCapture}

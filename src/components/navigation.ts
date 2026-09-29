@@ -34,7 +34,7 @@ export type LegacyScreenId =
   | "advanced"
   | "report-problem";
 export type ScreenId = MainScreenId | LegacyScreenId;
-export type SettingsPane = "general" | "shortcuts" | "network" | "agent" | "advanced";
+export type SettingsPane = "general" | "shortcuts" | "privacy" | "storage" | "network" | "agent" | "advanced";
 
 export interface ScreenDefinition {
   id: MainScreenId;

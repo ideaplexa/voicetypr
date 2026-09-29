@@ -16,11 +16,11 @@ vi.mock("@/components/sections/ShortcutsSection", () => ({
 vi.mock("@/components/sections/AdvancedSection", () => ({
   AdvancedSection: () => <p>Quick fixes and reset</p>,
 }));
-vi.mock("@/components/tabs/NetworkSharingTab", () => ({
-  NetworkSharingTab: () => <p>Network sharing controls</p>,
+vi.mock("@/components/sections/NetworkSharingCard", () => ({
+  NetworkSharingCard: () => <p>Network sharing controls</p>,
 }));
-vi.mock("@/components/tabs/AgentCliTab", () => ({
-  AgentCliTab: () => <p>CLI and API controls</p>,
+vi.mock("@/components/sections/AgentCliSection", () => ({
+  AgentCliSection: () => <p>CLI and API controls</p>,
 }));
 
 it("opens General by default and checks for updates from About", async () => {

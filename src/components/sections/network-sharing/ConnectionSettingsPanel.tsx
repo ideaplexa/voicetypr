@@ -2,8 +2,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Check, Eye, EyeOff } from "lucide-react";
+import { SettingsPaneRow } from "@/components/settings/settings-ui";
+import { Button } from "@/components/ui/button";
+import { useState } from "react";
 
 interface ConnectionSettingsPanelProps {
+  pane?: boolean;
   enabled: boolean;
   port: string;
   savedPort: string;
@@ -24,6 +28,7 @@ interface ConnectionSettingsPanelProps {
 }
 
 export function ConnectionSettingsPanel({
+  pane = false,
   enabled,
   port,
   savedPort,
@@ -42,6 +47,114 @@ export function ConnectionSettingsPanel({
   onSavePassword,
   onToggleModelControl,
 }: ConnectionSettingsPanelProps) {
+  const [editingPassword, setEditingPassword] = useState(false);
+  if (pane)
+    return (
+      <>
+        <SettingsPaneRow
+          title="Password"
+          description="Required to connect."
+          control={
+            editingPassword ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  id="sharing-password"
+                  aria-label="Password (Optional)"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => onPasswordChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && password !== savedPassword) onSavePassword();
+                  }}
+                  placeholder={passwordConfigured ? "Password saved" : "No password"}
+                  className="h-9 w-32"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onSavePassword();
+                    setEditingPassword(false);
+                  }}
+                  disabled={savingPassword || password === savedPassword}
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={onTogglePasswordVisibility}
+                >
+                  {showPassword ? <EyeOff /> : <Eye />}
+                </Button>
+                {passwordConfigured && !password ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title="Remove saved password"
+                    onClick={() => {
+                      onSavePassword();
+                      setEditingPassword(false);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                ) : null}
+                <Button variant="ghost" size="sm" onClick={() => setEditingPassword(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setEditingPassword(true)}>
+                Change
+              </Button>
+            )
+          }
+        />
+        <SettingsPaneRow
+          title="Port"
+          description="Network port for this computer."
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                id="sharing-port"
+                aria-label="Port"
+                type="number"
+                value={port}
+                onChange={(event) => onPortChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && port !== savedPort) onSavePort();
+                }}
+                className="h-9 w-24 font-mono"
+              />
+              {enabled && port !== savedPort ? (
+                <Button variant="outline" size="sm" onClick={onSavePort} disabled={savingPort}>
+                  Apply
+                </Button>
+              ) : null}
+            </div>
+          }
+        />
+        <SettingsPaneRow
+          title="Allow model changes"
+          description="Trusted devices may switch the model on this computer."
+          control={
+            <Switch
+              id="allow-model-control"
+              checked={allowModelControl}
+              onCheckedChange={onToggleModelControl}
+              disabled={savingModelControl || !passwordConfigured}
+            />
+          }
+        />
+        {!passwordConfigured ? (
+          <p className="pb-3 text-xs text-muted-foreground">
+            Set a password to allow trusted devices to change models.
+          </p>
+        ) : null}
+      </>
+    );
   return (
     <div className="rounded-lg border border-border/50 bg-background/50 p-3 space-y-3">
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">

@@ -8,6 +8,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { formatBindingDisplay, singleKeyValidation, type EditingCapture } from "./shortcutUtils";
 
 type ShortcutBindingRowProps = {
+  pane?: boolean;
   binding: ShortcutBinding;
   action: ShortcutActionDefinition;
   editingCapture: EditingCapture | null;
@@ -23,6 +24,7 @@ type ShortcutBindingRowProps = {
 };
 
 export function ShortcutBindingRow({
+  pane = false,
   binding,
   action,
   editingCapture,
@@ -112,9 +114,20 @@ export function ShortcutBindingRow({
   return (
     <div
       key={binding.id}
-      className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-2"
+      className={
+        pane
+          ? "flex items-center justify-end gap-1"
+          : "flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-2"
+      }
     >
-      <span aria-label={`${action.label} shortcut`} className="font-mono text-sm">
+      <span
+        aria-label={`${action.label} shortcut`}
+        className={
+          pane
+            ? "rounded-md border border-border bg-card px-[7px] py-[3px] font-mono text-xs text-muted-foreground"
+            : "font-mono text-sm"
+        }
+      >
         {formatBindingDisplay(binding)}
       </span>
       <div className="flex items-center gap-1">

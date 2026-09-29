@@ -4,7 +4,6 @@ import { AudioFeedbackCard, AudioFeedbackDetailRows } from "./recording/AudioFee
 import { CaptureControlsCard } from "./recording/CaptureControlsCard";
 import { RecordingGuideDialog } from "./recording/RecordingGuideDialog";
 import { RecordingIndicatorCard } from "./recording/RecordingIndicatorCard";
-import { StorageCleanupCard } from "./recording/StorageCleanupCard";
 import { TranscriptHandlingCard, PauseMediaRow } from "./recording/TranscriptHandlingCard";
 
 export function RecordingSettings() {
@@ -26,7 +25,6 @@ export function RecordingSettings() {
       <SettingsCard title="More">
         <PauseMediaRow />
         <AudioFeedbackDetailRows />
-        <StorageCleanupCard />
       </SettingsCard>
     </SettingsPage>
   );

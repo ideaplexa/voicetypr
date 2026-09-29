@@ -69,6 +69,62 @@ export function SettingsHeader({
   return <PageHeader {...props} action={actions} />;
 }
 
+/** Compact card and row geometry used by the Settings inner panes. */
+export function SettingsPaneHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <header className="space-y-[3px]">
+      <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
+      <p className="text-[12.5px] text-muted-foreground">{description}</p>
+    </header>
+  );
+}
+
+export function SettingsPaneCard({
+  title,
+  children,
+  className,
+}: {
+  title?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn("rounded-[14px] border border-border bg-card px-5 py-1", className)}>
+      {title ? (
+        <h3 className="pt-[14px] pb-1 text-sm font-semibold text-foreground">{title}</h3>
+      ) : null}
+      <div>{children}</div>
+    </section>
+  );
+}
+
+export function SettingsPaneRow({
+  title,
+  description,
+  control,
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  control?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-h-[60px] items-center gap-5 border-t border-border py-3 first:border-t-0",
+        className,
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
+      </div>
+      {control ? <div className="shrink-0">{control}</div> : null}
+    </div>
+  );
+}
+
 export function InfoButton({
   label,
   ...props
@@ -88,6 +144,7 @@ export function InfoButton({
 }
 
 export function SettingsCard({
+  compact = false,
   icon: Icon,
   title,
   description,
@@ -95,6 +152,7 @@ export function SettingsCard({
   children,
   className,
 }: {
+  compact?: boolean;
   icon?: ComponentType<IconProps>;
   title: ReactNode;
   description?: ReactNode;
@@ -103,12 +161,25 @@ export function SettingsCard({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-[14px] border border-border bg-card p-5", className)}>
+    <section
+      className={cn(
+        "rounded-[14px] border border-border bg-card",
+        compact ? "px-5 py-1" : "p-5",
+        className,
+      )}
+    >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             {Icon ? <Icon className="h-4 w-4 shrink-0 text-sage" /> : null}
-            <h2 className="text-base font-semibold text-foreground">{title}</h2>
+            <h2
+              className={cn(
+                "font-semibold text-foreground",
+                compact ? "pt-[14px] pb-1 text-sm" : "text-base",
+              )}
+            >
+              {title}
+            </h2>
           </div>
           {description ? (
             <p
@@ -123,7 +194,7 @@ export function SettingsCard({
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      {children ? <div className="mt-1">{children}</div> : null}
+      {children ? <div className={compact ? "" : "mt-1"}>{children}</div> : null}
     </section>
   );
 }
@@ -152,11 +223,11 @@ export function SettingRow({
     >
       <div className="min-w-0 max-w-[440px]">
         {htmlFor ? (
-          <label htmlFor={htmlFor} className="block text-[13.5px] font-medium text-foreground">
+          <label htmlFor={htmlFor} className="block text-sm font-medium text-foreground">
             {title}
           </label>
         ) : (
-          <p className="text-[13.5px] font-medium text-foreground">{title}</p>
+          <p className="text-sm font-medium text-foreground">{title}</p>
         )}
         {description ? (
           <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>

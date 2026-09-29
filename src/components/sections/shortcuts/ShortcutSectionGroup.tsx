@@ -4,6 +4,7 @@ import { ShortcutActionRow } from "./ShortcutActionRow";
 import type { EditingCapture } from "./shortcutUtils";
 
 type ShortcutSectionGroupProps = {
+  pane?: boolean;
   section: string;
   sectionActions: ShortcutActionDefinition[];
   bindingsByAction: Map<ShortcutAction, ShortcutBinding[]>;
@@ -20,6 +21,7 @@ type ShortcutSectionGroupProps = {
 };
 
 export function ShortcutSectionGroup({
+  pane = false,
   section,
   sectionActions,
   bindingsByAction,
@@ -40,20 +42,23 @@ export function ShortcutSectionGroup({
   );
 
   return (
-    <section className="p-4">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-sm font-semibold text-foreground">{section}</h2>
-        {sectionBindingCount > 0 && (
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {sectionBindingCount} {sectionBindingCount === 1 ? "shortcut" : "shortcuts"}
-          </span>
-        )}
-      </div>
+    <section className={pane ? "px-5" : "p-4"}>
+      {!pane ? (
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-sm font-semibold text-foreground">{section}</h2>
+          {sectionBindingCount > 0 && (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {sectionBindingCount} {sectionBindingCount === 1 ? "shortcut" : "shortcuts"}
+            </span>
+          )}
+        </div>
+      ) : null}
 
-      <div className="mt-2 divide-y divide-border/60">
+      <div className={pane ? "divide-y divide-border" : "mt-2 divide-y divide-border/60"}>
         {sectionActions.map((action) => (
           <ShortcutActionRow
             key={action.action}
+            pane={pane}
             action={action}
             bindings={bindingsByAction.get(action.action) ?? []}
             editingCapture={editingCapture}

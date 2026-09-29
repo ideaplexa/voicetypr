@@ -8,10 +8,11 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
 
 const log = createLogger("reset-settings");
 
-export function ResetSection() {
+export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
   const { updateSettings } = useSettings();
   const [isResetting, setIsResetting] = useState(false);
 
@@ -51,6 +52,35 @@ export function ResetSection() {
       setIsResetting(false);
     }
   };
+
+  if (pane)
+    return (
+      <SettingsPaneCard title="Reset">
+        <SettingsPaneRow
+          title="Reset onboarding"
+          description="Re-run the initial setup wizard."
+          control={
+            <Button variant="outline" size="sm" onClick={handleResetOnboarding}>
+              Reset
+            </Button>
+          }
+        />
+        <SettingsPaneRow
+          title="Reset app"
+          description="Clears settings and history. Keeps your license and API keys."
+          control={
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={isResetting}
+              onClick={handleResetAppData}
+            >
+              {isResetting ? "Resetting…" : "Reset…"}
+            </Button>
+          }
+        />
+      </SettingsPaneCard>
+    );
 
   return (
     <SettingsCard

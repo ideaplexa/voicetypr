@@ -171,8 +171,6 @@ describe("Recording screen", () => {
       "Recording started",
       "More",
       "Pause media during recording",
-      "Transcript history cleanup",
-      "Save recording audio",
       "Transcript ready",
       "Paste completed",
     ]) {

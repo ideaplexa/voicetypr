@@ -1,11 +1,18 @@
-import { SettingsHeader, SettingsPage } from "@/components/settings/settings-ui";
+import {
+  SettingsHeader,
+  SettingsPaneCard,
+  SettingsPaneRow,
+} from "@/components/settings/settings-ui";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { AlertTriangle } from "lucide-react";
 import { ShortcutSectionGroup } from "./shortcuts/ShortcutSectionGroup";
 import { MAX_SINGLE_KEY_BINDINGS } from "./shortcuts/shortcutUtils";
 import { useShortcutsSection } from "./shortcuts/useShortcutsSection";
 
-export function ShortcutsSection() {
+export function ShortcutsSection({
+  onNavigateRecording,
+}: { onNavigateRecording?: () => void } = {}) {
   const {
     groupedActions,
     bindingsByAction,
@@ -26,29 +33,45 @@ export function ShortcutsSection() {
   } = useShortcutsSection();
 
   return (
-    <SettingsPage>
-      <SettingsHeader
-        title="Shortcuts"
-        description="Additional shortcuts for history, Polish, Home, and other app actions."
-      />
+    <div className="flex flex-col gap-[14px]">
+      {!onNavigateRecording ? (
+        <SettingsHeader
+          title="Shortcuts"
+          description="Additional shortcuts for history, Polish, Home, and other app actions."
+        />
+      ) : (
+        <SettingsPaneCard>
+          <SettingsPaneRow
+            title="Dictation shortcut"
+            description="Change the shortcut that starts recording."
+            control={
+              <Button type="button" variant="outline" size="sm" onClick={onNavigateRecording}>
+                Manage in Recording
+              </Button>
+            }
+          />
+        </SettingsPaneCard>
+      )}
 
-      <div className="rounded-2xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-        <div className="flex gap-2">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-sage" />
-          <div>
-            <p>Your primary recording shortcut is configured in Recording.</p>
-            <p className="mt-1">
-              Voicetypr tests global shortcuts and refuses combos already owned by macOS, Windows,
-              or another app.
-            </p>
+      {!onNavigateRecording ? (
+        <div className="rounded-2xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+          <div className="flex gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-sage" />
+            <div>
+              <p>Your primary recording shortcut is configured in Recording.</p>
+              <p className="mt-1">
+                Voicetypr tests global shortcuts and refuses combos already owned by macOS, Windows,
+                or another app.
+              </p>
+            </div>
           </div>
+          {singleKeyCount > 0 && (
+            <p className="mt-1 text-xs">
+              {singleKeyCount} of {MAX_SINGLE_KEY_BINDINGS} single-key shortcuts used.
+            </p>
+          )}
         </div>
-        {singleKeyCount > 0 && (
-          <p className="mt-1 text-xs">
-            {singleKeyCount} of {MAX_SINGLE_KEY_BINDINGS} single-key shortcuts used.
-          </p>
-        )}
-      </div>
+      ) : null}
 
       {actionLoadError && (
         <div
@@ -80,10 +103,11 @@ export function ShortcutsSection() {
           No shortcut actions are available.
         </div>
       ) : (
-        <div className="divide-y divide-border/70 rounded-xl border border-border bg-card">
+        <div className="divide-y divide-border/70 rounded-[14px] border border-border bg-card">
           {groupedActions.map(([section, sectionActions]) => (
             <ShortcutSectionGroup
               key={section}
+              pane={Boolean(onNavigateRecording)}
               section={section}
               sectionActions={sectionActions}
               bindingsByAction={bindingsByAction}
@@ -101,6 +125,6 @@ export function ShortcutsSection() {
           ))}
         </div>
       )}
-    </SettingsPage>
+    </div>
   );
 }

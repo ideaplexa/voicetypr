@@ -1,7 +1,9 @@
 import { Switch } from "@/components/ui/switch";
 import { AlertTriangle, Network } from "lucide-react";
+import { SettingsPaneRow } from "@/components/settings/settings-ui";
 
 interface SharingStatusHeaderProps {
+  pane?: boolean;
   enabled: boolean;
   loading: boolean;
   activeRemoteServer: string | null;
@@ -12,6 +14,7 @@ interface SharingStatusHeaderProps {
 }
 
 export function SharingStatusHeader({
+  pane = false,
   enabled,
   loading,
   activeRemoteServer,
@@ -20,6 +23,43 @@ export function SharingStatusHeader({
   modelDisplayName,
   onToggleSharing,
 }: SharingStatusHeaderProps) {
+  if (pane)
+    return (
+      <>
+        <SettingsPaneRow
+          title="Share this Voicetypr"
+          description="Other computers on your network can send audio here."
+          control={
+            <Switch
+              id="network-sharing"
+              aria-label="Share this Voicetypr"
+              checked={enabled}
+              onCheckedChange={onToggleSharing}
+              disabled={
+                loading ||
+                (!enabled &&
+                  (!!activeRemoteServer || !hasShareableModel || !currentSelectionShareable))
+              }
+            />
+          }
+        />
+        {!enabled && !hasShareableModel ? (
+          <p className="pb-3 text-xs text-muted-foreground">
+            Remote sharing requires a downloaded Whisper or Parakeet model on this device.
+          </p>
+        ) : null}
+        {!enabled && activeRemoteServer ? (
+          <p className="pb-3 text-xs text-muted-foreground">
+            Stop using the remote Voicetypr before sharing this device.
+          </p>
+        ) : null}
+        {!enabled && !currentSelectionShareable && hasShareableModel && !activeRemoteServer ? (
+          <p className="pb-3 text-xs text-muted-foreground">
+            Select a local model in Transcription to enable sharing.
+          </p>
+        ) : null}
+      </>
+    );
   return (
     <>
       <div className="px-4 py-3 border-b border-border/50">
