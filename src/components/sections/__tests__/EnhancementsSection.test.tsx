@@ -5,6 +5,7 @@ import { EnhancementsSection } from "../EnhancementsSection";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useEnhancementsStore } from "@/state/enhancements";
+import { useWritingSettings } from "@/state/writingSettings";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { hasApiKey, saveApiKey } from "@/utils/keyring";
 import { defaultWritingSettings, mergeWritingSettings } from "@/types/writing";
@@ -346,6 +347,7 @@ describe("EnhancementsSection", () => {
     vi.clearAllMocks();
     eventListeners.clear();
     useEnhancementsStore.getState().clearPolishError();
+    useWritingSettings.setState({ settings: defaultWritingSettings, loaded: false });
     readinessState.value = null;
     modelDiscovery.loading = {};
     modelDiscovery.errors = {};
@@ -2035,16 +2037,29 @@ describe("EnhancementsSection", () => {
   describe("Polish failure banner", () => {
     const authCopy = "Polish failed — your API key was rejected. Update it below.";
 
-    const emitEvent = (name: string, payload: unknown) => {
+    const updatePolishError = (name: string, payload: unknown) => {
       act(() => {
-        void eventListeners.get(name)?.({ payload });
+        const { setPolishError, clearPolishError } = useEnhancementsStore.getState();
+        if (name === "enhancing-completed") {
+          clearPolishError();
+        } else if (name === "ai-enhancement-auth-error" && typeof payload === "string") {
+          setPolishError("auth", payload);
+        } else if (
+          name === "enhancing-failed" &&
+          payload &&
+          typeof payload === "object" &&
+          "message" in payload &&
+          typeof payload.message === "string"
+        ) {
+          setPolishError("generic", payload.message);
+        }
       });
     };
 
     it("shows the inline banner with auth copy when an auth error fires", async () => {
       renderWithProviders();
 
-      emitEvent("ai-enhancement-auth-error", "Please check your AI API key in settings.");
+      updatePolishError("ai-enhancement-auth-error", "Please check your AI API key in settings.");
 
       expect(screen.getByText(authCopy)).toBeInTheDocument();
       expect(
@@ -2057,7 +2072,7 @@ describe("EnhancementsSection", () => {
     it("shows the failure message for a generic polish error", async () => {
       renderWithProviders();
 
-      emitEvent("enhancing-failed", {
+      updatePolishError("enhancing-failed", {
         category: "service_unavailable",
         message: "AI service unavailable",
       });
@@ -2069,7 +2084,7 @@ describe("EnhancementsSection", () => {
       const user = userEvent.setup();
       renderWithProviders();
 
-      emitEvent("ai-enhancement-auth-error", "Please check your AI API key in settings.");
+      updatePolishError("ai-enhancement-auth-error", "Please check your AI API key in settings.");
       expect(screen.getByText(authCopy)).toBeInTheDocument();
 
       await user.click(
@@ -2084,10 +2099,10 @@ describe("EnhancementsSection", () => {
     it("clears the banner when a polish run completes", async () => {
       renderWithProviders();
 
-      emitEvent("ai-enhancement-auth-error", "Please check your AI API key in settings.");
+      updatePolishError("ai-enhancement-auth-error", "Please check your AI API key in settings.");
       expect(screen.getByText(authCopy)).toBeInTheDocument();
 
-      emitEvent("enhancing-completed", null);
+      updatePolishError("enhancing-completed", null);
 
       await waitFor(() => {
         expect(screen.queryByText(authCopy)).not.toBeInTheDocument();
@@ -2097,7 +2112,7 @@ describe("EnhancementsSection", () => {
     it("keeps the banner across remounts (tab switches) until dismissed", async () => {
       const view = renderWithProviders();
 
-      emitEvent("ai-enhancement-auth-error", "Please check your AI API key in settings.");
+      updatePolishError("ai-enhancement-auth-error", "Please check your AI API key in settings.");
       expect(screen.getByText(authCopy)).toBeInTheDocument();
 
       act(() => {

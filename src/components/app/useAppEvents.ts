@@ -1,16 +1,17 @@
-import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { toast } from "sonner";
 import {
   sendNotification,
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { listen } from "@tauri-apps/api/event";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import type { ScreenId } from "../navigation";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import { updateService } from "@/services/updateService";
 import { createLogger } from "@/lib/logger";
+import { usePolishErrorEvents } from "@/components/polish/usePolishErrorEvents";
+import { useEnhancementsStore } from "@/state/enhancements";
 
 import type { SourceFilter } from "../sections/models/types";
 
@@ -43,6 +44,11 @@ export function useAppEvents({
   forceOnboardingNeedsFreshAvailabilityRef,
 }: UseAppEventsOptions) {
   const { registerEvent } = useEventCoordinator("main");
+  const checkModelsRef = useRef(checkModels);
+  useEffect(() => {
+    checkModelsRef.current = checkModels;
+  }, [checkModels]);
+  usePolishErrorEvents();
 
   useEffect(() => {
     let isMounted = true;
@@ -52,6 +58,7 @@ export function useAppEvents({
       eventName: string,
       handler: (payload: T) => void | Promise<void>,
     ) => {
+      if (!isMounted) return;
       const unlisten = await registerEvent<T>(eventName, handler);
       if (typeof unlisten !== "function") {
         return;
@@ -67,6 +74,41 @@ export function useAppEvents({
       try {
         await register("navigate-to-overview", () => {
           setActiveSection("overview");
+        });
+
+        await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {
+          log.error("Hotkey registration failed:", data);
+          toast.error("Hotkey Registration Failed", {
+            description: data.suggestion || "The hotkey is in use by another application",
+            duration: 10000,
+          });
+        });
+
+        await register<ErrorEventPayload>("no-speech-detected", (data) => {
+          log.warn("No speech detected:", data);
+          const toastFn = data.severity === "error" ? toast.error : toast.warning;
+          toastFn(data.title || "No Speech Detected", {
+            description: data.message || "Please check your microphone and speak clearly",
+            duration: data.severity === "error" ? 8000 : 5000,
+          });
+        });
+
+        await register<string>("ai-enhancement-auth-error", (message) => {
+          log.error("AI authentication error:", message);
+          if (typeof message === "string") {
+            useEnhancementsStore.getState().setPolishError("auth", message);
+          }
+          toast.error(message, {
+            description: "Please update your API key in the Polish section",
+          });
+        });
+
+        await register<string>("ai-enhancement-error", (message) => {
+          log.warn("Polish error:", message);
+          if (typeof message === "string") {
+            useEnhancementsStore.getState().setPolishError("generic", message);
+          }
+          toast.warning(message);
         });
 
         await register("tray-check-updates", async () => {
@@ -147,7 +189,7 @@ export function useAppEvents({
 
         await register<{ title: string; message: string; action?: string }>(
           "license-required",
-          (data) => {
+          async (data) => {
             log.debug("License required event received in AppContainer:", data);
             // Navigate to License section to show license management
             setActiveSection("license");
@@ -156,6 +198,14 @@ export function useAppEvents({
               description: data.message || "Please purchase or restore a license to continue",
               duration: 5000,
             });
+
+            // Focus the main window after navigation.
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            try {
+              await invoke("focus_main_window");
+            } catch (error) {
+              log.error("Failed to focus window:", error);
+            }
           },
         );
 
@@ -181,7 +231,7 @@ export function useAppEvents({
           log.error("No models available:", data);
           setForceShowOnboarding(true);
           forceOnboardingNeedsFreshAvailabilityRef.current = true;
-          const refreshedAvailability = await checkModels();
+          const refreshedAvailability = await checkModelsRef.current();
           if (refreshedAvailability.hasModels === true) {
             forceOnboardingNeedsFreshAvailabilityRef.current = false;
             setForceShowOnboarding(false);
@@ -211,42 +261,10 @@ export function useAppEvents({
     };
   }, [
     registerEvent,
-    checkModels,
     setActiveSection,
     setSourceFilter,
     setForceShowOnboarding,
     forceOnboardingNeedsFreshAvailabilityRef,
   ]);
 
-  // Surface a local agent-CLI's OWN message (e.g. Claude Code's "Not logged in ·
-  // Please run /login") as a toast so the user gets the exact fix in the CLI's
-  // words. Gated to `category === "cli_error"` ONLY: cloud-provider polish
-  // failures keep their existing SILENT raw-transcript fallback (no behavior
-  // change / no toast noise). This listener lives in the main window, which
-  // mounts the <Toaster>; the pill window handles the formatting-state flip.
-  useEffect(() => {
-    let isMounted = true;
-    let unlisten: UnlistenFn | undefined;
-    void listen<{ category?: string; message?: string } | null>("enhancing-failed", (event) => {
-      if (!isMounted) return;
-      const message = event.payload?.message;
-      if (
-        event.payload?.category === "cli_error" &&
-        typeof message === "string" &&
-        message.trim()
-      ) {
-        toast.error(message);
-      }
-    }).then((nextUnlisten) => {
-      if (!isMounted) {
-        nextUnlisten();
-        return;
-      }
-      unlisten = nextUnlisten;
-    });
-    return () => {
-      isMounted = false;
-      unlisten?.();
-    };
-  }, []);
 }

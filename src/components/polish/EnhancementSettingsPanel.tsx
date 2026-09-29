@@ -23,7 +23,7 @@ export function EnhancementSettingsPanel({
   providerSetup: ProviderSetupCardProps;
   onPresetChange: (preset: EnhancementPreset) => void;
   onFinalTextLanguageChange: (value: string) => void;
-  onWritingSettingsChange: (settings: WritingSettings) => void;
+  onWritingSettingsChange: (patch: Partial<WritingSettings>) => void;
 }) {
   return (
     <EnhancementSettings

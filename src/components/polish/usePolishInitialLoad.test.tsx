@@ -5,6 +5,8 @@ import { useAiProviderSettings } from "./useAiProviderSettings";
 import { usePolishSectionSettings } from "./usePolishSectionSettings";
 import { usePolishSettingsLoad } from "./usePolishSettingsLoad";
 import { getApiKey, hasApiKey } from "@/utils/keyring";
+import { useWritingSettings } from "@/state/writingSettings";
+import { defaultWritingSettings } from "@/types/writing";
 
 const logError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/logger", () => ({ createLogger: () => ({ error: logError }) }));
@@ -69,6 +71,7 @@ function response(command: string, old: boolean): unknown {
 describe("Polish initial loader ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useWritingSettings.setState({ settings: defaultWritingSettings, loaded: false });
     vi.mocked(hasApiKey).mockResolvedValue(false);
     vi.mocked(getApiKey).mockResolvedValue(null);
   });
@@ -101,10 +104,15 @@ describe("Polish initial loader ownership", () => {
     );
     old = false;
     rerender({ ready: false });
+    if (blockedCommand === "get_writing_settings") {
+      // Both consumers now share the same backend request. Cancellation only
+      // stops the first consumer from applying its result.
+      await act(async () => resolveOld(response(blockedCommand, true)));
+    }
     await waitFor(() => expect(result.current.section.settingsLoaded).toBe(true));
-    await act(async () => {
-      resolveOld(response(blockedCommand, true));
-    });
+    if (blockedCommand !== "get_writing_settings") {
+      await act(async () => resolveOld(response(blockedCommand, true)));
+    }
     expect(result.current.provider.providers[0].name).toBe("New");
     expect(result.current.provider.aiSettings.model).toBe("new-model");
     expect(result.current.provider.customModelName).toBe("new-model");
@@ -112,7 +120,9 @@ describe("Polish initial loader ownership", () => {
     expect(result.current.provider.providerApiKeys.custom).toBe(false);
     expect(result.current.provider.openAIDefaultBaseUrl).toBe("https://new.example");
     expect(result.current.section.enhancementOptions.preset).toBe("Code");
-    expect(result.current.section.writingSettings.custom_words[0].phrase).toBe("new");
+    expect(result.current.section.writingSettings.custom_words[0].phrase).toBe(
+      blockedCommand === "get_writing_settings" ? "old" : "new",
+    );
   });
 
   it.each([
@@ -173,7 +183,14 @@ describe("Polish initial loader ownership", () => {
       rejectRequest(new Error("Canceled request failed"));
       await canceledLoad;
     });
-    expect(logError).not.toHaveBeenCalled();
+    if (blockedCommand === "get_writing_settings") {
+      // The shared request is still owned by the store after this consumer
+      // cancels, so its failure is logged once for the app.
+      expect(logError).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+      logError.mockClear();
+    } else {
+      expect(logError).not.toHaveBeenCalled();
+    }
 
     const activeError = new Error("Active request failed");
     vi.mocked(invoke).mockImplementation(async (command) => {

@@ -47,7 +47,7 @@ interface EnhancementSettingsProps {
   providerContent: ReactNode;
   onPresetChange: (value: EnhancementPreset) => void;
   onFinalTextLanguageChange: (value: string) => void;
-  onWritingSettingsChange: (settings: WritingSettings) => void;
+  onWritingSettingsChange: (patch: Partial<WritingSettings>) => void;
   disabled?: boolean;
   writingSettingsDisabled?: boolean;
 }
@@ -834,10 +834,7 @@ export function EnhancementSettings({
             disabled={writingSettingsDisabled}
             aiFormattingEnabled={aiFormattingEnabled}
             onChange={(app_formatting_rules) =>
-              onWritingSettingsChange({
-                ...writingSettings,
-                app_formatting_rules,
-              })
+              onWritingSettingsChange({ app_formatting_rules })
             }
           />
         </section>
@@ -847,7 +844,7 @@ export function EnhancementSettings({
             customWords={writingSettings.custom_words}
             disabled={writingSettingsDisabled}
             onChange={(custom_words) =>
-              onWritingSettingsChange({ ...writingSettings, custom_words })
+              onWritingSettingsChange({ custom_words })
             }
           />
         </section>
@@ -857,7 +854,7 @@ export function EnhancementSettings({
             replacements={writingSettings.replacements}
             disabled={writingSettingsDisabled}
             onChange={(replacements) =>
-              onWritingSettingsChange({ ...writingSettings, replacements })
+              onWritingSettingsChange({ replacements })
             }
           />
         </section>
@@ -866,7 +863,7 @@ export function EnhancementSettings({
           <SnippetEditor
             snippets={writingSettings.snippets}
             disabled={writingSettingsDisabled}
-            onChange={(snippets) => onWritingSettingsChange({ ...writingSettings, snippets })}
+            onChange={(snippets) => onWritingSettingsChange({ snippets })}
           />
         </section>
       </div>

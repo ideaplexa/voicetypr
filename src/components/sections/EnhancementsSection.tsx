@@ -5,7 +5,6 @@ import { EnhancementSettingsPanel } from "@/components/polish/EnhancementSetting
 import { EnhancementsProviderModals } from "@/components/polish/EnhancementsProviderModals";
 import { useAiProviderSettings, type ProviderTab } from "@/components/polish/useAiProviderSettings";
 import { usePolishSectionSettings } from "@/components/polish/usePolishSectionSettings";
-import { usePolishErrorEvents } from "@/components/polish/usePolishErrorEvents";
 import { usePolishSettingsLoad } from "@/components/polish/usePolishSettingsLoad";
 import {
   AGENT_CLI_DEFAULT_LABEL,
@@ -94,7 +93,6 @@ export function EnhancementsSection() {
     loadEnhancementOptionsRef,
     loadWritingSettingsRef,
   });
-  usePolishErrorEvents();
 
   const isUsingCustomProvider = aiSettings.provider === "custom";
   const hasSelectedModel = Boolean(

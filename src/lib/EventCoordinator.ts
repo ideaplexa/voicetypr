@@ -58,7 +58,7 @@ export class EventCoordinator {
           `[EventCoordinator] Event "${eventName}" already registered for window "${windowId}". Cleaning up old registration.`,
         );
         // Clean up the old registration before creating a new one
-        this.unregister(windowId, eventName);
+        this.unregister(eventName, existingForWindow);
       }
     }
 
@@ -75,14 +75,9 @@ export class EventCoordinator {
       }
     };
 
-    // Listen to the Tauri event
-    const unlisten = await listen<T>(eventName, wrappedHandler);
-
-    // Store registration
     const registration: EventRegistration = {
       windowId,
       handler: handler as EventHandler,
-      unlisten,
     };
 
     if (!this.registrations.has(eventName)) {
@@ -90,24 +85,37 @@ export class EventCoordinator {
     }
     this.registrations.get(eventName)!.push(registration);
 
+    // Claim the slot before the async listen resolves. A newer registration
+    // can then replace this one even when the promises settle out of order.
+    try {
+      const unlisten = await listen<T>(eventName, wrappedHandler);
+      if (!this.registrations.get(eventName)?.includes(registration)) {
+        unlisten();
+        return () => {};
+      }
+      registration.unlisten = unlisten;
+    } catch (error) {
+      this.unregister(eventName, registration);
+      throw error;
+    }
+
     log.debug(`[EventCoordinator] Registered event "${eventName}" for window "${windowId}"`);
 
     // Return cleanup function
     return () => {
-      this.unregister(windowId, eventName);
+      this.unregister(eventName, registration);
     };
   }
 
   /**
    * Unregister an event handler
    */
-  private unregister(windowId: WindowId, eventName: string) {
+  private unregister(eventName: string, registration: EventRegistration) {
     const registrations = this.registrations.get(eventName);
     if (!registrations) return;
 
-    const index = registrations.findIndex((reg) => reg.windowId === windowId);
+    const index = registrations.indexOf(registration);
     if (index !== -1) {
-      const registration = registrations[index];
       registration.unlisten?.();
       registrations.splice(index, 1);
 
@@ -115,7 +123,7 @@ export class EventCoordinator {
         this.registrations.delete(eventName);
       }
 
-      log.debug(`[EventCoordinator] Unregistered event "${eventName}" for window "${windowId}"`);
+      log.debug(`[EventCoordinator] Unregistered event "${eventName}" for window "${registration.windowId}"`);
     }
   }
 

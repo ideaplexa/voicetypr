@@ -74,6 +74,11 @@ Old ids stay as aliases in `TabContainer` for one release so the `navigate-to-ov
     racing. Today `usePolishSectionSettings.ts:28-93` owns it.
   - Tests: listeners fire with no tab mounted; concurrent edits from two consumers keep one
     ordered save queue.
+  - The store loads once per app lifetime. This is safe only because `update_writing_settings`
+    is the sole writer and Reset relaunches the app (checked 2026-09-29). Any future backend
+    writer (the learned-words engine, imports done in Rust) MUST emit
+    `writing-settings-changed`, and the store must reload on it. Otherwise the next UI edit
+    re-saves stale words.
 - **S1 — tokens, kit, sidebar and IA.** Token retune, Geist Mono decision, kit components,
   new `navigation.ts` (8 items + SETUP group + footer), license chip, old-id aliases, and the
   About row (version + update check moved out of the sidebar). Update `Sidebar.test`,
