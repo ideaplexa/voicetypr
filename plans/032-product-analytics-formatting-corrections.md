@@ -23,13 +23,13 @@
 
 ## Why this matters
 
-VoiceTypr currently reports crashes and a sampled transcription lifecycle to
+Voicetypr currently reports crashes and a sampled transcription lifecycle to
 GlitchTip, but it cannot answer adoption, funnel, reliability-distribution, or
 formatting-quality questions. The current single `telemetry_enabled` preference
 also cannot truthfully represent separate crash reporting and usage analytics.
 This plan adds two independently revocable controls, a closed non-content event
 pipeline, and automatic collection of high-confidence user corrections to text
-VoiceTypr just pasted. It does not add generic click tracking, browser
+Voicetypr just pasted. It does not add generic click tracking, browser
 instrumentation, audio collection, or cross-application keylogging.
 
 ## Product decisions
@@ -52,7 +52,7 @@ These decisions are load-bearing. Do not silently broaden or reinterpret them.
    queue, and deletes that category's local anonymous installation ID. Turning it
    on must not require an app restart.
 6. **Formatting correction collection is automatic and narrow.** Observe only
-   the same focused editable control and the range VoiceTypr inserted, for at
+   the same focused editable control and the range Voicetypr inserted, for at
    most 30 seconds. Upload only when a user edit overlaps that inserted range and
    the corrected range can be isolated unambiguously. Never record keystrokes,
    whole documents, surrounding text, target app/window names, audio, clipboard
@@ -73,7 +73,7 @@ Keep the modal short; do not add a release-notes wall.
 
 **Modal title**
 
-> Help improve VoiceTypr
+> Help improve Voicetypr
 
 **Modal description**
 
@@ -87,7 +87,7 @@ Keep the modal short; do not add a release-notes wall.
 **Usage row**
 
 - Label: `Usage analytics`
-- Description: `Help improve VoiceTypr by sharing product usage, performance data, and formatting corrections.`
+- Description: `Help improve Voicetypr by sharing product usage, performance data, and formatting corrections.`
 
 **Primary action**: `Continue`
 
@@ -276,7 +276,7 @@ Rules:
 - Custom provider/model names become `custom`; never send the user-entered name.
 - Language is the configured/returned normalized language code, never inferred by
   re-reading transcript content.
-- Error properties are closed categories already used by VoiceTypr's failure
+- Error properties are closed categories already used by Voicetypr's failure
   mapping; never send raw provider responses or `Display` strings.
 - Durations, lengths, and ratios are buckets, not exact values.
 - Do not add settings-page views, button clicks, target apps, window titles,

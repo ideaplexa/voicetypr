@@ -247,6 +247,7 @@ mod tests {
     ) -> CaptureAudioMetrics {
         CaptureAudioMetrics {
             sample_count,
+            start_to_first_audio_ms: None,
             duration_ms: 1000,
             rms,
             peak,

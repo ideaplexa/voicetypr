@@ -1,4 +1,4 @@
-# VoiceTypr Architecture Refactor Roadmap
+# Voicetypr Architecture Refactor Roadmap
 
 Date: 2026-07-03
 Branch: `integrate/perf-ux-2026-07`

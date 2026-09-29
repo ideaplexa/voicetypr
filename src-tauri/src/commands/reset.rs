@@ -1,6 +1,24 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
+
+// secure.dat is a sibling of these directories and must survive reset.
+fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str); 5] {
+    [
+        (app_data_dir.join("stores"), "Stores directory"),
+        (app_data_dir.join("models"), "Downloaded models"),
+        (
+            app_data_dir.join("parakeet-tdt-0.6b-v3"),
+            "Parakeet model data",
+        ),
+        (
+            app_data_dir.join("parakeet-tdt-0.6b-v2"),
+            "Parakeet model data",
+        ),
+        (app_data_dir.join("recordings"), "Audio recordings"),
+    ]
+}
 
 #[derive(serde::Serialize)]
 pub struct ResetResult {
@@ -44,80 +62,20 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
     }
 
-    // Delete the actual store files from disk
+    // Delete user-data directories only; secure.dat is a sibling file.
     if let Ok(app_data_dir) = app.path().app_data_dir() {
-        let stores_dir = app_data_dir.join("stores");
-        if stores_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&stores_dir) {
-                errors.push(format!("Failed to delete stores directory: {}", e));
-            } else {
-                cleared_items.push("Stores directory".to_string());
-            }
-        }
-    }
-
-    // 2. Delete app data directories
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
-        // Delete models directory
-        let models_dir = app_data_dir.join("models");
-        if models_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&models_dir) {
-                errors.push(format!("Failed to delete models directory: {}", e));
-            } else {
-                cleared_items.push("Downloaded models".to_string());
-            }
-        }
-
-        // Delete Parakeet model directories (for Swift sidecar)
-        // These might exist from old Python implementation or tracking
-        let parakeet_dirs = vec![
-            app_data_dir.join("parakeet-tdt-0.6b-v3"),
-            app_data_dir.join("parakeet-tdt-0.6b-v2"),
-        ];
-        for parakeet_dir in parakeet_dirs {
-            if parakeet_dir.exists() {
-                if let Err(e) = fs::remove_dir_all(&parakeet_dir) {
-                    errors.push(format!("Failed to delete Parakeet directory: {}", e));
+        for (path, item) in app_data_directories_to_clear(&app_data_dir) {
+            if path.exists() {
+                if let Err(e) = fs::remove_dir_all(&path) {
+                    errors.push(format!("Failed to delete {}: {}", item, e));
                 } else {
-                    cleared_items.push("Parakeet model data".to_string());
+                    cleared_items.push(item.to_string());
                 }
             }
         }
-
-        // Delete recordings directory
-        let recordings_dir = app_data_dir.join("recordings");
-        if recordings_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&recordings_dir) {
-                errors.push(format!("Failed to delete recordings directory: {}", e));
-            } else {
-                cleared_items.push("Audio recordings".to_string());
-            }
-        }
     }
 
-    // 3. Clear license data from secure store
-    if let Err(e) = crate::secure_store::secure_delete(&app, "license") {
-        // Only push error if it's not a "store doesn't exist" error
-        if !e.contains("Store access failed") {
-            errors.push(format!("Failed to clear license: {}", e));
-        }
-    } else {
-        cleared_items.push("License data".to_string());
-    }
-
-    // 3.5. Clear the secure.dat file itself
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
-        let secure_store_path = app_data_dir.join("secure.dat");
-        if secure_store_path.exists() {
-            if let Err(e) = fs::remove_file(&secure_store_path) {
-                errors.push(format!("Failed to remove secure storage: {}", e));
-            } else {
-                cleared_items.push("Secure storage (API keys)".to_string());
-            }
-        }
-    }
-
-    // 4. Clear cache data (license validation cache)
+    // 2. Clear cache data (license validation cache)
     if let Ok(cache_dir) = app.path().cache_dir() {
         if cache_dir.exists() {
             if let Err(e) = fs::remove_dir_all(&cache_dir) {
@@ -128,7 +86,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
     }
 
-    // 5. Clear app preferences
+    // 3. Clear app preferences
     #[cfg(target_os = "macos")]
     {
         // Clear FluidAudio cached models (for Swift Parakeet sidecar)
@@ -203,7 +161,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
     }
 
-    // 6. Clear additional system data
+    // 4. Clear additional system data
     #[cfg(target_os = "macos")]
     {
         if let Ok(home_dir) = app.path().home_dir() {
@@ -288,7 +246,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
     }
 
-    // 7. Reset system permissions
+    // 5. Reset system permissions
     #[cfg(target_os = "macos")]
     {
         let reset_script = format!(
@@ -322,7 +280,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         cleared_items.push("System permissions (N/A on Windows)".to_string());
     }
 
-    // 8. Clear any runtime state
+    // 6. Clear any runtime state
     use tauri::async_runtime::RwLock as AsyncRwLock;
     let whisper_state = app.state::<AsyncRwLock<crate::whisper::manager::WhisperManager>>();
     let mut whisper_manager = whisper_state.write().await;
@@ -330,14 +288,14 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     drop(whisper_manager);
     cleared_items.push("Runtime state".to_string());
 
-    // 8.5. Clear API key cache
+    // 6.5. Clear in-memory API key cache; persisted keys stay in secure storage.
     if let Err(e) = crate::commands::ai::clear_all_api_key_cache() {
         errors.push(format!("Failed to clear API key cache: {}", e));
     } else {
         cleared_items.push("AI API key cache".to_string());
     }
 
-    // 9. Refresh preferences daemon
+    // 7. Refresh preferences daemon
     #[cfg(target_os = "macos")]
     {
         match std::process::Command::new("killall")
@@ -353,7 +311,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
     }
 
-    // 10. Emit reset event to frontend
+    // 8. Emit reset event to frontend
     if let Err(e) = app.emit("app-reset", ()) {
         errors.push(format!("Failed to emit reset event: {}", e));
     }
@@ -371,4 +329,26 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         errors,
         cleared_items,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_data_directories_to_clear;
+    use std::path::Path;
+
+    #[test]
+    fn reset_deletion_plan_preserves_secure_storage_and_license() {
+        let app_data_dir = Path::new("/tmp/voicetypr-reset-test");
+        let deletions = app_data_directories_to_clear(app_data_dir);
+
+        assert_eq!(deletions.len(), 5);
+        for (path, item) in deletions {
+            assert!(path.starts_with(app_data_dir));
+            assert_ne!(path, app_data_dir);
+            assert!(!app_data_dir.join("secure.dat").starts_with(&path));
+            assert!(!item.to_ascii_lowercase().contains("license"));
+            assert!(!item.to_ascii_lowercase().contains("secure"));
+            assert!(!item.to_ascii_lowercase().contains("api key"));
+        }
+    }
 }

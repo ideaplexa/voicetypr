@@ -1,4 +1,4 @@
-# Whisper Engine Decode — VoiceTypr perf teardown
+# Whisper Engine Decode — Voicetypr perf teardown
 
 > **Scope:** the decode-bound engine (`whisper-rs` 0.16). READ-ONLY analysis; no code
 > changed. Every claim cites `path:line` relative to the VT repo root

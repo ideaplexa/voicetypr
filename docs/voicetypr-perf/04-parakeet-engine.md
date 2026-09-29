@@ -1,4 +1,4 @@
-# Parakeet (CoreML/ANE) engine — VoiceTypr perf teardown
+# Parakeet (CoreML/ANE) engine — Voicetypr perf teardown
 
 > Slice scope: the **macOS Parakeet path** — Rust manager (`src-tauri/src/parakeet/*`) ↔ Swift/FluidAudio
 > sidecar (`sidecar/parakeet-swift/Sources/main.swift`). READ-ONLY analysis; no code changed.
@@ -379,7 +379,7 @@ duration + RTF); add matching Rust-side spans at `manager.rs:416-432` (command s
 
 ### Provenance
 
-Read-only against VoiceTypr `main` @ `af63ab1`. All citations are `path:line` relative to repo root.
+Read-only against Voicetypr `main` @ `af63ab1`. All citations are `path:line` relative to repo root.
 FluidAudio citations are from the pinned checkout
 `sidecar/parakeet-swift/.build/checkouts/FluidAudio/Sources/FluidAudio/`. The ~120× RTF figure is quoted
 from `plans/028-transcription-latency-streaming.md` Evidence B (itself source-verified against FluidAudio

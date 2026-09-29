@@ -5,7 +5,7 @@
 
 ## 1. What this is
 
-VoiceTypr (Tauri v2 desktop app: Rust backend `src-tauri/`, React/TS frontend `src/`) does offline voice transcription. "Polish" is the optional AI post-processing step that cleans the raw transcript before it's typed into the active app.
+Voicetypr (Tauri v2 desktop app: Rust backend `src-tauri/`, React/TS frontend `src/`) does offline voice transcription. "Polish" is the optional AI post-processing step that cleans the raw transcript before it's typed into the active app.
 
 **Mission:** make Polish as good as Wispr Flow, with a two-persona split as the architectural spine:
 - **Regular users**: amazing zero-config defaults, ONE switch. They never see complexity.

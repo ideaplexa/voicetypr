@@ -9,7 +9,7 @@ Bugsink still receives two Windows panic families on 2.0.4:
 - Tao stale `HMONITOR` error 1461 panics during monitor information retrieval.
 - Tao `flush_paint_messages` assertions associated upstream with recursive tray device-change handling.
 
-VoiceTypr resolves `tao 0.34.5` and `tray-icon 0.21.1`. Upstream released the corresponding fixes in `tao 0.34.6` and `tray-icon 0.21.2`.
+Voicetypr resolves `tao 0.34.5` and `tray-icon 0.21.1`. Upstream released the corresponding fixes in `tao 0.34.6` and `tray-icon 0.21.2`.
 
 ## Change
 

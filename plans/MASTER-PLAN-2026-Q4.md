@@ -1,6 +1,6 @@
-# VoiceTypr Master Plan — Q4 2026 (desktop first)
+# Voicetypr Master Plan — Q4 2026 (desktop first)
 
-Status: DRAFT for founder review, 2026-09-27. Supersedes the ordering of older
+Status: ACTIVE, updated 2026-09-27 (evening) with the founder's decisions. Supersedes the ordering of older
 plans; older plans are history, not constraints. Built from the 2026-09-27
 session: branch recovery, Parakeet preview root cause, FluidAudio probe,
 user-pain research, local-polish research, competitor + pricing research,
@@ -61,20 +61,37 @@ released without the founder's OK.
 
 | # | Work | Proof of done |
 |---|---|---|
-| 0.1 | Promote 2.0.6-beta.11 (main) to stable 2.0.6 — Release run 36322042743 started 2026-09-27 | Release published; updater serves 2.0.6 |
-| 0.1a | **Last words cut off at stop:** post-roll — keep capturing ~250 ms after key release (today `recording/hotkeys.rs` Released → `stop_recording` → `recorder.rs` Stop with no delay); pad ~250 ms silence before Whisper decode. Small 2.0.7 on main | Clips ending at key release keep their last word |
+| 0.1 | DONE — 2.0.6 stable published 2026-09-27; updater serves it | Release published; updater serves 2.0.6 |
+| 0.1a | DONE (#146, shipped in 2.0.7-beta.1) — **Last words cut off at stop:** post-roll — keep capturing ~250 ms after key release (today `recording/hotkeys.rs` Released → `stop_recording` → `recorder.rs` Stop with no delay); pad ~250 ms silence before Whisper decode. Small 2.0.7 on main | Clips ending at key release keep their last word |
 | 0.1b | **Observability:** privacy-safe PostHog numbers per dictation — speech energy still active in the last ~100 ms at stop (clipping flag), audio length vs word count, stop → text, engine + version, re-dictation/edit right after; dashboard per release | Regressions visible as numbers per engine/version |
-| 0.2 | Commit the two verified Parakeet sidecar fixes + plans (local) | Sidecar build + token harness green |
-| 0.3 | Merge `main` into this branch: keep main's good parts; where both solve the same thing keep the better one; ask the founder when unclear | Full gate green; smoke of all engines |
-| 0.4 | ONE `AGENTS.md` written from the merged code — not reworded from old docs: architecture, pipeline stages, invariants, testing through the CLI, conventions (CLAUDE.md = a one-line `@AGENTS.md` import, since Claude Code reads only CLAUDE.md); archive stale plans | A new agent can work from AGENTS.md alone |
+| 0.2 | DONE — Commit the two verified Parakeet sidecar fixes + plans (local) | Sidecar build + token harness green |
+| 0.3 | DONE (`7f393e39`, decisions in plan 072) — Merge `main` into this branch: keep main's good parts; where both solve the same thing keep the better one; ask the founder when unclear | Full gate green; smoke of all engines |
+| 0.4 | DONE — ONE `AGENTS.md` written from the merged code — not reworded from old docs: architecture, pipeline stages, invariants, testing through the CLI, conventions (CLAUDE.md = a one-line `@AGENTS.md` import, since Claude Code reads only CLAUDE.md); archive stale plans | A new agent can work from AGENTS.md alone |
 | 0.4a | **Clean core:** split the god files (on main: `commands/audio.rs` 8,145 lines, `cloud_stt/soniox.rs` 4,609, `lib.rs` 2,424, `commands/remote.rs` 2,196) into one dictation pipeline with explicit stages (capture → preprocess → recognize → vocabulary → Polish → deliver); Tauri commands and CLI become thin adapters. SOLID-style single-purpose modules, typed errors, explicit state. Behaviour-preserving slices behind tests; architecture gets a gpt-6-astra xhigh second opinion; plan 050 + the July architecture review are inputs, re-derived from merged code | Same tests green before/after each slice; no god files |
 | 0.4b | **CLI parity:** every feature reachable from the CLI with `--json` — full pipeline incl. vocabulary + Polish, settings, vocabulary, providers, per-stage timings. Today `cli.rs` has 4 commands and `transcribe` skips vocabulary and Polish | Phase 1 scorecard harness runs entirely through the CLI |
-| 0.5 | [Plan 070](070-parakeet-full-context-preview.md): Parakeet full-context live preview | Plan 070 acceptance (preview WER ≈ batch, no dropped audio) |
+| 0.5 | DONE — [Plan 070](070-parakeet-full-context-preview.md): Parakeet full-context live preview; remaining edge cases in [070b](070b-decode-ahead-edge-cases.md) (beta.2) | Plan 070 acceptance (preview WER ≈ batch, no dropped audio) |
 | 0.6 | ~~Hide Unified/Nemotron~~ REVERSED 2026-09-27: on real speech (jfk.wav + LibriSpeech + MLS de/es) Unified and Nemotron are good and stream clean live text from ~1 s; the "broken" verdict came from the synthetic TTS corpus. Make them the recommended live-preview engines; retire `perf-corpus/synthetic` for engine decisions | Real-speech suite green (see below) |
-| 0.7 | Soniox: realtime WebSocket as the default transport for every dictation, REST upload only as fallback | Stop → text p50/p95 before/after on real clips |
-| 0.8 | Quick wins: pre-roll audio buffer (first words not clipped), import vocabulary from Wispr Flow / Handy | Verified on Mac + Windows |
+| 0.7 | IN PROGRESS — [plan 073](073-soniox-realtime-default.md), beta.2 — Soniox: realtime WebSocket as the default transport for every dictation, REST upload only as fallback | Stop → text p50/p95 before/after on real clips |
+| 0.8 | Quick wins: first words not clipped (measure the start path first, then reorder and/or pre-roll; an always-open mic needs a founder decision because of the mic privacy indicator), import vocabulary from Wispr Flow / Handy | Verified on Mac + Windows |
+| 0.8a | **Paste reliability:** count insertion failures per app category; when a paste fails, keep the text on the clipboard and show a notice so nothing is lost | Insertion success visible per release |
+| 0.8b | **Desktop E2E harness (Claude-run):** BlackHole 2ch as a virtual mic plays real clips; scripted hotkeys; checks the text that lands in a test app, stop → text, and screenshots. Windows on GitHub runners; a cloud Windows VM only for GPU/driver checks | Runs before every beta |
 | 0.9 | Windows signing for website downloads (Store MSIX is already Microsoft-signed): apply to SignPath Foundation; fallback Azure Artifact Signing ($9.99/mo, US/CA/EU/UK only) or route Windows downloads to the Store | No SmartScreen warning on the direct installer |
-| Ship | 2.1.0 beta | Founder smoke + OK |
+| Ship | 2.1.0-beta.N series (see Release cadence) | Automated gates + E2E harness; beta users + PostHog numbers replace founder smoke tests |
+
+## Release cadence (founder, 2026-09-27)
+
+Ship 2.1 as small betas on the beta channel, each with tests for what it
+changes; promote the tested final beta to 2.1.0 stable; then start
+2.2.0-beta.1. Any change after a beta is published goes into the next beta.
+
+| Beta | Contents |
+|---|---|
+| 2.1.0-beta.1 | This branch: live preview (Whisper, Parakeet, Soniox, Deepgram), streaming Parakeet models, pure-Rust audio (app 162 → 64 MB), vanilla pill, post-roll, hotkey reliability |
+| beta.2 | Soniox realtime by default (073), first-word clipping (0.8), plan 070b edge cases, E2E harness (0.8b) |
+| beta.3 | Polish P1 (skip check, never-answer guard, keep-my-words switch) + Polish golden set and harness |
+| beta.4 | UI/UX pass (grouped sidebar, Settings → Advanced, Report a problem via Discord) + observability numbers (0.1b) |
+| later betas | Vocabulary engine, clean core (0.4a), CLI parity (0.4b), paste reliability (0.8a) |
+| 2.2 | Voice commands (below), real-time Polish, local Polish |
 
 ## Phase 1 — Measurement (starts in parallel with Phase 0)
 
@@ -96,7 +113,7 @@ Goal: one honest scoreboard everything else is judged against.
 
 ## Phase 2 — Final-text accuracy (the core bet)
 
-Goal: VoiceTypr gets the user's words right, local or cloud.
+Goal: Voicetypr gets the user's words right, local or cloud.
 
 1. **Vocabulary engine (all engines):**
    - Store: term, spoken aliases, scope (global / app / project), source
@@ -111,13 +128,33 @@ Goal: VoiceTypr gets the user's words right, local or cloud.
      after insertion, save the fix to their list and show "Saved to your list ·
      Undo" (undo removes it). Track which recognized word produced the fix so
      the same mistake is corrected for that user next time.
-2. **Polish excellence with current providers (priority over training our own):**
-   context assembly (app type, vocabulary, text before cursor with permission,
-   user style), faithful-by-default prompt, verbatim toggle, diff + undo,
-   never-answer guard, skip Polish when text is already clean, prompt caching.
-3. **JEV experiment (cloud path only):** route skip / light / full Polish,
-   dictation vs command, pick between vocabulary candidates, classify user
-   corrections. Keep only where it beats the baseline on quality *and* latency.
+   - Count how often each fix fires, so repeated fixes are promoted
+     automatically; scopes (global / app / project) keep lists short.
+2. **Polish excellence with current providers (priority over training our own).**
+   Polish = faithful cleanup: fillers, false starts, self-corrections,
+   punctuation, lists/formatting, the user's words spelled right. Style
+   rewriting (changing how the user sounds) is never the default — only per-app
+   rules or Command Mode. Priority:
+   1. Deterministic skip check before any AI call (short or already-clean text:
+      no fillers, no repeats, no "no wait / I mean") — output identical, zero
+      wait; when in doubt, Polish runs. Never-answer guard. "Keep my words
+      exactly" switch.
+   2. Polish golden set + harness (Phase 1.2) — every change measured.
+   3. Undo Polish: one key swaps the pasted text back to the raw transcript.
+   4. Speed: fastest non-reasoning (or minimal-reasoning) default models; prompt
+      order = fixed instructions → user vocabulary/style → dictation, so
+      provider caching applies once prompts pass ~1k tokens; connection warm-up
+      (shipped).
+   5. Context assembly: app type, vocabulary, text before cursor (with
+      permission), user style.
+3. **Decision-model experiment** (researched 2026-09-27): TypeSafe **Jev**
+   (cloud API), Supersonic Labs **Julia-1** (144M, Apache-2.0, ONNX, CPU — the
+   only local option; strong at 2–5-way choices, weak at many classes), Respan
+   **Span-01** (cloud hallucination/injection scorer — offline eval of Polish
+   faithfulness, not an in-app step). Uses: skip / light / full Polish,
+   classify user corrections (vocabulary fix vs rewrite). Keep only where it
+   beats the deterministic check on quality *and* latency. Local only if it
+   clearly helps; cloud is fine for Plus (managed) and Core (BYOK).
 4. **Engines:** FluidAudio upgrade (0.17.x) + Parakeet Ultra option, after 0.2.
 5. **Hardware-aware defaults:** detect GPU; choose engine/model/threads
    accordingly; tuned CPU settings for machines without a GPU.
@@ -125,7 +162,8 @@ Goal: VoiceTypr gets the user's words right, local or cloud.
 ## Phase 3 — Speed and real time
 
 1. **Real-time Polish:** polish each finished sentence while the user speaks,
-   keep the last 1–2 sentences revisable, final pass at stop. Works with cloud
+   keep the last 1–2 sentences revisable, final pass at stop. Only for longer
+   dictations (roughly 20 s+); short ones keep one final pass (faster). Works with cloud
    providers and with the local Polish model (llama.cpp sidecar). Depends on
    stable live text (0.2, 0.4).
 2. **Stop → text:** consider making the Parakeet stream final authoritative for
@@ -142,6 +180,23 @@ Goal: VoiceTypr gets the user's words right, local or cloud.
    collisions); queue cap; pill shows "Recording · N processing"; Escape cancels
    only the current capture; text goes where the cursor is when each result is
    ready. The 0.4a clean-core design must model this from the start.
+
+## Voice commands (2.2, founder idea 2026-09-27)
+
+1. **Editing while dictating:** "new line", "new paragraph", "scratch that" —
+   local, instant, always undoable.
+2. **Command Mode (2.2 headline):** a second hotkey; with text selected, "make
+   this shorter / translate / turn into bullets / reply politely"; with nothing
+   selected, "write an email declining the meeting". Reuses the Polish
+   providers (cloud, local, agent CLIs).
+3. **Actions (2.3+):** "open Slack", "remind me at 5", "add this to my notes"
+   via macOS Shortcuts first, agents/tools later; anything that sends or deletes
+   asks first.
+
+Rule: commands get their own trigger — never guess command vs dictation from
+the words. Snippets already exist (whole-utterance trigger → text,
+`writing/library_rules.rs::match_snippet`); 2.2 adds "save that as a snippet"
+by voice. Builds on the clean pipeline (0.4a).
 
 ## Live preview for every engine (researched 2026-09-27)
 
@@ -179,8 +234,11 @@ on-device, Gemini Live, OpenAI.
 
 1. **Local Polish v1:** llama.cpp server as a warm sidecar (in-process linking
    clashes with the Whisper library's copy of ggml). English: S1-mini vs
-   SpeakoFlow Mini on the golden set; pre-load the prompt while the user speaks.
-   Windows without GPU may need the cloud path.
+   SpeakoFlow Mini on the golden set (watch EG-1 by Envious Labs); pre-load the
+   prompt while the user speaks. Default on machines that can carry it (Apple
+   Silicon or a capable GPU, ~16 GB RAM — measure the line), offered as a
+   one-click download we ask about first; weaker machines use AI Polish in the
+   cloud (Plus managed or BYOK). Gives Core users Polish with no key.
 2. **Own Polish model:** small Qwen3.5 fine-tune, multilingual (incl. Bangla,
    Hindi, Vietnamese, Chinese — no open cleanup model exists for them).
    Training data from consented user corrections (footnote: if we ever train
@@ -196,7 +254,7 @@ on-device, Gemini Live, OpenAI.
   cannot use the mic → app-session hop, like Wispr), Android keyboard (mic
   allowed). Apple on-device dictation as the no-download default on iOS.
 - Siri / Shortcuts / Action Button via App Intents; Android assistant later.
-- Windows Copilot key: register VoiceTypr as a Copilot key provider in the
+- Windows Copilot key: register Voicetypr as a Copilot key provider in the
   Store package (cheap — can move earlier).
 - Watch later.
 
@@ -223,19 +281,21 @@ when features ship, not before.
 
 ## Decisions needed from the founder
 
+Resolved 2026-09-27: Phase 0 started; `main` merged into the branch; Soniox
+speed fix ships in 2.1.0-beta.2; Parakeet CTC vocabulary boosting from `main`
+is kept; BlackHole approved for the E2E harness; Report a problem replies via
+Discord (no email field).
+
 Needed now:
-1. **Start Phase 0?** Commit the two tested sidecar fixes; the implementer
-   agent writes plan 070 code, Codex reviews, Claude runs the checks.
-2. **Soniox speed fix — when do users get it?** As a small update from `main`
-   soon, or together with this branch later?
-3. **Bring `main`'s latest code into this branch** (the July hold) once plan 070 lands?
+1. **Discord invite URL** for Report a problem and the beta community.
 
 Needed later:
-4. Bring back the optional Parakeet word-boosting download (~98 MB), removed in July?
-5. S1-mini must be credited "S1-mini by Superwhisper" — OK on an About screen?
-6. Plus: 3 devices or unlimited?
-7. Opt-in recording sharing as described in Phase 1.4?
-8. API keys to test Muse, Gemini 3.5 Transcribe and JEV; R2T2 license when we test it.
+2. Always-open microphone for pre-roll (mic indicator stays on) — only if
+   measuring shows reordering the start path isn't enough.
+3. S1-mini must be credited "S1-mini by Superwhisper" — OK on an About screen?
+4. Plus: 3 devices or unlimited?
+5. Opt-in recording sharing as described in Phase 1.4?
+6. API keys to test Muse, Gemini 3.5 Transcribe and JEV; R2T2 license when we test it.
 
 ## Validation pass (2026-09-27)
 
@@ -247,6 +307,13 @@ Real speech, streamed in real time through the sidecar (FluidAudio 0.15.5), word
 | Unified English (native streaming) | 0–2.9% / 0–2.9% | — | — | 1.0–1.8 s |
 | Nemotron multilingual (native streaming) | 0–6.7% / 0–6.7% | 11–28% / 15–34% | 0–4.9% / 0–4.9% | 1.0–2.1 s |
 
+Audio decoder A/B (2026-09-27, after removing ffmpeg): 9 real clips (EN/DE/ES,
+one 52 s) × 4 formats (mp3, m4a, opus, 48 kHz stereo WAV), ffmpeg → 16 kHz vs
+the pure-Rust decoder, Parakeet v3 via the CLI: identical WER on 7/9 clips in
+every format; on the other two the Rust decoder was better (DE opus 3.7 vs 7.4;
+ES mp3/m4a/opus 0.0/2.4/4.9 vs 7.3). Never worse; 0 errors in 36 pairs. Mic
+dictation never depended on ffmpeg (in-process conversion; ffmpeg was a fallback).
+
 Reads: the synthetic corpus was misleading (Unified/Nemotron are fine); TDT decode-ahead still degrades non-English live text badly → plan 070 stays; MLS references are normalized book text, so German numbers are partly normalization.
 
 Re-verified facts: post-roll 250 ms is defensible (Handy uses 450 ms offline hangover + 450 ms pre-roll; tune from the new post-roll metric); FluidAudio latest is 0.17.4, Parakeet Ultra beats v3 everywhere (int8 ~595 MB, same 25 languages); S1-mini naming clause confirmed; llama.cpp supports Qwen3-ASR (PR #19441) but R2T2's streaming mode may need its own runtime — test before planning on it; ggml duplicate-symbol issue unresolved → sidecar; Soniox realtime $0.12/h vs async $0.10/h, same context/vocabulary support, 5 h sessions; Gemini 3.5 Transcribe GA 2026-09-25; Muse zero-data-retention; Apple SpeechAnalyzer language list and vocabulary support must be verified on a macOS 26 build. Distribution: Store installs are Microsoft-signed (link the site's Windows button to the Store); Azure signing is US/Canada-only for individuals and no signing clears SmartScreen instantly; SignPath for a paid AGPL binary is untested — apply and ask; the EULA's anti-redistribution clauses likely conflict with AGPL (legal review).
@@ -255,6 +322,6 @@ Re-verified facts: post-roll 250 ms is defensible (Handy uses 450 ms offline han
 
 - Parakeet preview root cause + experiment: [plan 070](070-parakeet-full-context-preview.md), `docs/reports/2026-09-26-parakeet-recovery.md`.
 - FluidAudio 0.17.4 probe: plan 070 appendix (`.tmp/fa-upgrade`).
-- Soniox: `main` uses upload → job → poll every 1 s; realtime only in live-preview mode on this branch (`commands/audio.rs` `build_soniox_stream_sink_factory`).
-- Parakeet has no vocabulary support (`provider_capabilities.rs`).
+- Soniox: regular mode uses upload → job → poll every 1 s; realtime WS only in live-preview mode (`commands/audio.rs` `build_soniox_stream_sink_factory`), where the WS final is already authoritative (`take_cloud_ws_final`, `commands/audio.rs:6332`) → plan 073.
+- Parakeet TDT supports custom vocabulary through the optional CTC boosting models kept from `main` (see `docs/ARCHITECTURE.md`).
 - Research: user pains (insertion, faithful cleanup, vocabulary, live preview), local Polish shortlist, competitor issues and pricing — summarized in the session; sources linked there.

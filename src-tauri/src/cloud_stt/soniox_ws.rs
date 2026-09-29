@@ -192,9 +192,10 @@ async fn run_task<F>(
                 }
                 Some(Control::Finalize) => {
                     finalizing = true;
-                    // An empty binary frame tells Soniox end-of-audio; it flushes
-                    // pending finals then sends `finished:true`.
-                    let _ = write.send(Message::binary(Vec::<u8>::new())).await;
+                    // Soniox ends the stream on an EMPTY TEXT message (an empty
+                    // binary frame is ignored); it then flushes pending finals and
+                    // sends `finished:true`.
+                    let _ = write.send(Message::text("")).await;
                 }
                 Some(Control::Cancel) | None => {
                     // Cancelled: the result must never read as a completed transcript

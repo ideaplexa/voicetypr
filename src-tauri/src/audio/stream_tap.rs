@@ -112,11 +112,22 @@ impl StreamTapWorkerSummary {
     }
 }
 
+#[cfg(test)]
 pub fn spawn_noop_worker(
     generation: u64,
     chunk_capacity: usize,
     cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     sink: Option<Box<dyn StreamTapSink>>,
+) -> StreamTapHandle {
+    spawn_noop_worker_with_factory(generation, chunk_capacity, cancelled, sink, None)
+}
+
+pub fn spawn_noop_worker_with_factory(
+    generation: u64,
+    chunk_capacity: usize,
+    cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
+    sink: Option<Box<dyn StreamTapSink>>,
+    sink_after_play: Option<(StreamTapSinkFactory, u32, u16, Receiver<()>)>,
 ) -> StreamTapHandle {
     let (tx, rx) = mpsc::sync_channel::<StreamTapMsg>(STREAM_QUEUE_CAPACITY);
     let (pool_tx, pool_rx) = mpsc::sync_channel::<Vec<i16>>(STREAM_RECYCLE_CAPACITY);
@@ -132,6 +143,21 @@ pub fn spawn_noop_worker(
     let worker_pool_tx = pool_tx.clone();
     let worker_tx = tx.clone();
     let worker = thread::spawn(move || {
+        let sink = if let Some((factory, sample_rate, channels, play_rx)) = sink_after_play {
+            if play_rx.recv().is_err() {
+                return StreamTapWorkerSummary {
+                    generation,
+                    frames: 0,
+                    samples: 0,
+                    dropped: 0,
+                    cancelled: true,
+                    stale: false,
+                };
+            }
+            factory(sample_rate, channels)
+        } else {
+            sink
+        };
         run_noop_worker(
             rx,
             worker_pool_tx,
@@ -156,6 +182,29 @@ pub fn spawn_noop_worker(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn maybe_spawn_noop_worker_after_play(
+    enabled: bool,
+    generation: u64,
+    chunk_capacity: usize,
+    cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
+    sink_factory: Option<StreamTapSinkFactory>,
+    sample_rate: u32,
+    channels: u16,
+    play_rx: Receiver<()>,
+) -> Option<StreamTapHandle> {
+    enabled.then(|| {
+        spawn_noop_worker_with_factory(
+            generation,
+            chunk_capacity,
+            cancelled,
+            None,
+            sink_factory.map(|factory| (factory, sample_rate, channels, play_rx)),
+        )
+    })
+}
+
+#[cfg(test)]
 pub fn maybe_spawn_noop_worker(
     enabled: bool,
     generation: u64,
@@ -378,6 +427,48 @@ mod tests {
 
     fn not_cancelled() -> Arc<dyn Fn() -> bool + Send + Sync> {
         Arc::new(|| false)
+    }
+
+    #[test]
+    fn blocking_sink_factory_starts_only_after_play_and_does_not_block_it() {
+        let _lifecycle_guard = crate::tests::RECORDING_LIFECYCLE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let generation = begin_recording_generation();
+        let played = Arc::new(AtomicBool::new(false));
+        let release_factory = Arc::new(AtomicBool::new(false));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let played_in_factory = played.clone();
+        let release_in_factory = release_factory.clone();
+        let factory: StreamTapSinkFactory = Arc::new(move |_, _| {
+            assert!(played_in_factory.load(Ordering::SeqCst));
+            let _ = entered_tx.send(());
+            while !release_in_factory.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(1));
+            }
+            None
+        });
+        let (play_tx, play_rx) = mpsc::channel();
+        let handle = maybe_spawn_noop_worker_after_play(
+            true,
+            generation,
+            4,
+            not_cancelled(),
+            Some(factory),
+            16_000,
+            1,
+            play_rx,
+        )
+        .unwrap();
+        assert!(entered_rx.try_recv().is_err());
+        played.store(true, Ordering::SeqCst);
+        play_tx.send(()).unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        // The factory is still blocked here, yet the simulated play completed.
+        assert!(played.load(Ordering::SeqCst));
+        release_factory.store(true, Ordering::SeqCst);
+        let (_, finalizer) = handle.into_rt();
+        finalizer.finalize().join().unwrap();
     }
 
     struct CountingSink {

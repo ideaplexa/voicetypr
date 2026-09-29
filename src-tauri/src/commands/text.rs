@@ -510,7 +510,7 @@ fn insert_via_clipboard(
     }
 
     // Commit clipboard restoration state before best-effort feedback. The cue
-    // means VoiceTypr successfully completed its paste command; arbitrary
+    // means Voicetypr successfully completed its paste command; arbitrary
     // target applications do not expose a reliable text-acceptance signal.
     if play_completed_cue {
         if let Some(app) = app_handle.as_ref() {

@@ -32,6 +32,18 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
+Plan 078 — LOCAL CHECKS PASSED / NEEDS PostHog delivery check — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed): one privacy-safe `dictation.completed` PostHog event with typed numbers (stop→text, start latency, transport, outcome, paste, preview) — observability 0.1b for beta.2. See `078-dictation-telemetry.md`.
+
+Plan 077 — SPEC — Claude 2026-09-28: smaller Whisper models (official q8_0/q5_0 ggml: turbo 1.6 GB → 874/574 MB) chosen by a CI model-bench workflow on macOS + Windows. See `077-whisper-quantized-catalog.md`.
+
+Plan 076 — SPIKE — Claude 2026-09-28: Parakeet on Windows via ONNX in-process (`parakeet-rs` on `ort`, int8 TDT v3 ≈ 670 MB); spike measures WER/speed vs the macOS sidecar before integration. See `076-parakeet-on-windows.md`.
+
+Plan 075 — SPEC — Claude 2026-09-27: desktop E2E dictation harness — BlackHole 2ch virtual mic, isolated HOME profile, cliclick hotkeys, TextEdit target, stop→text/WER/first-word metrics. Runs before every 2.1 beta. See `075-desktop-e2e-harness.md`.
+
+Plan 074 — LOCAL CHECKS PASSED / NEEDS E2E first-word run — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed x4): first word not clipped — the "recording" cue waits for the first real audio callback, sink creation never delays capture, duplicate device probe removed, start latency measured. Target 2.1.0-beta.2 after 073. See `074-truthful-recording-start.md`.
+
+Plan 073 — LOCAL CHECKS PASSED / NEEDS real Soniox-key check — Claude 2026-09-27 (gpt-6-sol implemented, gpt-6-astra reviewed): Soniox streams every recording over the realtime WS (preview only controls the pill); REST stays the fallback. Target 2.1.0-beta.2. See `073-soniox-realtime-default.md`.
+
 Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
 
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.

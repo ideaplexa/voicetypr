@@ -63,7 +63,7 @@ export function TelemetrySection() {
       // launch, so say so instead of claiming reporting is live.
       toast.success(
         result.restart_required
-          ? "Crash reporting will turn on after you restart VoiceTypr."
+          ? "Crash reporting will turn on after you restart Voicetypr."
           : enabled
             ? "Crash reporting turned on."
             : "Crash reporting turned off.",

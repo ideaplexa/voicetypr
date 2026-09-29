@@ -1,4 +1,4 @@
-# VoiceTypr got ~60% smaller — by deleting ffmpeg
+# Voicetypr got ~60% smaller — by deleting ffmpeg
 
 **TL;DR:** We replaced the bundled ffmpeg + ffprobe binaries (~98 MB per platform) with
 a pure-Rust audio pipeline. The macOS app bundle dropped **60%** (162 MB → 64 MB) and the
@@ -19,7 +19,7 @@ the ffmpeg removal — not build noise.
 | Installer (`.dmg`, compressed) | 70 MB | **24 MB** | **−64%** |
 | Bundled 3rd-party binaries | 98 MB (ffmpeg 49 + ffprobe 49) | **0 MB** | **−98 MB** |
 
-Cross-check against what we actually shipped: VoiceTypr **v2.0.4**'s Apple-Silicon `.dmg`
+Cross-check against what we actually shipped: Voicetypr **v2.0.4**'s Apple-Silicon `.dmg`
 was **63 MB**. The new installer is **24 MB**. That is the number a user downloads.
 
 **Windows:** the same ~98 MB of `ffmpeg.exe` + `ffprobe.exe` comes out of every Windows
@@ -35,7 +35,7 @@ of it regardless.
 ## What actually changed
 
 **Before:** every time you transcribed anything that wasn't already a 16 kHz mono WAV —
-an imported mp3, an m4a voice memo, a video's audio track — VoiceTypr shelled out to a
+an imported mp3, an m4a voice memo, a video's audio track — Voicetypr shelled out to a
 **bundled ffmpeg process**, wrote a temp WAV to disk, read it back, and cleaned up. Two
 50 MB binaries rode along in every download to do it, and CI pulled them from a third-party
 mirror (gyan.dev) on every build.
@@ -94,7 +94,7 @@ bounded-memory test.
 > engine in public copy. These are drafts for founder sign-off._
 
 **Short:**
-> VoiceTypr just got ~60% smaller. Same offline transcription, same formats (mp3, m4a, mp4,
+> Voicetypr just got ~60% smaller. Same offline transcription, same formats (mp3, m4a, mp4,
 > webm, mkv…), a third of the download. We deleted 98 MB of bundled media binaries and rebuilt
 > the audio pipeline in pure Rust — smaller, faster, and it can't crash on a weird file anymore.
 

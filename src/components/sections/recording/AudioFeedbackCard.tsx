@@ -55,7 +55,7 @@ export function AudioFeedbackCard() {
         <FieldContent>
           <FieldLabel htmlFor="sound-on-paste-success">Paste completed</FieldLabel>
           <FieldDescription>
-            Play a sound after VoiceTypr successfully sends the paste command.
+            Play a sound after Voicetypr successfully sends the paste command.
           </FieldDescription>
         </FieldContent>
         <Switch

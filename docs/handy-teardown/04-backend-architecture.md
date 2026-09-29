@@ -608,7 +608,7 @@ So the full data path is: **cpal RT thread** â†’ `AudioChunk::Samples` (mpsc) â†
 
 ---
 
-## 8. VoiceTypr takeaways
+## 8. Voicetypr takeaways
 
 ### High
 

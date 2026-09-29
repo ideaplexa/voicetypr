@@ -504,6 +504,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         0,
         std::sync::Arc::new(|| false),
         None,
+        std::time::Instant::now(),
     )?;
     eprintln!("Recording… stop by silence.");
     let stop_message = recorder.wait_for_recording_end()?;

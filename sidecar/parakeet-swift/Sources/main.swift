@@ -346,6 +346,12 @@ final class ActiveStreamSession {
     var latestPartial = ""
     var decodeAheadDrainTask: Task<Void, Never>?
     var decodeAheadNoMoreInput = false
+    var finalizationTask: Task<Void, Never>?
+    var finalizationCancelled = false
+
+    nonisolated static func shouldSendFinal(isCurrent: Bool, wasCancelled: Bool, taskCancelled: Bool) -> Bool {
+        isCurrent && !wasCancelled && !taskCancelled
+    }
 
     init(engine: Engine, sampleRate: Double, channels: Int, encoder: JSONEncoder) {
         self.engine = engine
@@ -382,6 +388,7 @@ final class ActiveStreamSession {
             await drain.value
         }
         decodeAheadDrainTask = nil
+        guard !Task.isCancelled else { return "" }
         return await decodeSession.finalize()
     }
 
@@ -1026,7 +1033,7 @@ enum DecodeAheadV2Harness {
         return planner.apply(tokens: tokens, text: text, modelReturnedTimings: timings, window: window, final: final)
     }
 
-    static func run() {
+    static func run() async {
         var failures = 0
         func check(_ name: String, _ ok: Bool, detail: String = "") {
             let failureDetail = !ok && !detail.isEmpty ? " — \(detail)" : ""
@@ -1396,6 +1403,21 @@ enum DecodeAheadV2Harness {
             && longTiminglessFinal?.startAbs == 20 * DecodeAheadPlanner.sampleRate
             && repeatFinal.committed == "Hello Hello world")
 
+        let interruptedFinalize = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(20))
+            return ActiveStreamSession.shouldSendFinal(
+                isCurrent: true, wasCancelled: true, taskCancelled: Task.isCancelled
+            )
+        }
+        interruptedFinalize.cancel()
+        let emittedAfterCancel = await interruptedFinalize.value
+        check("cancel_interrupts_finalize_and_suppresses_final",
+            !emittedAfterCancel && ActiveStreamSession.shouldSendFinal(
+                isCurrent: true, wasCancelled: false, taskCancelled: false
+            ) && !ActiveStreamSession.shouldSendFinal(
+                isCurrent: false, wasCancelled: false, taskCancelled: false
+            ))
+
         fputs("decode_ahead_v2_harness: \(failures == 0 ? "ok" : "\(failures) failure(s)")\n", stderr)
         exit(failures == 0 ? 0 : 1)
     }
@@ -1493,7 +1515,7 @@ struct ParakeetSidecar {
             return
         }
         if CommandLine.arguments.contains("--decode-ahead-v2-harness") {
-            DecodeAheadV2Harness.run()
+            await DecodeAheadV2Harness.run()
             return
         }
 
@@ -1635,6 +1657,19 @@ struct ParakeetSidecar {
                 sendError("parse_error", message: "Failed to parse JSON: \(error)", encoder: encoder)
             }
         }
+        // The host may close stdin immediately after finalize_stream. Give the
+        // response task the same 30 s allowed by the host before leaving main.
+        if let session = activeStreamSession, let task = session.finalizationTask {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+            while session.finalizationTask != nil && ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            if session.finalizationTask == nil {
+                await task.value
+            } else {
+                task.cancel()
+            }
+        }
     }
 
     static func loadSelectedModel(
@@ -1744,7 +1779,7 @@ struct ParakeetSidecar {
         )
     }
 
-    // VoiceTypr stores bare ISO-639 codes; the native bundle uses regional
+    // Voicetypr stores bare ISO-639 codes; the native bundle uses regional
     // prompt_dictionary keys for these languages.
     static func nemotronLanguageHint(_ language: String?) -> String {
         switch language?.lowercased() {
@@ -2799,6 +2834,27 @@ struct ParakeetSidecar {
             sendError("stream_not_active", message: "No active stream session", encoder: encoder)
             return
         }
+        if case .decodeAhead(let decodeSession) = session.engine {
+            guard session.finalizationTask == nil else {
+                sendError("stream_busy", message: "Stream finalization is already in progress", encoder: encoder)
+                return
+            }
+            // Return to the stdin loop so cancel_stream can arrive during a
+            // multi-pass final decode. The session remains active until this ends.
+            session.finalizationTask = Task { @MainActor in
+                defer { session.finalizationTask = nil }
+                let finalText = await session.finalizeDecodeAhead(decodeSession)
+                guard ActiveStreamSession.shouldSendFinal(
+                    isCurrent: activeStreamSession === session,
+                    wasCancelled: session.finalizationCancelled,
+                    taskCancelled: Task.isCancelled
+                ) else { return }
+                activeStreamSession = nil
+                session.forwarder?.cancel()
+                sendResponse(StreamFinalResponse(text: finalText), encoder: encoder)
+            }
+            return
+        }
         activeStreamSession = nil
 
         do {
@@ -2812,8 +2868,8 @@ struct ParakeetSidecar {
                 finalText = try await withLibraryStdoutRedirected {
                     try await manager.finish()
                 }
-            case .decodeAhead(let decodeSession):
-                finalText = await session.finalizeDecodeAhead(decodeSession)
+            case .decodeAhead:
+                return // Handled by the cancellable task above.
             case .unified(let manager):
                 finalText = try await manager.finish()
             case .nemotronMultilingual(let manager):
@@ -2834,7 +2890,8 @@ struct ParakeetSidecar {
             }
             return
         }
-        activeStreamSession = nil
+        session.finalizationCancelled = true
+        session.finalizationTask?.cancel()
         do {
             switch session.engine {
             case .slidingWindow(let manager):
@@ -2855,6 +2912,10 @@ struct ParakeetSidecar {
         } catch {
             log("⚠️ Stream cancel cleanup failed: \(error.localizedDescription)")
         }
+        if let finalizationTask = session.finalizationTask {
+            await finalizationTask.value
+        }
+        if activeStreamSession === session { activeStreamSession = nil }
         session.forwarder?.cancel()
         if emitResponse {
             sendResponse(StreamCancelledResponse(), encoder: encoder)

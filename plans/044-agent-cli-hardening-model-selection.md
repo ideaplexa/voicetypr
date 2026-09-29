@@ -176,7 +176,7 @@ Add exact-argv tests for every provider, including selected model and empty-mode
 
 In `cold_spawn_and_collect` and auth/model-discovery subprocesses:
 
-- Create `tempfile::TempDir` with a VoiceTypr prefix.
+- Create `tempfile::TempDir` with a Voicetypr prefix.
 - Keep the `TempDir` owner alive until the child has exited or been killed.
 - Set `current_dir(temp_dir.path())`.
 - Treat stdin `write_all` failure as `AiProviderError::Internal`; close stdin after a successful write.
@@ -415,7 +415,7 @@ Additionally for Claude, directly verify the final safe-mode invocation on the l
 1. Native `.exe` installation resolves and runs.
 2. A `.cmd`/`.bat`/PowerShell-only installation is reported as incompatible and is never executed.
 3. When an unsafe candidate precedes a safe native executable on PATH, the later native executable wins.
-4. Install into an existing PATH directory while VoiceTypr runs; Refresh detects it without restart.
+4. Install into an existing PATH directory while Voicetypr runs; Refresh detects it without restart.
 5. Add a new PATH directory; Refresh may miss it, and restart guidance is accurate.
 6. Dictated shell metacharacters remain literal.
 7. No console window flashes and no child remains after timeout.
@@ -430,7 +430,7 @@ Observed on 2026-08-04:
 - Targeted process tests passed, including an outer-future-drop regression proving a descendant cannot survive cancellation of the CLI command future.
 - `pnpm tauri build --debug --bundles app --ci` produced and Developer-ID-signed `Voicetypr.app`; debug notarization was intentionally skipped because notarization credentials were not present.
 - Real no-completion model discovery passed for pi and omp and returned nonempty exact selectors. Real omp default-model polish passed.
-- Real Claude polish reached the authenticated service but returned the account's current `403 subscription disabled` response. Real pi polish hit the 9-second VoiceTypr deadline. These are not successful provider smoke results.
+- Real Claude polish reached the authenticated service but returned the account's current `403 subscription disabled` response. Real pi polish hit the 9-second Voicetypr deadline. These are not successful provider smoke results.
 - The signed app launched under native automation, but its main window rendered blank, so the Advanced picker and end-to-end app flow were not visually verified.
 - No physical Windows host was available. A macOS cross-check reached native dependency compilation but could not compile `ring` without Windows SDK headers; Windows runtime behavior remains unverified.
 - Independent backend and frontend adversarial re-reviews found no remaining merge-blocking code findings.

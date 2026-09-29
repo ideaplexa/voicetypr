@@ -1,4 +1,4 @@
-# VoiceTypr performance roadmap pressure-test review
+# Voicetypr performance roadmap pressure-test review
 
 > Review target: `docs/voicetypr-perf/00-MASTER-ROADMAP.md` plus supporting slices `01`-`05`, `07`, streaming context `../handy-teardown/06-oracle-decision.md`, and spot-checks in VT source. This is a pressure test, not a rubber stamp.
 

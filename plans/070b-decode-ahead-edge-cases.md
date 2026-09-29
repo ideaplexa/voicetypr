@@ -1,6 +1,8 @@
 # Plan 070b — Decode-ahead preview edge cases (follow-up to 070)
 
-Status: TODO. Source: fourth adversarial review of plan 070 (2026-09-27), no
+Status: PARTIAL (2026-09-28) — item 4 shipped in 2.1.0-beta.2; items 1-3 parked
+for a redesign. Attempts are on branch `wip/070b-full-attempt` (570da86a) and in
+the review notes below. Source: fourth adversarial review of plan 070 (2026-09-27), no
 blockers. All affect the live preview only; pasted text stays the batch
 decode. Must land before the Parakeet live final may ever become the pasted
 text (stop-to-text optimization).
@@ -20,3 +22,26 @@ text (stop-to-text optimization).
 4. **Cancel cannot interrupt finalize** (pre-existing, amplified by multi-pass
    finalize): run finalization as a cancellable task, keep session identity
    until completion, and gate `stream_final` after cancellation.
+
+## Outcome (2026-09-28)
+
+Item 4 (cancellable finalize, stream_final suppressed after cancel, EOF awaits
+finalize) passed every review round and ships. Items 1-3 went through five
+gpt-6-astra rounds; each fix created new counterexamples:
+
+- Item 1: per-word temporal compatibility duplicated text under coherent
+  +240 ms drift; a coherent-shift rule (±0.12 s around the median, |shift| ≤
+  1 s) then lost genuine repeats or duplicated text when jitter is incoherent.
+  Word timings alone cannot separate "same words, re-timed" from "new repeat".
+- Items 2-3: freezing saved words, window-scoped reconciliation and timing-less
+  finals kept producing duplicated/lost preview words in rare failure paths.
+
+Real speech (10 clips EN/DE/ES + 52 s) was identical to plan 070 in every
+variant, and all items affect only the live preview (pasted text = batch).
+
+Redesign direction: stop re-deriving alignment from each hypothesis; keep one
+running word lattice anchored to audio sample positions (committed words own
+their audio span; a new hypothesis only contributes words whose audio lies
+after the committed boundary, with the boundary moved only by agreement), and
+add a property-based fuzz harness (random repeats + timestamp jitter) before
+any rule change.

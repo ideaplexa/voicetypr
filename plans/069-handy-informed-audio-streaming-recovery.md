@@ -43,7 +43,7 @@ the user's current decisions control new work.
    last-word checks, cold/warm runs, p50/p95 latency, CPU/RSS, and exact
    source/model/binary identifiers. Preserve language and translation intent.
 6. **Deliver useful slices.** Clear model readiness, errors, and settings matter
-   more than copying Handy's architecture wholesale. Preserve VoiceTypr's
+   more than copying Handy's architecture wholesale. Preserve Voicetypr's
    existing product direction.
 
 Sources: [Handy synthesis](../docs/handy-teardown/00-README.md),

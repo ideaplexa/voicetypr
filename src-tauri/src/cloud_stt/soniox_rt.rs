@@ -81,6 +81,11 @@ impl SonioxRtFolder {
     pub(crate) fn ingest(&mut self, resp: &SonioxRtResponse) -> SonioxRtPartial {
         let mut tentative = String::new();
         for token in &resp.tokens {
+            // Control markers (`<end>` from endpoint detection, `<fin>` from
+            // manual finalization) are not speech and must never be pasted.
+            if is_control_token(&token.text) {
+                continue;
+            }
             if token.is_final {
                 // VERBATIM append — RT tokens carry their own leading spaces.
                 self.committed.push_str(&token.text);
@@ -123,10 +128,38 @@ pub(crate) fn rt_error_to_stt(code: i64) -> SttError {
     }
 }
 
+/// Soniox RT control tokens look like `<end>` / `<fin>`: angle brackets around
+/// a lowercase word, with no spaces.
+fn is_control_token(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.len() > 2
+        && trimmed.starts_with('<')
+        && trimmed.ends_with('>')
+        && trimmed[1..trimmed.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::transcription::stream::StreamSessionGate;
+
+    #[test]
+    fn control_tokens_are_never_committed_or_shown() {
+        let mut folder = SonioxRtFolder::new();
+        let partial = folder.ingest(&response(vec![
+            token("Hello", true),
+            token(" world.", true),
+            token("<end>", true),
+            token("<fin>", false),
+        ]));
+        assert_eq!(partial.committed, "Hello world.");
+        assert_eq!(partial.tentative, "");
+        // Real text that merely contains angle brackets is kept.
+        let partial = folder.ingest(&response(vec![token(" a <b> c", true)]));
+        assert_eq!(partial.committed, "Hello world. a <b> c");
+    }
 
     fn token(text: &str, is_final: bool) -> SonioxRtToken {
         SonioxRtToken {

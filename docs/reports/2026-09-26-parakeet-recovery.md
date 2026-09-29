@@ -77,7 +77,7 @@ performance comparisons or p50/p95 measurements.
   and restart return empty text. On 9.13 seconds both batch and preview return
   “The voice transcription are this record's latency atturs.”, omitting much of
   the utterance. An independent CPU-only program linked to the same FluidAudio
-  build reproduces both outputs, without VoiceTypr protocol/session code. Thus
+  build reproduces both outputs, without Voicetypr protocol/session code. Thus
   switching to CPU or relaxing shell permissions does not resolve this failure.
   A separate encoder probe confirms Float32 output and correct valid-frame
   lengths (64→8, 112→14, 300→38, 624→78); a simple output-shape mismatch was not
