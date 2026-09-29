@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { getModelDisplayName } from "@/lib/model-display";
 import { createLogger } from "@/lib/logger";
-import { applyHistoryFilters } from "./recentRecordingsHelpers";
+import { applyHistoryFilters, sourceLabel } from "./recentRecordingsHelpers";
 import { useRecentRecordingsActions } from "./useRecentRecordingsActions";
 
 const log = createLogger("recordings");
@@ -37,24 +37,16 @@ export function useRecentRecordings({
   useEffect(() => {
     let cancelled = false;
     const verifyRecordings = async () => {
-      log.debug("[RecentRecordings] Starting verification for", history.length, "items");
       const candidates = history.filter((item) => item.recording_file);
       const results = await Promise.all(
         candidates.map(async (item) => {
-          log.debug(
-            "[RecentRecordings] Checking recording:",
-            item.recording_file,
-            "for item:",
-            item.id,
-          );
           try {
             const exists = await invoke<boolean>("check_recording_exists", {
               filename: item.recording_file,
             });
-            log.debug("[RecentRecordings] Recording", item.recording_file, "exists:", exists);
             return { id: item.id, exists };
-          } catch (error) {
-            log.error(`Failed to verify recording ${item.recording_file}:`, error);
+          } catch {
+            log.error("Failed to verify saved recording availability");
             return null;
           }
         }),
@@ -69,12 +61,6 @@ export function useRecentRecordings({
           verified.add(result.id);
         }
       }
-      log.debug(
-        "[RecentRecordings] Verification complete. Items with recording_file:",
-        candidates.length,
-        "Verified:",
-        verified.size,
-      );
       setCheckedRecordings(checked);
       setVerifiedRecordings(verified);
     };
@@ -100,6 +86,8 @@ export function useRecentRecordings({
     return structural.filter(
       (item) =>
         item.text.toLowerCase().includes(q) ||
+        (item.writing?.context_hint?.app_name?.toLowerCase().includes(q) ?? false) ||
+        sourceLabel(item.writing?.source).toLowerCase().includes(q) ||
         (item.model && item.model.toLowerCase().includes(q)) ||
         (item.model && (getModelDisplayName(item.model) ?? "").toLowerCase().includes(q)),
     );

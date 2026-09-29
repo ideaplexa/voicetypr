@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { InfoButton } from "@/components/settings/settings-ui";
 import {
   Dialog,
   DialogContent,
@@ -7,24 +7,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { HelpCircle } from "lucide-react";
 
 export function RecordingGuideDialog() {
   return (
     <Dialog>
-      <DialogTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Recording guide"
-            className="size-7 rounded-full text-muted-foreground"
-          />
-        }
-      >
-        <HelpCircle className="size-4" />
-      </DialogTrigger>
+      <DialogTrigger render={<InfoButton label="Recording guide" />} />
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Recording guide</DialogTitle>

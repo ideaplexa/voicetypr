@@ -4,12 +4,14 @@ import { NO_NETWORK_SENTINEL } from "./sharingUtils";
 import type { BindingResult } from "./types";
 
 interface BindingResultsListProps {
+  pane?: boolean;
   bindingResults: BindingResult[];
   savedPort: string;
   onCopyAddress: (ip: string) => void;
 }
 
 export function BindingResultsList({
+  pane = false,
   bindingResults,
   savedPort,
   onCopyAddress,
@@ -26,6 +28,32 @@ export function BindingResultsList({
       failedBindings.push(result);
     }
   }
+
+  if (pane)
+    return (
+      <div className="flex flex-col gap-1">
+        {reachableBindings.length === 0 ? (
+          <span className="text-xs text-muted-foreground">No network address available</span>
+        ) : (
+          reachableBindings.map((result) => (
+            <button
+              key={result.ip}
+              type="button"
+              aria-label={`Copy address ${result.ip}:${savedPort}`}
+              onClick={() => onCopyAddress(result.ip)}
+              className="rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs text-muted-foreground hover:bg-accent"
+            >
+              {result.ip}:{savedPort} <Copy className="ml-1 inline size-3" />
+            </button>
+          ))
+        )}
+        {failedBindings.length > 0 ? (
+          <span className="text-xs text-muted-foreground">
+            Some network addresses could not be used.
+          </span>
+        ) : null}
+      </div>
+    );
 
   return (
     <div className="space-y-2">

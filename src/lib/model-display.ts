@@ -6,7 +6,7 @@ const KNOWN_MODEL_DISPLAY_NAMES: Record<string, string> = {
   "large-v3": "Large v3",
   "large-v3-turbo": "Large v3 Turbo",
   "large-v3-turbo-q8_0": "Large v3 Turbo (Q8)",
-  "parakeet-tdt-0.6b-v3": "Parakeet V3",
+  "parakeet-tdt-0.6b-v3": "Parakeet v3",
   "parakeet-tdt-0.6b-v2": "Parakeet V2 (English)",
   soniox: "Soniox (Cloud)",
   openai: "OpenAI (Cloud)",

@@ -5,7 +5,6 @@ import { EnhancementSettingsPanel } from "@/components/polish/EnhancementSetting
 import { EnhancementsProviderModals } from "@/components/polish/EnhancementsProviderModals";
 import { useAiProviderSettings, type ProviderTab } from "@/components/polish/useAiProviderSettings";
 import { usePolishSectionSettings } from "@/components/polish/usePolishSectionSettings";
-import { usePolishErrorEvents } from "@/components/polish/usePolishErrorEvents";
 import { usePolishSettingsLoad } from "@/components/polish/usePolishSettingsLoad";
 import {
   AGENT_CLI_DEFAULT_LABEL,
@@ -16,7 +15,7 @@ import {
 } from "@/components/polish/agentCli";
 import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { SettingsPage } from "@/components/settings/settings-ui";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
   const { settings, updateSettings } = useSettings();
@@ -94,7 +93,6 @@ export function EnhancementsSection() {
     loadEnhancementOptionsRef,
     loadWritingSettingsRef,
   });
-  usePolishErrorEvents();
 
   const isUsingCustomProvider = aiSettings.provider === "custom";
   const hasSelectedModel = Boolean(
@@ -148,6 +146,7 @@ export function EnhancementsSection() {
 
   return (
     <div className="h-full min-h-0 min-w-0 flex flex-col overflow-x-hidden">
+      <SettingsPage className="gap-[18px]">
       <EnhancementsHeader
         hasSelectedModel={hasSelectedModel}
         activeProviderName={activeProviderName}
@@ -157,8 +156,6 @@ export function EnhancementsSection() {
         onOpenProviderSetup={openProviderSetup}
       />
 
-      <ScrollArea className="flex-1 min-h-0 min-w-0 overflow-x-hidden">
-        <div className="min-w-0 max-w-full overflow-x-hidden pt-5 pb-4 pl-2 pr-4">
           <EnhancementSettingsPanel
             preset={enhancementOptions.preset}
             finalTextLanguage={effectiveFinalTextLanguage}
@@ -180,8 +177,7 @@ export function EnhancementsSection() {
               activeReasoningName,
             }}
           />
-        </div>
-      </ScrollArea>
+      </SettingsPage>
 
       <ProviderSetupDialog
         open={providerSetupOpen}

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Field,
   FieldContent,
@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { createLogger } from "@/lib/logger";
 import { updateService } from "@/services/updateService";
 import type { UpdateChannel } from "@/types";
@@ -23,8 +23,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, Rocket } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { SettingsPaneRow } from "@/components/settings/settings-ui";
 
 interface AppBehaviorCardProps {
+  pane?: boolean;
   updateChannel: string | null | undefined;
   checkUpdatesAutomatically: boolean | null | undefined;
   onUpdateChannelChange: (channel: UpdateChannel) => Promise<void>;
@@ -32,6 +34,7 @@ interface AppBehaviorCardProps {
   onLaunchAtStartupResolved: (enabled: boolean) => Promise<void> | void;
 }
 export function AppBehaviorCard({
+  pane = false,
   updateChannel,
   checkUpdatesAutomatically,
   onUpdateChannelChange,
@@ -123,6 +126,83 @@ export function AppBehaviorCard({
       setIsChangingUpdateChannel(false);
     }
   };
+
+  if (pane)
+    return (
+      <>
+        <SettingsPaneRow
+          className="min-h-[66px]"
+          title="Open at login"
+          description="Start Voicetypr quietly in the menu bar."
+          control={
+            <Switch
+              id="autostart"
+              aria-label="Open at login"
+              checked={autostartEnabled}
+              onCheckedChange={handleAutostartToggle}
+              disabled={autostartLoading}
+            />
+          }
+        />
+        {updateDistribution === "store" ? (
+          <SettingsPaneRow
+            className="min-h-[66px]"
+            title="Updates"
+            description="Updates are managed by Microsoft Store."
+          />
+        ) : updateDistribution === "direct" ? (
+          <>
+            <SettingsPaneRow
+              className="min-h-[66px]"
+              title="Updates"
+              description="Get new versions automatically."
+              control={
+                <Switch
+                  id="check-updates-automatically"
+                  aria-label="Updates"
+                  checked={checkUpdatesAutomatically ?? true}
+                  onCheckedChange={onCheckUpdatesAutomaticallyChange}
+                />
+              }
+            />
+            <SettingsPaneRow
+              className="min-h-[66px]"
+              title="Update channel"
+              description="Beta gets features first. You can switch back any time."
+              control={
+                <Select
+                  items={[
+                    { value: "stable", label: "Stable" },
+                    { value: "beta", label: "Beta" },
+                  ]}
+                  value={updateChannel ?? "stable"}
+                  onValueChange={(value) => value != null && void handleUpdateChannelChange(value)}
+                  disabled={isChangingUpdateChannel || isCheckingUpdate}
+                >
+                  <SelectTrigger className="w-[110px]" aria-label="Update channel">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stable">Stable</SelectItem>
+                    <SelectItem value="beta">Beta</SelectItem>
+                  </SelectContent>
+                </Select>
+              }
+            />
+          </>
+        ) : (
+          <SettingsPaneRow
+            className="min-h-[66px]"
+            title="Updates"
+            description={
+              updateDistribution === "loading"
+                ? "Checking update options…"
+                : "Update options unavailable."
+            }
+          />
+        )}
+      </>
+    );
 
   return (
     <div className="rounded-2xl border border-border bg-card p-4">

@@ -1,75 +1,146 @@
-// Direct imports for instant desktop app experience
+import { useState } from "react";
 import { AccountTab } from "./AccountTab";
-import { AdvancedTab } from "./AdvancedTab";
 import { EnhancementsTab } from "./EnhancementsTab";
+import { DictionarySection } from "@/components/sections/DictionarySection";
 import { ModelsTab } from "./ModelsTab";
 import { OverviewTab } from "./OverviewTab";
 import { RecordingsTab } from "./RecordingsTab";
 import { RecordingTab } from "./RecordingTab";
 import { SettingsTab } from "./SettingsTab";
-import { ShortcutsTab } from "./ShortcutsTab";
-import { NetworkSharingTab } from "./NetworkSharingTab";
-import { AgentCliTab } from "./AgentCliTab";
-import { AudioUploadSection } from "../sections/AudioUploadSection";
-import { ReportProblemSection } from "../sections/ReportProblemSection";
-import type { ScreenId } from "@/components/navigation";
-
-import type { SourceFilterProps } from "../sections/models/types";
+import { AudioUploadSection } from "@/components/sections/AudioUploadSection";
+import { ReportProblemSection } from "@/components/sections/ReportProblemSection";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { resolveScreen, type ScreenId, type SettingsPane } from "@/components/navigation";
+import type { SourceFilterProps } from "@/components/sections/models/types";
 
 interface TabContainerProps extends SourceFilterProps {
   activeSection: ScreenId;
   onNavigate?: (section: ScreenId) => void;
+  settingsPane?: SettingsPane;
+  onSettingsPaneChange?: (pane: SettingsPane) => void;
 }
 
 export function TabContainer({
   activeSection,
   onNavigate,
+  settingsPane,
+  onSettingsPaneChange,
   ...sourceFilterProps
 }: TabContainerProps) {
-  const renderTabContent = () => {
-    switch (activeSection) {
-      case "overview":
-        return <OverviewTab onNavigate={onNavigate} />;
+  const destination = resolveScreen(activeSection);
+  const [localSettingsPane, setLocalSettingsPane] = useState<SettingsPane>("general");
 
-      case "recordings":
-        return <RecordingsTab />;
+  let content;
+  switch (destination.screen) {
+    case "home":
+      content = (
+        <OverviewTab
+          onNavigate={onNavigate}
+          onNavigateSettingsPane={onSettingsPaneChange}
+          onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
+        />
+      );
+      break;
+    case "history":
+      content = (
+        <HistoryContent
+          key={activeSection}
+          initialUploadOpen={activeSection === "audio"}
+          onNavigate={onNavigate}
+          onNavigateSettingsPane={onSettingsPaneChange}
+          onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
+        />
+      );
+      break;
+    case "transcription":
+      content = <ModelsTab {...sourceFilterProps} />;
+      break;
+    case "polish":
+      content = <EnhancementsTab />;
+      break;
+    case "dictionary":
+      content = <DictionarySection />;
+      break;
+    case "recording":
+      content = <RecordingTab />;
+      break;
+    case "settings":
+      content = (
+        <SettingsTab
+          pane={destination.pane ?? settingsPane ?? localSettingsPane}
+          onNavigate={onNavigate}
+          onPaneChange={(pane) => {
+            setLocalSettingsPane(pane);
+            onSettingsPaneChange?.(pane);
+          }}
+        />
+      );
+      break;
+    case "help":
+      content = (
+        <ReportProblemSection
+          onNavigateSettingsPane={(pane) => {
+            setLocalSettingsPane(pane);
+            if (onSettingsPaneChange) onSettingsPaneChange(pane);
+            else onNavigate?.("settings");
+          }}
+        />
+      );
+      break;
+    case "license":
+      content = <AccountTab />;
+      break;
+    default:
+      content = (
+        <OverviewTab
+          onNavigate={onNavigate}
+          onNavigateSettingsPane={onSettingsPaneChange}
+          onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
+        />
+      );
+  }
+  return <div className="flex h-full min-h-0 flex-col">{content}</div>;
+}
 
-      case "audio":
-        return <AudioUploadSection />;
-      case "recording":
-        return <RecordingTab />;
-
-      case "general":
-        return <SettingsTab />;
-
-      case "shortcuts":
-        return <ShortcutsTab />;
-
-      case "models":
-        return <ModelsTab {...sourceFilterProps} />;
-
-      case "network":
-        return <NetworkSharingTab />;
-
-      case "agent":
-        return <AgentCliTab />;
-
-      case "advanced":
-        return <AdvancedTab />;
-
-      case "formatting":
-        return <EnhancementsTab />;
-
-      case "license":
-        return <AccountTab />;
-
-      case "report-problem":
-        return <ReportProblemSection />;
-
-      default:
-        return <OverviewTab onNavigate={onNavigate} />;
-    }
-  };
-
-  return <div className="h-full min-h-0 flex flex-col">{renderTabContent()}</div>;
+function HistoryContent({
+  initialUploadOpen,
+  onNavigate,
+  onNavigateSettingsPane,
+  onSourceFilterChange,
+}: {
+  initialUploadOpen: boolean;
+  onNavigate?: (screen: ScreenId) => void;
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
+  onSourceFilterChange?: SourceFilterProps["onSourceFilterChange"];
+}) {
+  const [uploadOpen, setUploadOpen] = useState(initialUploadOpen);
+  return (
+    <>
+      <RecordingsTab
+        onTranscribeFile={() => setUploadOpen(true)}
+        onNavigate={onNavigate}
+        onNavigateSettingsPane={onNavigateSettingsPane}
+        onSourceFilterChange={onSourceFilterChange}
+      />
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden bg-card p-0 text-card-foreground sm:max-w-3xl">
+          <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-14">
+            <DialogTitle>Transcribe a file…</DialogTitle>
+            <DialogDescription>
+              Choose an audio file to transcribe with your selected source.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto px-6 pb-6">
+            <AudioUploadSection />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }

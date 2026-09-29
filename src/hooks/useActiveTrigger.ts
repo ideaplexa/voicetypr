@@ -1,13 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import type { ShortcutBinding, ShortcutSettings } from "@/types/shortcuts";
+import { listen } from "@tauri-apps/api/event";
+import { loadEffectivePrimaryShortcut, type EffectivePrimaryShortcut } from "@/lib/primary-shortcut";
 import {
-  findActivePrimaryBinding,
   formatModifierLabel,
   formatPrimaryHotkeyLabel,
 } from "@/lib/shortcut-display";
+import type { PrimaryMode } from "@/lib/primary-shortcut";
 
 export interface ActiveTrigger {
+  mode: PrimaryMode;
   /** Full descriptive label for the active primary trigger (source of truth). */
   label: string;
   /** Raw combo hotkey string, if the active primary is a combo (`settings.hotkey`). */
@@ -30,33 +31,31 @@ export interface ActiveTrigger {
  * native primary binding in that case and resolves the label via the shared
  * `formatPrimaryHotkeyLabel`, keeping every display site consistent.
  */
-export function useActiveTrigger(hotkey: string | undefined): ActiveTrigger {
-  const [binding, setBinding] = useState<ShortcutBinding | null>(null);
-
+export function useActiveTrigger(settings: { hotkey?: string; recording_mode?: PrimaryMode } | null | undefined): ActiveTrigger {
+  const [effective, setEffective] = useState<EffectivePrimaryShortcut | null>(null);
+  // Tray writes refresh SettingsContext even when only recording_mode changes.
   useEffect(() => {
-    if (hotkey) return;
     let cancelled = false;
-    invoke<ShortcutSettings>("get_shortcut_settings")
-      .then((result) => {
-        if (!cancelled) setBinding(findActivePrimaryBinding(result.bindings));
-      })
-      .catch(() => {
-        if (!cancelled) setBinding(null);
-      });
-    return () => {
-      cancelled = true;
+    let unlisten: (() => void) | undefined;
+    const refresh = () => {
+      void loadEffectivePrimaryShortcut()
+        .then((result) => { if (!cancelled) setEffective(result); })
+        .catch(() => undefined);
     };
-  }, [hotkey]);
+    refresh();
+    void listen("shortcut-settings-changed", refresh).then((dispose) => {
+      if (cancelled) dispose(); else unlisten = dispose;
+    }).catch(() => undefined);
+    return () => { cancelled = true; unlisten?.(); };
+  }, [settings?.hotkey, settings?.recording_mode]);
 
-  // A combo primary (non-empty hotkey) wins; ignore any stale bare-modifier
-  // binding still in state from a previous empty-hotkey load.
-  const effectiveBinding = hotkey ? null : binding;
-  const kbdLabel =
-    hotkey ?? (effectiveBinding?.modifier ? formatModifierLabel(effectiveBinding.modifier) : null);
-
+  const binding = effective?.binding ?? null;
+  const hotkey = effective?.hotkey ?? (effective ? undefined : settings?.hotkey || undefined);
+  const label = !effective && !settings?.hotkey ? "Loading shortcut…" : formatPrimaryHotkeyLabel(binding, hotkey);
   return {
-    label: formatPrimaryHotkeyLabel(effectiveBinding, hotkey),
+    mode: effective ? (effective.mode === "hold" ? "push_to_talk" : "toggle") : settings?.recording_mode ?? "toggle",
+    label,
     hotkey,
-    kbdLabel: kbdLabel ?? formatPrimaryHotkeyLabel(effectiveBinding, hotkey),
+    kbdLabel: hotkey || (binding?.modifier ? formatModifierLabel(binding.modifier) : label),
   };
 }

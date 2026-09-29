@@ -171,6 +171,7 @@ export function LanguageSelection({
           <Button
             variant="outline"
             role="combobox"
+            aria-label="Spoken language"
             aria-expanded={open}
             disabled={englishOnly}
             className={cn("w-48 justify-between", className)}

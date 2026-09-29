@@ -22,15 +22,19 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 vi.mock("@/components/Sidebar", () => ({
-  Sidebar: () => <aside>Sidebar</aside>,
+  Sidebar: ({ onSectionChange }: { onSectionChange: (section: string) => void }) => (
+    <aside>
+      <button onClick={() => onSectionChange("history")}>History</button>
+    </aside>
+  ),
 }));
 
 vi.mock("@/components/tabs/TabContainer", () => ({
-  TabContainer: () => <main>Active section</main>,
+  TabContainer: ({ activeSection }: { activeSection: string }) => <main>{activeSection}</main>,
 }));
 
 vi.mock("@/components/ui/sidebar", () => ({
-  SidebarProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SidebarProvider: ({ children, style }: { children: ReactNode; style?: React.CSSProperties }) => <div data-testid="sidebar-provider" style={style}>{children}</div>,
   SidebarInset: ({ children, className }: { children: ReactNode; className?: string }) => (
     <section className={className}>{children}</section>
   ),
@@ -94,23 +98,22 @@ describe("AppShell tray recovery", () => {
     expect(screen.queryByText("Menu-bar icon unavailable")).not.toBeInTheDocument();
   });
 
-  it("aligns the sidebar toggle with the native window controls", async () => {
+  it("keeps the titlebar toggle accessible and routes sidebar navigation", async () => {
     getTrayStatusMock.mockResolvedValue({
       available: true,
       attempts: 0,
       lastError: null,
     });
 
-    render(<AppShell activeSection="overview" onSectionChange={vi.fn()} />);
+    const onSectionChange = vi.fn();
+    render(<AppShell activeSection="home" onSectionChange={onSectionChange} />);
 
     const titleBar = screen.getByRole("banner");
-    const toggle = screen.getByRole("button", { name: "Toggle Sidebar" });
-    const mainSurface = screen.getByText("Active section").closest("section");
+    expect(screen.getByTestId("sidebar-provider").style.getPropertyValue("--sidebar")).toBe("");
     expect(titleBar).toHaveAttribute("data-tauri-drag-region");
-    expect(titleBar).toHaveClass("h-9");
-    expect(toggle).toHaveClass("translate-y-1");
-    expect(mainSurface).toHaveClass("rounded-2xl", "bg-background");
-    expect(mainSurface).not.toHaveClass("border");
-    expect(mainSurface).not.toHaveClass("shadow-sm");
+    expect(screen.getByRole("button", { name: "Toggle Sidebar" })).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveTextContent("home");
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(onSectionChange).toHaveBeenCalledWith("history");
   });
 });

@@ -1,22 +1,19 @@
 import { HotkeyInput } from "@/components/HotkeyInput";
+import { KeyCaps } from "@/components/KeyCaps";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
-import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLegend,
-  FieldSet,
-  FieldTitle,
-} from "@/components/ui/field";
-import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/settings/SettingsButton";
+import { Switch } from "@/components/settings/SettingsSwitch";
+import { Segmented, SettingsCard } from "@/components/settings/settings-ui";
 import { useCanAutoInsert } from "@/contexts/ReadinessContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
 import { isMacOS } from "@/lib/platform";
+import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { formatPrimaryHotkeyLabel } from "@/lib/shortcut-display";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertCircle, Check, Edit2, X } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
+import { AlertCircle, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRecordingHotkey } from "./useRecordingHotkey";
 
@@ -24,9 +21,43 @@ const log = createLogger("recording-settings");
 
 export function CaptureControlsCard() {
   const { settings } = useSettings();
-  const showAccessibilityWarning = isMacOS;
   const canAutoInsert = useCanAutoInsert();
+  const [recording, setRecording] = useState(false);
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    void invoke<{ state: string }>("get_current_recording_state")
+      .then((current) => {
+        if (!disposed) setRecording(current.state === "recording");
+      })
+      .catch(() => undefined);
+    void listen<{ state: string }>("recording-state-changed", (event) => {
+      if (!disposed) {
+        setRecording(event.payload.state === "recording");
+        if (event.payload.state !== "recording") setLevel(0);
+      }
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else unlisteners.push(unlisten);
+      })
+      .catch(() => undefined);
+    void listen<number>("audio-level", (event) => {
+      if (!disposed) setLevel(Math.max(0, Math.min(1, event.payload)));
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else unlisteners.push(unlisten);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, []);
   const {
+    effective,
     nativeBinding,
     isEditingHotkey,
     pendingHotkey,
@@ -38,31 +69,25 @@ export function CaptureControlsCard() {
     startEditing,
     handleCancelHotkey,
     handleSaveHotkey,
+    changeRecordingMode,
   } = useRecordingHotkey();
-
   if (!settings) return null;
-
+  const hotkey = effective?.hotkey ?? (effective ? undefined : settings.hotkey);
+  const label = !effective && !settings.hotkey ? "Loading shortcut…" : formatPrimaryHotkeyLabel(nativeBinding, hotkey ?? undefined);
+  const caps = hotkey
+    ? shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows")
+    : [label];
   return (
-    <FieldSet className="gap-4 rounded-xl border border-border bg-card p-4">
-      <FieldLegend className="mb-1 text-base font-semibold">Capture controls</FieldLegend>
-
-      <Field orientation="responsive" className="items-start gap-3">
-        <FieldContent>
-          <FieldTitle>Recording Hotkey</FieldTitle>
-          <FieldDescription>
-            {isEditingHotkey
-              ? "Press a key or modifier, then save."
-              : "The shortcut that starts and stops recording."}
-          </FieldDescription>
-        </FieldContent>
-        <div className="w-full md:w-auto">
+    <div className="grid gap-[14px] sm:grid-cols-2">
+      <SettingsCard title="Dictation shortcut">
+        <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-[10px] bg-muted px-[14px] py-3">
           {isEditingHotkey ? (
-            <div className="space-y-3">
+            <div className="w-full space-y-2">
               <HotkeyInput
                 inline
                 value={pendingHotkey}
-                onChange={(v) => {
-                  setPendingHotkey(v);
+                onChange={(value) => {
+                  setPendingHotkey(value);
                   setPendingBareModifier(null);
                 }}
                 allowBareModifier
@@ -72,99 +97,96 @@ export function CaptureControlsCard() {
                 }}
                 placeholder="Press a key..."
               />
-              {pendingBareModifier && (
-                <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
+              {pendingBareModifier ? (
+                <label className="flex items-center gap-2 text-xs">
                   <Switch checked={holdToTalk} onCheckedChange={setHoldToTalk} id="hold-to-talk" />
-                  <span>Hold to talk (push-to-talk)</span>
+                  Hold to talk (push-to-talk)
                 </label>
-              )}
+              ) : null}
               <div className="flex gap-2">
                 <Button
-                  type="button"
                   size="sm"
                   onClick={handleSaveHotkey}
                   disabled={!pendingHotkey && !pendingBareModifier}
                 >
-                  <Check className="h-3.5 w-3.5" />
+                  <Check className="size-3" />
                   Save
                 </Button>
-                <Button type="button" size="sm" variant="outline" onClick={handleCancelHotkey}>
-                  <X className="h-3.5 w-3.5" />
+                <Button size="sm" variant="outline" onClick={handleCancelHotkey}>
+                  <X className="size-3" />
                   Cancel
                 </Button>
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <div className="flex min-h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-sm">
-                {formatPrimaryHotkeyLabel(nativeBinding, settings.hotkey)}
+            <>
+              <div
+                className="flex flex-1 flex-wrap gap-1.5"
+                aria-label={`Current shortcut: ${label}`}
+              >
+                <KeyCaps caps={caps} />
               </div>
-              <Button type="button" size="sm" variant="outline" onClick={startEditing}>
-                <Edit2 className="h-3.5 w-3.5" />
-                Edit
+              <Button size="sm" variant="ghost" className="text-sage" onClick={startEditing}>
+                Change
               </Button>
-            </div>
+            </>
           )}
         </div>
-      </Field>
-
-      <p className="text-xs text-muted-foreground">
-        Primary recording shortcut. Additional app shortcuts live in{" "}
-        <span className="font-medium text-foreground">Shortcuts</span>.
-      </p>
-
-      {!canAutoInsert && showAccessibilityWarning && (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
-            <div className="space-y-2">
-              <div>
-                <p className="text-sm font-medium text-amber-900 dark:text-amber-400">
-                  Accessibility permission required
-                </p>
-                <p className="text-xs text-amber-800 dark:text-amber-500">
-                  Voicetypr needs accessibility permission for global hotkeys and auto-insert.
-                </p>
-              </div>
-              <ol className="list-decimal space-y-0.5 pl-4 text-xs text-amber-800 dark:text-amber-500">
-                <li>Open System Settings</li>
-                <li>Go to Privacy &amp; Security → Accessibility</li>
-                <li>Add Voicetypr and enable it</li>
-              </ol>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-auto px-0 text-amber-700 hover:bg-transparent hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
-                onClick={async () => {
-                  try {
-                    await invoke("open_accessibility_settings");
-                  } catch (error) {
-                    log.error("Failed to open accessibility settings:", error);
-                    toast.error("Could not open settings. Please open System Settings manually.");
-                  }
-                }}
-              >
-                Open Accessibility Settings
-              </Button>
-            </div>
-          </div>
+        <div className="mt-3">
+          <Segmented
+            label="Recording mode"
+            value={effective?.mode === "hold" ? "push_to_talk" : "toggle"}
+            onValueChange={(value) => {
+              void changeRecordingMode(value as "toggle" | "push_to_talk");
+            }}
+            options={[
+              { value: "push_to_talk", label: "Hold to talk" },
+              { value: "toggle", label: "Press to start / stop" },
+            ]}
+          />
         </div>
-      )}
-
-      <Field orientation="responsive" className="items-center gap-3">
-        <FieldContent>
-          <FieldTitle>Microphone</FieldTitle>
-          <FieldDescription>Select your preferred audio input device.</FieldDescription>
-        </FieldContent>
-        <div className="w-full md:w-auto">
+        <p className="mt-2 text-xs text-muted-foreground">
+          Additional app shortcuts live in Shortcuts.
+        </p>
+        {!canAutoInsert && isMacOS ? (
+          <div className="mt-3 rounded-lg border border-warn/25 bg-warn-bg p-3 text-xs text-foreground">
+            <p className="flex items-center gap-2 font-medium">
+              <AlertCircle className="size-4 text-warn" />
+              Accessibility permission required
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              Voicetypr needs accessibility permission for global hotkeys and auto-insert.
+            </p>
+            <ol className="mt-2 list-decimal pl-4 text-muted-foreground">
+              <li>Open System Settings</li>
+              <li>Go to Privacy &amp; Security → Accessibility</li>
+              <li>Add Voicetypr and enable it</li>
+            </ol>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 px-0 text-sage"
+              onClick={async () => {
+                try {
+                  await invoke("open_accessibility_settings");
+                } catch (error) {
+                  log.error("Failed to open accessibility settings:", error);
+                  toast.error("Could not open settings. Please open System Settings manually.");
+                }
+              }}
+            >
+              Open Accessibility Settings
+            </Button>
+          </div>
+        ) : null}
+      </SettingsCard>
+      <SettingsCard title="Microphone">
+        <div className="mt-3">
           <MicrophoneSelection
             value={settings.selected_microphone || undefined}
             onValueChange={async (deviceName) => {
               try {
-                await invoke("set_audio_device", {
-                  deviceName: deviceName || null,
-                });
+                await invoke("set_audio_device", { deviceName: deviceName || null });
                 toast.success(`Microphone changed to: ${deviceName || "Default"}`);
               } catch (error) {
                 log.error("Failed to set microphone:", error);
@@ -173,7 +195,27 @@ export function CaptureControlsCard() {
             }}
           />
         </div>
-      </Field>
-    </FieldSet>
+        {recording ? (
+          <div
+            className="mt-3 flex h-[18px] items-center gap-[3px]"
+            role="meter"
+            aria-label="Microphone level"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(level * 100)}
+          >
+            {Array.from({ length: 24 }, (_, index) => (
+              <span
+                key={index}
+                className={`h-2 flex-1 rounded-sm ${index < Math.round(level * 24) ? "bg-sage" : "bg-muted"}`}
+              />
+            ))}
+          </div>
+        ) : null}
+        <p className="mt-3 text-xs text-muted-foreground">
+          Speak to test — start a dictation to see the level.
+        </p>
+      </SettingsCard>
+    </div>
   );
 }

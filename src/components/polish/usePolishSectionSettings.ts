@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import type { EnhancementOptions, EnhancementPreset } from "@/types/ai";
 import { fromBackendOptions, toBackendOptions } from "@/types/ai";
 import type { AppSettings } from "@/types";
-import type { WritingSettings } from "@/types/writing";
-import { defaultWritingSettings, mergeWritingSettings } from "@/types/writing";
+import { useWritingSettings } from "@/state/writingSettings";
 import { getErrorMessage } from "@/utils/error";
 import { createLogger } from "@/lib/logger";
 
@@ -25,16 +24,11 @@ export function usePolishSectionSettings({
   }>({
     preset: "PersonalDictation",
   });
-  const [writingSettings, setWritingSettings] = useState<WritingSettings>(defaultWritingSettings);
+  const writingSettings = useWritingSettings((state) => state.settings);
+  const loadWritingSettings = useWritingSettings((state) => state.load);
+  const handleWritingSettingsChange = useWritingSettings((state) => state.update);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const writingSaveGeneration = useRef(0);
   const enhancementSaveGeneration = useRef(0);
-  const writingSettingsRef = useRef(writingSettings);
-  const writingSaveQueueRef = useRef<Promise<void> | null>(null);
-
-  useEffect(() => {
-    writingSettingsRef.current = writingSettings;
-  }, [writingSettings]);
 
   const loadEnhancementOptions = async (aiEnabled: boolean, signal?: AbortSignal) => {
     try {
@@ -44,19 +38,6 @@ export function usePolishSectionSettings({
     } catch (error) {
       if (signal?.aborted) return;
       log.error("Failed to load Polish options:", error);
-    }
-  };
-
-  const loadWritingSettings = async (signal?: AbortSignal) => {
-    try {
-      const nextSettings = await invoke<Partial<WritingSettings>>("get_writing_settings");
-      if (signal?.aborted) return false;
-      setWritingSettings(mergeWritingSettings(nextSettings));
-      return true;
-    } catch (error) {
-      if (signal?.aborted) return false;
-      log.error("Failed to load writing settings:", error);
-      return false;
     }
   };
 
@@ -75,37 +56,6 @@ export function usePolishSectionSettings({
       }
       const message = getErrorMessage(error, "Failed to save Polish settings");
       toast.error(message);
-    }
-  };
-
-  const enqueueWritingSettingsSave = (
-    settingsToSave: WritingSettings,
-    rollbackSettings: WritingSettings,
-    generationAtEnqueue: number,
-  ) => {
-    const queue = writingSaveQueueRef.current ?? Promise.resolve();
-    writingSaveQueueRef.current = queue.then(async () => {
-      try {
-        await invoke("update_writing_settings", { settings: settingsToSave });
-      } catch (error) {
-        if (writingSaveGeneration.current === generationAtEnqueue) {
-          setWritingSettings(rollbackSettings);
-          writingSettingsRef.current = rollbackSettings;
-          const message = getErrorMessage(error, "Failed to save writing settings");
-          toast.error(message);
-        }
-      }
-    });
-  };
-
-  const handleWritingSettingsChange = (nextSettings: WritingSettings) => {
-    const rollbackSettings = writingSettingsRef.current;
-    const generationAtEnqueue = writingSaveGeneration.current + 1;
-    writingSaveGeneration.current = generationAtEnqueue;
-    setWritingSettings(nextSettings);
-    writingSettingsRef.current = nextSettings;
-    if (settingsLoaded) {
-      enqueueWritingSettingsSave(nextSettings, rollbackSettings, generationAtEnqueue);
     }
   };
 

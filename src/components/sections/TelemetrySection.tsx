@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { createLogger } from "@/lib/logger";
 import { toast } from "sonner";
+import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
 
 const log = createLogger("telemetry");
 
@@ -95,52 +96,44 @@ export function TelemetrySection() {
   const loading = diagnostics === null || analytics === null;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-base font-semibold">Privacy &amp; diagnostics</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Control anonymous crash reporting and product analytics independently.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-3 rounded-lg border border-border/50 bg-card p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Crash &amp; error reporting</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Anonymous crash reports that help us fix bugs faster.
-            </p>
-          </div>
-          <Switch
-            className="shrink-0"
-            checked={diagnostics?.enabled ?? true}
-            disabled={
-              pending !== null ||
-              diagnostics === null ||
-              (!diagnostics.available && !diagnostics.enabled)
-            }
-            onCheckedChange={updateDiagnostics}
-            aria-label="Enable crash and error reporting"
-          />
-        </div>
-
-        <div className="flex items-start justify-between gap-4 border-t border-border/50 pt-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Usage analytics</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Anonymous usage analytics that help us improve the product.
-            </p>
-          </div>
-          <Switch
-            className="shrink-0"
-            checked={analytics?.enabled ?? true}
-            disabled={
-              pending !== null || analytics === null || (!analytics.available && !analytics.enabled)
-            }
-            onCheckedChange={updateAnalytics}
-            aria-label="Enable usage analytics"
-          />
-        </div>
+    <div className="flex flex-col gap-[14px]">
+      <SettingsPaneCard title="Diagnostics">
+        <SettingsPaneRow
+          className="min-h-[62px]"
+          title="Crash & error reporting"
+          description="Sends scrubbed crash and error details so bugs can be fixed."
+          control={
+            <Switch
+              className="shrink-0"
+              checked={diagnostics?.enabled ?? true}
+              disabled={
+                pending !== null ||
+                diagnostics === null ||
+                (!diagnostics.available && !diagnostics.enabled)
+              }
+              onCheckedChange={updateDiagnostics}
+              aria-label="Enable crash and error reporting"
+            />
+          }
+        />
+        <SettingsPaneRow
+          className="min-h-[62px]"
+          title="Usage analytics"
+          description="Anonymous feature usage and speed numbers. Never audio or text."
+          control={
+            <Switch
+              className="shrink-0"
+              checked={analytics?.enabled ?? true}
+              disabled={
+                pending !== null ||
+                analytics === null ||
+                (!analytics.available && !analytics.enabled)
+              }
+              onCheckedChange={updateAnalytics}
+              aria-label="Enable usage analytics"
+            />
+          }
+        />
 
         {loading && (
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -148,11 +141,13 @@ export function TelemetrySection() {
             <span className="text-xs">Checking…</span>
           </div>
         )}
-
-        <p className="text-xs text-muted-foreground">
-          No audio, transcripts, or personal data — ever.
+      </SettingsPaneCard>
+      <SettingsPaneCard title="Never sent" className="pb-[14px]">
+        <p className="pt-1 text-[12.5px] text-muted-foreground">
+          Audio, transcripts, clipboard contents, prompts, API keys, file paths and window titles
+          are never sent.
         </p>
-      </div>
+      </SettingsPaneCard>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { FileAudio, FileText, Loader2 } from "lucide-react";
 
 export function AudioUploadFileList({

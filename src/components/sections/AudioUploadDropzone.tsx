@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { cn } from "@/lib/utils";
 import { Upload } from "lucide-react";
 

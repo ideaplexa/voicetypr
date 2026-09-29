@@ -1,12 +1,6 @@
-import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLegend,
-  FieldSet,
-  FieldTitle,
-} from "@/components/ui/field";
+import { Button } from "@/components/settings/SettingsButton";
+import { SettingsCard } from "@/components/settings/settings-ui";
+import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -93,9 +87,7 @@ export function TranscriptionPerformanceCard() {
   };
 
   return (
-    <FieldSet className="gap-4 rounded-xl border border-border bg-card p-4">
-      <FieldLegend className="mb-1 text-base font-semibold">Transcription performance</FieldLegend>
-
+    <SettingsCard title="Transcription performance">
       <Field orientation="responsive" className="items-center gap-3">
         <FieldContent>
           <FieldTitle>Acceleration</FieldTitle>
@@ -118,7 +110,7 @@ export function TranscriptionPerformanceCard() {
             if (value != null) void handleAccelerationChange(value);
           }}
         >
-          <SelectTrigger className="w-full md:w-[190px]">
+          <SelectTrigger aria-label="Transcription acceleration" className="w-full md:w-[190px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -149,9 +141,7 @@ export function TranscriptionPerformanceCard() {
             </p>
           )}
           {accelerationStatus?.last_error && (
-            <p className="text-xs text-amber-600 dark:text-amber-500">
-              {accelerationStatus.last_error}
-            </p>
+            <p className="text-xs text-warn">{accelerationStatus.last_error}</p>
           )}
         </div>
         <Button
@@ -164,6 +154,6 @@ export function TranscriptionPerformanceCard() {
           {testingAcceleration ? "Checking..." : isWindows ? "Test GPU" : "Check Status"}
         </Button>
       </div>
-    </FieldSet>
+    </SettingsCard>
   );
 }

@@ -32,7 +32,11 @@ export async function getSystemSpecs(): Promise<SystemSpecsResult> {
     log.error("Failed to collect system specs:", error);
     // Single-line, pipe-free so BOTH the report body table and the raw JSON
     // payload carry a bounded diagnostic; the payload path has no sanitizer.
-    const message = raw.replace(/[|\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+    const message = raw
+      .replace(/[|\r\n]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300);
     return { error: message };
   }
 }
@@ -109,7 +113,21 @@ export async function gatherCrashReportData(
   };
 }
 
+const REPORT_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const MANUAL_MESSAGE_LIMIT = 10_000;
+
+export function generateReportId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(5));
+  return `VT-${Array.from(bytes, (byte) => REPORT_ALPHABET[byte & 31]).join("")}`;
+}
+
+export function formatManualReportMessage(reportId: string, message: string): string {
+  const prefix = `Report ID: ${reportId}\n\n`;
+  return prefix + message.slice(0, MANUAL_MESSAGE_LIMIT - prefix.length);
+}
+
 export interface ManualReportData {
+  reportId: string;
   name?: string;
   email?: string;
   message: string;
@@ -154,6 +172,7 @@ export async function gatherManualReportData(
   message: string,
   currentModel?: string | null,
 ): Promise<ManualReportData> {
+  const reportId = generateReportId();
   const [appVer, deviceId, logAttachment, systemSpecsResult, trayStatus] = await Promise.all([
     getVersion().catch(() => "Unknown"),
     invoke<string>("get_device_id").catch(() => "Unknown"),
@@ -177,8 +196,9 @@ export async function gatherManualReportData(
   }
 
   return {
-    name,
-    email,
+    reportId,
+    ...(name ? { name } : {}),
+    ...(email ? { email } : {}),
     message,
     appVersion: appVer,
     platform: os,
@@ -212,7 +232,7 @@ export function buildReportBody(data: ManualReportData): string {
   }
 
   parts.push("### Message");
-  parts.push(data.message);
+  parts.push(formatManualReportMessage(data.reportId, data.message));
   parts.push("");
 
   parts.push("## Environment");
@@ -251,7 +271,10 @@ export function buildReportBody(data: ManualReportData): string {
     parts.push(`| GPU | ${specs.gpus.length ? specs.gpus.join(", ") : "Unknown"} |`);
     parts.push("");
   } else if (data.systemSpecsError) {
-    const reason = data.systemSpecsError.replace(/[|\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+    const reason = data.systemSpecsError
+      .replace(/[|\r\n]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     parts.push("## System");
     parts.push("");
     parts.push(`> System configuration could not be collected: ${reason}`);
@@ -350,9 +373,9 @@ export interface ReportSubmitResult {
 export function buildManualReportPayload(data: ManualReportData): BugReportPayload {
   return {
     kind: "manual",
-    name: data.name,
-    email: data.email,
-    message: data.message,
+    ...(data.name ? { name: data.name } : {}),
+    ...(data.email ? { email: data.email } : {}),
+    message: formatManualReportMessage(data.reportId, data.message),
     environment: buildEnvironmentPayload(data),
     latestLog: buildLatestLogPayload(data),
   };

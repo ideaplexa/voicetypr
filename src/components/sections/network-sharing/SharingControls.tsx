@@ -5,13 +5,13 @@ import { toast } from "sonner";
 import { createLogger } from "@/lib/logger";
 import { BindingResultsList } from "./BindingResultsList";
 import { ConnectionSettingsPanel } from "./ConnectionSettingsPanel";
-import type { FirewallStatus, SharingStatus } from "./types";
+import type { FirewallCheck, SharingStatus } from "./types";
 
 const log = createLogger("network");
 
 interface SharingControlsProps {
   status: SharingStatus;
-  firewallStatus: FirewallStatus | null;
+  firewallCheck: FirewallCheck;
   sharedModelDisplayName: string | null;
   port: string;
   savedPort: string;
@@ -33,7 +33,7 @@ interface SharingControlsProps {
 
 export function SharingControls({
   status,
-  firewallStatus,
+  firewallCheck,
   sharedModelDisplayName,
   port,
   savedPort,
@@ -67,7 +67,24 @@ export function SharingControls({
           </div>
         </div>
 
-        {firewallStatus?.may_be_blocked && (
+        {firewallCheck.state === "unknown" && (
+          <div
+            data-firewall-status="unknown"
+            className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-foreground"
+          >
+            <span aria-hidden className="size-1.5 rounded-full bg-warn" />
+            Couldn't check the firewall —{" "}
+            <button type="button" onClick={onRecheckFirewall} className="font-medium underline">
+              Check again
+            </button>
+          </div>
+        )}
+        {firewallCheck.state === "checking" && (
+          <p data-firewall-status="checking" className="text-sm text-muted-foreground">
+            Checking firewall…
+          </p>
+        )}
+        {firewallCheck.state === "blocked" && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
             <Shield className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
             <div className="flex-1">

@@ -14,6 +14,7 @@ import {
   formatModifierLabel,
   formatPrimaryHotkeyLabel,
 } from "@/lib/shortcut-display";
+import { resolvePrimaryShortcut } from "@/lib/primary-shortcut";
 
 /** Build a native (engine-kind) binding with sensible defaults. */
 function binding(over: Partial<ShortcutBinding> = {}): ShortcutBinding {
@@ -53,6 +54,13 @@ describe("findActivePrimaryBinding", () => {
   it("ignores disabled bindings", () => {
     const disabled = binding({ id: "disabled-hold", enabled: false });
     expect(findActivePrimaryBinding([disabled])).toBeNull();
+  });
+
+  it("skips a disabled preferred id before choosing the enabled native recording binding", () => {
+    const disabled = binding({ enabled: false });
+    const active = binding({ id: "other-hold", modifier: { modifier: "alt", side: "right" } });
+    expect(findActivePrimaryBinding([disabled, active])).toBe(active);
+    expect(resolvePrimaryShortcut({ hotkey: "", recording_mode: "toggle" }, [disabled, active])).toEqual({ binding: active, hotkey: undefined, mode: "push_to_talk" });
   });
 
   it("ignores combo bindings (those live in settings.hotkey)", () => {

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Input } from "@/components/ui/input";
 import { SettingsCard } from "@/components/settings/settings-ui";
 import { Crown } from "lucide-react";
@@ -41,10 +41,11 @@ export function ActivateLicenseCard({
           </Button>
         </div>
 
-        <div className="space-y-2 border-t border-border/50 pt-4">
+        <div className="space-y-2 border-t border-border pt-4">
           <p className="text-sm font-medium">Have a license key?</p>
           <div className="flex gap-2">
             <Input
+              aria-label="License key"
               placeholder="Enter license key"
               value={licenseKey}
               onChange={(e) => onLicenseKeyChange(e.target.value)}

@@ -1,35 +1,22 @@
-import { ModelCard } from "@/components/ModelCard";
-import { SettingsCard } from "@/components/settings/settings-ui";
-import { CheckCircle, HardDrive, Star, Zap } from "lucide-react";
+import { Button } from "@/components/settings/SettingsButton";
+import { Radio } from "@base-ui/react/radio";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Spinner } from "@/components/ui/spinner";
+import { getModelDisplayName } from "@/lib/model-display";
+import { cn } from "@/lib/utils";
+import { Download, Ellipsis, X } from "lucide-react";
 import type { LocalModelActions, ModelEntry } from "./types";
 
-const modelScoreLegend = (
-  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
-    <span className="font-medium uppercase tracking-wide">Badges</span>
-    <span className="flex items-center gap-1.5">
-      <Zap className="size-3.5 text-emerald-600" />
-      Speed
-    </span>
-    <span className="flex items-center gap-1.5">
-      <CheckCircle className="size-3.5 text-blue-600" />
-      Accuracy
-    </span>
-    <span className="flex items-center gap-1.5">
-      <HardDrive className="size-3.5" />
-      Size
-    </span>
-    <span className="flex items-center gap-1.5">
-      <Star className="size-3.5 fill-amber-500 text-amber-500" />
-      Recommended
-    </span>
-  </div>
-);
-
-interface LocalModelCardsProps extends LocalModelActions {
+interface LocalModelsListProps extends LocalModelActions {
   models: ModelEntry[];
 }
 
-function LocalModelCards({
+export function LocalModelsList({
   models,
   downloadProgress,
   downloadPhases,
@@ -39,65 +26,94 @@ function LocalModelCards({
   onDelete,
   onCancelDownload,
   onRepair,
-  onSelect,
   currentModel,
   activeRemoteServer,
-  clearActiveRemote,
-  speedModeRecommended,
-}: LocalModelCardsProps) {
+}: LocalModelsListProps) {
   return (
-    <div className="grid gap-3">
-      {models.map(([name, model]) => (
-        <ModelCard
-          key={name}
-          name={name}
-          model={model}
-          downloadProgress={downloadProgress[name]}
-          downloadPhase={downloadPhases[name]}
-          isVerifying={verifyingModels.has(name)}
-          downloadError={downloadErrors[name]}
-          onDownload={onDownload}
-          onDelete={onDelete}
-          onCancelDownload={onCancelDownload}
-          onRepair={onRepair}
-          onSelect={async (modelName) => {
-            await clearActiveRemote();
-            void onSelect(modelName);
-          }}
-          showSelectButton={model.downloaded}
-          isSelected={!activeRemoteServer && currentModel === name}
-          speedModeRecommended={speedModeRecommended && name === "large-v3-turbo"}
-        />
-      ))}
+    <div className="divide-y divide-border">
+      {models.map(([name, model]) => {
+        const displayName = getModelDisplayName(name, { [name]: model });
+        const usable = model.downloaded && !model.requires_setup;
+        const selected = usable && !activeRemoteServer && currentModel === name;
+        const progress = downloadProgress[name];
+        const bytes = model.size ?? 0;
+        const size =
+          bytes >= 1024 ** 3
+            ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
+            : `${Math.round(bytes / 1024 ** 2)} MB`;
+        const detail = `${model.supported_languages?.length ? `${model.supported_languages.length} languages` : model.engine === "parakeet" ? "Multilingual" : "Local transcription"} · ${size}`;
+        return (
+          <div
+            key={name}
+            className={cn("flex min-h-[60px] items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}
+          >
+            <Radio.Root
+              value={name}
+              aria-label={`Use ${displayName}`}
+              disabled={!usable}
+              className={cn(
+                "size-4 shrink-0 rounded-full border border-border",
+                selected && "border-[5px] border-sage",
+                usable && "cursor-pointer",
+              )}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13.5px] leading-[normal] font-medium text-foreground">{displayName}</p>
+              <p className="mt-0.5 truncate text-xs leading-[normal] text-muted-foreground">{detail}</p>
+              {downloadErrors[name] && !usable && progress === undefined ? (
+                <p className="text-xs text-destructive">{downloadErrors[name]}</p>
+              ) : null}
+            </div>
+            {selected ? (
+              <span className="text-xs font-medium text-sage">In use</span>
+            ) : usable ? (
+              <span className="text-xs text-muted-foreground">Downloaded</span>
+            ) : verifyingModels.has(name) ? (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Spinner className="size-3" />
+                Verifying
+              </span>
+            ) : progress !== undefined ? (
+              <span className="flex items-center gap-1 text-xs text-sage">
+                <Spinner className="size-3" />
+                {downloadPhases[name] || "Downloading"} {Math.round(progress)}%
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Cancel ${displayName} download`}
+                  onClick={() => onCancelDownload(name)}
+                >
+                  <X className="size-3" />
+                </Button>
+              </span>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => onDownload(name)}>
+                <Download className="size-3.5" />
+                Download
+              </Button>
+            )}
+            {model.downloaded && (onRepair || onDelete) ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" size="icon-sm" aria-label={`${displayName} options`} />
+                  }
+                >
+                  <Ellipsis className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {onRepair ? (
+                    <DropdownMenuItem onClick={() => onRepair(name)}>Repair</DropdownMenuItem>
+                  ) : null}
+                  {onDelete ? (
+                    <DropdownMenuItem onClick={() => onDelete(name)}>Remove</DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-interface LocalModelsListProps extends LocalModelActions {
-  readyLocalModels: ModelEntry[];
-}
-
-export function LocalModelsList({ readyLocalModels, ...actions }: LocalModelsListProps) {
-  if (readyLocalModels.length === 0) return null;
-
-  return (
-    <SettingsCard
-      icon={HardDrive}
-      title={`Local models (${readyLocalModels.length})`}
-      description="Offline transcription models stored on this machine."
-    >
-      <div className="mt-4">{modelScoreLegend}</div>
-      <LocalModelCards models={readyLocalModels} {...actions} />
-    </SettingsCard>
-  );
-}
-
-interface LocalSetupGridProps extends LocalModelActions {
-  setupLocalModels: ModelEntry[];
-}
-
-export function LocalSetupGrid({ setupLocalModels, ...actions }: LocalSetupGridProps) {
-  if (setupLocalModels.length === 0) return null;
-
-  return <LocalModelCards models={setupLocalModels} {...actions} />;
 }

@@ -14,7 +14,7 @@ import {
   isShareableModel,
   parseSharingPort,
 } from "./sharingUtils";
-import type { FirewallStatus, ModelStatusResponse, SharingStatus } from "./types";
+import type { FirewallCheck, FirewallStatus, ModelStatusResponse, SharingStatus } from "./types";
 
 const log = createLogger("network");
 
@@ -134,7 +134,7 @@ export function useSharingStatus() {
   const [hasShareableModel, setHasShareableModel] = useState<boolean>(true);
   const [currentSelectionShareable, setCurrentSelectionShareable] = useState<boolean>(true);
   const [activeRemoteServer, setActiveRemoteServer] = useState<string | null>(null);
-  const [firewallStatus, setFirewallStatus] = useState<FirewallStatus | null>(null);
+  const [firewallCheck, setFirewallCheck] = useState<FirewallCheck>({ state: "checking" });
 
   const currentModel = settings?.current_model;
   const currentEngine = settings?.current_model_engine ?? "whisper";
@@ -186,12 +186,13 @@ export function useSharingStatus() {
   }, []);
 
   const fetchFirewallStatus = useCallback(async () => {
+    setFirewallCheck({ state: "checking" });
     try {
       const result = await invoke<FirewallStatus>("get_firewall_status");
-      setFirewallStatus(result);
+      setFirewallCheck({ state: result.may_be_blocked ? "blocked" : "allowed", status: result });
     } catch (error) {
       log.error("Failed to get firewall status:", error);
-      setFirewallStatus(null);
+      setFirewallCheck({ state: "unknown" });
     }
   }, []);
 
@@ -298,7 +299,7 @@ export function useSharingStatus() {
     hasShareableModel,
     currentSelectionShareable,
     activeRemoteServer,
-    firewallStatus,
+    firewallCheck,
     currentModel,
     currentEngine,
     sharedModelDisplayName,

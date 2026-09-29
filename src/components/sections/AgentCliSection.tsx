@@ -1,19 +1,11 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { createLogger } from "@/lib/logger";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Bot,
-  Check,
-  CheckCircle,
-  CircleAlert,
-  Copy,
-  Loader2,
-  RefreshCw,
-  XCircle,
-} from "lucide-react";
+import { Check, Copy, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
 
 const log = createLogger("cli-tool");
 
@@ -137,70 +129,55 @@ export function AgentCliSection() {
   };
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-base font-semibold">CLI</h2>
-
-      <div className="space-y-4 rounded-lg border border-border/50 bg-card p-4">
-        <p className="text-sm text-muted-foreground">
-          Run transcription from your terminal and let AI agents or scripts use the same Voicetypr
-          engine with the{" "}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">voicetypr</code>{" "}
-          CLI.
-        </p>
-
-        <div className="rounded-xl border border-border/70 bg-background/60 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-            <div className="flex min-w-0 items-start gap-3">
-              {status === null ? (
-                <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
-              ) : compatible ? (
-                <CheckCircle className="mt-0.5 size-4 shrink-0 text-sage" />
-              ) : installed ? (
-                <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
-              ) : (
-                <XCircle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              )}
-              <div className="min-w-0">
-                <p className="text-sm font-medium">
-                  {status === null
-                    ? "Checking…"
-                    : compatible
-                      ? "Ready and compatible"
-                      : installed
-                        ? "Needs attention"
-                        : "Not installed"}
-                </p>
-                {status?.path && (
-                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                    {status.path}
-                  </p>
-                )}
-                {status?.detail && (
-                  <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                    {status.detail}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              {manageable &&
-                (installed ? (
+    <div className="space-y-3">
+      <SettingsPaneCard title="Command line">
+        <SettingsPaneRow
+          title="voicetypr CLI"
+          description={
+            status?.path
+              ? `Installed at ${status.path} · ${compatible ? "healthy" : "needs repair"}`
+              : status === null
+                ? "Checking command status…"
+                : "Not installed"
+          }
+          control={
+            <Badge variant={compatible ? "secondary" : "outline"} className="text-sm">
+              {status === null
+                ? "Checking"
+                : compatible
+                  ? "Installed"
+                  : installed
+                    ? "Needs attention"
+                    : "Not installed"}
+            </Badge>
+          }
+        />
+        <SettingsPaneRow
+          title={installed ? "Repair or remove" : "Install command line tool"}
+          description={
+            installed
+              ? "Reinstall if the command stops working."
+              : "Use Voicetypr from your terminal and AI agents."
+          }
+          control={
+            <div className="flex items-center gap-1">
+              {manageable ? (
+                installed ? (
                   <>
                     <Button variant="outline" size="sm" onClick={repair} disabled={busy}>
-                      {pending === "repair" && <Loader2 className="animate-spin" />}
+                      {pending === "repair" ? <Loader2 className="animate-spin" /> : null}
                       {compatible ? "Repair" : "Update"}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={uninstall} disabled={busy}>
-                      {pending === "uninstall" && <Loader2 className="animate-spin" />}
                       Remove
                     </Button>
                   </>
                 ) : (
                   <Button size="sm" onClick={install} disabled={busy}>
-                    {pending === "install" && <Loader2 className="animate-spin" />}
                     Install
                   </Button>
-                ))}
+                )
+              ) : null}
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -211,54 +188,31 @@ export function AgentCliSection() {
                 <RefreshCw className={pending === "refresh" ? "animate-spin" : ""} />
               </Button>
             </div>
-          </div>
-
-          {status && (
-            <div className="mt-4 flex flex-wrap gap-2 border-t border-border/60 pt-3">
-              <Badge variant="outline">App v{status.app_version}</Badge>
-              <Badge variant={compatible ? "secondary" : "outline"}>
-                CLI {status.command_version ? `v${status.command_version}` : "version unknown"}
-              </Badge>
-            </div>
-          )}
-        </div>
-
-        {status?.manageable === false && !status.detail && (
-          <p className="text-xs text-muted-foreground">
+          }
+        />
+        {status?.manageable === false && !status.detail ? (
+          <p className="border-t border-border py-2 text-xs text-muted-foreground">
             CLI management is unavailable on this platform.
           </p>
-        )}
-
-        <div className="space-y-3">
-          <div className="rounded-xl border border-sage/20 bg-sage-bg/45 p-4">
-            <div className="flex items-start gap-3">
-              <div className="rounded-lg bg-background p-2 text-sage shadow-sm ring-1 ring-border/70">
-                <Bot className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold">Give Voicetypr to your agent</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Works as a reusable instruction for Claude Code, Codex, OpenCode, OpenClaw, and
-                  other terminal-capable agents.
-                </p>
-              </div>
-            </div>
-            <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-background/80 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
-              {AGENT_PROMPT}
-            </pre>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-3 w-full"
-              onClick={copyAgentPrompt}
-            >
+        ) : null}
+        {status?.detail ? (
+          <p className="border-t border-border py-2 text-xs text-muted-foreground">
+            {status.detail}
+          </p>
+        ) : null}
+      </SettingsPaneCard>
+      <SettingsPaneCard title="Agents">
+        <SettingsPaneRow
+          title="Give Voicetypr to your agent"
+          description="Copy a short prompt that teaches your agent to use the CLI."
+          control={
+            <Button type="button" variant="outline" size="sm" onClick={copyAgentPrompt}>
               {promptCopied ? <Check /> : <Copy />}
               {promptCopied ? "Copied" : "Copy agent prompt"}
             </Button>
-          </div>
-        </div>
-      </div>
+          }
+        />
+      </SettingsPaneCard>
     </div>
   );
 }

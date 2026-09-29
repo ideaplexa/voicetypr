@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingsCard } from "@/components/settings/settings-ui";
 import type { SelectedFile, SpeakerSegment } from "@/state/upload";
@@ -141,7 +141,7 @@ export function AudioUploadResultPanels({
           <li>Long media takes more time and memory to process.</li>
         </ul>
         <p className="mt-3 text-xs text-muted-foreground">
-          Upload uses the source currently selected in Sources.
+          Upload uses the source currently selected in Transcription.
         </p>
       </section>
     </>

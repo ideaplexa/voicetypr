@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      tailwind = { config: { corePlugins: { preflight: false } } };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist%3Awght%40100..900&family=Geist+Mono%3Awght%40100..900&family=Inter%3Aital%2Cwght%400%2C100..900%3B1%2C100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *, ::before, ::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body style="background-color: #E9E9E5">
+    <div
+      data-pencil-name="Pill states"
+      class="box-border w-[760px] h-fit flex flex-col gap-[22px] p-[36px] justify-start items-start bg-[#E9E9E5] rounded-[12px]"
+    >
+      <div
+        data-pencil-name="Title"
+        class="text-[20px]/[normal] box-border text-[#18181A] font-[Geist,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+      >
+        Recording pill — states
+      </div>
+      <div
+        data-pencil-name="Sub"
+        class="text-[13px]/[normal] box-border text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+      >
+        One dark surface, one accent. Every state is readable in half a second.
+      </div>
+      <div
+        data-pencil-name="State Ready"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Ready
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[9px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <div
+            data-pencil-name="Dot"
+            class="box-border w-[5px] shrink-0 h-[5px] bg-[#FFFFFF55] rounded-full"
+          ></div>
+          <div
+            data-pencil-name="Dot"
+            class="box-border w-[5px] shrink-0 h-[5px] bg-[#FFFFFF55] rounded-full"
+          ></div>
+          <div
+            data-pencil-name="Dot"
+            class="box-border w-[5px] shrink-0 h-[5px] bg-[#FFFFFF55] rounded-full"
+          ></div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Listening"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Listening
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <div
+            data-pencil-name="Bars"
+            class="box-border w-fit shrink-0 h-[18px] flex flex-row gap-[2px] justify-start items-center"
+          >
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[6px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[10px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[16px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[12px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[18px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[9px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[14px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[7px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+            <div
+              data-pencil-name="Bar"
+              class="box-border w-[2.5px] shrink-0 h-[11px] bg-[#8FD1A8] rounded-[2px]"
+            ></div>
+          </div>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Listening
+          </div>
+          <div
+            data-pencil-name="Timer"
+            class="text-[12px]/[normal] box-border text-[#FFFFFF80] font-['Geist_Mono',system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            0:07
+          </div>
+          <div
+            data-pencil-name="Cancel"
+            class="box-border w-[20px] shrink-0 h-[20px] flex flex-row gap-0 justify-center items-center bg-[#FFFFFF14] rounded-[10px]"
+          >
+            <svg
+              data-pencil-name="X"
+              data-icon-name="x"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              class="box-border w-[11px] shrink-0 h-[11px]"
+            >
+              <path
+                d="M3.34619 2.93945q-0.25293 0.08545-0.37939 0.30762-0.04102 0.08545-0.04102 0.25293 0 0.16748 0.04102 0.25293 0.04443 0.08203 1.62353 1.66455l1.58252 1.58252-1.58252 1.58252q-1.5791 1.58252-1.62353 1.66797-0.04102 0.08203-0.04102 0.23584 0 0.15381 0.03418 0.23926 0.0376 0.08203 0.1333 0.18115 0.09912 0.0957 0.18115 0.1333 0.08545 0.03418 0.23926 0.03418 0.15381 0 0.23584-0.04102 0.08545-0.04443 1.66797-1.62353l1.58252-1.58252 1.58252 1.58252q1.58252 1.5791 1.66455 1.62353 0.08545 0.04102 0.23926 0.04102 0.15381 0 0.23584-0.03418 0.08545-0.0376 0.18115-0.1333 0.09912-0.09912 0.1333-0.18115 0.0376-0.08545 0.0376-0.23926 0-0.15381-0.04443-0.23584-0.04101-0.08545-1.62012-1.66797l-1.58252-1.58252 1.58252-1.58252q1.5791-1.58252 1.62012-1.66455 0.04443-0.08545 0.04443-0.25293 0-0.16748-0.04102-0.25293-0.09912-0.16748-0.28027-0.2666-0.05811-0.02734-0.09912-0.04102-0.04102-0.01367-0.15381-0.01367-0.11279 0-0.15381 0.01367-0.04101 0.01367-0.11279 0.04102-0.09912 0.05811-1.66455 1.62695l-1.56885 1.56543-2.82666-2.81299q-0.31104-0.29395-0.42041-0.37939-0.08545-0.05469-0.19824-0.05469l-0.02735 0q-0.14014 0-0.18115 0.01367z"
+                fill="#FFFFFFB0"
+              ></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Live preview"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Live preview
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-[340px] shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-col gap-[8px] p-[9px_14px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[16px]"
+        >
+          <div
+            data-pencil-name="Top"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-[10px] justify-start items-center"
+          >
+            <div
+              data-pencil-name="Bars"
+              class="box-border w-fit shrink-0 h-[18px] flex flex-row gap-[2px] justify-start items-center"
+            >
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[6px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[10px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[16px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[12px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[18px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[9px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[14px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[7px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+              <div
+                data-pencil-name="Bar"
+                class="box-border w-[2.5px] shrink-0 h-[11px] bg-[#8FD1A8] rounded-[2px]"
+              ></div>
+            </div>
+            <div
+              data-pencil-name="Label"
+              class="text-[12px]/[normal] box-border [flex:1_1_0] text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left"
+            >
+              Listening
+            </div>
+            <div
+              data-pencil-name="Timer"
+              class="text-[12px]/[normal] box-border text-[#FFFFFF80] font-['Geist_Mono',system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              0:12
+            </div>
+          </div>
+          <div
+            data-pencil-name="Text"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-[4px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="Committed"
+              class="text-[13px]/[normal] box-border text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              …and I'll send the notes before the call
+            </div>
+            <div
+              data-pencil-name="Tentative"
+              class="text-[13px]/[normal] box-border text-[#FFFFFF73] font-[Inter,system-ui,sans-serif] font-normal italic text-left [white-space:nowrap]"
+            >
+              tomorrow
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Transcribing"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Transcribing
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <div
+            data-pencil-name="Scan"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[4px] justify-start items-center"
+          >
+            <div
+              data-pencil-name="Dot"
+              class="box-border w-[6px] shrink-0 h-[6px] bg-[#7DD3FC] rounded-full"
+            ></div>
+            <div
+              data-pencil-name="Dot"
+              class="box-border w-[6px] shrink-0 h-[6px] bg-[#7DD3FC99] rounded-full"
+            ></div>
+            <div
+              data-pencil-name="Dot"
+              class="box-border w-[6px] shrink-0 h-[6px] bg-[#7DD3FC44] rounded-full"
+            ></div>
+          </div>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Transcribing
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Polishing"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Polishing
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <svg
+            data-pencil-name="Spark"
+            data-icon-name="sparkles"
+            data-icon-set="lucide"
+            viewBox="0 0 13.99993896484375 14"
+            preserveAspectRatio="xMidYMid meet"
+            xmlns="http://www.w3.org/2000/svg"
+            class="box-border w-[14px] shrink-0 h-[14px]"
+          >
+            <path
+              d="M6.84619 0.58789q-0.28027 0.04102-0.54687 0.22559-0.29395 0.2085-0.40674 0.57422-0.02734 0.08203-0.3418 1.75683-0.31445 1.67139-0.35889 1.76367-0.04102 0.08887-0.10937 0.16065-0.07178 0.08203-0.15381 0.11279-0.11279 0.04102-0.4751 0.12305l-1.28857 0.23926q-1.68164 0.32129-1.77734 0.34863-0.23926 0.07178-0.44434 0.27002-0.20166 0.19482-0.29395 0.44092-0.08887 0.24268-0.06152 0.50244 0.02734 0.25635 0.16748 0.4956 0.09912 0.16748 0.27344 0.30762 0.17432 0.14014 0.35889 0.19824 0.0957 0.02734 1.76367 0.34863l1.28515 0.25293q0.37939 0.06836 0.50586 0.10938 0.08203 0.04443 0.15381 0.11279 0.05469 0.08545 0.09912 0.16748 0.04102 0.12646 0.10938 0.50586l0.23926 1.24414q0.32129 1.68164 0.34863 1.76367 0.15381 0.46484 0.58789 0.67335 0.2666 0.14014 0.51953 0.14013 0.25293 0 0.51953-0.14013 0.43408-0.2085 0.58789-0.67335 0.02734-0.08203 0.3418-1.74658 0.31445-1.66797 0.3418-1.72265 0.02734-0.11279 0.12646-0.2085 0.09912-0.09912 0.21191-0.14355 0.06836-0.02734 1.73291-0.3418 1.66797-0.31445 1.75-0.3418 0.46484-0.15381 0.67335-0.58789 0.2666-0.51953 0-1.03906-0.09912-0.2085-0.28028-0.36231-0.18115-0.15381-0.39307-0.22558-0.0957-0.02734-1.77734-0.34863l-1.23047-0.23926q-0.37939-0.06836-0.50586-0.10938-0.0957-0.03076-0.15381-0.08545-0.10938-0.11279-0.1538-0.23925-0.02734-0.06836-0.3418-1.73291-0.31445-1.66797-0.3418-1.75-0.14014-0.46484-0.60498-0.68702-0.14014-0.07178-0.31445-0.09912-0.17432-0.02734-0.3418-0.01367z m4.73047 0.01367q-0.12305 0.01367-0.24268 0.09912-0.11963 0.08203-0.1914 0.19483-0.04102 0.08545-0.05469 0.20508-0.01367 0.11621-0.01367 0.35546l0 0.29395-0.36572 0q-0.26318 0.01367-0.32813 0.02051-0.06152 0.00684-0.1333 0.03418-0.2666 0.12646-0.31445 0.42041-0.04785 0.29395 0.14697 0.50586 0.08545 0.08203 0.18115 0.14013 0.08545 0.02734 0.14697 0.03418 0.06494 0.00684 0.31788 0.02051l0.34863 0 0 0.34863q0.01367 0.25293 0.02051 0.31788 0.00683 0.06152 0.03418 0.14697 0.05811 0.0957 0.14013 0.18115 0.21191 0.19482 0.50586 0.14697 0.29395-0.04785 0.42041-0.31445 0.02734-0.08545 0.03418-0.14014 0.00684-0.05811 0.02051-0.32129l0-0.36572 0.29395 0q0.32129 0 0.45458-0.03418 0.1333-0.03418 0.25293-0.15381 0.11963-0.11963 0.15381-0.31445 0.03418-0.19824-0.04785-0.35205-0.04443-0.08203-0.12305-0.15039-0.0752-0.07178-0.1538-0.10596-0.07519-0.0376-0.14014-0.04443-0.06152-0.00684-0.32813-0.02051l-0.3623 0 0-0.34863q0-0.23926-0.00684-0.30762-0.00684-0.07178-0.03418-0.12646-0.08545-0.21191-0.25293-0.30762-0.16748-0.09912-0.37939-0.05811z m-4.26904 2.7583q0.23926 1.26123 0.29394 1.55518 0.05811 0.29395 0.1128 0.42041 0.12646 0.30762 0.38281 0.56738 0.25977 0.25635 0.56738 0.38281 0.12646 0.05469 0.41358 0.1128 0.28711 0.05469 1.54833 0.29394 1.56885 0.29395 1.57569 0.30762 0.00684 0.01367-1.60303 0.31445-1.60986 0.30078-1.72266 0.32813-0.39307 0.09912-0.72119 0.40674-0.32813 0.30762-0.46826 0.70068-0.04443 0.09912-0.09912 0.43408l-0.32129 1.63721q-0.25293 1.37402-0.2666 1.37402-0.01367 0-0.30762-1.55517-0.23926-1.2749-0.29736-1.56202-0.05469-0.28711-0.10938-0.41357-0.09912-0.23584-0.30078-0.46484-0.20166-0.23242-0.41357-0.35889-0.14014-0.09912-0.2666-0.14014-0.16748-0.04102-0.57422-0.12646l-1.28516-0.25293q-1.6543-0.30762-1.64062-0.32129 0.01367-0.01367 1.60986-0.30762l1.51416-0.29394q0.25293-0.05811 0.38965-0.1128 0.29395-0.11279 0.56738-0.37597 0.27344-0.2666 0.3999-0.57422 0.05469-0.12646 0.10938-0.41358 0.05811-0.28711 0.29736-1.56201 0.29395-1.55518 0.30762-1.55517 0.01367 0 0.30762 1.55517z m-5.33203 6.59326q-0.31104 0.07178-0.57764 0.23926-0.26318 0.16748-0.46143 0.42041-0.34863 0.4751-0.34863 1.05615 0 0.58105 0.3418 1.04249 0.34521 0.46143 0.91943 0.6289 0.64258 0.18457 1.25781-0.10937 0.32471-0.15381 0.56055-0.44092 0.23926-0.28711 0.35205-0.65283 0.02734-0.11279 0.03418-0.18116 0.00684-0.06836 0.02051-0.28027 0-0.25293-0.02051-0.3623-0.02051-0.11279-0.10596-0.32471-0.15381-0.36231-0.46826-0.63574-0.31445-0.27344-0.70752-0.38623-0.15381-0.02734-0.3999-0.03418-0.24268-0.00684-0.39648 0.0205z m0.60156 1.18946q0.24951 0.11279 0.31787 0.38623 0.07178 0.27344-0.0957 0.48193-0.12646 0.15381-0.29395 0.21192-0.16748 0.05469-0.33496 0-0.25293-0.07178-0.37939-0.33497-0.04102-0.09912-0.03418-0.23242 0.00684-0.1333 0.04785-0.23242 0.09912-0.22217 0.32129-0.29736 0.22559-0.07861 0.45117 0.01709z"
+              fill="#8FD1A8"
+            ></path>
+          </svg>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Polishing
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Pasted"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Pasted
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <svg
+            data-pencil-name="Check"
+            data-icon-name="check"
+            data-icon-set="lucide"
+            viewBox="0 0 13.99993896484375 14"
+            preserveAspectRatio="xMidYMid meet"
+            xmlns="http://www.w3.org/2000/svg"
+            class="box-border w-[14px] shrink-0 h-[14px]"
+          >
+            <path
+              d="M11.48096 2.95313q-0.07178 0.01367-0.12989 0.0581-0.05469 0.04102-3.07617 3.06592l-3.0249 3.00781-1.28857-1.28857q-1.28857-1.28516-1.38086-1.32618-0.08887-0.04443-0.22217-0.04443-0.1333 0-0.23242 0.0376-0.0957 0.03418-0.18799 0.11279-0.08887 0.0752-0.1333 0.1709-0.02734 0.07178-0.03418 0.11279-0.00684 0.04102-0.00684 0.14014l0 0.04102q-0.01367 0.11279 0.04102 0.19824 0.07178 0.10938 0.36572 0.40332 0.19482 0.21191 0.96729 0.98096l1.49707 1.48339q0.28027 0.2666 0.38964 0.33838 0.07178 0.05469 0.18457 0.04102l0.09571 0.01367q0.07178 0 0.14013-0.02734 0.08545-0.07178 0.32129-0.28711 0.23926-0.21875 0.79981-0.76221l2.2832-2.2832q2.08496-2.09863 2.7002-2.71387 0.61524-0.61865 0.64599-0.68701 0.04102-0.08545 0.04102-0.23926 0-0.09912-0.00684-0.14014-0.00684-0.04102-0.03418-0.11279-0.04443-0.08203-0.13672-0.16406-0.08887-0.08545-0.18115-0.11963-0.08887-0.0376-0.20849-0.0376-0.11963 0-0.18799 0.02734z"
+              fill="#8FD1A8"
+            ></path>
+          </svg>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Pasted · 38 words
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Copied (no text field)"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Copied (no text field)
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <svg
+            data-pencil-name="Clip"
+            data-icon-name="clipboard-check"
+            data-icon-set="lucide"
+            viewBox="0 0 13.99993896484375 14"
+            preserveAspectRatio="xMidYMid meet"
+            xmlns="http://www.w3.org/2000/svg"
+            class="box-border w-[14px] shrink-0 h-[14px]"
+          >
+            <path
+              d="M5.12354 0.58789q-0.18115 0.02734-0.30762 0.07861-0.12646 0.04785-0.28028 0.16065-0.39307 0.29395-0.44775 0.82373l-0.01367 0.09912-0.33496 0q-0.51953 0-0.78614 0.08545-0.46143 0.16748-0.76904 0.51953-0.30762 0.34863-0.40674 0.81006-0.01367 0.12646-0.02734 0.71435l0 6.96924q0.01367 0.79981 0.02734 1.03907 0.01367 0.18115 0.05811 0.30761l0.01367 0.02735q0.14014 0.44775 0.48877 0.75537 0.34863 0.30762 0.81348 0.40674 0.10938 0.01367 0.66992 0.02734l3.17871 0 3.17871 0q0.56055-0.01367 0.66992-0.02734 0.46484-0.09912 0.81348-0.40674 0.34863-0.30762 0.48877-0.75537l0.01367-0.02735q0.04443-0.12646 0.05811-0.30761 0.01367-0.23926 0.02734-1.03907l0-6.96924q-0.01367-0.58789-0.02734-0.71435-0.09912-0.46143-0.40674-0.81006-0.30762-0.35205-0.76905-0.51953-0.2666-0.08545-0.78613-0.08545l-0.33496 0-0.01367-0.09912q-0.04102-0.32129-0.21191-0.56397-0.16748-0.24609-0.44776-0.38623l-0.02734-0.01367q-0.0957-0.05811-0.19483-0.07178-0.12646-0.01367-0.48877-0.02734l-1.45605 0q-1.83545-0.01367-1.96191 0z m3.62646 1.75l0 0.58789-3.5 0 0-1.17578 3.5 0 0 0.58789z m-4.66211 0.70068q0.02734 0.2085 0.10254 0.36914 0.07861 0.16064 0.24609 0.33155 0.23926 0.23584 0.53321 0.30761 0.12646 0.02734 2.03027 0.02735 1.90381 0 2.03027-0.02735 0.29395-0.07178 0.53321-0.30761 0.16748-0.1709 0.24267-0.33155 0.07861-0.16064 0.10596-0.38281l0.01367-0.09912 0.36572 0q0.27685 0 0.33838 0.00684 0.06494 0.00684 0.12305 0.04785 0.18115 0.08545 0.2666 0.2666l0.05469 0.08545 0 8.44238-0.02734 0.0957q-0.04443 0.09912-0.12989 0.19141-0.08203 0.08887-0.16406 0.1333l-0.09912 0.04102-7.30762 0-0.09912-0.04102q-0.08203-0.04443-0.16748-0.1333-0.08203-0.09228-0.12646-0.19141l-0.02735-0.0957 0-8.44238 0.05469-0.08545q0.12646-0.23584 0.36572-0.30762 0.04102-0.01367 0.3794-0.01367l0.34863 0 0.01367 0.11279z m4.5083 3.40088q-0.11279 0.02734-0.29394 0.19141-0.18115 0.16064-0.89551 0.88867l-0.99463 0.97754-0.40674-0.40674q-0.42041-0.40332-0.48877-0.44775-0.11279-0.05469-0.2666-0.05469-0.15381 0-0.2666 0.05469-0.08203 0.04443-0.16065 0.13672-0.0752 0.08887-0.11963 0.17431-0.06836 0.2085 0 0.417 0.02734 0.07178 0.13331 0.1914 0.10596 0.11963 0.58105 0.58106 0.65967 0.66992 0.72803 0.71435 0.12646 0.05469 0.27344 0.05469 0.14697 0 0.27343-0.05469 0.06836-0.04443 1.30567-1.28174 1.24072-1.24072 1.28174-1.32275 0.04443-0.08545 0.04443-0.23926 0-0.15381-0.0376-0.23584-0.03418-0.08545-0.11621-0.18457-0.16748-0.15381-0.39307-0.16748-0.14014 0-0.18115 0.01367z"
+              fill="#F2B35B"
+            ></path>
+          </svg>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FFFFFFE6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            No text field — copied. Press ⌘V
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Error"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Error
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#2A1618] [outline:1px_solid_#F28B7A55] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <svg
+            data-pencil-name="Alert"
+            data-icon-name="mic-off"
+            data-icon-set="lucide"
+            viewBox="0 0 13.99993896484375 14"
+            preserveAspectRatio="xMidYMid meet"
+            xmlns="http://www.w3.org/2000/svg"
+            class="box-border w-[14px] shrink-0 h-[14px]"
+          >
+            <path
+              d="M1.07666 0.60156q-0.29395 0.02734-0.42725 0.30078-0.12988 0.27344 0.01026 0.54004 0.02734 0.06836 2.01318 2.07129l2.00293 1.98926 0 0.85449q0 0.72803 0.01367 0.92969 0.01367 0.20166 0.09912 0.44092 0.16748 0.50244 0.52295 0.875 0.35889 0.37256 0.83399 0.56738 0.36572 0.14014 0.75537 0.15381 0.60156 0.01367 1.10742-0.22559l0.18115-0.08203 0.40674 0.42041q0.42041 0.40332 0.42041 0.42725 0 0.02051-0.28027 0.17431-0.25293 0.15381-0.62891 0.28028-0.84082 0.28027-1.71582 0.12646-0.875-0.15381-1.57568-0.70068-0.46143-0.37939-0.79981-0.92285-0.33496-0.54688-0.44775-1.1211-0.04102-0.22559-0.05469-0.47509-0.01367-0.25293-0.01367-0.80664 0-0.55371-0.01367-0.67676-0.01367-0.12646-0.08545-0.23926-0.16748-0.23926-0.48877-0.23926-0.23926 0-0.40674 0.16748-0.12646 0.11279-0.15381 0.29395-0.02734 0.08545-0.02734 0.69385 0 0.6084 0.01367 0.875 0.09912 1.26123 0.78272 2.29687 0.68701 1.03564 1.8081 1.58252 0.37598 0.19482 0.76904 0.30762 0.12646 0.04102 0.34864 0.09228 0.22559 0.04785 0.31103 0.04785l0.05469 0.01368 0.01367 0.70068q0 0.41699 0.01367 0.52978 0 0.16748 0.02735 0.22559 0.03076 0.05469 0.11279 0.14014l0.01367 0.01367q0.16748 0.16748 0.40674 0.16748 0.23926 0 0.40674-0.16748l0.01367-0.01367q0.08203-0.08545 0.10938-0.14014 0.03076-0.05811 0.03076-0.22559 0.01367-0.11279 0.01367-0.52978l0.01367-0.70068 0.18115-0.02735q0.72803-0.12646 1.3877-0.47851 0.15381-0.06836 0.37597-0.2085 0.22559-0.14014 0.28028-0.19482l0.04443-0.04444 1.31592 1.31592q1.31592 1.31592 1.38428 1.34326 0.18115 0.09912 0.37939 0.07178 0.29395-0.05469 0.41699-0.32129 0.12646-0.2666 0.00342-0.5332-0.04443-0.05469-5.88232-5.90625-5.83789-5.85498-5.96436-5.93701-0.18115-0.15381-0.43408-0.1128z m5.56104 0.01367q-0.50586 0.08545-0.96729 0.39307-0.22559 0.15381-0.4375 0.39307-0.2085 0.23584-0.31787 0.48877-0.08545 0.15381-0.05811 0.32812 0.03076 0.17432 0.15381 0.31445 0.12646 0.14014 0.33838 0.18458 0.0957 0.02734 0.2085-0.01368 0.15381-0.04443 0.24267-0.11279 0.09229-0.07178 0.20508-0.2666 0.11279-0.19482 0.30762-0.33496 0.19824-0.14014 0.42041-0.19824 0.11279-0.02734 0.32129-0.01368 0.25293 0 0.44092 0.09229 0.19141 0.08887 0.35888 0.27344 0.19482 0.2085 0.28028 0.48877 0.01367 0.07178 0.02734 0.32129l0.02734 2.47802q0 0.19824 0.03418 0.27002 0.0376 0.06836 0.11963 0.15381 0.08545 0.08203 0.18115 0.12988 0.09912 0.04785 0.22559 0.04785 0.12646 0 0.229-0.04785 0.10596-0.04785 0.18799-0.14013 0.08545-0.09229 0.11963-0.17432 0.0376-0.08545 0.0376-0.29395l-0.01367-2.83007-0.04102-0.16748q-0.18457-0.65625-0.64599-1.11768-0.46143-0.46484-1.17579-0.61865-0.14014-0.02734-0.3999-0.03418-0.25635-0.00684-0.41015 0.00683z m4.31005 4.64844q-0.08545 0.02734-0.18457 0.09229-0.0957 0.06152-0.15381 0.14013-0.05469 0.0752-0.07519 0.14698-0.02051 0.06836-0.03418 0.2666l0 0.6289q-0.01367 0.79639-0.04102 1.0083-0.02734 0.2085 0.00684 0.33497 0.03418 0.12646 0.14697 0.25293 0.0957 0.08203 0.18116 0.11962 0.08545 0.03418 0.22558 0.03418 0.10938 0 0.15723-0.00683 0.05127-0.00684 0.10595-0.04102 0.05811-0.0376 0.14014-0.11279 0.08545-0.07861 0.1128-0.1333 0.07178-0.12646 0.09912-0.41358 0.02734-0.28711 0.02734-0.96044 0.01367-0.51611 0-0.69727 0-0.22559-0.0376-0.31445-0.03418-0.09229-0.1333-0.19141-0.0957-0.09912-0.24951-0.14014-0.15381-0.04102-0.29395-0.01367z m-3.66748 2.85742q0 0.01367-0.09912 0.02735-0.0957 0.01367-0.20849 0.01367-0.32129 0-0.59473-0.17432-0.27344-0.17432-0.41357-0.46826-0.07178-0.14014-0.09913-0.25976-0.02734-0.11963-0.02734-0.34522l-0.01367-0.24951 0.72803 0.71435q0.72803 0.72803 0.72802 0.7417z"
+              fill="#F28B7A"
+            ></path>
+          </svg>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FECACA] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Microphone unavailable
+          </div>
+          <div
+            data-pencil-name="Action"
+            class="text-[12px]/[normal] box-border text-[#F28B7A] font-[Inter,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+          >
+            Fix
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="State Too short"
+        class="box-border w-full h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+      >
+        <div
+          data-pencil-name="Label"
+          class="text-[12.5px]/[normal] box-border w-[120px] shrink-0 text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-semibold text-left"
+        >
+          Too short
+        </div>
+        <div
+          data-pencil-name="Pill"
+          class="box-border w-fit shrink-0 h-fit [box-shadow:0px_8px_24px_#00000030] flex flex-row gap-[10px] p-[7px_12px] justify-start items-center bg-[#121316] [outline:1px_solid_#FFFFFF1F] [outline-offset:-0.5px] rounded-[18px]"
+        >
+          <svg
+            data-pencil-name="Info"
+            data-icon-name="timer"
+            data-icon-set="lucide"
+            viewBox="0 0 13.99993896484375 14"
+            preserveAspectRatio="xMidYMid meet"
+            xmlns="http://www.w3.org/2000/svg"
+            class="box-border w-[14px] shrink-0 h-[14px]"
+          >
+            <path
+              d="M5.7251 0.60156q-0.18115 0.02734-0.32129 0.18115-0.14014 0.15381-0.15381 0.35206 0 0.14014 0.06152 0.28027 0.06494 0.14014 0.19141 0.22217l0.01367 0.01367q0.06836 0.05811 0.15039 0.07178 0.08545 0.01367 0.35205 0.02734l1.96192 0q0.2666-0.01367 0.34863-0.02734 0.08545-0.01367 0.15381-0.07178l0.01367-0.01367q0.21191-0.14014 0.24609-0.36914 0.03418-0.23242-0.09912-0.43409-0.1333-0.20508-0.38281-0.23242-0.11279-0.02734-1.2749-0.02734-1.16211 0-1.26123 0.02734z m0.77246 2.33789q-0.98096 0.09912-1.86963 0.54688-0.88867 0.44775-1.54834 1.18945-1.07666 1.2168-1.30225 2.88477-0.02734 0.2085-0.0205 0.64941 0.00684 0.44092 0.03418 0.63916 0.09912 0.71436 0.34863 1.32276 0.25293 0.6084 0.67334 1.16894 0.15381 0.19482 0.44092 0.48877 0.28711 0.29395 0.47168 0.44775 0.43408 0.33496 0.93652 0.58789 0.58789 0.28027 1.1416 0.41358 0.55371 0.1333 1.19629 0.1333 0.64258 0 1.19629-0.1333 0.55371-0.1333 1.1416-0.41358 0.40674-0.2085 0.72119-0.4375 0.31445-0.23242 0.66651-0.58447 0.85107-0.84082 1.24414-1.95849 0.25293-0.72803 0.27343-1.54493 0.02051-0.82031-0.17431-1.56543-0.2666-0.93652-0.82715-1.69873-0.56055-0.76221-1.37061-1.30908-0.16748-0.11279-0.50586-0.28027-0.33496-0.16748-0.52978-0.23926-0.54688-0.19482-1.13477-0.28027-0.16748-0.02734-0.60156-0.03418-0.43408-0.00684-0.60156 0.00683z m0.96387 1.17578q0.98096 0.09912 1.82519 0.68018 0.84766 0.58105 1.32617 1.46289 0.43408 0.82715 0.46143 1.77734 0.02734 1.0083-0.39307 1.87647-0.15381 0.34863-0.33496 0.60156-0.18115 0.25293-0.44775 0.51953-0.2666 0.26318-0.50586 0.44092-0.23584 0.17432-0.55713 0.3418-1.06641 0.5332-2.24902 0.41357-1.18262-0.11963-2.13282-0.875-0.22559-0.18115-0.49218-0.46826-0.2666-0.28711-0.43409-0.56738-0.62891-0.99463-0.60839-2.20459 0.02051-1.21338 0.68017-2.20459 0.60156-0.9126 1.59619-1.40137 1.03564-0.51953 2.26612-0.39307z m1.18945 1.73633q-0.0957 0.01367-0.16748 0.05127-0.06836 0.03418-1.03565 0.98438-0.67334 0.68701-0.82031 0.84082-0.14697 0.15381-0.17432 0.22558-0.06836 0.2085 0.01368 0.42725 0.08545 0.21533 0.28027 0.31445 0.09912 0.04102 0.25293 0.04102l0.02734 0q0.11279 0 0.19483-0.04102 0.08545-0.04443 0.29736-0.23926 0.15381-0.14014 0.66992-0.65966l0.1128-0.10938q0.67334-0.67334 0.82031-0.83398 0.14697-0.16064 0.17431-0.23242 0.06836-0.2085-0.00341-0.39649-0.06836-0.19141-0.24268-0.30078-0.17432-0.11279-0.3999-0.07178z"
+              fill="#FFFFFF80"
+            ></path>
+          </svg>
+          <div
+            data-pencil-name="Label"
+            class="text-[12px]/[normal] box-border text-[#FFFFFFB3] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Too short — hold a bit longer
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

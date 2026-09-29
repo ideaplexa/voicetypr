@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelsSection } from "../ModelsSection";
@@ -147,20 +147,33 @@ describe("ModelsSection live preview mode", () => {
     });
   });
 
-  it("hides the live preview control for Parakeet while the engine is dormant", async () => {
-    renderSection();
+  it.each(["downloading", "verifying"] as const)("keeps %s status in the model list, outside Spoken language", async (phase) => {
+    const pendingModel: ModelInfo = { ...parakeetModel, name: "pending-model", display_name: "Pending model", downloaded: false };
+    render(<ModelsSection {...baseProps}
+      models={[...baseProps.models, [pendingModel.name, pendingModel]]}
+      downloadProgress={phase === "downloading" ? { [pendingModel.name]: 42 } : {}}
+      verifyingModels={new Set(phase === "verifying" ? [pendingModel.name] : [])} />);
+    await screen.findByRole("switch", { name: "Live preview" });
+    const language = screen.getByRole("heading", { name: "Spoken language" }).closest("section")!;
+    expect(screen.getByText(phase === "downloading" ? "Downloading 42%" : "Verifying")).toBeInTheDocument();
+    expect(within(language).queryByText(/Downloading|Verifying/)).not.toBeInTheDocument();
+    expect(within(language).getByTestId("language-selection")).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(screen.queryByText("Transcription mode")).not.toBeInTheDocument();
-    });
+  it("shows a disabled switch and reason when streaming is unavailable", async () => {
+    renderSection();
+    expect(await screen.findByRole("switch", { name: "Live preview" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByText("This engine cannot show words while you speak.")).toBeInTheDocument();
   });
 
   it("shows the live preview control when capabilities support streaming", async () => {
     mockCapabilities = makeCapabilities(true);
     renderSection();
 
-    expect(await screen.findByText("Transcription mode")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Live preview" })).toBeInTheDocument();
+    expect(await screen.findByRole("switch", { name: "Live preview" })).toBeEnabled();
     expect(screen.getByText("en,ja,vi")).toBeInTheDocument();
     expect(screen.queryByText(/English-only for now/i)).not.toBeInTheDocument();
   });
@@ -169,7 +182,7 @@ describe("ModelsSection live preview mode", () => {
     mockCapabilities = makeCapabilities(true);
     renderSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Live preview" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(mocks.invoke).toHaveBeenCalledWith("activate_live_preview", undefined);
@@ -184,7 +197,7 @@ describe("ModelsSection live preview mode", () => {
     activateLivePreviewError = new Error("warmup failed");
     renderSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Live preview" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("warmup failed");
@@ -198,7 +211,7 @@ describe("ModelsSection live preview mode", () => {
     mockCapabilities = makeCapabilities(true);
     renderSection();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Regular" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Live preview" }));
 
     await waitFor(() => {
       expect(mocks.updateSettings).toHaveBeenCalledWith({ transcription_mode: "regular" });

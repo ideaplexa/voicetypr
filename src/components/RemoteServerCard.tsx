@@ -66,6 +66,7 @@ interface RemoteServerCardProps {
   isRefreshing?: boolean;
   /** Refresh saved remote server state after a successful model update */
   onServerUpdated?: () => void | Promise<void>;
+  compact?: boolean;
 }
 
 function modelOptionKey(name: string, engine: SpeechModelEngine) {
@@ -392,6 +393,7 @@ export function RemoteServerCard({
   onEdit,
   isRefreshing = false,
   onServerUpdated,
+  compact = false,
 }: RemoteServerCardProps) {
   const [removing, setRemoving] = useState(false);
 
@@ -449,10 +451,12 @@ export function RemoteServerCard({
   return (
     <Card
       className={cn(
-        "rounded-xl border border-border bg-card p-4 transition-colors",
+        compact
+          ? "rounded-none border-0 border-t border-border bg-transparent p-4 transition-colors"
+          : "rounded-xl border border-border bg-card p-4 transition-colors",
         isSelectable && !isActive ? "cursor-pointer" : "cursor-default",
         status === "self_connection"
-          ? "border-amber-500/30 bg-amber-500/10"
+          ? "border-warn/30 bg-warn-bg"
           : isActive
             ? "border-sage/50 bg-sage-bg/40"
             : isSelectable
@@ -469,9 +473,9 @@ export function RemoteServerCard({
               isActive
                 ? "border-sage/30 bg-sage-bg text-sage"
                 : status === "online"
-                  ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
+                  ? "border-sage/20 bg-sage-bg text-sage"
                   : status === "auth_failed" || status === "self_connection"
-                    ? "border-amber-500/20 bg-amber-500/10 text-amber-700"
+                    ? "border-warn/20 bg-warn-bg text-warn"
                     : "border-border bg-muted/60 text-muted-foreground",
             )}
           >
@@ -494,7 +498,7 @@ export function RemoteServerCard({
                     "gap-1",
                     status === "online"
                       ? "border-sage/40 bg-sage-bg text-sage"
-                      : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+                      : "border-warn/40 bg-warn-bg text-warn dark:text-warn",
                   )}
                 >
                   {status === "online" ? (
@@ -538,18 +542,18 @@ export function RemoteServerCard({
                 )
               ) : status === "online" ? (
                 <>
-                  <Wifi className="size-3 text-emerald-600" />
-                  <span className="text-emerald-700 dark:text-emerald-400">Online</span>
+                  <Wifi className="size-3 text-sage" />
+                  <span className="text-sage dark:text-sage">Online</span>
                   {modelDisplayName && <span>• {modelDisplayName}</span>}
                   {isRefreshing && <Spinner className="size-3" />}
                 </>
               ) : status === "auth_failed" ? (
                 <>
-                  <KeyRound className="size-3 text-amber-600" />
-                  <span className="text-amber-700 dark:text-amber-400">Password incorrect</span>
+                  <KeyRound className="size-3 text-warn" />
+                  <span className="text-warn dark:text-warn">Password incorrect</span>
                   <button
                     type="button"
-                    className="text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
+                    className="text-warn underline underline-offset-2 hover:text-warn dark:text-warn dark:hover:text-warn"
                     onClick={handleEdit}
                   >
                     Edit password
@@ -558,8 +562,8 @@ export function RemoteServerCard({
                 </>
               ) : status === "self_connection" ? (
                 <>
-                  <AlertTriangle className="size-3 text-amber-600" />
-                  <span className="text-amber-700 dark:text-amber-400">This Machine</span>
+                  <AlertTriangle className="size-3 text-warn" />
+                  <span className="text-warn dark:text-warn">This Machine</span>
                   <span>• This is the same device</span>
                 </>
               ) : (

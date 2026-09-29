@@ -13,14 +13,36 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { normalizeTheme } from "@/hooks/useTheme";
+import { Segmented, SettingsPaneRow } from "@/components/settings/settings-ui";
 import { Sun } from "lucide-react";
 
 interface AppearanceCardProps {
+  pane?: boolean;
   theme: string | null | undefined;
   onThemeChange: (theme: string) => void;
 }
 
-export function AppearanceCard({ theme, onThemeChange }: AppearanceCardProps) {
+export function AppearanceCard({ theme, onThemeChange, pane = false }: AppearanceCardProps) {
+  if (pane)
+    return (
+      <SettingsPaneRow
+        className="min-h-[66px]"
+        title="Appearance"
+        description="Match your system or pick a side."
+        control={
+          <Segmented
+            label="Theme"
+            value={normalizeTheme(theme)}
+            onValueChange={(value) => onThemeChange(normalizeTheme(value))}
+            options={[
+              { value: "system", label: "System" },
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+            ]}
+          />
+        }
+      />
+    );
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="mb-4 flex items-center gap-2">

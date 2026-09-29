@@ -1,10 +1,13 @@
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
-import { formatHotkey } from "@/lib/hotkey-utils";
-import { TranscriptionHistory } from "@/types";
-import { AlertCircle, AlertTriangle, Mic, Search, ShieldCheck } from "lucide-react";
+import type { KeyboardEvent } from "react";
+import { AlertTriangle, Search } from "lucide-react";
+import { KeyCaps } from "@/components/KeyCaps";
+import { Button } from "@/components/settings/SettingsButton";
+import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { isMacOS } from "@/lib/platform";
-import { RecentRecordingRow } from "./RecentRecordingRow";
+import type { TranscriptionHistory } from "@/types";
+import { sourceLabel } from "./recentRecordingsHelpers";
+import { RecentRecordingApplicationIcon } from "./RecentRecordingApplicationIcon";
+import type { HomeStatus } from "@/lib/home-readiness";
 
 export interface RecentRecordingsListProps {
   historyLength: number;
@@ -12,24 +15,15 @@ export interface RecentRecordingsListProps {
   groupedHistory: Record<string, TranscriptionHistory[]>;
   visibleCount: number;
   onLoadMore: () => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
   isLoading: boolean;
   loadError: string | null;
   onRetry?: () => void;
+  onTranscribeFile?: () => void;
   hotkey: string;
-  availability: {
-    canRecord: boolean;
-    canAutoInsert: boolean;
-    unavailableMessage: string;
-  };
-  reTranscribingIds: Set<string>;
-  reTranscribingModels: Map<string, string>;
-  verifiedRecordings: Set<string>;
-  checkedRecordings: Set<string>;
-  showOriginalIds: Set<string>;
-  onToggleOriginal: (id: string) => void;
-  onReTranscribe: (item: TranscriptionHistory) => void;
-  onShowInFolder: (item: TranscriptionHistory) => void;
-  onDelete: (e: React.MouseEvent, id: string) => void;
+  readinessStatus: HomeStatus;
+  onReadinessAction: () => void;
 }
 
 export function RecentRecordingsList({
@@ -38,142 +32,142 @@ export function RecentRecordingsList({
   groupedHistory,
   visibleCount,
   onLoadMore,
+  selectedId,
+  onSelect,
   isLoading,
   loadError,
   onRetry,
+  onTranscribeFile,
   hotkey,
-  availability,
-  reTranscribingIds,
-  reTranscribingModels,
-  verifiedRecordings,
-  checkedRecordings,
-  showOriginalIds,
-  onToggleOriginal,
-  onReTranscribe,
-  onShowInFolder,
-  onDelete,
+  readinessStatus,
+  onReadinessAction,
 }: RecentRecordingsListProps) {
-  if (historyLength > 0) {
-    if (filteredHistory.length === 0) {
-      return (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <Search className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <p className="text-sm text-muted-foreground">No transcriptions found</p>
-            <p className="text-xs text-muted-foreground/70 mt-2">
-              Try adjusting your search or filters
-            </p>
-          </div>
-        </div>
-      );
-    }
+  const visible = filteredHistory.slice(0, visibleCount);
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: string) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const index = visible.findIndex((item) => item.id === id);
+    const next = visible[index + (event.key === "ArrowDown" ? 1 : -1)];
+    if (!next) return;
+    onSelect(next.id);
+    document.getElementById(`history-item-${next.id}`)?.focus();
+  };
 
+  if (historyLength === 0 && isLoading)
     return (
-      <ScrollArea className="h-full">
-        <div className="py-4 pl-2 pr-4 space-y-6">
-          {Object.entries(groupedHistory).map(([date, items]) => (
-            <div key={date} className="space-y-2.5">
-              <p className="px-1 text-xs font-medium text-muted-foreground">
-                {date} <span className="text-muted-foreground/50">· {items.length}</span>
-              </p>
-              <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                {items.map((item) => (
-                  <RecentRecordingRow
-                    key={item.id}
-                    item={item}
-                    reTranscribingIds={reTranscribingIds}
-                    reTranscribingModels={reTranscribingModels}
-                    verifiedRecordings={verifiedRecordings}
-                    checkedRecordings={checkedRecordings}
-                    showOriginal={showOriginalIds.has(item.id)}
-                    onToggleOriginal={onToggleOriginal}
-                    onReTranscribe={onReTranscribe}
-                    onShowInFolder={onShowInFolder}
-                    onDelete={onDelete}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-          {filteredHistory.length > visibleCount && (
-            <div className="flex justify-center pt-1">
-              <Button variant="secondary" size="sm" onClick={onLoadMore}>
-                Load more · showing {visibleCount} of {filteredHistory.length}
-              </Button>
-            </div>
-          )}
-          <p className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-sage" />
-            Every transcript stays on this {isMacOS ? "Mac" : "PC"}. Nothing syncs to a cloud.
-          </p>
-        </div>
-      </ScrollArea>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div aria-hidden className="py-4 pl-2 pr-4 space-y-2.5">
+      <div aria-hidden className="space-y-2 p-4">
         {[0, 1, 2].map((key) => (
-          <div key={key} className="h-16 rounded-lg bg-muted/60 animate-pulse" />
+          <div key={key} className="h-[77px] animate-pulse rounded-lg bg-muted" />
         ))}
       </div>
     );
-  }
-
-  if (loadError) {
+  if (historyLength === 0 && loadError)
     return (
-      <div className="py-4 pl-2 pr-4">
-        <div className="flex items-center gap-3.5 rounded-2xl border border-border bg-amber-500/[0.04] px-5 py-4">
-          <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-500">
-            <AlertTriangle className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
-              Couldn&apos;t load your history.
-            </p>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRetry?.();
-              }}
-              className="mt-1 text-[11px] font-medium text-sage hover:underline"
-            >
+      <div className="p-4">
+        <div className="flex items-center gap-3 rounded-[10px] bg-muted p-4">
+          <AlertTriangle className="size-5 text-muted-foreground" />
+          <div>
+            <p className="text-sm text-muted-foreground">Couldn&apos;t load your history.</p>
+            <button type="button" onClick={onRetry} className="mt-1 text-sm text-sage underline">
               Retry
             </button>
           </div>
         </div>
       </div>
     );
-  }
-
-  return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="text-center">
-        {availability.canRecord ? (
-          <>
-            <Mic className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <p className="text-sm text-muted-foreground">No recordings yet</p>
-            {availability.canAutoInsert ? (
-              <p className="text-xs text-muted-foreground/70 mt-2">
-                Press {formatHotkey(hotkey)} to record. Save recordings in Settings to enable
-                re-transcription.
-              </p>
-            ) : (
-              <p className="text-xs text-amber-600 mt-2">
-                Recording available but accessibility permission needed for hotkeys
-              </p>
-            )}
-          </>
+  if (filteredHistory.length === 0)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Search className="size-7 text-muted-foreground" />
+        {historyLength === 0 ? (
+          readinessStatus.ready ? (
+            <p className="text-sm text-muted-foreground">
+              Your dictations will show up here. Press{" "}
+              <span className="[&_kbd]:text-muted-foreground [&>span]:text-muted-foreground">
+                <KeyCaps caps={shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows")} />
+              </span>{" "}
+              to start.
+            </p>
+          ) : (
+            <div className="space-y-2 text-sm">
+              <p className="text-muted-foreground">Your dictations will show up here.</p>
+              <button
+                type="button"
+                onClick={onReadinessAction}
+                className="font-medium text-foreground underline"
+              >
+                {readinessStatus.label} —{" "}
+                {readinessStatus.label === "No model yet" ? "Choose a model" : "Review settings"}
+              </button>
+            </div>
+          )
         ) : (
-          <>
-            <AlertCircle className="w-12 h-12 text-amber-500/50 mx-auto mb-4" />
-            <p className="text-sm text-muted-foreground">Cannot record yet</p>
-            <p className="text-xs text-amber-600 mt-2">{availability.unavailableMessage}</p>
-          </>
+          <p className="text-sm text-muted-foreground">No dictations match</p>
+        )}
+        {onTranscribeFile && (
+          <Button type="button" variant="outline" onClick={onTranscribeFile}>
+            Transcribe a file…
+          </Button>
         )}
       </div>
+    );
+
+  return (
+    <div className="h-full overflow-y-auto" aria-label="Dictations">
+      {Object.entries(groupedHistory).map(([day, items]) => (
+        <div key={day}>
+          <div className="px-4 pb-[6px] pt-3 text-[10.5px] font-semibold tracking-[0.5px] text-muted-foreground">
+            {day.toUpperCase()}
+          </div>
+          {items.map((item) => {
+            const app = item.writing?.context_hint?.app_name;
+            const name = app && app !== "Other" ? app : sourceLabel(item.writing?.source);
+            const selected = item.id === selectedId;
+            return (
+              <button
+                id={`history-item-${item.id}`}
+                key={item.id}
+                type="button"
+                aria-current={selected ? "true" : undefined}
+                onClick={() => onSelect(item.id)}
+                onKeyDown={(event) => handleKeyDown(event, item.id)}
+                className={`block min-h-[77px] w-full border-b border-border px-4 py-[11px] text-left transition-colors focus-visible:outline-2 focus-visible:outline-sage ${selected ? "bg-sage-bg" : "hover:bg-muted/60"}`}
+              >
+                <span className="mb-1 flex items-start justify-between gap-2 text-[11.5px] font-semibold text-muted-foreground">
+                  <span
+                    className={`inline-flex min-w-0 items-center gap-1 truncate ${selected ? "text-[14px] text-sage" : ""}`}
+                  >
+                    {app && app !== "Other" && item.writing?.context_hint?.process_path ? (
+                      <RecentRecordingApplicationIcon
+                        appName={app}
+                        processPath={item.writing.context_hint.process_path}
+                      />
+                    ) : null}
+                    {name}
+                  </span>
+                  <time className="shrink-0 font-mono font-normal text-muted-foreground">
+                    {new Date(item.timestamp).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    })}
+                  </time>
+                </span>
+                <span className="line-clamp-2 text-[12.5px] leading-[18px] text-muted-foreground">
+                  {item.text}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+      {filteredHistory.length > visibleCount && (
+        <div className="p-4 text-center">
+          <Button type="button" variant="outline" onClick={onLoadMore}>
+            Load more · showing {visibleCount} of {filteredHistory.length}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

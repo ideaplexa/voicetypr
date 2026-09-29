@@ -1,11 +1,17 @@
 import type { BareModifierSpec } from "@/components/HotkeyInput";
 import { formatBareModifierLabel } from "@/components/onboarding/onboardingTypes";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { Spinner } from "@/components/ui/spinner";
-import { formatHotkey } from "@/lib/hotkey-utils";
-import { ShieldCheck } from "lucide-react";
+import { KeyCaps } from "@/components/KeyCaps";
+import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
+import { isMacOS } from "@/lib/platform";
+import { useTestDictation } from "@/components/tabs/overview/useTestDictation";
+import { CircleCheck } from "lucide-react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 
 export function SuccessStep({
+  editor,
+  onChangeShortcut,
   capturedBareModifier,
   holdToTalk,
   hotkey,
@@ -16,6 +22,8 @@ export function SuccessStep({
   onAnalyticsChange,
   onComplete,
 }: {
+  editor?: ReactNode;
+  onChangeShortcut: () => void;
   capturedBareModifier: BareModifierSpec | null;
   holdToTalk: boolean;
   hotkey: string;
@@ -26,41 +34,72 @@ export function SuccessStep({
   onAnalyticsChange: (checked: boolean) => void;
   onComplete: () => void | Promise<void>;
 }) {
+  const [text, setText] = useState("");
+  const trialRef = useRef<HTMLTextAreaElement>(null);
+  const editing = Boolean(editor);
+  useEffect(() => {
+    if (!editing) trialRef.current?.focus();
+  }, [editing]);
+  const { feedback, contentChanged } = useTestDictation(!editor);
+  const caps = capturedBareModifier
+    ? [formatBareModifierLabel(capturedBareModifier)]
+    : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
   return (
-    <section className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 text-center">
-      <div className="flex size-16 items-center justify-center rounded-3xl bg-sage text-sage-foreground shadow-sm">
-        <ShieldCheck className="size-8" />
-      </div>
-      <div className="flex flex-col gap-3">
-        <h1 className="text-4xl font-semibold tracking-[-0.04em]">You're all set</h1>
-        <p className="text-muted-foreground">
-          Voicetypr is ready to use.{" "}
-          {capturedBareModifier ? (
-            holdToTalk ? (
-              <>
-                Hold {formatBareModifierLabel(capturedBareModifier)} anywhere to start recording;
-                release to stop.
-              </>
-            ) : (
-              <>
-                Tap {formatBareModifierLabel(capturedBareModifier)} anywhere to start or stop
-                recording.
-              </>
-            )
-          ) : holdToTalk ? (
-            <>Hold {formatHotkey(hotkey)} anywhere to start recording; release to stop.</>
-          ) : (
-            <>Press {formatHotkey(hotkey)} anywhere to start recording.</>
-          )}
-        </p>
-      </div>
-
-      <p className="w-full rounded-2xl border border-border bg-card p-4 text-left text-sm text-muted-foreground shadow-sm">
-        Tip: turn on Polish in Settings to clean up your dictation automatically.
+    <section className="flex w-full flex-col items-center gap-[22px]">
+      <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Try it now</h2>
+      <p className="flex flex-wrap items-center justify-center gap-[10px] text-base text-muted-foreground">
+        {holdToTalk ? "Hold" : "Press"} <KeyCaps caps={caps} size="onboarding" />
+        {holdToTalk ? "and say anything, then let go." : "and say anything. Press again to stop."}
       </p>
-
+      {editor}
+      <div
+        className={
+          editor
+            ? "hidden"
+            : "flex h-[150px] w-full flex-col gap-[10px] rounded-[14px] outline-[1.5px] outline-sage outline-offset-[-0.75px] bg-card p-[18px]"
+        }
+      >
+        <textarea
+          ref={trialRef}
+          autoFocus
+          aria-label="Try a dictation"
+          placeholder="Your words will appear here…"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            contentChanged();
+          }}
+          className="min-h-0 flex-1 resize-none bg-transparent text-[17px] leading-[26px] text-foreground outline-none placeholder:text-muted-foreground"
+        />
+        {feedback ? (
+          <p
+            role="status"
+            className="flex items-center gap-2 text-[12.5px] font-medium text-muted-foreground"
+          >
+            {feedback.startsWith("Worked") ? <CircleCheck className="size-4 text-sage" /> : null}
+            {feedback}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-[10px]">
+        <Button
+          variant="outline"
+          className="h-auto rounded-[10px] px-4 py-[9px] text-[13px] leading-[normal] text-muted-foreground"
+          disabled={Boolean(editor) || isSavingCompletion}
+          onClick={onChangeShortcut}
+        >
+          Change shortcut
+        </Button>
+        <Button
+          disabled={isSavingCompletion}
+          className="h-auto rounded-[10px] px-4 py-[9px] border-0 text-sm leading-4"
+          onClick={() => void onComplete()}
+        >
+          {isSavingCompletion ? <Spinner /> : null}Start using Voicetypr
+        </Button>
+      </div>
       <div className="flex w-full flex-col gap-3 text-left text-sm">
-        <label className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <label className="flex items-start gap-3 rounded-[14px] border border-border bg-card p-4">
           <input
             type="checkbox"
             checked={telemetryOptIn}
@@ -76,7 +115,7 @@ export function SuccessStep({
           </span>
         </label>
 
-        <label className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <label className="flex items-start gap-3 rounded-[14px] border border-border bg-card p-4">
           <input
             type="checkbox"
             checked={analyticsOptIn}
@@ -90,11 +129,6 @@ export function SuccessStep({
           </span>
         </label>
       </div>
-
-      <Button size="lg" disabled={isSavingCompletion} onClick={() => void onComplete()}>
-        {isSavingCompletion ? <Spinner /> : null}
-        Start using Voicetypr
-      </Button>
     </section>
   );
 }

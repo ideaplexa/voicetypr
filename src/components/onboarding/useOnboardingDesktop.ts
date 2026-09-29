@@ -33,6 +33,7 @@ export function useOnboardingDesktop({
   onCompletionError,
   onComplete,
   modelManagement,
+  previewPhase,
 }: OnboardingDesktopProps) {
   const { settings, updateSettings } = useSettings();
   const {
@@ -67,7 +68,15 @@ export function useOnboardingDesktop({
     isLoading,
   } = modelManagement;
 
-  const [currentStep, setCurrentStep] = useState<Step>("welcome");
+  const [currentStep, setCurrentStep] = useState<Step>(
+    previewPhase === 2
+      ? isMacOS
+        ? "permissions"
+        : "hotkey"
+      : previewPhase === 3
+        ? "success"
+        : "welcome",
+  );
   // Both independent privacy choices are opt-out and default to checked.
   const [telemetryOptIn, setTelemetryOptIn] = useState(true);
   const [analyticsOptIn, setAnalyticsOptIn] = useState(true);
@@ -89,7 +98,7 @@ export function useOnboardingDesktop({
   const [selectedDiscoveredServer, setSelectedDiscoveredServer] =
     useState<DiscoveredRemoteServer | null>(null);
   const [isSavingCompletion, setIsSavingCompletion] = useState(false);
-  const [holdToTalk, setHoldToTalk] = useState(false);
+  const [holdToTalk, setHoldToTalk] = useState(settings?.recording_mode === "push_to_talk");
   const [cloudModelSetup, setCloudModelSetup] = useState<string | null>(null);
   const [isSavingCloudKey, setIsSavingCloudKey] = useState(false);
   const [hotkeyHydrated, setHotkeyHydrated] = useState(() => Boolean(settings?.hotkey));
@@ -141,7 +150,7 @@ export function useOnboardingDesktop({
   const steps = useMemo(
     () =>
       isMacOS
-        ? (["welcome", "source", "permissions", "readiness", "hotkey", "success"] satisfies Step[])
+        ? (["welcome", "source", "readiness", "permissions", "hotkey", "success"] satisfies Step[])
         : (["welcome", "source", "readiness", "hotkey", "success"] satisfies Step[]),
     [],
   );
@@ -589,12 +598,12 @@ export function useOnboardingDesktop({
       }
 
       if (currentStep === "source") {
-        setCurrentStep(isMacOS ? "permissions" : "readiness");
+        setCurrentStep("readiness");
         return;
       }
 
       if (currentStep === "permissions") {
-        setCurrentStep("readiness");
+        setCurrentStep("hotkey");
         return;
       }
 
@@ -603,7 +612,7 @@ export function useOnboardingDesktop({
           await invoke("set_active_remote_server", { serverId: null });
           setActiveRemoteServerId(null);
         }
-        setCurrentStep("hotkey");
+        setCurrentStep(isMacOS ? "permissions" : "hotkey");
         return;
       }
 

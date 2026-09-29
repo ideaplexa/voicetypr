@@ -1,13 +1,11 @@
 import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
 import type { ActiveStreamCapabilities, SpeechModelEngine } from "@/types";
 import { getErrorMessage } from "@/utils/error";
 import { invoke } from "@tauri-apps/api/core";
-import { Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,9 +14,11 @@ const log = createLogger("models");
 export function TranscriptionControls({
   engine,
   modelName,
+  speedOnly = false,
 }: {
   engine: SpeechModelEngine;
   modelName: string;
+  speedOnly?: boolean;
 }) {
   const { settings, updateSettings, refreshSettings } = useSettings();
   const [capabilities, setCapabilities] = useState<ActiveStreamCapabilities | null>(null);
@@ -78,64 +78,59 @@ export function TranscriptionControls({
     }
   };
 
-  return (
-    <>
-      {engine === "whisper" && (
-        <SettingsCard icon={Zap} title="Whisper performance">
-          <SettingRow
-            title="Speed mode"
-            description="Faster transcription (flash attention); pairs best with Large v3 Turbo."
-            control={
-              <Switch
-                id="whisper-speed-mode"
-                checked={settings?.whisper_speed_mode ?? false}
-                onCheckedChange={(checked) => {
-                  void updateSettings({ whisper_speed_mode: checked }).catch((error) => {
-                    log.error("Failed to update Whisper speed mode:", error);
-                    toast.error("Failed to update speed mode");
-                  });
-                }}
-                aria-label="Speed mode"
-              />
-            }
+  const previewAvailable = capabilities?.capabilities.supports_streaming === true;
+  return speedOnly ? (
+    engine === "whisper" ? (
+      <SettingsCard title="Whisper performance">
+        <SettingRow
+          title="Speed mode"
+          description="Faster transcription (flash attention); pairs best with Large v3 Turbo."
+          control={
+            <Switch
+              id="whisper-speed-mode"
+              checked={settings?.whisper_speed_mode ?? false}
+              onCheckedChange={(checked) => {
+                void updateSettings({ whisper_speed_mode: checked }).catch((error) => {
+                  log.error("Failed to update Whisper speed mode:", error);
+                  toast.error("Failed to update speed mode");
+                });
+              }}
+              aria-label="Speed mode"
+            />
+          }
+        />
+      </SettingsCard>
+    ) : null
+  ) : (
+    <section
+      data-pencil-name="Opt Live preview"
+      className="rounded-[14px] border border-border bg-card px-4 py-3"
+    >
+      <SettingRow
+        title="Live preview"
+        className="border-0 p-0! flex-row! items-center! gap-4! [&>div:first-child]:flex-1"
+        description={
+          previewAvailable
+            ? "See words in the pill as you talk."
+            : "This engine cannot show words while you speak."
+        }
+        control={
+          <Switch
+            id="live-preview"
+            aria-label="Live preview"
+            checked={previewAvailable && transcriptionMode === "live_preview"}
+            disabled={!previewAvailable || isActivating}
+            onCheckedChange={(checked) => {
+              void changeMode(checked ? "live_preview" : "regular");
+            }}
           />
-        </SettingsCard>
-      )}
-      {capabilities?.capabilities.supports_streaming === true && (
-        <SettingsCard
-          icon={Zap}
-          title="Transcription mode"
-          description="Live preview shows text as you speak; your final text still uses your selected model."
-        >
-          <SettingRow
-            title="Mode"
-            description="Regular waits for the final transcript. Live preview shows text locally as you speak."
-            control={
-              <div className="flex flex-col items-end gap-2">
-                <ToggleGroup
-                  variant="outline"
-                  size="sm"
-                  spacing={0}
-                  value={[transcriptionMode]}
-                  onValueChange={(values) =>
-                    void changeMode(values.find((value) => value !== transcriptionMode) ?? "")
-                  }
-                  aria-label="Transcription mode"
-                  disabled={isActivating}
-                >
-                  <ToggleGroupItem value="regular">Regular</ToggleGroupItem>
-                  <ToggleGroupItem value="live_preview">Live preview</ToggleGroupItem>
-                </ToggleGroup>
-                {isActivating && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Spinner className="size-3.5" /> Enabling live preview…
-                  </div>
-                )}
-              </div>
-            }
-          />
-        </SettingsCard>
-      )}
-    </>
+        }
+      />
+      {isActivating ? (
+        <p className="text-xs text-muted-foreground">
+          <Spinner className="inline size-3" /> Enabling live preview…
+        </p>
+      ) : null}
+    </section>
   );
 }

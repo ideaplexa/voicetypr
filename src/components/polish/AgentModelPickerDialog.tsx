@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Dialog,
   DialogContent,

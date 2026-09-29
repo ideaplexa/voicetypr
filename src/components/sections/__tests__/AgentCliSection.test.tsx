@@ -56,8 +56,8 @@ describe("AgentCliSection", () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("install_cli_tool");
     });
-    expect(await screen.findByText("Ready and compatible")).toBeInTheDocument();
-    expect(screen.getByText("CLI v2.0.5")).toBeInTheDocument();
+    expect(await screen.findByText("Installed")).toBeInTheDocument();
+    expect(screen.getByText(/Installed at \/usr\/local\/bin\/voicetypr/)).toBeInTheDocument();
   });
 
   it("repairs an installed command that targets another app version", async () => {
@@ -77,7 +77,7 @@ describe("AgentCliSection", () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("repair_cli_tool");
     });
-    expect(await screen.findByText("Ready and compatible")).toBeInTheDocument();
+    expect(await screen.findByText("Installed")).toBeInTheDocument();
   });
 
   it("offers repair and removal for a healthy installed command", async () => {
@@ -97,7 +97,7 @@ describe("AgentCliSection", () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("uninstall_cli_tool");
     });
-    expect(await screen.findByText("Not installed")).toBeInTheDocument();
+    expect((await screen.findAllByText("Not installed")).length).toBeGreaterThan(0);
   });
 
   it("shows an unmanaged conflict without destructive actions", async () => {
@@ -114,7 +114,7 @@ describe("AgentCliSection", () => {
     expect(await screen.findByText(/another command already uses this path/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^install$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^remove$/i })).not.toBeInTheDocument();
-    expect(screen.getAllByText(/voicetypr transcribe/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /copy agent prompt/i })).toBeInTheDocument();
   });
 
   it("copies a reusable prompt for terminal-capable agents", async () => {
@@ -126,6 +126,6 @@ describe("AgentCliSection", () => {
     expect(writeTextMock).toHaveBeenCalledWith(
       expect.stringContaining("voicetypr transcribe --file <file> --json"),
     );
-    expect(screen.getByText(/Claude Code, Codex, OpenCode/)).toBeInTheDocument();
+    expect(screen.getByText(/Copy a short prompt that teaches your agent/)).toBeInTheDocument();
   });
 });

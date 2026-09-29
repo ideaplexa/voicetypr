@@ -22,6 +22,12 @@ export interface FirewallStatus {
   may_be_blocked: boolean;
 }
 
+export type FirewallCheck =
+  | { state: "checking" }
+  | { state: "allowed"; status: FirewallStatus }
+  | { state: "blocked"; status: FirewallStatus }
+  | { state: "unknown" };
+
 export interface SharingModelInfo {
   name: string;
   display_name: string;

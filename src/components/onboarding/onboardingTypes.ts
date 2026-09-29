@@ -5,6 +5,8 @@ import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import { isMacOS } from "@/lib/platform";
 
 export interface OnboardingDesktopProps {
+  /** Screenshot fixtures only; production onboarding always starts at welcome. */
+  previewPhase?: 1 | 2 | 3;
   onCompletionStart?: () => void;
   onCompletionError?: () => void;
   onComplete: () => void;

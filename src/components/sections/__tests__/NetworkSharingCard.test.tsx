@@ -83,6 +83,56 @@ describe("NetworkSharingCard", () => {
     eventListeners.clear();
   });
 
+  it("shows an unknown firewall warning after a failed check and retries", async () => {
+    let checks = 0;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_settings") return Promise.resolve({ current_model: "large-v3-turbo" });
+      if (command === "get_sharing_status") return Promise.resolve(sharingStatus());
+      if (command === "get_local_ips") return Promise.resolve([]);
+      if (command === "get_model_status") return Promise.resolve({ models: [shareableModel()] });
+      if (command === "get_active_remote_server") return Promise.resolve(null);
+      if (command === "get_firewall_status") {
+        checks += 1;
+        return checks === 1 ? Promise.reject(new Error("unavailable")) : Promise.resolve({ may_be_blocked: false, firewall_enabled: false, app_allowed: true });
+      }
+      return Promise.resolve(null);
+    });
+    const view = renderWithProviders(<NetworkSharingCard pane />);
+    const warning = await screen.findByText("Couldn't check the firewall");
+    expect(warning).toHaveClass("text-foreground");
+    expect(warning.closest("[data-firewall-status]")).toHaveAttribute("data-firewall-status", "unknown");
+    expect(warning.closest("[data-firewall-status]")?.querySelector(".bg-warn")).not.toBeNull();
+    expect(screen.queryByText("Incoming connections are allowed.")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByText("Incoming connections are allowed.")).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("distinguishes checking, blocked and allowed firewall results", async () => {
+    let resolveFirst!: (value: { may_be_blocked: boolean; firewall_enabled: boolean; app_allowed: boolean }) => void;
+    let checks = 0;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_settings") return Promise.resolve({ current_model: "large-v3-turbo" });
+      if (command === "get_sharing_status") return Promise.resolve(sharingStatus());
+      if (command === "get_local_ips") return Promise.resolve([]);
+      if (command === "get_model_status") return Promise.resolve({ models: [shareableModel()] });
+      if (command === "get_active_remote_server") return Promise.resolve(null);
+      if (command === "get_firewall_status") {
+        checks += 1;
+        return checks === 1
+          ? new Promise((resolve) => { resolveFirst = resolve; })
+          : Promise.resolve({ may_be_blocked: false, firewall_enabled: false, app_allowed: true });
+      }
+      return Promise.resolve(null);
+    });
+    renderWithProviders(<NetworkSharingCard pane />);
+    expect(await screen.findByText("Checking firewall…")).toBeInTheDocument();
+    resolveFirst({ may_be_blocked: true, firewall_enabled: true, app_allowed: false });
+    expect(await screen.findByText("Firewall may block connections")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByText("Incoming connections are allowed.")).toBeInTheDocument();
+  });
+
   describe("when no model is downloaded", () => {
     beforeEach(() => {
       mockInvoke.mockImplementation((command: string) => {

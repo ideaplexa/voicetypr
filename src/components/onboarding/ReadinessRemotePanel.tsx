@@ -4,7 +4,7 @@ import { isRemoteServerOnline } from "@/components/onboarding/onboardingTypes";
 import type { SavedConnection } from "@/components/RemoteServerCard";
 import { AddServerModal } from "@/components/sections/AddServerModal";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import {
   Card,
   CardAction,
@@ -72,7 +72,7 @@ export function ReadinessRemotePanel({
         </div>
       </div>
 
-      <Card className="rounded-2xl border border-border bg-card py-0 shadow-sm">
+      <Card className="rounded-[14px] border border-border bg-card py-0">
         <ScrollArea className="h-[320px]">
           <div className="flex flex-col gap-3 p-4">
             {isLoadingRemoteServers && remoteServers.length === 0 ? (
@@ -93,11 +93,14 @@ export function ReadinessRemotePanel({
               <Card
                 key={`${server.machine_id}:${server.host}:${server.port}`}
                 size="sm"
-                className="rounded-xl border border-border bg-muted/30"
+                className="rounded-none border-0 border-b border-border bg-transparent ring-0 last:border-b-0"
               >
                 <CardHeader>
                   <CardAction>
-                    <Badge variant={server.auth_required ? "outline" : "secondary"}>
+                    <Badge
+                      variant={server.auth_required ? "outline" : "secondary"}
+                      className="text-xs text-muted-foreground"
+                    >
                       {server.auth_required ? "Password required" : "Found on LAN"}
                     </Badge>
                   </CardAction>
@@ -128,7 +131,7 @@ export function ReadinessRemotePanel({
                   key={server.id}
                   size="sm"
                   className={cn(
-                    "rounded-xl border border-border bg-muted/30",
+                    "rounded-none border-0 border-b border-border bg-transparent ring-0 last:border-b-0",
                     selected && "border-sage/50 bg-sage-bg/40 ring-1 ring-sage/30",
                   )}
                 >
@@ -136,7 +139,7 @@ export function ReadinessRemotePanel({
                     <CardAction>
                       <Badge
                         variant={online ? "secondary" : "outline"}
-                        className={cn(online && "bg-sage-bg text-sage")}
+                        className={cn("text-xs text-muted-foreground", online && "bg-sage-bg")}
                       >
                         {online ? "Online" : server.status || "Unknown"}
                       </Badge>

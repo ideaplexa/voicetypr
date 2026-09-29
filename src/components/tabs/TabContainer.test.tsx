@@ -1,102 +1,180 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { TabContainer } from "./TabContainer";
+import { useState } from "react";
+import type { SettingsPane } from "@/components/navigation";
+import type { ScreenId } from "@/components/navigation";
 
-// Mock Tauri API
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue([]),
-}));
-
-// Mock event coordinator hook
-vi.mock("@/hooks/useEventCoordinator", () => ({
-  useEventCoordinator: () => ({
-    registerEvent: vi.fn(),
-    unregisterEvent: vi.fn(),
-  }),
-}));
-
-// Mock all tab components with simple test versions
 vi.mock("./RecordingsTab", () => ({
-  RecordingsTab: () => <div data-testid="recordings-tab">Recordings</div>,
-}));
-
-vi.mock("./RecordingTab", () => ({
-  RecordingTab: () => <div data-testid="recording-tab">Recording</div>,
-}));
-
-vi.mock("./OverviewTab", () => ({
-  OverviewTab: () => <div data-testid="overview-tab">Overview</div>,
-}));
-
-vi.mock("./ModelsTab", () => ({
-  ModelsTab: ({ sourceFilter }: { sourceFilter?: string }) => (
-    <div data-testid="models-tab">Models {sourceFilter}</div>
+  RecordingsTab: ({ onTranscribeFile }: { onTranscribeFile?: () => void }) => (
+    <>
+      <h1>History screen</h1>
+      <button onClick={onTranscribeFile}>Transcribe a file…</button>
+    </>
   ),
 }));
-
-vi.mock("./SettingsTab", () => ({
-  SettingsTab: () => <div data-testid="settings-tab">Settings</div>,
+vi.mock("./RecordingTab", () => ({ RecordingTab: () => <h1>Recording screen</h1> }));
+vi.mock("./OverviewTab", () => ({ OverviewTab: () => <h1>Home screen</h1> }));
+vi.mock("./ModelsTab", () => ({
+  ModelsTab: ({ sourceFilter }: { sourceFilter?: string }) => (
+    <h1>Transcription screen {sourceFilter}</h1>
+  ),
 }));
-
-vi.mock("./EnhancementsTab", () => ({
-  EnhancementsTab: () => <div data-testid="enhancements-tab">Enhancements</div>,
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
+vi.mock("@/components/sections/GeneralSettings", () => ({
+  GeneralSettings: () => <p>General controls</p>,
 }));
-
-vi.mock("./AdvancedTab", () => ({
-  AdvancedTab: () => <div data-testid="advanced-tab">Advanced</div>,
+vi.mock("@/components/sections/ShortcutsSection", () => ({
+  ShortcutsSection: () => <p>Shortcut controls</p>,
 }));
-
-vi.mock("./AccountTab", () => ({
-  AccountTab: () => <div data-testid="account-tab">Account</div>,
+vi.mock("@/components/sections/AdvancedSection", () => ({
+  AdvancedSection: () => <p>Troubleshooting controls</p>,
 }));
-
+vi.mock("@/components/sections/NetworkSharingCard", () => ({
+  NetworkSharingCard: () => <p>Network controls</p>,
+}));
+vi.mock("@/components/sections/AgentCliSection", () => ({
+  AgentCliSection: () => <p>CLI controls</p>,
+}));
+vi.mock("./EnhancementsTab", () => ({ EnhancementsTab: () => <h1>Polish screen</h1> }));
+vi.mock("@/components/sections/DictionarySection", () => ({
+  DictionarySection: () => <h1>Dictionary screen</h1>,
+}));
+vi.mock("./AccountTab", () => ({ AccountTab: () => <h1>License screen</h1> }));
 vi.mock("../sections/ReportProblemSection", () => ({
-  ReportProblemSection: () => <div data-testid="report-problem-tab">Report problem</div>,
+  ReportProblemSection: ({
+    onNavigateSettingsPane,
+  }: {
+    onNavigateSettingsPane: (pane: SettingsPane) => void;
+  }) => (
+    <>
+      <h1>Help screen</h1>
+      <button onClick={() => onNavigateSettingsPane("advanced")}>Troubleshooting</button>
+      <button onClick={() => onNavigateSettingsPane("shortcuts")}>Shortcuts</button>
+    </>
+  ),
+}));
+vi.mock("../sections/AudioUploadSection", () => ({
+  AudioUploadSection: () => <p>Choose audio file</p>,
 }));
 
-describe("TabContainer", () => {
-  it("passes the saved Cloud destination when mounting Sources from another tab", () => {
-    const { rerender } = render(<TabContainer activeSection="overview" sourceFilter="local" />);
-    expect(screen.queryByTestId("models-tab")).not.toBeInTheDocument();
-    rerender(<TabContainer activeSection="models" sourceFilter="cloud" />);
-    expect(screen.getByTestId("models-tab")).toHaveTextContent("Models cloud");
-    rerender(<TabContainer activeSection="models" sourceFilter="remote" />);
-    expect(screen.getByTestId("models-tab")).toHaveTextContent("Models remote");
-    rerender(<TabContainer activeSection="models" sourceFilter="cloud" />);
-    expect(screen.getByTestId("models-tab")).toHaveTextContent("Models cloud");
+describe("TabContainer destinations", () => {
+  it.each<[ScreenId, string]>([
+    ["home", "Home screen"],
+    ["history", "History screen"],
+    ["transcription", "Transcription screen"],
+    ["polish", "Polish screen"],
+    ["dictionary", "Dictionary screen"],
+    ["recording", "Recording screen"],
+    ["settings", "Settings"],
+    ["help", "Help screen"],
+    ["license", "License screen"],
+  ])("opens %s with its existing content", (id, heading) => {
+    render(<TabContainer activeSection={id} />);
+    expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
   });
 
-  it("renders correct tab based on activeSection", () => {
-    const { rerender } = render(<TabContainer activeSection="overview" />);
-    expect(screen.getByTestId("overview-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="recordings" />);
-    expect(screen.getByTestId("recordings-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="recording" />);
-    expect(screen.getByTestId("recording-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="models" />);
-    expect(screen.getByTestId("models-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="general" />);
-    expect(screen.getByTestId("settings-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="formatting" />);
-    expect(screen.getByTestId("enhancements-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="advanced" />);
-    expect(screen.getByTestId("advanced-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="license" />);
-    expect(screen.getByTestId("account-tab")).toBeInTheDocument();
-
-    rerender(<TabContainer activeSection="report-problem" />);
-    expect(screen.getByTestId("report-problem-tab")).toBeInTheDocument();
+  it.each<[ScreenId, string]>([
+    ["overview", "Home screen"],
+    ["recordings", "History screen"],
+    ["models", "Transcription screen"],
+    ["formatting", "Polish screen"],
+    ["general", "Settings"],
+    ["shortcuts", "Settings"],
+    ["network", "Settings"],
+    ["agent", "Settings"],
+    ["advanced", "Settings"],
+    ["report-problem", "Help screen"],
+  ])("keeps the %s alias reachable", (id, heading) => {
+    render(<TabContainer activeSection={id} />);
+    expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
   });
 
-  it("renders overview tab for unknown sections", () => {
-    render(<TabContainer activeSection={"unknown" as unknown as never} />);
-    expect(screen.getByTestId("overview-tab")).toBeInTheDocument();
+  it("passes Cloud filter to Transcription", () => {
+    render(<TabContainer activeSection="transcription" sourceFilter="cloud" />);
+    expect(screen.getByRole("heading", { name: "Transcription screen cloud" })).toBeInTheDocument();
   });
+
+  it("applies an alias after an inner Settings pane click", async () => {
+    const user = userEvent.setup();
+    const view = render(<TabContainer activeSection="settings" />);
+    await user.click(screen.getByRole("button", { name: "Shortcuts" }));
+    expect(screen.getByText("Shortcut controls")).toBeInTheDocument();
+    view.rerender(<TabContainer activeSection="general" />);
+    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("General controls")).toBeInTheDocument();
+  });
+
+  it("reports inner Settings pane clicks to navigation", async () => {
+    const onSettingsPaneChange = vi.fn();
+    render(
+      <TabContainer
+        activeSection="settings"
+        settingsPane="general"
+        onSettingsPaneChange={onSettingsPaneChange}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Shortcuts" }));
+    expect(onSettingsPaneChange).toHaveBeenCalledWith("shortcuts");
+  });
+
+  it("opens file transcription from History and from the audio alias", async () => {
+    const user = userEvent.setup();
+    const view = render(<TabContainer activeSection="history" />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Transcribe a file…" }));
+    expect(screen.getByRole("dialog", { name: "Transcribe a file…" })).toHaveTextContent(
+      "Choose audio file",
+    );
+    expect(screen.getAllByRole("heading", { name: "Transcribe a file…" })).toHaveLength(1);
+    view.rerender(<TabContainer activeSection="audio" />);
+    expect(screen.getByRole("dialog", { name: "Transcribe a file…" })).toBeInTheDocument();
+  });
+  it.each([
+    ["Troubleshooting", "Troubleshooting controls"],
+    ["Shortcuts", "Shortcut controls"],
+  ])("navigates Help's %s tile to its Settings pane", async (label, controls) => {
+    function Shell() {
+      const [activeSection, setActiveSection] = useState<ScreenId>("help");
+      return <TabContainer activeSection={activeSection} onNavigate={setActiveSection} />;
+    }
+    render(<Shell />);
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText(controls)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
+  });
+  it.each([
+    ["Troubleshooting", "Troubleshooting controls"],
+    ["Shortcuts", "Shortcut controls"],
+  ] as const)(
+    "keeps Help's %s destination with the app's controlled navigation",
+    async (label, controls) => {
+      const onNavigate = vi.fn();
+      function Shell() {
+        const [navigation, setNavigation] = useState<{
+          activeSection: ScreenId;
+          settingsPane?: SettingsPane;
+        }>({ activeSection: "help" });
+        return (
+          <TabContainer
+            {...navigation}
+            onNavigate={(activeSection) => {
+              onNavigate(activeSection);
+              setNavigation({ activeSection, settingsPane: "general" });
+            }}
+            onSettingsPaneChange={(settingsPane) =>
+              setNavigation({ activeSection: "settings", settingsPane })
+            }
+          />
+        );
+      }
+      render(<Shell />);
+      await userEvent.click(screen.getByRole("button", { name: label }));
+      expect(screen.getByText(controls)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
+      expect(onNavigate).not.toHaveBeenCalled();
+    },
+  );
 });

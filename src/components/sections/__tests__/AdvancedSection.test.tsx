@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdvancedSection } from "../AdvancedSection";
 
 const platformMock = vi.hoisted(() => ({ isMacOS: false }));
+const invokeMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 vi.mock("@/lib/platform", () => platformMock);
 
@@ -29,10 +31,10 @@ describe("AdvancedSection", () => {
     platformMock.isMacOS = false;
   });
 
-  it("owns quick fixes and reset controls on Quick help", () => {
+  it("owns quick fixes and reset controls on Troubleshooting", () => {
     render(<AdvancedSection />);
 
-    expect(screen.getByRole("heading", { name: /Quick help/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Troubleshooting/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Quick fixes" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Reset app / start over" })).toBeInTheDocument();
     expect(
@@ -59,6 +61,15 @@ describe("AdvancedSection", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/grant Accessibility permission/i)).not.toBeInTheDocument();
+  });
+
+  it("shows Windows privacy guidance without a permission badge and opens Settings", async () => {
+    render(<AdvancedSection />);
+    expect(screen.getByText("Microphone privacy")).toBeInTheDocument();
+    expect(screen.getByText("Windows Settings → Privacy → Microphone must allow desktop apps.")).toBeInTheDocument();
+    expect(screen.queryByText("Granted")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open Windows Settings" }));
+    expect(invokeMock).toHaveBeenCalledWith("open_microphone_settings");
   });
 
   it("shows macOS permission guidance only on macOS", async () => {

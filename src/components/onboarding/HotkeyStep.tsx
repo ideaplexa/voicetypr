@@ -6,7 +6,7 @@ import {
 } from "@/components/onboarding/onboardingTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { Info, Keyboard } from "lucide-react";
 
 export function HotkeyStep({
@@ -45,7 +45,7 @@ export function HotkeyStep({
         />
       }
     >
-      <Card className="mx-auto w-full max-w-xl rounded-2xl border border-border bg-card shadow-sm">
+      <Card className="mx-auto w-full max-w-xl rounded-[14px] border border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2.5">
             <span className="flex size-8 items-center justify-center rounded-lg bg-sage-bg text-sage">

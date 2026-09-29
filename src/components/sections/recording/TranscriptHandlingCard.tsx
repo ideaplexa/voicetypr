@@ -1,73 +1,57 @@
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLegend,
-  FieldSet,
-  FieldTitle,
-} from "@/components/ui/field";
-import { Switch } from "@/components/ui/switch";
+import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { useSettings } from "@/contexts/SettingsContext";
 
 export function TranscriptHandlingCard() {
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
-
   return (
-    <FieldSet className="gap-4 rounded-xl border border-border bg-card p-4">
-      <FieldLegend className="mb-1 text-base font-semibold">Transcript handling</FieldLegend>
+    <>
+      <SettingsCard title="Paste automatically" description="Type the text where your cursor is." className="relative rounded-[12px] px-[14px] py-3 [&>div:first-child]:pr-10 [&_h2]:font-medium">
+        <div className="absolute right-[14px] top-1/2 -translate-y-1/2 flex justify-end">
+          <Switch
+            id="auto-paste-transcription"
+            aria-label="Paste automatically"
+            checked={settings.auto_paste_transcription ?? true}
+            onCheckedChange={(checked) =>
+              void updateSettings({ auto_paste_transcription: checked })
+            }
+          />
+        </div>
+      </SettingsCard>
+      <SettingsCard title="Keep in clipboard" description="Also copy it, so you can paste again." className="relative rounded-[12px] px-[14px] py-3 [&>div:first-child]:pr-10 [&_h2]:font-medium">
+        <div className="absolute right-[14px] top-1/2 -translate-y-1/2 flex justify-end">
+          <Switch
+            id="clipboard-retain"
+            aria-label="Keep in clipboard"
+            checked={settings.keep_transcription_in_clipboard ?? false}
+            onCheckedChange={(checked) =>
+              void updateSettings({ keep_transcription_in_clipboard: checked })
+            }
+          />
+        </div>
+      </SettingsCard>
+    </>
+  );
+}
 
-      <Field orientation="responsive" className="items-center gap-3">
-        <FieldContent>
-          <FieldTitle>Keep Transcript in Clipboard</FieldTitle>
-          <FieldDescription>Leave transcribed text available for manual pastes</FieldDescription>
-        </FieldContent>
-        <Switch
-          id="clipboard-retain"
-          checked={settings.keep_transcription_in_clipboard ?? false}
-          onCheckedChange={async (checked) =>
-            await updateSettings({
-              keep_transcription_in_clipboard: checked,
-            })
-          }
-        />
-      </Field>
-
-      <Field orientation="responsive" className="items-center gap-3">
-        <FieldContent>
-          <FieldTitle>Auto-paste transcript</FieldTitle>
-          <FieldDescription>
-            Insert completed text automatically. Turn off to copy for manual paste.
-          </FieldDescription>
-        </FieldContent>
-        <Switch
-          id="auto-paste-transcription"
-          checked={settings.auto_paste_transcription ?? true}
-          onCheckedChange={async (checked) =>
-            await updateSettings({
-              auto_paste_transcription: checked,
-            })
-          }
-        />
-      </Field>
-
-      <Field orientation="responsive" className="items-center gap-3">
-        <FieldContent>
-          <FieldTitle>Pause media during recording</FieldTitle>
-          <FieldDescription>
-            Automatically pause playing music or videos while recording.
-          </FieldDescription>
-        </FieldContent>
+export function PauseMediaRow() {
+  const { settings, updateSettings } = useSettings();
+  if (!settings) return null;
+  return (
+    <SettingRow
+      title="Pause media during recording"
+      htmlFor="pause-media"
+      description="Automatically pause playing music or videos while recording."
+      control={
         <Switch
           id="pause-media"
           checked={settings.pause_media_during_recording ?? false}
-          onCheckedChange={async (checked) =>
-            await updateSettings({
-              pause_media_during_recording: checked,
-            })
+          onCheckedChange={(checked) =>
+            void updateSettings({ pause_media_during_recording: checked })
           }
         />
-      </Field>
-    </FieldSet>
+      }
+    />
   );
 }

@@ -44,13 +44,17 @@ export function MicrophoneSelection({ value, onValueChange, className }: Microph
     const selected = valueRef.current;
     if (selected && audioDevices.length > 0 && !audioDevices.includes(selected)) {
       log.debug(`Selected device "${selected}" is no longer available, resetting to default`);
-      toast.info(`${selected} is no longer available, switching to default microphone`);
+      valueRef.current = undefined;
+      toast.info(`${selected} is no longer available, switching to default microphone`, {
+        id: "microphone-selection-unavailable",
+      });
       onValueChangeRef.current(undefined); // Reset to default
     }
   };
 
   // Fetch audio devices on mount and validate stored selection
   React.useEffect(() => {
+    let cancelled = false;
     const initializeDevices = async () => {
       try {
         setLoading(true);
@@ -58,26 +62,33 @@ export function MicrophoneSelection({ value, onValueChange, className }: Microph
         // First, validate that any stored microphone still exists
         // This cleans up stale selections from previously connected devices
         const wasReset = await invoke<boolean>("validate_microphone_selection");
+        if (cancelled) return;
         if (wasReset) {
           log.debug("Stale microphone selection was reset to default");
-          toast.info("Previously selected microphone is no longer available, using default");
+          valueRef.current = undefined;
+          toast.info("Previously selected microphone is no longer available, using default", {
+            id: "microphone-selection-unavailable",
+          });
         }
 
         // Then fetch current devices
         const audioDevices = await invoke<string[]>("get_audio_devices");
+        if (cancelled) return;
         log.debug("Fetched audio devices:", audioDevices);
         applyDeviceList(audioDevices);
       } catch (error) {
+        if (cancelled) return;
         log.error("Failed to initialize audio devices:", error);
         toast.error("Failed to load audio devices");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     initializeDevices();
 
     const listenerPromise = listen<string[]>("audio-devices-updated", ({ payload }) => {
+      if (cancelled) return;
       log.debug("Audio devices updated:", payload);
       applyDeviceList(Array.isArray(payload) ? payload : []);
     }).catch((error) => {
@@ -86,6 +97,7 @@ export function MicrophoneSelection({ value, onValueChange, className }: Microph
     });
 
     return () => {
+      cancelled = true;
       listenerPromise
         ?.then((dispose) => {
           dispose();

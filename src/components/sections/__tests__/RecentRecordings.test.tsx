@@ -6,6 +6,8 @@ import type { TranscriptionHistory } from "@/types";
 
 const invokeMock = vi.fn();
 
+const mockReadiness = { canRecord: true, licenseValid: true, licenseStatus: "licensed", selectedModelAvailable: true, remoteSelected: false, remoteAvailable: null, hasMicrophonePermission: true };
+
 const mockSettings: {
   current_model: string;
   current_model_engine: "whisper" | "parakeet" | "soniox";
@@ -24,14 +26,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@/contexts/ReadinessContext", () => ({
   useCanRecord: () => true,
-  useReadiness: () => ({
-    canRecord: true,
-    licenseStatus: "licensed",
-    hasModels: true,
-    selectedModelAvailable: true,
-    remoteSelected: false,
-    hasMicrophonePermission: true,
-  }),
+  useReadiness: () => mockReadiness,
   useCanAutoInsert: () => true,
 }));
 
@@ -69,6 +64,8 @@ const createDeferred = <T,>() => {
 describe("RecentRecordings re-transcription", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadiness.canRecord = true;
+    mockReadiness.selectedModelAvailable = true;
     mockSettings.current_model = "small.en";
     mockSettings.current_model_engine = "whisper";
     invokeMock.mockImplementation(async (cmd: string) => {
@@ -356,7 +353,7 @@ it("uses Soniox when it is the current cloud transcription source", async () => 
 // Before/after original text toggle
 // ---------------------------------------------------------------------------
 
-describe("original text toggle", () => {
+describe("before polish detail", () => {
   const defaultInvoke = async (cmd: string) => {
     if (cmd === "check_recording_exists") return false;
     if (cmd === "get_active_remote_server") return null;
@@ -368,7 +365,7 @@ describe("original text toggle", () => {
     invokeMock.mockImplementation(defaultInvoke);
   });
 
-  it("shows toggle button when ai_applied and original_text differs from text", async () => {
+  it("shows the original when ai_applied and original_text differs from text", async () => {
     const item: TranscriptionHistory = {
       id: "toggle-1",
       text: "AI formatted text",
@@ -382,10 +379,15 @@ describe("original text toggle", () => {
 
     render(<RecentRecordings history={[item]} onHistoryUpdate={vi.fn()} />);
 
-    expect(await screen.findByText("Show original")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "AI formatted text",
+    );
+    expect(screen.getByRole("region", { name: "Before polish" })).toHaveTextContent(
+      "raw transcript before AI",
+    );
   });
 
-  it("clicking toggle swaps displayed text to original and back", async () => {
+  it("changes the displayed original when selection changes", async () => {
     const user = userEvent.setup();
     const item: TranscriptionHistory = {
       id: "toggle-2",
@@ -398,23 +400,16 @@ describe("original text toggle", () => {
       },
     };
 
-    render(<RecentRecordings history={[item]} onHistoryUpdate={vi.fn()} />);
-
-    // Initially shows formatted text
-    expect(await screen.findByText("AI formatted text")).toBeInTheDocument();
-    expect(screen.queryByText("raw transcript before AI")).not.toBeInTheDocument();
-
-    // Click to expand the original block — polished text stays visible
-    await user.click(screen.getByText("Show original"));
-    expect(await screen.findByText("raw transcript before AI")).toBeInTheDocument();
-    expect(screen.getByText("AI formatted text")).toBeInTheDocument();
-    expect(screen.getByText("Hide original")).toBeInTheDocument();
-
-    // Click again to collapse the original block
-    await user.click(screen.getByText("Hide original"));
-    expect(await screen.findByText("AI formatted text")).toBeInTheDocument();
-    expect(screen.queryByText("raw transcript before AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Show original")).toBeInTheDocument();
+    const other = { ...item, id: "other", text: "Second dictation", writing: undefined };
+    render(<RecentRecordings history={[item, other]} onHistoryUpdate={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Before polish" })).toHaveTextContent(
+      "raw transcript before AI",
+    );
+    await user.click(screen.getByRole("button", { name: /Second dictation/ }));
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Second dictation",
+    );
+    expect(screen.queryByRole("region", { name: "Before polish" })).not.toBeInTheDocument();
   });
 
   it("copy actions copy polished and original text separately", async () => {
@@ -442,12 +437,11 @@ describe("original text toggle", () => {
     await user.click(await screen.findByTitle("Copy"));
     expect(writeTextMock).toHaveBeenLastCalledWith("AI formatted text");
 
-    // Expanded original block has its own copy action
-    await user.click(screen.getByText("Show original"));
+    // The original block has its own copy action.
     await user.click(screen.getByTitle("Copy original transcript"));
     expect(writeTextMock).toHaveBeenLastCalledWith("raw transcript before AI");
 
-    // Row copy still copies the polished text while the block is expanded
+    // Detail copy still copies the polished text.
     await user.click(screen.getByTitle("Copy"));
     expect(writeTextMock).toHaveBeenLastCalledWith("AI formatted text");
   });
@@ -463,9 +457,10 @@ describe("original text toggle", () => {
 
     render(<RecentRecordings history={[item]} onHistoryUpdate={vi.fn()} />);
 
-    // Wait for row to appear, then assert no toggle
-    expect(await screen.findByText("Formatted text")).toBeInTheDocument();
-    expect(screen.queryByText("Show original")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Formatted text",
+    );
+    expect(screen.queryByRole("region", { name: "Before polish" })).not.toBeInTheDocument();
   });
 
   it("does not show toggle when original_text equals text (AI made no change)", async () => {
@@ -482,11 +477,11 @@ describe("original text toggle", () => {
 
     render(<RecentRecordings history={[item]} onHistoryUpdate={vi.fn()} />);
 
-    expect(await screen.findByText("Same text")).toBeInTheDocument();
-    expect(screen.queryByText("Show original")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent("Same text");
+    expect(screen.queryByRole("region", { name: "Before polish" })).not.toBeInTheDocument();
   });
 
-  it("does not show toggle when ai_applied is absent", async () => {
+  it("shows a stored original even when the legacy ai_applied flag is absent", async () => {
     const item: TranscriptionHistory = {
       id: "toggle-6",
       text: "Plain text",
@@ -499,8 +494,10 @@ describe("original text toggle", () => {
 
     render(<RecentRecordings history={[item]} onHistoryUpdate={vi.fn()} />);
 
-    expect(await screen.findByText("Plain text")).toBeInTheDocument();
-    expect(screen.queryByText("Show original")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Plain text",
+    );
+    expect(screen.getByRole("region", { name: "Before polish" })).toHaveTextContent("raw text");
   });
 });
 
@@ -551,7 +548,9 @@ describe("history load states", () => {
       />,
     );
 
-    expect(screen.getByText("Original transcript")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Original transcript",
+    );
     expect(screen.queryByText("Couldn't load your history.")).not.toBeInTheDocument();
   });
 });
@@ -594,5 +593,178 @@ describe("application context badge", () => {
     expect(invokeMock).toHaveBeenCalledWith("get_application_icon", {
       processPath: "/Applications/Ghostty.app",
     });
+  });
+});
+
+describe("History split view", () => {
+  const first: TranscriptionHistory = {
+    id: "first",
+    text: "First final dictation",
+    timestamp: new Date("2026-09-29T10:42:00Z"),
+    model: "parakeet-v3",
+    writing: {
+      source: "desktop_recording",
+      context_hint: { app_name: "Slack" },
+      original_text: "first raw dictation",
+      mode: "Message",
+    },
+  };
+  const second: TranscriptionHistory = {
+    id: "second",
+    text: "Second final dictation",
+    timestamp: new Date("2026-09-29T10:18:00Z"),
+    model: "base.en",
+    writing: { source: "desktop_recording", context_hint: { app_name: "Notes" } },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSettings.current_model = "small.en";
+    mockReadiness.canRecord = true;
+    mockReadiness.selectedModelAvailable = true;
+    invokeMock.mockResolvedValue(null);
+  });
+
+  it("traps focus in the mobile detail, makes the list inert, closes on Escape, and restores row focus", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 });
+    const user = userEvent.setup();
+    try {
+      render(<RecentRecordings history={[first, second]} />);
+      const row = screen.getByRole("button", { name: /Second final dictation/ });
+      await user.click(row);
+      const dialog = await screen.findByRole("dialog", { name: "Dictation detail" });
+      expect(dialog).toBeInTheDocument();
+      expect(row.closest("[inert]")).not.toBeNull();
+      const copy = screen.getByRole("button", { name: "Copy" });
+      copy.focus();
+      await user.tab();
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Dictation detail" })).not.toBeInTheDocument());
+      expect(row).toHaveFocus();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+
+  it("selects dictations by click and arrow keys", async () => {
+    const user = userEvent.setup();
+    render(<RecentRecordings history={[first, second]} />);
+    const firstButton = screen.getByRole("button", { name: /First final dictation/ });
+    const secondButton = screen.getByRole("button", { name: /Second final dictation/ });
+    expect(firstButton).toHaveAttribute("aria-current", "true");
+    await user.click(secondButton);
+    expect(secondButton).toHaveAttribute("aria-current", "true");
+    await user.keyboard("{ArrowUp}");
+    expect(firstButton).toHaveFocus();
+    expect(firstButton).toHaveAttribute("aria-current", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(secondButton).toHaveAttribute("aria-current", "true");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Second final dictation",
+    );
+    await user.keyboard("{Space}");
+    expect(secondButton).toHaveAttribute("aria-current", "true");
+  });
+
+  it("filters the list and clears a filtered-out selection", async () => {
+    const user = userEvent.setup();
+    render(<RecentRecordings history={[first, second]} />);
+    await user.type(screen.getByRole("textbox", { name: "Search dictations" }), "Second");
+    expect(screen.queryByRole("button", { name: /First final dictation/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Dictation detail" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Second final dictation/ }));
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Second final dictation",
+    );
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByRole("button", { name: /First final dictation/ })).toBeInTheDocument();
+  });
+
+  it("deletes the selected item and moves to the next item", async () => {
+    const user = userEvent.setup();
+    const onHistoryUpdate = vi.fn();
+    const view = render(
+      <RecentRecordings history={[first, second]} onHistoryUpdate={onHistoryUpdate} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("delete_transcription_entry", { timestamp: "first" }),
+    );
+    view.rerender(<RecentRecordings history={[second]} onHistoryUpdate={onHistoryUpdate} />);
+    expect(screen.getByRole("button", { name: /Second final dictation/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Second final dictation",
+    );
+  });
+
+  it("copies final text while showing the stored original separately", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    render(<RecentRecordings history={[first, second]} />);
+    expect(screen.getByRole("region", { name: "Before polish" })).toHaveTextContent(
+      "first raw dictation",
+    );
+    await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+    expect(writeText).toHaveBeenCalledWith("First final dictation");
+    await user.click(screen.getByRole("button", { name: /Second final dictation/ }));
+    expect(screen.queryByRole("region", { name: "Before polish" })).not.toBeInTheDocument();
+  });
+
+  it("shows both empty states with the upload entry point", async () => {
+    const user = userEvent.setup();
+    const upload = vi.fn();
+    const view = render(
+      <RecentRecordings history={[]} onTranscribeFile={upload} hotkey="Cmd+Shift+Space" />,
+    );
+    expect(screen.getByText(/Your dictations will show up here/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Transcribe a file…" })).toHaveLength(2);
+    await user.click(screen.getAllByRole("button", { name: "Transcribe a file…" })[1]);
+    expect(upload).toHaveBeenCalledTimes(1);
+    view.rerender(<RecentRecordings history={[first]} onTranscribeFile={upload} />);
+    await user.type(screen.getByRole("textbox", { name: "Search dictations" }), "missing phrase");
+    expect(screen.getByText("No dictations match")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Transcribe a file…" })).toHaveLength(2);
+  });
+
+  it("routes an empty, unready History to the Home readiness blocker", async () => {
+    mockSettings.current_model = "";
+    mockReadiness.canRecord = false;
+    mockReadiness.selectedModelAvailable = false;
+    const onNavigate = vi.fn();
+    render(<RecentRecordings history={[]} onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "No model yet — Choose a model" }));
+    expect(onNavigate).toHaveBeenCalledWith("transcription");
+  });
+
+  it("shows the shortcut when empty History is ready", () => {
+    render(<RecentRecordings history={[]} hotkey="Cmd+Shift+Space" />);
+    expect(screen.getByText(/to start\./)).toHaveTextContent("Press");
+    expect(screen.queryByRole("button", { name: /Choose a model/ })).not.toBeInTheDocument();
+  });
+
+  it("selects a newly completed file upload from the existing history flow", () => {
+    const view = render(<RecentRecordings history={[first]} />);
+    const upload: TranscriptionHistory = {
+      id: "uploaded",
+      text: "Transcript from the file",
+      timestamp: new Date("2026-09-29T11:00:00Z"),
+      model: "base.en",
+      writing: { source: "audio_file" },
+    };
+    view.rerender(<RecentRecordings history={[upload, first]} />);
+    expect(screen.getByRole("button", { name: /Transcript from the file/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("region", { name: "Dictation detail" })).toHaveTextContent(
+      "Transcript from the file",
+    );
   });
 });
