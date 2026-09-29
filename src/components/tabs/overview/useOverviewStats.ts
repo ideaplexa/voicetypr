@@ -10,6 +10,8 @@ export interface OverviewWeekDay {
 export interface OverviewStats {
   todayCount: number;
   weekCount: number;
+  weekWords: number;
+  weekSavedMinutes: number;
   totalWords: number;
   avgLength: number;
   timeSavedHours: number;
@@ -28,6 +30,12 @@ export function formatTimeSaved(stats: OverviewStats): string {
     : `${stats.timeSavedMinutes}m`;
 }
 
+export function formatWeekSavedTime(minutes: number): string {
+  if (minutes <= 0) return "—";
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
+}
+
 export function computeOverviewStats(
   history: TranscriptionHistory[],
   totalCount: number,
@@ -39,7 +47,11 @@ export function computeOverviewStats(
   const startOfWeek = new Date(now);
   startOfWeek.setDate(startOfWeek.getDate() - 7);
   const todayCount = history.filter((item) => new Date(item.timestamp) >= startOfToday).length;
-  const weekCount = history.filter((item) => new Date(item.timestamp) >= startOfWeek).length;
+  const weekHistory = history.filter((item) => new Date(item.timestamp) >= startOfWeek);
+  const weekCount = weekHistory.length;
+  const weekWords = weekHistory.reduce((sum, item) => sum + item.text.split(/\s+/).filter(Boolean).length, 0);
+  const speakingMinutes = weekHistory.reduce((sum, item) => sum + (item.writing?.audio_duration_ms ?? 0) / 60_000, 0);
+  const weekSavedMinutes = Math.max(0, Math.round(weekWords / 40 - speakingMinutes));
 
   const totalWords = history.reduce(
     (acc, item) => acc + item.text.split(/\s+/).filter(Boolean).length,
@@ -48,7 +60,8 @@ export function computeOverviewStats(
   const avgLength = history.length > 0 ? Math.round(totalWords / history.length) : 0;
 
   const avgTypingSpeed = 40;
-  const timeSavedMinutes = Math.round(totalWords / avgTypingSpeed);
+  const totalSpeakingMinutes = history.reduce((sum, item) => sum + (item.writing?.audio_duration_ms ?? 0) / 60_000, 0);
+  const timeSavedMinutes = Math.max(0, Math.round(totalWords / avgTypingSpeed - totalSpeakingMinutes));
   const timeSavedHours = Math.floor(timeSavedMinutes / 60);
 
   // Per-day counts for the last 7 days (weekly rhythm sparkline).
@@ -120,6 +133,8 @@ export function computeOverviewStats(
   return {
     todayCount,
     weekCount,
+    weekWords,
+    weekSavedMinutes,
     totalWords,
     avgLength,
     timeSavedHours,

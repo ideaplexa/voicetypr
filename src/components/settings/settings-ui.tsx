@@ -14,13 +14,15 @@ export function SettingsPage({
   children,
   className,
   wide = false,
+  container = false,
 }: {
   children: ReactNode;
   className?: string;
   wide?: boolean;
+  container?: boolean;
 }) {
   return (
-    <div className="h-full min-h-0 overflow-auto">
+    <div className={cn("h-full min-h-0 overflow-auto", container && "@container")}>
       <div
         className={cn(
           "mx-auto flex w-full flex-col gap-5 pb-4 pl-2 pr-4",
@@ -193,7 +195,7 @@ export function Segmented({
         if (next) onValueChange(next);
       }}
       className="rounded-[7px] bg-muted p-0.5"
-      spacing={0}
+      spacing={0.5}
     >
       {options.map((option) => (
         <ToggleGroupItem

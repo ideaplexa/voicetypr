@@ -37,6 +37,8 @@ describe("settings choices", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("group", { name: "Theme" })).not.toHaveAttribute("data-spacing", "0");
+    expect(screen.getByRole("button", { name: "Light" }).className).toContain("rounded-[7px]");
     expect(screen.getByRole("button", { name: "System" })).toHaveAttribute(
       "aria-pressed",
       "false",

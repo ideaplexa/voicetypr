@@ -27,7 +27,7 @@ const demoText = [
 type HistoryWireItem = Omit<TranscriptionHistory, "id" | "timestamp"> & { timestamp: string };
 const apps = ["Mail", "Notes", "Slack", "Chrome", "Linear", "Pages"];
 export const demoHistory: HistoryWireItem[] = demoText.map((text, index) => ({
-  timestamp: new Date(Date.now() - index * 18 * 60 * 60 * 1000).toISOString(),
+  timestamp: new Date(Date.now() - (index < 4 ? [2, 18, 60, 180][index] * 60 * 1000 : (index - 3) * 18 * 60 * 60 * 1000)).toISOString(),
   text,
   model: "parakeet-v3",
   status: "completed",
@@ -60,7 +60,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
 
 export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Alt+Space";
-  const settings: AppSettings = { hotkey, current_model: "parakeet-v3", current_model_engine: "parakeet", speech_language: "en", theme: options.theme, onboarding_completed: true, check_updates_automatically: false, recording_mode: "toggle", selected_microphone: "Built-in Microphone", auto_paste_transcription: true, keep_transcription_in_clipboard: false, play_sound_on_recording: true, play_sound_on_transcription_complete: true, pill_indicator_mode: "when_recording", transcription_mode: "regular", update_channel: "beta", save_recordings: true };
+  const settings: AppSettings = { hotkey, current_model: "parakeet-v3", current_model_engine: "parakeet", speech_language: "en", theme: options.theme, onboarding_completed: true, check_updates_automatically: false, recording_mode: "push_to_talk", selected_microphone: "Built-in Microphone", auto_paste_transcription: true, keep_transcription_in_clipboard: false, play_sound_on_recording: true, play_sound_on_transcription_complete: true, pill_indicator_mode: "when_recording", transcription_mode: "live_preview", update_channel: "beta", save_recordings: true };
   const license: LicenseStatus = { status: "licensed", license_type: "pro", trial_days_left: 0, verification_state: "verified" };
   const shortcuts: ShortcutSettings = { bindings: [{ id: "preview-record", action: "toggle_recording", shortcut: hotkey, trigger: "pressed", enabled: true, allow_risky_combo: false }] };
   const providers: AiProvider[] = [
