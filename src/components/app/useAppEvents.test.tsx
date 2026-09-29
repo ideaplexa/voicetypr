@@ -18,7 +18,9 @@ function deferredOverviewListen(eventName: string, handler: (event: Event<unknow
   listeners.set(eventName, active);
   const attach = () => {
     active.add(handler);
-    return () => { active.delete(handler); };
+    return () => {
+      active.delete(handler);
+    };
   };
   if (eventName !== "navigate-to-overview") return Promise.resolve(attach());
   return new Promise<() => void>((resolve) => {
@@ -56,14 +58,16 @@ describe("useAppEvents registration lifecycle", () => {
     await act(async () => pendingOverview[0]());
     await act(async () => {});
 
-    expect(vi.mocked(listen).mock.calls.filter(([event]) => event === "hotkey-registration-failed")).toHaveLength(1);
+    expect(
+      vi.mocked(listen).mock.calls.filter(([event]) => event === "hotkey-registration-failed"),
+    ).toHaveLength(1);
     expect(listeners.get("hotkey-registration-failed")?.size).toBe(1);
     act(() => {
       for (const handler of listeners.get("navigate-to-overview") ?? []) {
         handler({ payload: null } as Event<unknown>);
       }
     });
-    expect(setActiveSection).toHaveBeenCalledWith("overview");
+    expect(setActiveSection).toHaveBeenCalledWith("home");
     mounted.unmount();
     expect(listeners.get("hotkey-registration-failed")?.size).toBe(0);
   });

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSettings } from "@/contexts/SettingsContext";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -22,12 +22,18 @@ export function normalizeTheme(value: string | null | undefined): ThemePreferenc
 export function useTheme() {
   const { settings } = useSettings();
   const theme = normalizeTheme(settings?.theme);
+  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">(() =>
+    theme === "dark" || (theme === "system" && window.matchMedia(DARK_QUERY).matches)
+      ? "dark"
+      : "light",
+  );
 
   useEffect(() => {
     const media = window.matchMedia(DARK_QUERY);
     const apply = () => {
       const isDark = theme === "dark" || (theme === "system" && media.matches);
       document.documentElement.classList.toggle("dark", isDark);
+      setResolvedTheme(isDark ? "dark" : "light");
     };
 
     apply();
@@ -38,4 +44,5 @@ export function useTheme() {
     }
     return undefined;
   }, [theme]);
+  return resolvedTheme;
 }

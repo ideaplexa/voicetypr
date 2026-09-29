@@ -185,15 +185,24 @@ vi.mock("@/components/ui/sidebar", () => ({
 }));
 
 vi.mock("./tabs/TabContainer", () => ({
-  TabContainer: ({ activeSection, sourceFilter, onSourceFilterChange, onNavigate }: any) => (
+  TabContainer: ({
+    activeSection,
+    sourceFilter,
+    settingsPane,
+    onSourceFilterChange,
+    onNavigate,
+    onSettingsPaneChange,
+  }: any) => (
     <div data-testid="tab-container">
       Current Tab: {activeSection}
-      <button onClick={() => onNavigate("models")}>Open Sources</button>
-      <button onClick={() => onNavigate("overview")}>Open Overview</button>
-      {activeSection === "models" && (
-        <div data-testid="sources">
+      <button onClick={() => onNavigate("transcription")}>Open Transcription</button>
+      <button onClick={() => onNavigate("home")}>Open Home</button>
+      <button onClick={() => onSettingsPaneChange("advanced")}>Open Troubleshooting</button>
+      {activeSection === "settings" && <div>Settings pane: {settingsPane ?? "general"}</div>}
+      {activeSection === "transcription" && (
+        <div data-testid="transcription">
           Source filter: {sourceFilter ?? "automatic"}
-          <button onClick={() => onSourceFilterChange("remote")}>Show remote sources</button>
+          <button onClick={() => onSourceFilterChange("remote")}>Show remote transcription</button>
         </div>
       )}
     </div>
@@ -280,11 +289,9 @@ describe("AppContainer", () => {
   it("shows hotkey and no-speech notices while their settings tab is unmounted", async () => {
     render(<AppContainer />);
     await waitFor(() => {
-      expect((window as any).__testEventCallbacks?.["no-speech-detected"]).toBeInstanceOf(
-        Function,
-      );
+      expect((window as any).__testEventCallbacks?.["no-speech-detected"]).toBeInstanceOf(Function);
     });
-    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: overview");
+    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: home");
 
     act(() => {
       (window as any).__testEventCallbacks["hotkey-registration-failed"]({
@@ -362,43 +369,44 @@ describe("AppContainer", () => {
     expect(useEnhancementsStore.getState().polishError).toBeNull();
   });
 
-  it.each([false, true])("opens License with one toast when focus fails: %s", async (focusFails) => {
-    if (focusFails) {
-      const originalImplementation = mockInvoke.getMockImplementation();
-      mockInvoke.mockImplementation((...args: unknown[]) =>
-        args[0] === "focus_main_window"
-          ? Promise.reject(new Error("Focus failed"))
-          : originalImplementation?.(...args),
-      );
-    }
-    render(<AppContainer />);
-    await waitFor(() => {
-      expect((window as any).__testEventCallbacks?.["license-required"]).toBeInstanceOf(
-        Function,
-      );
-    });
-
-    await act(async () => {
-      await (window as any).__testEventCallbacks["license-required"]({
-        title: "License Required",
-        message: "Restore your license",
+  it.each([false, true])(
+    "opens License with one toast when focus fails: %s",
+    async (focusFails) => {
+      if (focusFails) {
+        const originalImplementation = mockInvoke.getMockImplementation();
+        mockInvoke.mockImplementation((...args: unknown[]) =>
+          args[0] === "focus_main_window"
+            ? Promise.reject(new Error("Focus failed"))
+            : originalImplementation?.(...args),
+        );
+      }
+      render(<AppContainer />);
+      await waitFor(() => {
+        expect((window as any).__testEventCallbacks?.["license-required"]).toBeInstanceOf(Function);
       });
-    });
 
-    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: license");
-    expect(toastErrorMock).toHaveBeenCalledWith("License Required", {
-      description: "Restore your license",
-      duration: 5000,
-    });
-    expect(mockInvoke).toHaveBeenCalledWith("focus_main_window");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    });
-    expect(toastErrorMock).toHaveBeenCalledTimes(1);
-  });
+      await act(async () => {
+        await (window as any).__testEventCallbacks["license-required"]({
+          title: "License Required",
+          message: "Restore your license",
+        });
+      });
+
+      expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: license");
+      expect(toastErrorMock).toHaveBeenCalledWith("License Required", {
+        description: "Restore your license",
+        duration: 5000,
+      });
+      expect(mockInvoke).toHaveBeenCalledWith("focus_main_window");
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      });
+      expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each(["unmounted", "active"])(
-    "opens Cloud sources after Soniox escalation with Sources %s",
+    "opens Cloud transcription after Soniox escalation with Transcription %s",
     async (state) => {
       render(<AppContainer />);
       await waitFor(() => {
@@ -407,33 +415,40 @@ describe("AppContainer", () => {
         );
       });
       if (state === "active") {
-        fireEvent.click(screen.getByRole("button", { name: "Open Sources" }));
-        fireEvent.click(screen.getByRole("button", { name: "Show remote sources" }));
-        expect(screen.getByTestId("sources")).toHaveTextContent("Source filter: remote");
+        fireEvent.click(screen.getByRole("button", { name: "Open Transcription" }));
+        fireEvent.click(screen.getByRole("button", { name: "Show remote transcription" }));
+        expect(screen.getByTestId("transcription")).toHaveTextContent("Source filter: remote");
       } else {
-        expect(screen.queryByTestId("sources")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("transcription")).not.toBeInTheDocument();
       }
       act(() => {
         (window as any).__testEventCallbacks["soniox-storage-limit"]({});
       });
-      expect(screen.getByTestId("sources")).toHaveTextContent("Source filter: cloud");
+      expect(screen.getByTestId("transcription")).toHaveTextContent("Source filter: cloud");
       // A later escalation must override a new user-selected filter too.
-      fireEvent.click(screen.getByRole("button", { name: "Show remote sources" }));
+      fireEvent.click(screen.getByRole("button", { name: "Show remote transcription" }));
       act(() => {
         (window as any).__testEventCallbacks["soniox-storage-limit"]({});
       });
-      expect(screen.getByTestId("sources")).toHaveTextContent("Source filter: cloud");
+      expect(screen.getByTestId("transcription")).toHaveTextContent("Source filter: cloud");
     },
   );
 
-  it("leaves the initial Sources filter unset for the active source to choose", () => {
+  it("leaves the initial Transcription filter unset for the active source to choose", () => {
     render(<AppContainer />);
-    fireEvent.click(screen.getByRole("button", { name: "Open Sources" }));
-    expect(screen.getByTestId("sources")).toHaveTextContent("Source filter: automatic");
+    fireEvent.click(screen.getByRole("button", { name: "Open Transcription" }));
+    expect(screen.getByTestId("transcription")).toHaveTextContent("Source filter: automatic");
+  });
+
+  it("opens the Troubleshooting pane through the new Settings destination", () => {
+    render(<AppContainer />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Troubleshooting" }));
+    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: settings");
+    expect(screen.getByText("Settings pane: advanced")).toBeInTheDocument();
   });
 
   it.each(["browsing", "alert"])(
-    "consumes the %s destination when Sources closes so remount follows the current source",
+    "consumes the %s destination when Transcription closes so remount follows the current source",
     async (destination) => {
       render(<AppContainer />);
       await waitFor(() => {
@@ -441,22 +456,22 @@ describe("AppContainer", () => {
           Function,
         );
       });
-      fireEvent.click(screen.getByRole("button", { name: "Open Sources" }));
+      fireEvent.click(screen.getByRole("button", { name: "Open Transcription" }));
       if (destination === "browsing") {
-        fireEvent.click(screen.getByRole("button", { name: "Show remote sources" }));
+        fireEvent.click(screen.getByRole("button", { name: "Show remote transcription" }));
       } else {
         act(() => (window as any).__testEventCallbacks["soniox-storage-limit"]({}));
       }
-      expect(screen.getByTestId("sources")).toHaveTextContent(
+      expect(screen.getByTestId("transcription")).toHaveTextContent(
         `Source filter: ${destination === "browsing" ? "remote" : "cloud"}`,
       );
-      fireEvent.click(screen.getByRole("button", { name: "Open Overview" }));
-      expect(screen.queryByTestId("sources")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Open Home" }));
+      expect(screen.queryByTestId("transcription")).not.toBeInTheDocument();
       // No stale controlled value can mask SettingsContext/tray changes while hidden.
-      fireEvent.click(screen.getByRole("button", { name: "Open Sources" }));
-      expect(screen.getByTestId("sources")).toHaveTextContent("Source filter: automatic");
+      fireEvent.click(screen.getByRole("button", { name: "Open Transcription" }));
+      expect(screen.getByTestId("transcription")).toHaveTextContent("Source filter: automatic");
       act(() => (window as any).__testEventCallbacks["soniox-storage-limit"]({}));
-      expect(screen.getByTestId("sources")).toHaveTextContent("Source filter: cloud");
+      expect(screen.getByTestId("transcription")).toHaveTextContent("Source filter: cloud");
     },
   );
 
@@ -511,7 +526,7 @@ describe("AppContainer", () => {
     expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
   });
 
-  it("shows onboarding when setup is explicitly reset even if sources are available", async () => {
+  it("shows onboarding when setup is explicitly reset even if transcription sources are available", async () => {
     mockSettings.onboarding_completed = false;
     render(<AppContainer />);
 

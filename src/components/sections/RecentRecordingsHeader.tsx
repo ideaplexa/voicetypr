@@ -18,6 +18,7 @@ import { isMacOS } from "@/lib/platform";
 
 export interface RecentRecordingsHeaderProps {
   historyLength: number;
+  onTranscribeFile?: () => void;
   onExport: () => void;
   onExportText: (format: "txt" | "md") => void;
   onClearAll: () => void;
@@ -25,6 +26,7 @@ export interface RecentRecordingsHeaderProps {
 
 export function RecentRecordingsHeader({
   historyLength,
+  onTranscribeFile,
   onExport,
   onExportText,
   onClearAll,
@@ -82,6 +84,11 @@ export function RecentRecordingsHeader({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {onTranscribeFile ? (
+            <Button type="button" variant="outline" size="sm" onClick={onTranscribeFile}>
+              Transcribe a file…
+            </Button>
+          ) : null}
           {historyLength > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger

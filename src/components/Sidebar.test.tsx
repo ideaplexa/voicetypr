@@ -5,22 +5,19 @@ import { Sidebar } from "./Sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-vi.mock("@tauri-apps/api/app", () => ({
-  getVersion: vi.fn().mockResolvedValue("2.0.5"),
+const licenseState = vi.hoisted(() => ({
+  current: { status: "licensed", license_type: "pro", trial_days_left: null as number | null },
 }));
 
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
 vi.mock("@/contexts/LicenseContext", () => ({
   useLicense: () => ({
-    status: { status: "licensed", license_type: "pro", trial_days_left: null },
+    status: licenseState.current,
     isLoading: false,
   }),
 }));
 
-vi.mock("@/services/updateService", () => ({
-  updateService: { checkForUpdatesManually: vi.fn() },
-}));
-
-function renderSidebar(activeSection: Parameters<typeof Sidebar>[0]["activeSection"] = "overview") {
+function renderSidebar(activeSection: Parameters<typeof Sidebar>[0]["activeSection"] = "home") {
   const onSectionChange = vi.fn();
   render(
     <TooltipProvider>
@@ -35,77 +32,72 @@ function renderSidebar(activeSection: Parameters<typeof Sidebar>[0]["activeSecti
 
 beforeEach(() => {
   vi.clearAllMocks();
+  licenseState.current = { status: "licensed", license_type: "pro", trial_days_left: null };
 });
 
 describe("Sidebar navigation", () => {
-  it("renders one flat ordered list of destinations", async () => {
+  it("shows the new ordered destinations and Setup group", async () => {
     renderSidebar();
-    await screen.findByText("v2.0.5");
-    expect(document.querySelector('[data-slot="sidebar-container"]')).toHaveClass(
-      "group-data-[side=left]:border-r-0",
+    const main = within(screen.getByRole("navigation", { name: "Main navigation" }));
+    expect(main.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Home",
+      "History",
+      "Transcription",
+      "Polish",
+      "Recording",
+    ]);
+    expect(main.getByText("Setup")).toBeInTheDocument();
+    const support = within(screen.getByRole("navigation", { name: "Support navigation" }));
+    expect(support.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Settings",
+      "Help & feedback",
+    ]);
+    expect(main.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
+    expect(await screen.findByText("2.1.0")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check for updates" })).not.toBeInTheDocument();
+  });
+
+  it("marks the current destination and navigates through brand, footer and license", async () => {
+    const user = userEvent.setup();
+    const change = renderSidebar("transcription");
+    expect(screen.getByRole("button", { name: "Transcription" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
-
-    const sources = screen.getByRole("button", { name: "Sources" });
-    const recording = screen.getByRole("button", { name: "Recording" });
-    const polish = screen.getByRole("button", { name: "Polish" });
-    expect(
-      sources.compareDocumentPosition(recording) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      recording.compareDocumentPosition(polish) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: /network sharing/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "CLI" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Voicetypr Home" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: /Pro. Open License/ }));
+    expect(change.mock.calls.map(([section]) => section)).toEqual(["home", "settings", "license"]);
   });
 
-  it("keeps everyday destinations compact and support actions fixed below", async () => {
-    const user = userEvent.setup();
-    const onSectionChange = renderSidebar();
-    await screen.findByText("v2.0.5");
-
-    const mainNav = screen.getByTestId("sidebar-main-nav");
-    const overview = within(mainNav).getByRole("button", { name: "Overview" });
-    const general = within(mainNav).getByRole("button", { name: "General" });
-    const history = within(mainNav).getByRole("button", { name: "History" });
-    const footerGroup = screen.getByTestId("sidebar-footer-nav");
-    const diagnostics = within(footerGroup).getByRole("button", { name: "Quick help" });
-    const report = within(footerGroup).getByRole("button", { name: "Report a problem" });
-
-    expect(
-      overview.compareDocumentPosition(general) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      general.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(within(mainNav).getByRole("button", { name: "License" })).toBeInTheDocument();
-    expect(within(mainNav).queryByRole("button", { name: "Quick help" })).not.toBeInTheDocument();
-    expect(
-      diagnostics.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(footerGroup).not.toHaveTextContent(/general|license/i);
-    expect(document.querySelector('[data-slot="sidebar-content"]')).toHaveClass("overflow-hidden");
-
-    await user.click(general);
-    expect(onSectionChange).toHaveBeenLastCalledWith("general");
-
-    await user.click(screen.getByRole("button", { name: /Pro. Open License/i }));
-    expect(onSectionChange).toHaveBeenLastCalledWith("license");
+  it("shows legacy destinations as their current sidebar destination", () => {
+    renderSidebar("advanced");
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
-  it("keeps the brand row close to the native titlebar", () => {
+  it("names trial and expired license states in the bottom chip", () => {
+    licenseState.current = { status: "trial", license_type: "pro", trial_days_left: 1 };
+    const view = renderSidebar("license");
+    expect(
+      screen.getByRole("button", { name: /Trial · 1 day left. Open License/ }),
+    ).toHaveAttribute("aria-current", "page");
+    view.mockClear();
+    licenseState.current = { status: "expired", license_type: "pro", trial_days_left: null };
+    // A fresh render reflects a backend license state change.
     renderSidebar();
-    expect(document.querySelector('[data-slot="sidebar-header"]')).toHaveClass("pt-1");
+    expect(screen.getByRole("button", { name: /Trial expired. Open License/ })).toBeInTheDocument();
   });
 
-  it("collapses to the icon rail through the sidebar control contract", async () => {
+  it("collapses to an icon rail while keeping navigation accessible", async () => {
     const user = userEvent.setup();
     renderSidebar();
-    const sidebar = document.querySelector('[data-slot="sidebar"][data-state]');
-
-    expect(sidebar).toHaveAttribute("data-state", "expanded");
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "expanded");
     await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
-    expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    expect(sidebar).toHaveAttribute("data-collapsible", "icon");
-    expect(screen.getByTitle("Overview")).toHaveAccessibleName("Overview");
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Help & feedback" })).toBeInTheDocument();
   });
 });

@@ -29,7 +29,7 @@ export function ShortcutsSection() {
     <SettingsPage>
       <SettingsHeader
         title="Shortcuts"
-        description="Additional shortcuts for history, Polish, the dashboard, and other app actions."
+        description="Additional shortcuts for history, Polish, Home, and other app actions."
       />
 
       <div className="rounded-2xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">

@@ -78,6 +78,12 @@ describe("AudioUploadSection - Essential User Flows", () => {
     useUploadStore.getState().reset();
   });
 
+  it("renders upload controls without a second page heading", () => {
+    render(<AudioUploadSection />);
+    expect(screen.queryByRole("heading", { name: "Transcribe a file…" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Audio file" })).toBeInTheDocument();
+  });
+
   describe("Critical Path: Upload and Transcribe", () => {
     it("user can select a file and get transcription", async () => {
       const user = userEvent.setup();

@@ -1,4 +1,4 @@
-import { Toaster } from "@/components/ui/sonner";
+import { AppToaster } from "@/components/AppToaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppErrorBoundary } from "./components/ErrorBoundary";
 import { AppContainer } from "./components/AppContainer";
@@ -26,7 +26,7 @@ export default function App() {
               <ModelManagementProvider>
                 <TooltipProvider>
                   <AppContainer />
-                  <Toaster
+                  <AppToaster
                     position="top-center"
                     closeButton
                     expand
@@ -42,7 +42,7 @@ export default function App() {
                           "border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground",
                         success: "border-sage/50",
                         error: "border-destructive/50",
-                        warning: "border-amber-500/50",
+                        warning: "border-warn/50",
                         info: "border-sky-500/50",
                       },
                     }}

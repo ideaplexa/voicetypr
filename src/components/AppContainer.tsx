@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type SetStateAction } from "react";
 import { AppErrorBoundary } from "./ErrorBoundary";
 import { AppShell } from "./AppShell";
-import type { ScreenId } from "./navigation";
+import { resolveScreen, type ScreenId, type SettingsPane } from "./navigation";
 import { OnboardingDesktop } from "./onboarding/OnboardingDesktop";
 import { UpdateAnnouncementDialog } from "./UpdateAnnouncementDialog";
 import { PrivacyConsentDialog } from "./PrivacyConsentDialog";
@@ -17,22 +17,28 @@ import { useOnboardingRecovery } from "./app/useOnboardingRecovery";
 import type { SourceFilter } from "./sections/models/types";
 
 export function AppContainer() {
-  const [{ activeSection, sourceFilter }, setNavigation] = useState<{
+  const [{ activeSection, sourceFilter, settingsPane }, setNavigation] = useState<{
     activeSection: ScreenId;
     sourceFilter?: SourceFilter;
-  }>({ activeSection: "overview" });
+    settingsPane?: SettingsPane;
+  }>({ activeSection: "home" });
   const setActiveSection = useCallback((action: SetStateAction<ScreenId>) => {
     setNavigation((current) => {
       const next = typeof action === "function" ? action(current.activeSection) : action;
-      // Destinations apply to one Sources visit; returning derives the latest source.
+      // Destinations apply to one Transcription visit; returning derives the latest source.
       return {
         activeSection: next,
-        sourceFilter: next === "models" ? current.sourceFilter : undefined,
+        settingsPane: resolveScreen(next).pane ?? (next === "settings" ? "general" : undefined),
+        sourceFilter:
+          resolveScreen(next).screen === "transcription" ? current.sourceFilter : undefined,
       };
     });
   }, []);
   const setSourceFilter = useCallback((filter: SourceFilter) => {
     setNavigation((current) => ({ ...current, sourceFilter: filter }));
+  }, []);
+  const openSettingsPane = useCallback((pane: SettingsPane) => {
+    setNavigation({ activeSection: "settings", settingsPane: pane });
   }, []);
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
   const { settings, refreshSettings } = useSettings();
@@ -109,6 +115,8 @@ export function AppContainer() {
       <AppShell
         activeSection={activeSection}
         onSectionChange={setActiveSection}
+        settingsPane={settingsPane}
+        onSettingsPaneChange={openSettingsPane}
         sourceFilter={sourceFilter}
         onSourceFilterChange={setSourceFilter}
       />

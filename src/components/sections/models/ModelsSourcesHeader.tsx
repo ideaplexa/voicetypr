@@ -28,7 +28,7 @@ export function ModelsSourcesHeader({
       <SettingsHeader
         title={
           <span className="inline-flex items-center gap-2">
-            Sources
+            Transcription
             <Dialog>
               <DialogTrigger
                 render={
@@ -36,7 +36,7 @@ export function ModelsSourcesHeader({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Sources guide"
+                    aria-label="Transcription guide"
                     className="size-7 rounded-full text-muted-foreground"
                   />
                 }
@@ -45,7 +45,7 @@ export function ModelsSourcesHeader({
               </DialogTrigger>
               <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
-                  <DialogTitle>Sources guide</DialogTitle>
+                  <DialogTitle>Transcription guide</DialogTitle>
                   <DialogDescription>
                     Choose where speech recognition runs before recording or uploading files.
                   </DialogDescription>

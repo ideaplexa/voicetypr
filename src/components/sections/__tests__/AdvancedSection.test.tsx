@@ -29,10 +29,10 @@ describe("AdvancedSection", () => {
     platformMock.isMacOS = false;
   });
 
-  it("owns quick fixes and reset controls on Quick help", () => {
+  it("owns quick fixes and reset controls on Troubleshooting", () => {
     render(<AdvancedSection />);
 
-    expect(screen.getByRole("heading", { name: /Quick help/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Troubleshooting/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Quick fixes" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Reset app / start over" })).toBeInTheDocument();
     expect(

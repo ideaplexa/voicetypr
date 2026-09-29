@@ -8,6 +8,7 @@ import { useRecentRecordings } from "./useRecentRecordings";
 
 interface RecentRecordingsProps {
   history: TranscriptionHistory[];
+  onTranscribeFile?: () => void;
   hotkey?: string;
   onHistoryUpdate?: () => void;
   isLoading?: boolean;
@@ -16,6 +17,7 @@ interface RecentRecordingsProps {
 
 export function RecentRecordings({
   history,
+  onTranscribeFile,
   hotkey = "Cmd+Shift+Space",
   onHistoryUpdate,
   isLoading = false,
@@ -38,6 +40,7 @@ export function RecentRecordings({
   return (
     <div className="h-full flex flex-col">
       <RecentRecordingsHeader
+        onTranscribeFile={onTranscribeFile}
         historyLength={history.length}
         onExport={recordings.handleExport}
         onExportText={recordings.handleExportText}

@@ -1,4 +1,10 @@
-import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import { toast } from "sonner";
 import {
   sendNotification,
@@ -73,7 +79,7 @@ export function useAppEvents({
     const setup = async () => {
       try {
         await register("navigate-to-overview", () => {
-          setActiveSection("overview");
+          setActiveSection("home");
         });
 
         await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {
@@ -217,7 +223,7 @@ export function useAppEvents({
             // focused the main window; land on the page with the Soniox
             // stored-files card and explain inline.
             setSourceFilter("cloud");
-            setActiveSection("models");
+            setActiveSection("transcription");
             toast.error(data.title || "Soniox storage limit reached", {
               description:
                 data.message ||
@@ -266,5 +272,4 @@ export function useAppEvents({
     setForceShowOnboarding,
     forceOnboardingNeedsFreshAvailabilityRef,
   ]);
-
 }

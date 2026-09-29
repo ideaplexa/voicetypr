@@ -51,7 +51,7 @@ const QUICK_FIXES: QuickFix[] = [
     issue: "Voice recording does not start from the shortcut.",
     solution: () =>
       isMacOS
-        ? "Check microphone permission in Quick help. Also confirm a recording device is selected in Recording."
+        ? "Check microphone permission in Settings → Troubleshooting. Also confirm a recording device is selected in Recording."
         : "In Windows Settings, allow desktop apps to use the microphone. Also confirm a recording device is selected in Recording.",
   },
   {
@@ -61,7 +61,7 @@ const QUICK_FIXES: QuickFix[] = [
     issue: "The global shortcut does not trigger recording.",
     solution: () =>
       isMacOS
-        ? "Open Quick help and grant Accessibility permission so the global shortcut can work."
+        ? "Open Settings → Troubleshooting and grant Accessibility permission so the global shortcut can work."
         : "Open Shortcuts, and choose another shortcut if the current one is reserved by another app.",
   },
   {
@@ -71,7 +71,7 @@ const QUICK_FIXES: QuickFix[] = [
     issue: "The transcript does not appear at the cursor.",
     solution: () =>
       isMacOS
-        ? "Place the cursor in an editable text field. Check Accessibility permission under Quick help."
+        ? "Place the cursor in an editable text field. Check Accessibility permission under Settings → Troubleshooting."
         : "Place the cursor in an editable text field, then confirm Auto-paste after transcription is enabled in Settings.",
   },
   {
@@ -151,7 +151,7 @@ export function AdvancedSection() {
         <SettingsHeader
           title={
             <span className="flex items-center gap-2">
-              Quick help
+              Troubleshooting
               <Dialog>
                 <DialogTrigger
                   render={
@@ -159,7 +159,7 @@ export function AdvancedSection() {
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      aria-label="Quick help guide"
+                      aria-label="Troubleshooting guide"
                       className="size-7 rounded-full text-muted-foreground"
                     />
                   }
@@ -168,9 +168,9 @@ export function AdvancedSection() {
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-lg">
                   <DialogHeader>
-                    <DialogTitle>Quick help guide</DialogTitle>
+                    <DialogTitle>Troubleshooting guide</DialogTitle>
                     <DialogDescription>
-                      Quick help covers permissions, troubleshooting, and reset tools.
+                      Troubleshooting covers permissions, troubleshooting, and reset tools.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-3 text-sm leading-6 text-muted-foreground">

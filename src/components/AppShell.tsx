@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { CircleAlert } from "lucide-react";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { toast } from "sonner";
-import type { ScreenId } from "@/components/navigation";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { TabContainer } from "@/components/tabs/TabContainer";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -20,9 +20,17 @@ import type { SourceFilterProps } from "./sections/models/types";
 interface AppShellProps extends SourceFilterProps {
   activeSection: ScreenId;
   onSectionChange: (section: ScreenId) => void;
+  settingsPane?: SettingsPane;
+  onSettingsPaneChange?: (pane: SettingsPane) => void;
 }
 
-export function AppShell({ activeSection, onSectionChange, ...sourceFilterProps }: AppShellProps) {
+export function AppShell({
+  activeSection,
+  onSectionChange,
+  settingsPane,
+  onSettingsPaneChange,
+  ...sourceFilterProps
+}: AppShellProps) {
   const [trayStatus, setTrayStatus] = useState<TrayStatus | null>(null);
   const [isRetryingTray, setIsRetryingTray] = useState(false);
   useEffect(() => {
@@ -63,7 +71,6 @@ export function AppShell({ activeSection, onSectionChange, ...sourceFilterProps 
       style={
         {
           "--sidebar-width": "14rem",
-          "--sidebar": "var(--background)",
         } as CSSProperties
       }
     >
@@ -106,6 +113,8 @@ export function AppShell({ activeSection, onSectionChange, ...sourceFilterProps 
           <TabContainer
             activeSection={activeSection}
             onNavigate={onSectionChange}
+            settingsPane={settingsPane}
+            onSettingsPaneChange={onSettingsPaneChange}
             {...sourceFilterProps}
           />
         </div>

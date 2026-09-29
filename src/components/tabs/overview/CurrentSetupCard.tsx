@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Wrench } from "lucide-react";
-import type { ScreenId } from "@/components/navigation";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
 
 function SetupValue({ label, value }: { label: string; value: string }) {
   return (
@@ -15,6 +15,7 @@ function SetupValue({ label, value }: { label: string; value: string }) {
 export function CurrentSetupCard({
   canRecord,
   onNavigate,
+  onNavigateSettingsPane,
   selectedSourceLabel,
   triggerLabel,
   spokenLanguage,
@@ -22,6 +23,7 @@ export function CurrentSetupCard({
 }: {
   canRecord: boolean;
   onNavigate?: (section: ScreenId) => void;
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
   selectedSourceLabel: string;
   triggerLabel: string;
   spokenLanguage: string;
@@ -37,23 +39,24 @@ export function CurrentSetupCard({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {!canRecord && onNavigate ? (
+          {!canRecord && (onNavigateSettingsPane || onNavigate) ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onNavigate("advanced")}
+              onClick={() => {
+                if (onNavigateSettingsPane) onNavigateSettingsPane("advanced");
+                else onNavigate?.("settings");
+              }}
             >
               <Wrench />
-              Quick help
+              Troubleshooting
             </Button>
           ) : null}
           <span
             className={cn(
               "rounded-full px-2.5 py-1 text-xs font-medium",
-              canRecord
-                ? "bg-sage-bg text-sage"
-                : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+              canRecord ? "bg-sage-bg text-sage" : "bg-warn-bg text-warn",
             )}
           >
             {canRecord ? "Ready" : "Needs attention"}

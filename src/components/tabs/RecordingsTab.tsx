@@ -3,7 +3,7 @@ import { useActiveTrigger } from "@/hooks/useActiveTrigger";
 import { useTranscriptionHistory } from "@/hooks/useTranscriptionHistory";
 import { RecentRecordings } from "../sections/RecentRecordings";
 
-export function RecordingsTab() {
+export function RecordingsTab({ onTranscribeFile }: { onTranscribeFile?: () => void } = {}) {
   const { settings } = useSettings();
   // Load the full history (generous cap covering any realistic local store); the
   // list itself is paginated client-side in RecentRecordings so rendering stays fast.
@@ -19,6 +19,7 @@ export function RecordingsTab() {
   return (
     <RecentRecordings
       history={history}
+      onTranscribeFile={onTranscribeFile}
       hotkey={kbdLabel}
       onHistoryUpdate={refreshHistory}
       isLoading={isLoading}

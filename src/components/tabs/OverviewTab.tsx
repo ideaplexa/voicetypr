@@ -8,13 +8,19 @@ import { useActiveTrigger } from "@/hooks/useActiveTrigger";
 import { getModelDisplayName } from "@/lib/model-display";
 import { Share2 } from "lucide-react";
 import { useState } from "react";
-import type { ScreenId } from "@/components/navigation";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
 import { CurrentSetupCard } from "./overview/CurrentSetupCard";
 import { WeeklyRhythmCard } from "./overview/WeeklyRhythmCard";
 import { useActiveRemoteLabel } from "./overview/useActiveRemoteLabel";
 import { formatTimeSaved, useOverviewStats } from "./overview/useOverviewStats";
 
-export function OverviewTab({ onNavigate }: { onNavigate?: (section: ScreenId) => void }) {
+export function OverviewTab({
+  onNavigate,
+  onNavigateSettingsPane,
+}: {
+  onNavigate?: (section: ScreenId) => void;
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
+}) {
   const readiness = useReadiness();
   const canRecord = readiness.canRecord;
   const canAutoInsert = useCanAutoInsert();
@@ -44,7 +50,7 @@ export function OverviewTab({ onNavigate }: { onNavigate?: (section: ScreenId) =
         <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-[1.75rem] font-semibold tracking-[-0.025em] text-foreground">
-              Overview
+              Home
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Your active dictation setup and usage at a glance.
@@ -64,6 +70,7 @@ export function OverviewTab({ onNavigate }: { onNavigate?: (section: ScreenId) =
         <CurrentSetupCard
           canRecord={canRecord}
           onNavigate={onNavigate}
+          onNavigateSettingsPane={onNavigateSettingsPane}
           selectedSourceLabel={selectedSourceLabel}
           triggerLabel={triggerLabel}
           spokenLanguage={spokenLanguage}
