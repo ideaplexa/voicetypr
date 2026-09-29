@@ -33,6 +33,7 @@ export interface ActiveTrigger {
  */
 export function useActiveTrigger(settings: { hotkey?: string; recording_mode?: PrimaryMode } | null | undefined): ActiveTrigger {
   const [effective, setEffective] = useState<EffectivePrimaryShortcut | null>(null);
+  // Tray writes refresh SettingsContext even when only recording_mode changes.
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
@@ -46,7 +47,7 @@ export function useActiveTrigger(settings: { hotkey?: string; recording_mode?: P
       if (cancelled) dispose(); else unlisten = dispose;
     }).catch(() => undefined);
     return () => { cancelled = true; unlisten?.(); };
-  }, [settings?.hotkey]);
+  }, [settings?.hotkey, settings?.recording_mode]);
 
   const binding = effective?.binding ?? null;
   const hotkey = effective?.hotkey ?? (effective ? undefined : settings?.hotkey || undefined);

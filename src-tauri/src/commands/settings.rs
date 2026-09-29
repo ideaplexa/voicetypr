@@ -927,10 +927,7 @@ pub async fn save_settings(
         return Err(error.to_string());
     }
 
-    if let Ok(mut mode_guard) = app_state.recording_mode.lock() {
-        *mode_guard = recording_mode;
-        log::info!("Recording mode updated to: {:?}", recording_mode);
-    }
+    crate::commands::shortcuts::sync_runtime_recording_mode(&app_state, &settings.recording_mode);
 
     crate::trigger::engine_host::rebuild_engine_bindings(&app);
 

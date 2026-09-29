@@ -62,7 +62,7 @@ function fireHotkey(target: Element, init: KeyboardEventInit = {}): void {
 }
 
 // A bare-modifier isolated-tap primary (e.g. Control alone), as returned by
-// get_shortcut_settings when no combo hotkey is configured.
+// get_effective_primary_shortcut when no combo hotkey is configured.
 const bareControlBinding = {
   id: "onboarding-primary-hold",
   action: "toggle_recording",
@@ -112,7 +112,7 @@ function fireModifierUp(target: Element, init: KeyboardEventInit = {}): void {
   );
 }
 
-// Render the hook and flush the async get_shortcut_settings load so the
+// Render the hook and flush the async get_effective_primary_shortcut load so the
 // bare-modifier binding is in place before dispatching events.
 async function renderWithBareModifier(): Promise<void> {
   renderHook(() => useInAppRecordingHotkey());
@@ -149,7 +149,7 @@ describe("useInAppRecordingHotkey", () => {
     mockRecording.startRecording.mockReset();
     mockRecording.stopRecording.mockReset();
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue({ bindings: [] });
+    mockInvoke.mockResolvedValue({ binding: null, hotkey: null, mode: "toggle" });
     eventMock.shortcutSettingsChangedHandler = null;
     editable = document.createElement("textarea");
     nonEditable = document.createElement("div");
@@ -309,7 +309,7 @@ describe("useInAppRecordingHotkey", () => {
 
   it("starts recording on a bare-modifier tap inside a text field", async () => {
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
@@ -321,7 +321,7 @@ describe("useInAppRecordingHotkey", () => {
   it("stops recording on a bare-modifier tap when already recording", async () => {
     mockSettings.hotkey = "";
     mockRecording.state = "recording";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
@@ -332,7 +332,7 @@ describe("useInAppRecordingHotkey", () => {
 
   it("ignores a chord (Ctrl+C) — a key pressed during the modifier hold", async () => {
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     const opts = { bubbles: true, cancelable: true };
@@ -355,7 +355,7 @@ describe("useInAppRecordingHotkey", () => {
 
   it("ignores a bare-modifier tap outside an editable field", async () => {
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(nonEditable);
@@ -366,7 +366,7 @@ describe("useInAppRecordingHotkey", () => {
   it("respects the configured modifier side", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [{ ...bareControlBinding, modifier: { modifier: "control", side: "left" } }],
+      binding: { ...bareControlBinding, modifier: { modifier: "control", side: "left" } }, hotkey: null, mode: "toggle",
     });
     await renderWithBareModifier();
 
@@ -379,7 +379,7 @@ describe("useInAppRecordingHotkey", () => {
   it("starts on keydown and stops on keyup for a push-to-talk modifier_hold binding", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     await renderWithBareModifier();
 
@@ -398,7 +398,7 @@ describe("useInAppRecordingHotkey", () => {
   it("suppresses auto-repeat keydowns for a push-to-talk modifier_hold binding", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     await renderWithBareModifier();
 
@@ -413,7 +413,7 @@ describe("useInAppRecordingHotkey", () => {
   it("does not start a modifier_hold recording for AltGr's synthesized Control then RightAlt sequence", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     await renderWithBareModifier();
 
@@ -451,7 +451,7 @@ describe("useInAppRecordingHotkey", () => {
   it("chains the hold stop after an in-flight start so stop-before-Starting is never dropped", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     let resolveStart: ((started: boolean) => void) | undefined;
     mockRecording.startRecording.mockImplementationOnce(
@@ -482,7 +482,7 @@ describe("useInAppRecordingHotkey", () => {
   it("keyup still stops the hold after a duplicate non-repeat keydown of the same modifier", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     mockRecording.startRecording.mockResolvedValueOnce(true);
     await renderWithBareModifier();
@@ -507,7 +507,7 @@ describe("useInAppRecordingHotkey", () => {
   it("does not issue the deferred stop when the start was a redundant no-op on a recording it does not own", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     let resolveStart: ((started: boolean) => void) | undefined;
     mockRecording.startRecording.mockImplementationOnce(
@@ -534,7 +534,7 @@ describe("useInAppRecordingHotkey", () => {
   it("does not issue the deferred stop when the in-flight start failed, preserving the error state", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     let resolveStart: ((started: boolean) => void) | undefined;
     mockRecording.startRecording.mockImplementationOnce(
@@ -561,7 +561,7 @@ describe("useInAppRecordingHotkey", () => {
   it("stops a hold that already started when AltGr's second key arrives after the hold-start timer", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     await renderWithBareModifier();
 
@@ -590,7 +590,7 @@ describe("useInAppRecordingHotkey", () => {
   it("stops an active modifier_hold even when keyup still reports AltGraph", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockResolvedValue({
-      bindings: [holdControlBinding],
+      binding: holdControlBinding, hotkey: null, mode: "hold",
     });
     await renderWithBareModifier();
 
@@ -616,7 +616,7 @@ describe("useInAppRecordingHotkey", () => {
 
   it("bails if recording state changed between keydown and keyup", async () => {
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     const opts = { bubbles: true, cancelable: true, code: "ControlLeft", key: "Control" };
@@ -628,7 +628,7 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
-  it("does not activate the bare-modifier fallback when get_shortcut_settings fails", async () => {
+  it("does not activate the bare-modifier fallback when get_effective_primary_shortcut fails", async () => {
     mockSettings.hotkey = "";
     mockInvoke.mockRejectedValue(new Error("backend unavailable"));
     await renderWithBareModifier();
@@ -640,7 +640,7 @@ describe("useInAppRecordingHotkey", () => {
 
   it("clears a pending tap on blur (no toggle on a later keyup)", async () => {
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     const opts = { bubbles: true, cancelable: true, code: "ControlLeft", key: "Control" };
@@ -653,7 +653,7 @@ describe("useInAppRecordingHotkey", () => {
 
   it("debounces a rapid second bare-modifier tap", async () => {
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
@@ -665,7 +665,7 @@ describe("useInAppRecordingHotkey", () => {
   it("does not run the bare-modifier path on macOS (native engine handles it)", async () => {
     platform.isMacOS = true;
     mockSettings.hotkey = "";
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
@@ -676,7 +676,7 @@ describe("useInAppRecordingHotkey", () => {
   it("reloads the bare-modifier binding when shortcut settings change in-session", async () => {
     mockSettings.hotkey = "";
     // Initially no bare binding → a tap does nothing.
-    mockInvoke.mockResolvedValue({ bindings: [] });
+    mockInvoke.mockResolvedValue({ binding: null, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
@@ -685,7 +685,7 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
 
     // Backend now reports a bare-Control isolated_tap binding (in-session save).
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await act(async () => {
       eventMock.shortcutSettingsChangedHandler?.();
       // Flush the reload's invoke().then() that sets the bare-modifier ref.
@@ -699,16 +699,42 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
+  it("does not emulate an additional Control tap after a shortcut-settings event with a combo primary", async () => {
+    mockInvoke.mockImplementation((command: string) => Promise.resolve(command === "get_effective_primary_shortcut"
+      ? { binding: null, hotkey: "CommandOrControl+Space", mode: "toggle" }
+      : { bindings: [bareControlBinding] }));
+    await renderWithBareModifier();
+    await act(async () => { eventMock.shortcutSettingsChangedHandler?.(); });
+    fireModifierDown(editable);
+    fireHotkey(editable, { code: "KeyC", key: "c" });
+    fireModifierUp(editable);
+    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    fireModifierTap(editable);
+    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("cancels a tap on every intervening key with a stale combo cache (composing: %s)", async (isComposing) => {
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
+    await renderWithBareModifier();
+    await act(async () => { eventMock.shortcutSettingsChangedHandler?.(); });
+    fireModifierDown(editable);
+    fireHotkey(editable, { code: "KeyC", key: "c", isComposing });
+    fireModifierUp(editable);
+    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    fireModifierTap(editable);
+    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+  });
+
   it("rearms from shortcut-settings-changed even when the cached hotkey is stale", async () => {
     mockSettings.hotkey = "CommandOrControl+Shift+Space";
-    mockInvoke.mockResolvedValue({ bindings: [] });
+    mockInvoke.mockResolvedValue({ binding: null, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
 
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
 
-    mockInvoke.mockResolvedValue({ bindings: [bareControlBinding] });
+    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await act(async () => {
       eventMock.shortcutSettingsChangedHandler?.();
       await Promise.resolve();

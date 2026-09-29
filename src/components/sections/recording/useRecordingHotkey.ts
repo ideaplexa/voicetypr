@@ -23,6 +23,7 @@ export function useRecordingHotkey() {
     setEffective(result);
     return result;
   }, []);
+  // Tray writes refresh SettingsContext even when only recording_mode changes.
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
@@ -36,7 +37,7 @@ export function useRecordingHotkey() {
       if (cancelled) dispose(); else unlisten = dispose;
     }).catch(() => undefined);
     return () => { cancelled = true; unlisten?.(); };
-  }, [settings?.hotkey]);
+  }, [settings?.hotkey, settings?.recording_mode]);
 
   const startEditing = () => {
     if (!settings) return;

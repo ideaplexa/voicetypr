@@ -426,8 +426,20 @@ fn replace_primary(
     }
 }
 
+/// Synchronize the recording guard from the successfully persisted mode.
+pub(crate) fn sync_runtime_recording_mode(state: &AppState, mode: &str) {
+    let recording_mode = match mode {
+        "push_to_talk" => crate::RecordingMode::PushToTalk,
+        _ => crate::RecordingMode::Toggle,
+    };
+    if let Ok(mut mode_guard) = state.recording_mode.lock() {
+        *mode_guard = recording_mode;
+        log::info!("Recording mode updated to: {:?}", recording_mode);
+    }
+}
+
 #[tauri::command]
-pub fn set_primary_recording_shortcut(
+pub async fn set_primary_recording_shortcut(
     app: AppHandle,
     request: SetPrimaryRecordingShortcutRequest,
 ) -> Result<EffectivePrimaryShortcut, String> {
@@ -474,9 +486,13 @@ pub fn set_primary_recording_shortcut(
         let _ = store.reload();
         return Err(format!("Failed to save settings: {error}"));
     }
-    crate::trigger::engine_host::rebuild_engine_bindings(&app);
     let app_state = app.state::<AppState>();
+    sync_runtime_recording_mode(&app_state, &mode);
+    crate::trigger::engine_host::rebuild_engine_bindings(&app);
     clear_active_custom_shortcut_state(&app_state);
+    if let Err(error) = crate::commands::settings::update_tray_menu(app.clone()).await {
+        log::warn!("Failed to update tray menu after primary shortcut change: {error}");
+    }
     let _ = app.emit("shortcut-settings-changed", ());
     Ok(effective_primary(&hotkey, &mode, &bindings.bindings))
 }
@@ -1068,6 +1084,22 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
 #[cfg(test)]
 mod primary_replacement_tests {
     use super::*;
+
+    #[test]
+    fn persisted_primary_mode_updates_the_recording_guard() {
+        let state = AppState::new();
+        *state.recording_mode.lock().unwrap() = crate::RecordingMode::PushToTalk;
+        sync_runtime_recording_mode(&state, "toggle");
+        assert_eq!(
+            *state.recording_mode.lock().unwrap(),
+            crate::RecordingMode::Toggle
+        );
+        sync_runtime_recording_mode(&state, "push_to_talk");
+        assert_eq!(
+            *state.recording_mode.lock().unwrap(),
+            crate::RecordingMode::PushToTalk
+        );
+    }
 
     fn bare(id: &str, action: ShortcutAction, enabled: bool) -> ShortcutBinding {
         ShortcutBinding {
