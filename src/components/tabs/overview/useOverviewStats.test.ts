@@ -14,6 +14,20 @@ describe("formatWeekSavedTime", () => {
 });
 
 describe("computeOverviewStats", () => {
+  it("uses the same local-midnight seven-day window for totals and bars", () => {
+    const now = new Date();
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const firstDay = new Date(today); firstDay.setDate(firstDay.getDate() - 6);
+    const before = new Date(firstDay.getTime() - 1);
+    const stats = computeOverviewStats([
+      { id: "before", text: "old", timestamp: before, model: "parakeet" },
+      { id: "first", text: "included", timestamp: firstDay, model: "parakeet" },
+      { id: "now", text: "included", timestamp: now, model: "parakeet" },
+    ], 3);
+    expect(stats.weekCount).toBe(2);
+    expect(stats.weekWords).toBe(2);
+    expect(stats.weekDays.map((day) => day.count)).toEqual([1, 0, 0, 0, 0, 0, 1]);
+  });
   it("keeps the weekly maximum at zero for an empty history", () => {
     const stats = computeOverviewStats([], 0);
 

@@ -35,7 +35,7 @@ export function SettingsTab({ pane, onPaneChange }: { pane: SettingsPane; onPane
               return (
                 <div key={entry.id}>
                   {index === 2 ? (
-                    <p className="px-2 pb-1 pt-5 text-[10px] font-semibold uppercase tracking-wider text-text-3">
+                    <p className="px-2 pb-1 pt-5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       Advanced
                     </p>
                   ) : null}

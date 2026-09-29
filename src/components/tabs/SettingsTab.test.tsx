@@ -43,6 +43,7 @@ it("keeps every advanced pane reachable", async () => {
   const panes = screen.getByRole("navigation", { name: "Settings panes" });
   expect(screen.getByText("Shortcut controls")).toBeInTheDocument();
   expect(panes).toHaveTextContent("Advanced");
+  expect(screen.getByText("Advanced")).toHaveClass("text-muted-foreground");
   for (const [label, content] of [
     ["Network sharing", "Network sharing controls"],
     ["CLI & API", "CLI and API controls"],

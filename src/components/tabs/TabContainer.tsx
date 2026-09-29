@@ -39,7 +39,7 @@ export function TabContainer({
   switch (destination.screen) {
     case "home":
       content = (
-        <OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onSettingsPaneChange} />
+        <OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onSettingsPaneChange} onSourceFilterChange={sourceFilterProps.onSourceFilterChange} />
       );
       break;
     case "history":
@@ -75,7 +75,7 @@ export function TabContainer({
       break;
     default:
       content = (
-        <OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onSettingsPaneChange} />
+        <OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onSettingsPaneChange} onSourceFilterChange={sourceFilterProps.onSourceFilterChange} />
       );
   }
   return <div className="flex h-full min-h-0 flex-col">{content}</div>;

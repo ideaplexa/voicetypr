@@ -199,6 +199,9 @@ describe("Recording screen", () => {
     expect(screen.getByLabelText("Current shortcut: Ctrl+Shift+Space")).toBeInTheDocument();
     expect(screen.getByText("Ctrl")).toBeInTheDocument();
     expect(screen.getByText("Shift")).toBeInTheDocument();
+    const cap = screen.getByText("Ctrl");
+    expect(cap.tagName).toBe("KBD");
+    expect(cap).toHaveClass("font-sans", "bg-secondary", "rounded-[9px]", "border");
   });
 
   it("shows microphone level only during recording", async () => {

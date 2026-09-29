@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings, TranscriptionHistory } from "@/types";
@@ -6,32 +6,36 @@ import { OverviewTab } from "./OverviewTab";
 
 const mock = vi.hoisted(() => ({
   settings: { hotkey: "Alt+Space", current_model: "parakeet-tdt-0.6b-v3", current_model_engine: "parakeet", speech_language: "en", recording_mode: "push_to_talk", transcription_mode: "live_preview" } as Partial<AppSettings>,
-  readiness: { canRecord: true, selectedModelAvailable: true as boolean | null, remoteSelected: false },
+  readiness: { canRecord: true, selectedModelAvailable: true as boolean | null, remoteSelected: false, remoteAvailable: true, licenseValid: true, licenseStatus: "licensed" as string | null, hasMicrophonePermission: true },
+  downloadProgress: {} as Record<string, number>,
+  shortcutBindings: [] as Array<{ id: string; action: string; shortcut: string; trigger: string; enabled: boolean; allow_risky_combo: boolean; trigger_kind: string; modifier: { modifier: string; side: string } }>,
   history: [] as TranscriptionHistory[],
   isLoading: false,
   loadError: null as string | null,
   mac: true,
-  progress: null as ((payload: { payload: { model: string; progress: number } }) => void) | null,
+  listeners: {} as Record<string, (event: { payload: unknown }) => void>,
 }));
 
 vi.mock("@/contexts/ReadinessContext", () => ({ useReadiness: () => mock.readiness }));
 vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => ({ settings: mock.settings }) }));
 vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () => ({ history: mock.history, totalCount: mock.history.length, isLoading: mock.isLoading, loadError: mock.loadError, refreshHistory: vi.fn() }) }));
-vi.mock("@/hooks/useActiveTrigger", () => ({ useActiveTrigger: (hotkey: string) => ({ hotkey, kbdLabel: hotkey || "Right ⌥" }) }));
+vi.mock("@/contexts/ModelManagementContext", () => ({ useModelManagementContext: () => ({ downloadProgress: mock.downloadProgress }) }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: true } : { preset: "CleanDictation" }) }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (_name: string, handler: typeof mock.progress) => { mock.progress = handler; return () => {}; }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: true } : command === "get_shortcut_settings" ? { bindings: mock.shortcutBindings } : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => { mock.listeners[name] = handler; return () => { delete mock.listeners[name]; }; }) }));
 vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: () => null }));
 
 beforeEach(() => {
   mock.settings = { hotkey: "Alt+Space", current_model: "parakeet-tdt-0.6b-v3", current_model_engine: "parakeet", speech_language: "en", recording_mode: "push_to_talk", transcription_mode: "live_preview" };
-  mock.readiness = { canRecord: true, selectedModelAvailable: true, remoteSelected: false };
+  mock.readiness = { canRecord: true, selectedModelAvailable: true, remoteSelected: false, remoteAvailable: true, licenseValid: true, licenseStatus: "licensed", hasMicrophonePermission: true };
+  mock.downloadProgress = {};
+  mock.shortcutBindings = [];
   mock.history = [];
   mock.isLoading = false;
   mock.loadError = null;
   mock.mac = true;
-  mock.progress = null;
+  mock.listeners = {};
 });
 
 describe("Home", () => {
@@ -61,6 +65,44 @@ describe("Home", () => {
     expect(screen.getByText(/Press once to start, again to paste/)).toBeInTheDocument();
   });
 
+  it("loads a bare-modifier primary through the real active-trigger hook", async () => {
+    mock.settings = { ...mock.settings, hotkey: "" };
+    mock.shortcutBindings = [{ id: "onboarding-primary-hold", action: "hold_to_record", shortcut: "", trigger: "hold", enabled: true, allow_risky_combo: false, trigger_kind: "modifier_hold", modifier: { modifier: "alt", side: "right" } }];
+    render(<OverviewTab />);
+    expect(await screen.findByText("Right ⌥")).toBeInTheDocument();
+    expect(screen.queryByText("your recording shortcut")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["license", { licenseValid: false, licenseStatus: "expired", canRecord: false }, "License needs attention", "license", undefined],
+    ["microphone mac", { hasMicrophonePermission: false, canRecord: false }, "Microphone access needed", undefined, "advanced"],
+    ["remote", { remoteSelected: true, remoteAvailable: false, canRecord: false }, "Remote source unavailable", "transcription", undefined],
+  ])("routes %s to its resolution", async (_case, readiness, label, screenId, pane) => {
+    mock.readiness = { ...mock.readiness, ...readiness };
+    const onNavigate = vi.fn(); const onNavigateSettingsPane = vi.fn();
+    render(<OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onNavigateSettingsPane} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: new RegExp(label) }));
+    if (pane) expect(onNavigateSettingsPane).toHaveBeenCalledWith(pane);
+    else expect(onNavigate).toHaveBeenCalledWith(screenId);
+  });
+
+  it("routes a denied Windows microphone to Recording", async () => {
+    mock.mac = false; mock.readiness = { ...mock.readiness, hasMicrophonePermission: false, canRecord: false };
+    const onNavigate = vi.fn();
+    render(<OverviewTab onNavigate={onNavigate} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: /Microphone access needed/ }));
+    expect(onNavigate).toHaveBeenCalledWith("recording");
+  });
+
+  it("prioritizes license and microphone blockers over an online remote source", () => {
+    mock.readiness = { ...mock.readiness, remoteSelected: true, remoteAvailable: true, licenseValid: false, licenseStatus: "expired", canRecord: false };
+    const { rerender } = render(<OverviewTab />);
+    expect(screen.getByRole("button", { name: /License needs attention/ })).toBeInTheDocument();
+    mock.readiness = { ...mock.readiness, licenseValid: true, licenseStatus: "licensed", hasMicrophonePermission: false };
+    rerender(<OverviewTab />);
+    expect(screen.getByRole("button", { name: /Microphone access needed/ })).toBeInTheDocument();
+  });
+
   it.each([
     ["missing model", "", "parakeet", false, "No model yet"],
     ["missing cloud key", "soniox", "soniox", false, "Needs an API key"],
@@ -74,18 +116,33 @@ describe("Home", () => {
     expect(onNavigate).toHaveBeenCalledWith("transcription");
   });
 
-  it("shows live download progress", async () => {
+  it("opens the Cloud card for a missing API key", async () => {
+    mock.settings = { ...mock.settings, current_model: "soniox", current_model_engine: "soniox" };
     mock.readiness = { ...mock.readiness, canRecord: false, selectedModelAvailable: false };
-    render(<OverviewTab />);
-    await waitFor(() => expect(mock.progress).not.toBeNull());
-    act(() => { mock.progress?.({ payload: { model: "parakeet-tdt-0.6b-v3", progress: 42 } }); });
-    expect(await screen.findByRole("button", { name: /Downloading Parakeet V3 · 42%/ })).toBeInTheDocument();
+    const onNavigate = vi.fn(); const onSourceFilterChange = vi.fn();
+    render(<OverviewTab onNavigate={onNavigate} onSourceFilterChange={onSourceFilterChange} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: /Needs an API key/ }));
+    expect(onSourceFilterChange).toHaveBeenCalledWith("cloud");
+    expect(onNavigate).toHaveBeenCalledWith("transcription");
+  });
+
+  it("uses the selected model's context download state and clears it", async () => {
+    mock.readiness = { ...mock.readiness, canRecord: false, selectedModelAvailable: false };
+    mock.downloadProgress = { "parakeet-tdt-0.6b-v3": 42 };
+    const { rerender } = render(<OverviewTab />);
+    expect(screen.getByRole("button", { name: /Downloading Parakeet V3 · 42%/ })).toBeInTheDocument();
+    mock.downloadProgress = {};
+    rerender(<OverviewTab />);
+    expect(screen.queryByRole("button", { name: /Downloading/ })).not.toBeInTheDocument();
+    mock.settings = { ...mock.settings, current_model: "other-model" };
+    rerender(<OverviewTab />);
+    expect(screen.queryByRole("button", { name: /42%/ })).not.toBeInTheDocument();
   });
 
   it("shows an empty Recent state and the last four dictations with app and time", async () => {
     const { rerender } = render(<OverviewTab />);
     expect(screen.getByText("Your dictations will show up here.")).toBeInTheDocument();
-    expect(screen.getByText("nothing yet this week")).toBeInTheDocument();
+    expect(screen.getByText("nothing yet in the last 7 days")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     mock.history = Array.from({ length: 5 }, (_, index) => ({ id: String(index), text: `Dictation number ${index}`, timestamp: new Date(Date.now() - index * 60_000), model: "parakeet", writing: { context_hint: { app_name: "Notes" }, audio_duration_ms: 3000 } }));
     rerender(<OverviewTab />);
@@ -93,21 +150,67 @@ describe("Home", () => {
     expect(screen.queryByText("Dictation number 4")).not.toBeInTheDocument();
     expect(screen.getAllByText("Notes")).toHaveLength(4);
     expect(screen.getByText("2m")).toBeInTheDocument();
+    expect(screen.queryByText("nothing yet in the last 7 days")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /dictations on/ })).toHaveAccessibleName(/5 dictations on/);
+    expect(screen.getAllByText("Notes")[0]).toHaveClass("text-muted-foreground");
     const onNavigate = vi.fn();
     rerender(<OverviewTab onNavigate={onNavigate} />);
     await userEvent.setup().click(screen.getByRole("button", { name: /View all history/ }));
     expect(onNavigate).toHaveBeenCalledWith("history");
   });
 
-  it("autofocuses the try box and reports pasted words", async () => {
+  it("describes a short dictation without treating zero rounded savings as empty", () => {
+    mock.history = [{ id: "short", text: "hello", timestamp: new Date(), model: "parakeet", writing: { audio_duration_ms: 1000 } }];
+    render(<OverviewTab />);
+    expect(screen.getByText("less than a minute estimated saved")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Last 7 days" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /1 dictations on/ })).toBeInTheDocument();
+  });
+
+  it("reports neutral words until dictation completes and changes the textarea", async () => {
     render(<OverviewTab />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Try a test dictation" }));
     const textarea = screen.getByRole("textbox", { name: "Test dictation" });
     expect(textarea).toHaveFocus();
     await user.type(textarea, "This really works");
-    expect(screen.getByText("Worked · 3 words")).toBeInTheDocument();
+    expect(screen.getByText("3 words")).toBeInTheDocument();
+    fireEvent.paste(textarea, { clipboardData: { getData: () => "manually pasted" } });
+    fireEvent.change(textarea, { target: { value: "This really works manually pasted" } });
+    expect(screen.getByText("5 words")).toBeInTheDocument();
+    await waitFor(() => expect(mock.listeners["recording-state-changed"]).toBeDefined());
+    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["transcription-complete"]({ payload: {} }); });
+    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
+    fireEvent.change(textarea, { target: { value: "This really works manually pasted now" } });
+    expect(screen.getByText("Worked · 6 words")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Test dictation" })).not.toBeInTheDocument());
+  });
+
+  it("accepts a transcribing-to-idle completion but ignores a cancelled recording", async () => {
+    render(<OverviewTab />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
+    await waitFor(() => expect(mock.listeners["recording-state-changed"]).toBeDefined());
+    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
+    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["recording-state-changed"]({ payload: { state: "idle" } }); });
+    fireEvent.change(textarea, { target: { value: "manual paste" } });
+    expect(screen.getByText("2 words")).toBeInTheDocument();
+    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["recording-state-changed"]({ payload: { state: "transcribing" } }); mock.listeners["recording-state-changed"]({ payload: { state: "idle" } }); });
+    fireEvent.change(textarea, { target: { value: "manual paste dictation" } });
+    expect(screen.getByText("Worked · 3 words")).toBeInTheDocument();
+  });
+
+  it("does not call delayed typing a successful test dictation", async () => {
+    render(<OverviewTab />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
+    await waitFor(() => expect(mock.listeners["transcription-complete"]).toBeDefined());
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["transcription-complete"]({ payload: {} }); });
+    clock.mockReturnValue(now + 3001);
+    fireEvent.change(screen.getByRole("textbox", { name: "Test dictation" }), { target: { value: "typed later" } });
+    expect(screen.getByText("2 words")).toBeInTheDocument();
+    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
+    clock.mockRestore();
   });
 });

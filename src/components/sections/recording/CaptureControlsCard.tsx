@@ -1,4 +1,5 @@
 import { HotkeyInput } from "@/components/HotkeyInput";
+import { KeyCaps } from "@/components/KeyCaps";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -120,14 +121,7 @@ export function CaptureControlsCard() {
                 className="flex flex-1 flex-wrap gap-1.5"
                 aria-label={`Current shortcut: ${label}`}
               >
-                {caps.map((cap, index) => (
-                  <kbd
-                    key={`${cap}-${index}`}
-                    className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium shadow-sm"
-                  >
-                    {cap}
-                  </kbd>
-                ))}
+                <KeyCaps caps={caps} />
               </div>
               <Button size="sm" variant="ghost" className="text-sage" onClick={startEditing}>
                 Change

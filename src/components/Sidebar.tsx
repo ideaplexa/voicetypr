@@ -111,7 +111,7 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
           <span className="min-w-0 truncate text-xs font-semibold group-data-[collapsible=icon]:hidden">
             {license.label}
           </span>
-          <span className="ml-auto font-mono text-[11px] text-text-3 group-data-[collapsible=icon]:hidden">
+          <span className="ml-auto font-mono text-[11px] text-muted-foreground group-data-[collapsible=icon]:hidden">
             {version}
           </span>
         </button>
@@ -134,7 +134,7 @@ function NavGroup({
   return (
     <SidebarGroup className="py-1">
       {label ? (
-        <SidebarGroupLabel className="px-3 text-[10px] font-semibold uppercase tracking-wider text-text-3 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel className="px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground group-data-[collapsible=icon]:hidden">
           {label}
         </SidebarGroupLabel>
       ) : null}

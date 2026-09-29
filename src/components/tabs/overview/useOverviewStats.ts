@@ -44,10 +44,13 @@ export function computeOverviewStats(
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
 
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(startOfWeek.getDate() - 7);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 6);
   const todayCount = history.filter((item) => new Date(item.timestamp) >= startOfToday).length;
-  const weekHistory = history.filter((item) => new Date(item.timestamp) >= startOfWeek);
+  const weekHistory = history.filter((item) => {
+    const timestamp = new Date(item.timestamp);
+    return timestamp >= startOfWeek && timestamp <= now;
+  });
   const weekCount = weekHistory.length;
   const weekWords = weekHistory.reduce((sum, item) => sum + item.text.split(/\s+/).filter(Boolean).length, 0);
   const speakingMinutes = weekHistory.reduce((sum, item) => sum + (item.writing?.audio_duration_ms ?? 0) / 60_000, 0);
@@ -70,7 +73,7 @@ export function computeOverviewStats(
     dayStart.setDate(dayStart.getDate() - (6 - index));
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
-    const count = history.filter((item) => {
+    const count = weekHistory.filter((item) => {
       const t = new Date(item.timestamp);
       return t >= dayStart && t < dayEnd;
     }).length;

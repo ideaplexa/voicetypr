@@ -201,7 +201,7 @@ export function Segmented({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className="rounded-[7px] px-3 data-pressed:bg-card data-pressed:shadow-sm"
+          className="rounded-[7px] px-3 aria-pressed:bg-card aria-pressed:shadow-sm"
         >
           {option.label}
         </ToggleGroupItem>

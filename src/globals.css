@@ -29,6 +29,7 @@
   --sage: #3F7D5C;
   --sage-foreground: #ffffff;
   --sage-bg: #E3EFE7;
+  /* Text below 14px uses muted-foreground (text-2, >=4.5:1 in both themes); text-3 is for icons, placeholders, and decorative separators only. */
   --text-3: #9A9A95;
   --warn: #B26A00;
   --warn-bg: #FFF0D9;

@@ -4,6 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import { ChoiceCard, Segmented } from "./settings-ui";
 
 describe("settings choices", () => {
+  it.each(["push_to_talk", "toggle"])("raises the selected recording mode %s", (mode) => {
+    render(<Segmented label="Recording mode" value={mode} onValueChange={vi.fn()} options={[
+      { value: "push_to_talk", label: "Hold to talk" },
+      { value: "toggle", label: "Press to start / stop" },
+    ]} />);
+    const selected = screen.getByRole("button", { name: mode === "toggle" ? "Press to start / stop" : "Hold to talk" });
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(selected.className).toContain("aria-pressed:bg-card");
+    expect(selected.className).toContain("aria-pressed:shadow-sm");
+  });
   it("selects a segment with the keyboard and reports selection", async () => {
     const user = userEvent.setup();
     const changed = vi.fn();
@@ -21,7 +31,7 @@ describe("settings choices", () => {
     );
     expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "System" }).className).toContain(
-      "data-pressed:bg-card",
+      "aria-pressed:bg-card",
     );
     act(() => screen.getByRole("button", { name: "Light" }).focus());
     await user.keyboard("{Enter}");
