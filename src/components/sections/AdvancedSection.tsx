@@ -34,6 +34,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 interface QuickFix {
   id: string;
@@ -235,18 +236,25 @@ export function AdvancedSection({ embedded = false }: { embedded?: boolean } = {
               </TooltipProvider>
             }
           >
-            {(showAccessibility
-              ? permissionData
-              : [
-                  {
-                    type: "microphone" as const,
-                    icon: Mic,
-                    title: "Microphone",
-                    description: "Windows Settings → Privacy → Microphone must allow desktop apps.",
-                    status: hasMicrophonePermission ? "granted" : isLoading ? "checking" : "denied",
-                  },
-                ]
-            ).map((perm) => (
+            {!isMacOS ? (
+              <SettingRow
+                title="Microphone privacy"
+                description="Windows Settings → Privacy → Microphone must allow desktop apps."
+              >
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    // The shell/opener scopes only allow http(s)/mailto/tel, so use the
+                    // backend command that opens ms-settings:privacy-microphone.
+                    void invoke("open_microphone_settings");
+                  }}
+                >
+                  Open Windows Settings
+                </Button>
+              </SettingRow>
+            ) : null}
+            {(showAccessibility ? permissionData : []).map((perm) => (
               <SettingRow
                 className={
                   embedded ? "min-h-[60px] !mt-0 !border-border !py-3 first:!border-t-0" : undefined

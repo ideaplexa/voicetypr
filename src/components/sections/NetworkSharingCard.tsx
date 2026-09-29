@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { createLogger } from "@/lib/logger";
 import { isMacOS, isWindows } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 
 const log = createLogger("network");
 
@@ -99,9 +100,36 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
             <SettingsPaneRow
               title="Firewall"
               description={
-                sharing.firewallStatus?.may_be_blocked
-                  ? "Firewall may block connections"
-                  : "Incoming connections are allowed."
+                <span
+                  data-firewall-status={sharing.firewallCheck.state}
+                  className={cn(
+                    "inline-flex items-center gap-2 text-foreground",
+                    sharing.firewallCheck.state === "blocked" ||
+                      sharing.firewallCheck.state === "unknown"
+                      ? "text-foreground"
+                      : undefined,
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      sharing.firewallCheck.state === "blocked" ||
+                        sharing.firewallCheck.state === "unknown"
+                        ? "bg-warn"
+                        : sharing.firewallCheck.state === "allowed"
+                          ? "bg-sage"
+                          : "bg-muted-foreground",
+                    )}
+                  />
+                  {sharing.firewallCheck.state === "checking"
+                    ? "Checking firewall…"
+                    : sharing.firewallCheck.state === "blocked"
+                      ? "Firewall may block connections"
+                      : sharing.firewallCheck.state === "unknown"
+                        ? "Couldn't check the firewall"
+                        : "Incoming connections are allowed."}
+                </span>
               }
               control={
                 <div className="flex gap-2">
@@ -174,7 +202,7 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
       {sharing.status.enabled && (
         <SharingControls
           status={sharing.status}
-          firewallStatus={sharing.firewallStatus}
+          firewallCheck={sharing.firewallCheck}
           sharedModelDisplayName={sharing.sharedModelDisplayName}
           port={sharing.port}
           savedPort={sharing.savedPort}

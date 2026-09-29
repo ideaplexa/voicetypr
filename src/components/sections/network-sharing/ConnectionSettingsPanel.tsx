@@ -101,7 +101,14 @@ export function ConnectionSettingsPanel({
                     Remove
                   </Button>
                 ) : null}
-                <Button variant="ghost" size="sm" onClick={() => setEditingPassword(false)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    onPasswordChange(savedPassword);
+                    setEditingPassword(false);
+                  }}
+                >
                   Cancel
                 </Button>
               </div>
@@ -137,7 +144,7 @@ export function ConnectionSettingsPanel({
           }
         />
         <SettingsPaneRow
-          title="Allow model changes"
+          title={<Label htmlFor="allow-model-control">Allow model changes</Label>}
           description="Trusted devices may switch the model on this computer."
           control={
             <Switch

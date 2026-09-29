@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TranscriptionHistory } from "@/types";
 import { RecentRecordingsFilters } from "./RecentRecordingsFilters";
 import { RecentRecordingsHeader } from "./RecentRecordingsHeader";
 import { RecentRecordingsList } from "./RecentRecordingsList";
 import { RecentRecordingDetail } from "./RecentRecordingDetail";
 import { useRecentRecordings } from "./useRecentRecordings";
+import { useReadiness } from "@/contexts/ReadinessContext";
+import { useSettings } from "@/contexts/SettingsContext";
+import { homeStatus } from "@/lib/home-readiness";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
+import type { SourceFilter } from "./models/types";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface RecentRecordingsProps {
   history: TranscriptionHistory[];
@@ -13,6 +19,9 @@ interface RecentRecordingsProps {
   onHistoryUpdate?: () => void;
   isLoading?: boolean;
   loadError?: string | null;
+  onNavigate?: (screen: ScreenId) => void;
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
+  onSourceFilterChange?: (source: SourceFilter) => void;
 }
 
 export function RecentRecordings({
@@ -22,11 +31,45 @@ export function RecentRecordings({
   onHistoryUpdate,
   isLoading = false,
   loadError = null,
+  onNavigate,
+  onNavigateSettingsPane,
+  onSourceFilterChange,
 }: RecentRecordingsProps) {
+  const readiness = useReadiness();
+  const { settings } = useSettings();
+  const emptyStatus = homeStatus({
+    model: settings?.current_model ?? "",
+    engine: settings?.current_model_engine ?? "whisper",
+    modelAvailable: readiness.selectedModelAvailable,
+    canRecord: readiness.canRecord,
+    remoteSelected: readiness.remoteSelected,
+    remoteAvailable: readiness.remoteAvailable,
+    remoteLabel: null,
+    downloadProgress: null,
+    licenseValid: readiness.licenseValid,
+    licenseStatus: readiness.licenseStatus,
+    hasMicrophonePermission: readiness.hasMicrophonePermission,
+  });
   const recordings = useRecentRecordings({ history, onHistoryUpdate });
   const [selectedId, setSelectedId] = useState<string | null>(history[0]?.id ?? null);
   const [previousHistory, setPreviousHistory] = useState(history);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const measure = () => setNarrow((element.clientWidth || window.innerWidth) <= 688);
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(element);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
 
   // The existing transcription-added flow prepends completed uploads. Select any
   // newly prepended entry, including one arriving while the upload dialog is open.
@@ -52,6 +95,19 @@ export function RecentRecordings({
       if (!next) setDrawerOpen(false);
     }
   };
+  const detail = selected ? (
+    <RecentRecordingDetail
+      item={selected}
+      verified={recordings.verifiedRecordings.has(selected.id)}
+      checked={recordings.checkedRecordings.has(selected.id)}
+      reTranscribing={recordings.reTranscribingIds.has(selected.id)}
+      reTranscribingModel={recordings.reTranscribingModels.get(selected.id)}
+      onReTranscribe={recordings.handleReTranscribe}
+      onShowInFolder={recordings.handleShowInFolder}
+      onDelete={handleDelete}
+      onClose={() => setDrawerOpen(false)}
+    />
+  ) : null;
 
   return (
     <div className="@container flex h-full min-h-0 flex-col gap-4 overflow-hidden px-9 pt-10 [&>header]:items-end">
@@ -77,7 +133,11 @@ export function RecentRecordings({
           onClearFilters={recordings.clearFilters}
         />
       )}
-      <div className="relative flex min-h-0 w-full flex-1 overflow-hidden rounded-t-[14px] border border-b-0 border-border bg-card">
+      <div
+        ref={containerRef}
+        inert={narrow && drawerOpen}
+        className="relative flex min-h-0 w-full flex-1 overflow-hidden rounded-t-[14px] border border-b-0 border-border bg-card"
+      >
         <div
           className={`h-full shrink-0 @max-[688px]:w-full @max-[688px]:border-r-0 ${recordings.filteredHistory.length === 0 ? "w-full" : "w-[330px] border-r border-border"}`}
         >
@@ -97,28 +157,34 @@ export function RecentRecordings({
             onRetry={onHistoryUpdate}
             onTranscribeFile={onTranscribeFile}
             hotkey={hotkey}
+            readinessStatus={emptyStatus}
+            onReadinessAction={() => {
+              if (emptyStatus.pane) onNavigateSettingsPane?.(emptyStatus.pane);
+              else if (emptyStatus.screen) {
+                if (emptyStatus.source) onSourceFilterChange?.(emptyStatus.source);
+                onNavigate?.(emptyStatus.screen);
+              }
+            }}
           />
         </div>
-        {selected && (
-          <div
-            className={`min-w-0 flex-1 bg-card @max-[688px]:absolute @max-[688px]:inset-0 @max-[688px]:z-10 @max-[688px]:border-l @max-[688px]:border-border ${drawerOpen ? "" : "@max-[688px]:hidden"}`}
-            role="region"
-            aria-label="Dictation detail"
-          >
-            <RecentRecordingDetail
-              item={selected}
-              verified={recordings.verifiedRecordings.has(selected.id)}
-              checked={recordings.checkedRecordings.has(selected.id)}
-              reTranscribing={recordings.reTranscribingIds.has(selected.id)}
-              reTranscribingModel={recordings.reTranscribingModels.get(selected.id)}
-              onReTranscribe={recordings.handleReTranscribe}
-              onShowInFolder={recordings.handleShowInFolder}
-              onDelete={handleDelete}
-              onClose={() => setDrawerOpen(false)}
-            />
+        {selected && !narrow && (
+          <div className="min-w-0 flex-1 bg-card" role="region" aria-label="Dictation detail">
+            {detail}
           </div>
         )}
       </div>
+      {narrow && selected && (
+        <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <DialogContent
+            showCloseButton={false}
+            finalFocus={() => document.getElementById(`history-item-${selected.id}`)}
+            className="inset-x-0 bottom-0 top-auto left-0 h-[min(85dvh,720px)] max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-t-[14px] rounded-b-none bg-card p-0 ring-1 ring-border"
+          >
+            <DialogTitle className="sr-only">Dictation detail</DialogTitle>
+            {detail}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

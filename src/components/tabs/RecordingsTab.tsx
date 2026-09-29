@@ -2,8 +2,20 @@ import { useSettings } from "@/contexts/SettingsContext";
 import { useActiveTrigger } from "@/hooks/useActiveTrigger";
 import { useTranscriptionHistory } from "@/hooks/useTranscriptionHistory";
 import { RecentRecordings } from "../sections/RecentRecordings";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
+import type { SourceFilter } from "@/components/sections/models/types";
 
-export function RecordingsTab({ onTranscribeFile }: { onTranscribeFile?: () => void } = {}) {
+export function RecordingsTab({
+  onTranscribeFile,
+  onNavigate,
+  onNavigateSettingsPane,
+  onSourceFilterChange,
+}: {
+  onTranscribeFile?: () => void;
+  onNavigate?: (screen: ScreenId) => void;
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
+  onSourceFilterChange?: (source: SourceFilter) => void;
+} = {}) {
   const { settings } = useSettings();
   // Load the full history (generous cap covering any realistic local store); the
   // list itself is paginated client-side in RecentRecordings so rendering stays fast.
@@ -24,6 +36,9 @@ export function RecordingsTab({ onTranscribeFile }: { onTranscribeFile?: () => v
       onHistoryUpdate={refreshHistory}
       isLoading={isLoading}
       loadError={loadError}
+      onNavigate={onNavigate}
+      onNavigateSettingsPane={onNavigateSettingsPane}
+      onSourceFilterChange={onSourceFilterChange}
     />
   );
 }

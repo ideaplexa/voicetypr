@@ -134,6 +134,39 @@ describe("Settings pane controls", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_sharing"));
   });
 
+  it("discards a cancelled password before sharing is toggled off and on", async () => {
+    const fixtures = createFixtures({ platform: "macos", theme: "light", empty: false });
+    let sharingEnabled = true;
+    vi.mocked(invoke).mockImplementation((command: string) => {
+      if (command === "stop_sharing") sharingEnabled = false;
+      if (command === "start_sharing") sharingEnabled = true;
+      if (command === "get_sharing_status") return Promise.resolve({ ...(fixtures.get_sharing_status as Record<string, unknown>), enabled: sharingEnabled });
+      return Promise.resolve(fixtures[command]);
+    });
+    render(<SettingsTab pane="network" onPaneChange={vi.fn()} />);
+    const toggle = await screen.findByRole("switch", { name: "Share this Voicetypr" });
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    fireEvent.change(screen.getByLabelText("Password (Optional)"), { target: { value: "cancelled-secret" } });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(toggle);
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_sharing"));
+    await userEvent.click(toggle);
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("start_sharing", expect.anything()));
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "start_sharing"))
+      .not.toEqual(expect.arrayContaining([["start_sharing", expect.objectContaining({ password: "cancelled-secret" })]]));
+  });
+
+  it("gives every switch in each Settings pane an accessible name", async () => {
+    for (const pane of ["general", "shortcuts", "privacy", "storage", "network", "agent", "advanced"] as const) {
+      const view = render(<SettingsTab pane={pane} onPaneChange={vi.fn()} />);
+      if (pane === "network") await screen.findByRole("switch", { name: "Share this Voicetypr" });
+      for (const control of screen.queryAllByRole("switch")) {
+        expect(control).toHaveAccessibleName();
+      }
+      view.unmount();
+    }
+  });
+
   it("renders CLI status and repair from the existing commands", async () => {
     render(<SettingsTab pane="agent" onPaneChange={vi.fn()} />);
     expect(await screen.findByText("Installed")).toBeInTheDocument();

@@ -6,6 +6,8 @@ import type { TranscriptionHistory } from "@/types";
 
 const invokeMock = vi.fn();
 
+const mockReadiness = { canRecord: true, licenseValid: true, licenseStatus: "licensed", selectedModelAvailable: true, remoteSelected: false, remoteAvailable: null, hasMicrophonePermission: true };
+
 const mockSettings: {
   current_model: string;
   current_model_engine: "whisper" | "parakeet" | "soniox";
@@ -24,14 +26,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@/contexts/ReadinessContext", () => ({
   useCanRecord: () => true,
-  useReadiness: () => ({
-    canRecord: true,
-    licenseStatus: "licensed",
-    hasModels: true,
-    selectedModelAvailable: true,
-    remoteSelected: false,
-    hasMicrophonePermission: true,
-  }),
+  useReadiness: () => mockReadiness,
   useCanAutoInsert: () => true,
 }));
 
@@ -69,6 +64,8 @@ const createDeferred = <T,>() => {
 describe("RecentRecordings re-transcription", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadiness.canRecord = true;
+    mockReadiness.selectedModelAvailable = true;
     mockSettings.current_model = "small.en";
     mockSettings.current_model_engine = "whisper";
     invokeMock.mockImplementation(async (cmd: string) => {
@@ -622,7 +619,33 @@ describe("History split view", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSettings.current_model = "small.en";
+    mockReadiness.canRecord = true;
+    mockReadiness.selectedModelAvailable = true;
     invokeMock.mockResolvedValue(null);
+  });
+
+  it("traps focus in the mobile detail, makes the list inert, closes on Escape, and restores row focus", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 });
+    const user = userEvent.setup();
+    try {
+      render(<RecentRecordings history={[first, second]} />);
+      const row = screen.getByRole("button", { name: /Second final dictation/ });
+      await user.click(row);
+      const dialog = await screen.findByRole("dialog", { name: "Dictation detail" });
+      expect(dialog).toBeInTheDocument();
+      expect(row.closest("[inert]")).not.toBeNull();
+      const copy = screen.getByRole("button", { name: "Copy" });
+      copy.focus();
+      await user.tab();
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Dictation detail" })).not.toBeInTheDocument());
+      expect(row).toHaveFocus();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
   });
 
   it("selects dictations by click and arrow keys", async () => {
@@ -708,6 +731,22 @@ describe("History split view", () => {
     await user.type(screen.getByRole("textbox", { name: "Search dictations" }), "missing phrase");
     expect(screen.getByText("No dictations match")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Transcribe a file…" })).toHaveLength(2);
+  });
+
+  it("routes an empty, unready History to the Home readiness blocker", async () => {
+    mockSettings.current_model = "";
+    mockReadiness.canRecord = false;
+    mockReadiness.selectedModelAvailable = false;
+    const onNavigate = vi.fn();
+    render(<RecentRecordings history={[]} onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "No model yet — Choose a model" }));
+    expect(onNavigate).toHaveBeenCalledWith("transcription");
+  });
+
+  it("shows the shortcut when empty History is ready", () => {
+    render(<RecentRecordings history={[]} hotkey="Cmd+Shift+Space" />);
+    expect(screen.getByText(/to start\./)).toHaveTextContent("Press");
+    expect(screen.queryByRole("button", { name: /Choose a model/ })).not.toBeInTheDocument();
   });
 
   it("selects a newly completed file upload from the existing history flow", () => {

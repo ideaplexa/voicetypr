@@ -40,12 +40,22 @@ export function TabContainer({
   switch (destination.screen) {
     case "home":
       content = (
-        <OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onSettingsPaneChange} onSourceFilterChange={sourceFilterProps.onSourceFilterChange} />
+        <OverviewTab
+          onNavigate={onNavigate}
+          onNavigateSettingsPane={onSettingsPaneChange}
+          onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
+        />
       );
       break;
     case "history":
       content = (
-        <HistoryContent key={activeSection} initialUploadOpen={activeSection === "audio"} />
+        <HistoryContent
+          key={activeSection}
+          initialUploadOpen={activeSection === "audio"}
+          onNavigate={onNavigate}
+          onNavigateSettingsPane={onSettingsPaneChange}
+          onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
+        />
       );
       break;
     case "transcription":
@@ -80,17 +90,36 @@ export function TabContainer({
       break;
     default:
       content = (
-        <OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onSettingsPaneChange} onSourceFilterChange={sourceFilterProps.onSourceFilterChange} />
+        <OverviewTab
+          onNavigate={onNavigate}
+          onNavigateSettingsPane={onSettingsPaneChange}
+          onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
+        />
       );
   }
   return <div className="flex h-full min-h-0 flex-col">{content}</div>;
 }
 
-function HistoryContent({ initialUploadOpen }: { initialUploadOpen: boolean }) {
+function HistoryContent({
+  initialUploadOpen,
+  onNavigate,
+  onNavigateSettingsPane,
+  onSourceFilterChange,
+}: {
+  initialUploadOpen: boolean;
+  onNavigate?: (screen: ScreenId) => void;
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
+  onSourceFilterChange?: SourceFilterProps["onSourceFilterChange"];
+}) {
   const [uploadOpen, setUploadOpen] = useState(initialUploadOpen);
   return (
     <>
-      <RecordingsTab onTranscribeFile={() => setUploadOpen(true)} />
+      <RecordingsTab
+        onTranscribeFile={() => setUploadOpen(true)}
+        onNavigate={onNavigate}
+        onNavigateSettingsPane={onNavigateSettingsPane}
+        onSourceFilterChange={onSourceFilterChange}
+      />
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
         <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden bg-card p-0 text-card-foreground sm:max-w-3xl">
           <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-14">

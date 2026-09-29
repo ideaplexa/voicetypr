@@ -7,6 +7,7 @@ import { isMacOS } from "@/lib/platform";
 import type { TranscriptionHistory } from "@/types";
 import { sourceLabel } from "./recentRecordingsHelpers";
 import { RecentRecordingApplicationIcon } from "./RecentRecordingApplicationIcon";
+import type { HomeStatus } from "@/lib/home-readiness";
 
 export interface RecentRecordingsListProps {
   historyLength: number;
@@ -21,6 +22,8 @@ export interface RecentRecordingsListProps {
   onRetry?: () => void;
   onTranscribeFile?: () => void;
   hotkey: string;
+  readinessStatus: HomeStatus;
+  onReadinessAction: () => void;
 }
 
 export function RecentRecordingsList({
@@ -36,6 +39,8 @@ export function RecentRecordingsList({
   onRetry,
   onTranscribeFile,
   hotkey,
+  readinessStatus,
+  onReadinessAction,
 }: RecentRecordingsListProps) {
   const visible = filteredHistory.slice(0, visibleCount);
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: string) => {
@@ -75,13 +80,27 @@ export function RecentRecordingsList({
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Search className="size-7 text-muted-foreground" />
         {historyLength === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Your dictations will show up here. Press{" "}
-            <span className="[&_kbd]:text-muted-foreground [&>span]:text-muted-foreground">
-              <KeyCaps caps={shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows")} />
-            </span>{" "}
-            to start.
-          </p>
+          readinessStatus.ready ? (
+            <p className="text-sm text-muted-foreground">
+              Your dictations will show up here. Press{" "}
+              <span className="[&_kbd]:text-muted-foreground [&>span]:text-muted-foreground">
+                <KeyCaps caps={shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows")} />
+              </span>{" "}
+              to start.
+            </p>
+          ) : (
+            <div className="space-y-2 text-sm">
+              <p className="text-muted-foreground">Your dictations will show up here.</p>
+              <button
+                type="button"
+                onClick={onReadinessAction}
+                className="font-medium text-foreground underline"
+              >
+                {readinessStatus.label} —{" "}
+                {readinessStatus.label === "No model yet" ? "Choose a model" : "Review settings"}
+              </button>
+            </div>
+          )
         ) : (
           <p className="text-sm text-muted-foreground">No dictations match</p>
         )}
