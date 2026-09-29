@@ -47,7 +47,7 @@ export function ReadinessCloudPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <Card className="rounded-2xl border border-border bg-card py-0 shadow-sm">
+      <Card className="rounded-[14px] border border-border bg-card py-0">
         <ScrollArea className="h-[320px]">
           <div className="flex flex-col gap-3 p-4">
             {cloudModelNames.map((name) => {
@@ -61,13 +61,16 @@ export function ReadinessCloudPanel({
                   key={name}
                   size="sm"
                   className={cn(
-                    "rounded-xl border border-border bg-muted/30",
+                    "rounded-none border-0 border-b border-border bg-transparent shadow-none last:border-b-0",
                     selected && "border-sage/50 bg-sage-bg/40 ring-1 ring-sage/30",
                   )}
                 >
                   <CardHeader>
                     <CardAction>
-                      <Badge variant={ready ? "secondary" : "outline"}>
+                      <Badge
+                        variant={ready ? "secondary" : "outline"}
+                        className="text-xs text-muted-foreground"
+                      >
                         {ready ? "Connected" : "API key required"}
                       </Badge>
                     </CardAction>
@@ -113,6 +116,7 @@ export function ReadinessCloudPanel({
       </Card>
       {activeCloudProvider ? (
         <ApiKeyModal
+          inline
           isOpen
           onClose={() => {
             if (!isSavingCloudKey) onSetCloudModelSetup(null);

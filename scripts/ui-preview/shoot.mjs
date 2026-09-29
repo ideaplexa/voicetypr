@@ -61,6 +61,23 @@ try {
   browser = await chromium.launch({ executablePath: chrome, headless: true, args: ["--no-sandbox"] });
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
+      for (const phase of [1, 2, 3]) {
+        const name = `onboarding-${phase}`;
+        if (!shouldCapture(platform, theme, name)) continue;
+        const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
+        page.on("pageerror", (error) => errors.push(`${platform}/${theme}/${name}: ${error.stack ?? error}`));
+        page.on("console", (message) => { if (message.text().startsWith("[ui-preview] unknown command:")) unknown.add(message.text()); });
+        await page.goto(`${baseUrl}/ui-preview.html?platform=${platform}&theme=${theme}&onboarding=${phase}`, { waitUntil: "networkidle" });
+        await page.getByRole("progressbar", { name: "Setup phase" }).waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: path.join(output, `${platform}-${theme}-${name}.png`), animations: "disabled" });
+        shots.push(`${platform}-${theme}-${name}.png`);
+        await page.close();
+      }
+    }
+  }
+  for (const platform of ["macos", "windows"]) {
+    for (const theme of ["light", "dark"]) {
       for (const state of ["idle", "listening", "preview", "transcribing", "formatting", "pasted", "copied", "no_permission", "error", "too_short"]) {
         const name = `pill-${state}`;
         if (!shouldCapture(platform, theme, name)) continue;

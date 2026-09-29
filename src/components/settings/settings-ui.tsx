@@ -284,6 +284,7 @@ export function Segmented({
 }
 
 export function ChoiceCard({
+  layout = "column",
   label,
   description,
   icon: Icon,
@@ -292,6 +293,7 @@ export function ChoiceCard({
   active,
   onSelect,
 }: {
+  layout?: "column" | "row";
   label: string;
   description?: string;
   icon?: ComponentType<IconProps>;
@@ -308,22 +310,52 @@ export function ChoiceCard({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "h-full min-h-36 w-full flex-col items-start justify-start gap-2 rounded-[14px] border bg-card p-4 text-left whitespace-normal",
+        "w-full rounded-[14px] border bg-card p-4 text-left whitespace-normal",
+        layout === "row"
+          ? "h-auto flex-row items-center justify-start gap-[14px]"
+          : "h-full min-h-36 flex-col items-start justify-start gap-2",
         (active ?? selected) && "border-sage ring-[1.5px] ring-sage",
         active === false && selected && "ring-[1.5px] ring-foreground/20",
       )}
     >
       {Icon ? (
-        <span className="rounded-lg bg-muted p-2 text-sage">
-          <Icon className="size-4" />
+        <span
+          className={cn(
+            "shrink-0 rounded-[9px] text-sage",
+            layout === "row" ? "flex size-9 items-center justify-center" : "p-2",
+            selected ? "bg-sage-bg" : "bg-muted",
+          )}
+        >
+          <Icon className={layout === "row" ? "size-[18px]" : "size-4"} />
         </span>
       ) : null}
-      <span className="font-medium text-foreground">{label}</span>
-      {description ? (
-        <span className="text-xs leading-snug text-muted-foreground">{description}</span>
-      ) : null}
+      <span className={cn(layout === "row" && "flex min-w-0 flex-1 flex-col gap-[3px]")}>
+        <span
+          className={cn(
+            "text-foreground",
+            layout === "row" ? "text-[14.5px] leading-[normal] font-semibold" : "font-medium",
+          )}
+        >
+          {label}
+        </span>
+        {description ? (
+          <span
+            className={cn(
+              "text-[12.5px] text-muted-foreground",
+              layout === "row" ? "leading-[normal]" : "leading-snug",
+            )}
+          >
+            {description}
+          </span>
+        ) : null}
+      </span>
       {tag ? (
-        <span className="mt-auto rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+        <span
+          className={cn(
+            "text-muted-foreground",
+            layout === "row" ? "text-xs" : "mt-auto rounded-md bg-muted px-2 py-0.5 text-[11px]",
+          )}
+        >
           {tag}
         </span>
       ) : null}

@@ -12,6 +12,7 @@ export type PreviewOptions = {
   theme: "light" | "dark";
   platform: "macos" | "windows";
   empty: boolean;
+  onboarding?: 1 | 2 | 3;
 };
 
 const demoText = [
@@ -241,7 +242,7 @@ export function createFixtures(options: PreviewOptions) {
     current_model_engine: "parakeet",
     speech_language: "en",
     theme: options.theme,
-    onboarding_completed: true,
+    onboarding_completed: !options.onboarding,
     check_updates_automatically: false,
     recording_mode: "push_to_talk",
     selected_microphone:
@@ -257,6 +258,25 @@ export function createFixtures(options: PreviewOptions) {
     update_channel: "beta",
     save_recordings: true,
   };
+  const onboardingModels = options.onboarding
+    ? demoModels.map((model) => {
+        if (model.name !== "parakeet-v3") return model;
+        return options.platform === "macos"
+          ? {
+              ...model,
+              display_name: "Parakeet V3",
+              size: 500_000_000,
+              downloaded: options.onboarding !== 1,
+            }
+          : {
+              ...model,
+              display_name: "Large v3 Turbo",
+              engine: "whisper" as const,
+              size: 1_624_555_275,
+              downloaded: options.onboarding !== 1,
+            };
+      })
+    : demoModels;
   const license: LicenseStatus = {
     status: "licensed",
     license_type: "pro",
@@ -337,7 +357,7 @@ export function createFixtures(options: PreviewOptions) {
     save_settings: null,
     check_license_status: license,
     revalidate_license: license,
-    get_model_status: { models: demoModels },
+    get_model_status: { models: onboardingModels },
     get_recognition_availability_snapshot: {
       whisper_available: false,
       parakeet_available: true,
@@ -365,7 +385,7 @@ export function createFixtures(options: PreviewOptions) {
     ],
     validate_microphone_selection: false,
     check_microphone_permission: true,
-    check_accessibility_permission: true,
+    check_accessibility_permission: options.onboarding === 2 ? false : true,
     get_tray_status: { available: true, attempts: 0, lastError: null },
     get_distribution_info: distribution,
     check_for_app_update: null,

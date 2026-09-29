@@ -1,19 +1,13 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 import React, { useState } from "react";
-import { Button } from "./ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface ApiKeyModalProps {
   isOpen: boolean;
+  inline?: boolean;
   onClose: () => void;
   onSubmit: (apiKey: string) => void;
   providerName: string;
@@ -26,6 +20,7 @@ interface ApiKeyModalProps {
 
 export function ApiKeyModal({
   isOpen,
+  inline = false,
   onClose,
   onSubmit,
   providerName,
@@ -96,61 +91,74 @@ export function ApiKeyModal({
     description ??
     `Enter your API key to enable ${displayName}. Your key is stored securely in the system keychain.`;
 
+  const form = (
+    <form onSubmit={handleSubmit}>
+      <div className="space-y-2">
+        {inline ? (
+          <h3 className="text-sm font-semibold">{resolvedTitle}</h3>
+        ) : (
+          <DialogTitle>{resolvedTitle}</DialogTitle>
+        )}
+        {inline ? (
+          <p className="text-sm text-muted-foreground">{resolvedDescription}</p>
+        ) : (
+          <DialogDescription>{resolvedDescription}</DialogDescription>
+        )}
+      </div>
+
+      <div className="grid gap-4 py-4">
+        <div className="grid gap-2">
+          <Label htmlFor="apiKey">API Key</Label>
+          <Input
+            id="apiKey"
+            type="password"
+            placeholder={`Enter your ${displayName} API key`}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            disabled={isLoading}
+            autoFocus
+          />
+        </div>
+
+        {providerUrl && (
+          <div className="text-sm text-muted-foreground">
+            <a
+              href={providerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 hover:underline"
+            >
+              Get your {displayName} API key
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={!apiKey.trim() || isLoading}>
+          {isLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            submitLabel
+          )}
+        </Button>
+      </div>
+    </form>
+  );
+  if (inline)
+    return isOpen ? (
+      <section className="rounded-[14px] border border-border bg-card p-[18px]">{form}</section>
+    ) : null;
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[425px]">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>{resolvedTitle}</DialogTitle>
-            <DialogDescription>{resolvedDescription}</DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="apiKey">API Key</Label>
-              <Input
-                id="apiKey"
-                type="password"
-                placeholder={`Enter your ${displayName} API key`}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                disabled={isLoading}
-                autoFocus
-              />
-            </div>
-
-            {providerUrl && (
-              <div className="text-sm text-muted-foreground">
-                <a
-                  href={providerUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 hover:underline"
-                >
-                  Get your {displayName} API key
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!apiKey.trim() || isLoading}>
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                submitLabel
-              )}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+      <DialogContent className="sm:max-w-[425px]">{form}</DialogContent>
     </Dialog>
   );
 }

@@ -1,39 +1,29 @@
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import {
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  HardDrive,
-  Server,
-  Star,
-  Zap,
-} from "lucide-react";
+import { CheckCircle2, HardDrive, Server, Star, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function StepDots({ currentIndex, total }: { currentIndex: number; total: number }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex items-center gap-1.5">
-        {Array.from({ length: total }).map((_, index) => (
-          <span
-            key={index}
-            aria-hidden
-            className={cn(
-              "h-1.5 rounded-full transition-all",
-              index < currentIndex
-                ? "w-1.5 bg-sage/60"
-                : index === currentIndex
-                  ? "w-5 bg-sage"
-                  : "w-1.5 bg-border",
-            )}
-          />
-        ))}
-      </div>
-      <p className="text-xs tabular-nums text-muted-foreground">
-        Step {currentIndex + 1} of {total}
-      </p>
+    <div
+      role="progressbar"
+      aria-label="Setup phase"
+      aria-valuenow={currentIndex + 1}
+      aria-valuemin={1}
+      aria-valuemax={total}
+      className="flex items-center gap-1.5"
+    >
+      {Array.from({ length: total }, (_, index) => (
+        <span
+          key={index}
+          className={cn(
+            "h-1.5 rounded-[3px]",
+            index === currentIndex ? "w-7" : "w-2",
+            index <= currentIndex ? "bg-sage" : "bg-border",
+          )}
+        />
+      ))}
     </div>
   );
 }
@@ -50,9 +40,9 @@ export function OnboardingPanel({
   footer: ReactNode;
 }) {
   return (
-    <section className="flex w-full flex-col gap-7 animate-fade-in">
+    <section className="flex w-full flex-col gap-[22px]">
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-2.5 text-center">
-        <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">{title}</h2>
+        <h2 className="text-[26px] font-semibold tracking-[-0.5px] text-balance">{title}</h2>
         <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
       <div>{children}</div>
@@ -77,9 +67,12 @@ export function StepFooter({
   skipLabel?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <Button variant="outline" onClick={onBack}>
-        <ChevronLeft />
+    <div className="flex items-center justify-center gap-[10px]">
+      <Button
+        variant="outline"
+        className="text-[13px] text-muted-foreground hover:text-muted-foreground"
+        onClick={onBack}
+      >
         Back
       </Button>
       <div className="flex items-center gap-2">
@@ -88,9 +81,13 @@ export function StepFooter({
             {skipLabel ?? "Skip"}
           </Button>
         ) : null}
-        <Button onClick={() => void onNext()} disabled={nextDisabled}>
+        <Button
+          variant="outline"
+          className="text-[13px] text-muted-foreground hover:text-muted-foreground"
+          onClick={() => void onNext()}
+          disabled={nextDisabled}
+        >
           {nextLabel}
-          <ChevronRight />
         </Button>
       </div>
     </div>

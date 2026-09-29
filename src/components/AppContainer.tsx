@@ -1,3 +1,4 @@
+import { getOnboardingPreview } from "@/components/onboarding/onboardingPreview";
 import { useCallback, useRef, useState, type SetStateAction } from "react";
 import { AppErrorBoundary } from "./ErrorBoundary";
 import { AppShell } from "./AppShell";
@@ -96,6 +97,7 @@ export function AppContainer() {
     return (
       <AppErrorBoundary>
         <OnboardingDesktop
+          previewPhase={getOnboardingPreview()}
           onCompletionStart={markOnboardingCompletionStarted}
           onCompletionError={clearOnboardingCompletionMarker}
           onComplete={() => {
