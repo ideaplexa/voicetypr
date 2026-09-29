@@ -44,6 +44,7 @@ describe("Sidebar navigation", () => {
       "History",
       "Transcription",
       "Polish",
+      "Dictionary",
       "Recording",
     ]);
     expect(main.getByText("Setup")).toHaveClass("text-muted-foreground");

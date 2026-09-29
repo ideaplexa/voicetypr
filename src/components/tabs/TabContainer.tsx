@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AccountTab } from "./AccountTab";
 import { EnhancementsTab } from "./EnhancementsTab";
+import { DictionarySection } from "@/components/sections/DictionarySection";
 import { ModelsTab } from "./ModelsTab";
 import { OverviewTab } from "./OverviewTab";
 import { RecordingsTab } from "./RecordingsTab";
@@ -52,6 +53,9 @@ export function TabContainer({
       break;
     case "polish":
       content = <EnhancementsTab />;
+      break;
+    case "dictionary":
+      content = <DictionarySection />;
       break;
     case "recording":
       content = <RecordingTab />;

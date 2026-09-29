@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   AudioLines,
   BadgeCheck,
+  BookA,
   History,
   House,
   LifeBuoy,
@@ -15,6 +16,7 @@ export type MainScreenId =
   | "history"
   | "transcription"
   | "polish"
+  | "dictionary"
   | "recording"
   | "settings"
   | "help"
@@ -63,6 +65,12 @@ export const setupNavScreens: ScreenDefinition[] = [
     label: "Polish",
     icon: Sparkles,
     description: "Configure AI cleanup and writing tools.",
+  },
+  {
+    id: "dictionary",
+    label: "Dictionary",
+    icon: BookA,
+    description: "Words, corrections, and snippets.",
   },
   {
     id: "recording",

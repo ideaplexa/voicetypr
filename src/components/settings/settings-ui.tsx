@@ -173,6 +173,7 @@ export interface ChoiceOption {
   value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
 }
 
 export function Segmented({
@@ -201,6 +202,7 @@ export function Segmented({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
+          disabled={option.disabled}
           className="rounded-[7px] border border-transparent bg-transparent px-3 font-medium text-muted-foreground aria-pressed:bg-card! aria-pressed:text-foreground aria-pressed:font-semibold aria-pressed:shadow-sm dark:aria-pressed:border-foreground/30"
         >
           {option.label}

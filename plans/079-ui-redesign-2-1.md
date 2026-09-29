@@ -118,7 +118,10 @@ Old ids stay as aliases in `TabContainer` for one release so the `navigate-to-ov
     - `Pasted` → "Pasted · N words" (✓)
     - `LeftInClipboard` / `NoPermission` → "Copied — press ⌘V" (Ctrl+V on Windows),
       shown for 1.6 s
-  - This needs one new event (`paste-outcome` with `{outcome, words}`, no text). The existing
+  - This needs one new event (`paste-outcome` with `{outcome, words}`, no text).
+  - The same event is the only honest success signal for Home's "Try a test dictation". Until
+    S7 lands, that dialog shows only a neutral word count, because no production event
+    reliably marks a delivered dictation (re-review 2026-09-29). The existing
     states map to Listening / Transcribing / Polishing / Error / Too short.
   - "No text field" detection (AX focused-element role on macOS, UIA on Windows) is **out of
     scope**: it's a later plan, and the copy must not claim it.

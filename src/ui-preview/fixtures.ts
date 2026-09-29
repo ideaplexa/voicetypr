@@ -112,13 +112,14 @@ export const demoModels: ModelInfo[] = [
 
 export const demoWriting: WritingSettings = {
   custom_words: [
-    { phrase: "Voicetypr", enabled: true },
-    { phrase: "Parakeet", enabled: true },
+    { phrase: "Voicetypr", spoken_form: "voice typer", enabled: true },
+    { phrase: "Parakeet", spoken_form: "para keet", enabled: true },
     { phrase: "Ideaplexa", enabled: true },
   ],
   replacements: [
     { from: "voice typer", to: "Voicetypr", enabled: true },
     { from: "next js", to: "Next.js", enabled: true },
+    { from: "post hog", to: "PostHog", enabled: true },
   ],
   snippets: [
     {
@@ -127,8 +128,12 @@ export const demoWriting: WritingSettings = {
       enabled: true,
       preserve_literal: false,
     },
+    { trigger: "insert my email", body: "hello@example.com", enabled: true, preserve_literal: true },
   ],
-  app_formatting_rules: [],
+  app_formatting_rules: [
+    { app_name: "Slack", preset: "Message", enabled: true },
+    { app_name: "Cursor", preset: "Code", enabled: true },
+  ],
 };
 
 const shortcutActions: ShortcutActionDefinition[] = [

@@ -42,7 +42,7 @@ async function waitForServer() {
 
 const macScreens = [
   ["Home", "home"], ["History", "history"], ["Transcription", "transcription"],
-  ["Polish", "polish"], ["Recording", "recording"], ["Settings", "settings-general"],
+  ["Polish", "polish"], ["Dictionary", "dictionary"], ["Recording", "recording"], ["Settings", "settings-general"],
   ["Help & feedback", "help"],
 ];
 const panes = [

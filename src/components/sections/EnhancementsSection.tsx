@@ -146,6 +146,7 @@ export function EnhancementsSection() {
 
   return (
     <div className="h-full min-h-0 min-w-0 flex flex-col overflow-x-hidden">
+      <div className="mx-auto w-full max-w-3xl px-4 pt-5">
       <EnhancementsHeader
         hasSelectedModel={hasSelectedModel}
         activeProviderName={activeProviderName}
@@ -154,9 +155,10 @@ export function EnhancementsSection() {
         onToggleEnabled={handleToggleEnabled}
         onOpenProviderSetup={openProviderSetup}
       />
+      </div>
 
       <ScrollArea className="flex-1 min-h-0 min-w-0 overflow-x-hidden">
-        <div className="min-w-0 max-w-full overflow-x-hidden pt-5 pb-4 pl-2 pr-4">
+        <div className="mx-auto min-w-0 w-full max-w-3xl overflow-x-hidden pt-5 pb-4 pl-2 pr-4">
           <EnhancementSettingsPanel
             preset={enhancementOptions.preset}
             finalTextLanguage={effectiveFinalTextLanguage}

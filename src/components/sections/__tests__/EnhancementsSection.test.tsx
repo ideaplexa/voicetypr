@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, within, act } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { EnhancementsSection } from "../EnhancementsSection";
+import { DictionarySection } from "../DictionarySection";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useEnhancementsStore } from "@/state/enhancements";
@@ -318,10 +319,15 @@ function renderWithProviders() {
 }
 
 async function openPolishTab(
-  _user: ReturnType<typeof userEvent.setup>,
+  user: ReturnType<typeof userEvent.setup>,
   name: "Provider" | "Dictionary" | "Corrections" | "Snippets" | "Modes",
 ) {
-  // Sections are always rendered now — resolve the region for async settling.
+  if (name === "Dictionary" || name === "Corrections" || name === "Snippets") {
+    if (!screen.queryByRole("heading", { name: "Dictionary" })) render(<DictionarySection />);
+    if (name !== "Dictionary") {
+      await user.click(screen.getByRole("button", { name: new RegExp(`^${name} \\d+$`) }));
+    }
+  }
   await screen.findByRole("region", { name });
 }
 
@@ -540,20 +546,16 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     expect(await screen.findByRole("region", { name: "Provider" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "Select a provider to enable Polish",
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Dictionary" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Corrections" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Snippets" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose provider and model" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Dictionary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Corrections" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Snippets" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Modes" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Style" })).not.toBeInTheDocument();
 
     await openModes(user);
-    expect(await screen.findByText("Default mode")).toBeInTheDocument();
-    expect(screen.getByText("Per-app modes")).toBeInTheDocument();
+    expect(await screen.findByText("Default style")).toBeInTheDocument();
+    expect(screen.getByText("Per-app styles")).toBeInTheDocument();
     expect(invoke).toHaveBeenCalledWith("list_ai_providers");
   });
 
@@ -562,21 +564,34 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     await openModes(user);
-    expect(await screen.findByRole("tablist", { name: "Default mode" })).toBeInTheDocument();
-    for (const mode of ["Polish Off", "Clean Dictation", "Writing", "Notes", "Message", "Code"]) {
-      expect(screen.getByRole("tab", { name: mode })).toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: "Default style" })).toBeInTheDocument();
+    for (const mode of ["Off", "Clean", "Writing", "Notes", "Message", "Code"]) {
+      expect(screen.getByRole("button", { name: mode })).toBeInTheDocument();
     }
     expect(screen.queryByRole("region", { name: "Style" })).not.toBeInTheDocument();
+  });
+
+  it("changes the default style and its illustrative result", async () => {
+    aiSettingsResponse = { ...enabledAISettings, enabled: true };
+    vi.mocked(hasApiKey).mockImplementation(async (providerId: string) => providerId === "openai");
+    const user = userEvent.setup();
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Writing" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Writing" }));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Writing" } });
+      expect(screen.getByText("Let's meet on Wednesday to review the draft.")).toBeInTheDocument();
+    });
   });
 
   it("shows cloud and local setup tabs when Polish is unconfigured", async () => {
     renderWithProviders();
     expect(
       await screen.findByRole("button", {
-        name: "Select a provider to enable Polish",
+        name: "Choose provider and model",
       }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: /polish/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Polish" })).toBeInTheDocument();
 
     const providersPanel = await getProviderSetupPanel();
     expect(
@@ -604,7 +619,7 @@ describe("EnhancementsSection", () => {
     const launcher = await screen.findByRole("button", {
       name: "Choose provider and model",
     });
-    expect(launcher).toHaveTextContent("Provider & model");
+    expect(launcher).toHaveTextContent("Change");
     // The summary text arrives after the async settings load — wait for it
     // instead of asserting once (this raced under full-suite load).
     await waitFor(() => expect(launcher).toHaveTextContent("OpenAI · GPT-5 Mini"), {
@@ -1045,7 +1060,7 @@ describe("EnhancementsSection", () => {
       expect(providerSummary).toHaveTextContent("Active");
       expect(screen.queryByText("Connect an AI to turn on Polish")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("region", { name: "Corrections" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Corrections" })).not.toBeInTheDocument();
 
     const providersPanel = await getProviderSetupPanel();
     expect(
@@ -1060,7 +1075,7 @@ describe("EnhancementsSection", () => {
 
     expect(
       await screen.findByRole("button", {
-        name: "Select a provider to enable Polish",
+        name: "Choose provider and model",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Choose a cloud API or local agent")).toBeInTheDocument();
@@ -1267,16 +1282,11 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     expect(await screen.findByRole("region", { name: "Provider" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "Select a provider to enable Polish",
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose provider and model" })).toBeInTheDocument();
 
     await openModes(user);
-    expect(await screen.findByText("Default mode")).toBeInTheDocument();
-    expect(screen.getByText("Per-app modes")).toBeInTheDocument();
-    expect(screen.getByText(/Override the default mode when dictation starts/)).toBeInTheDocument();
+    expect(await screen.findByText("Default style")).toBeInTheDocument();
+    expect(screen.getByText("Per-app styles")).toBeInTheDocument();
   });
 
   it("does not render a context_policy control after the app-hint removal", async () => {
@@ -1291,11 +1301,11 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     await openPolishTab(user, "Dictionary");
-    expect(await screen.findByText("Words & names")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dictionary" })).toBeInTheDocument();
     await openPolishTab(user, "Corrections");
     expect(screen.getByRole("region", { name: "Corrections" })).toBeInTheDocument();
     await openPolishTab(user, "Snippets");
-    expect(await screen.findByText("Saved text")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Snippets" })).toBeInTheDocument();
   });
 
   it("keeps AiProviderStatus single-sourced and drops removed writing fields on merge", () => {
@@ -1667,7 +1677,7 @@ describe("EnhancementsSection", () => {
 
     await waitFor(() => {
       expect(saveCount).toBe(2);
-      expect(screen.getByText("Rule 2")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete row 2" })).toBeInTheDocument();
     });
     expect(toast.error).not.toHaveBeenCalledWith("stale save failed");
   });

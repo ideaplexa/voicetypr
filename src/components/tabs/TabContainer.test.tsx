@@ -26,6 +26,7 @@ vi.mock("@/components/sections/AdvancedSection", () => ({ AdvancedSection: () =>
 vi.mock("./NetworkSharingTab", () => ({ NetworkSharingTab: () => <p>Network controls</p> }));
 vi.mock("./AgentCliTab", () => ({ AgentCliTab: () => <p>CLI controls</p> }));
 vi.mock("./EnhancementsTab", () => ({ EnhancementsTab: () => <h1>Polish screen</h1> }));
+vi.mock("@/components/sections/DictionarySection", () => ({ DictionarySection: () => <h1>Dictionary screen</h1> }));
 vi.mock("./AccountTab", () => ({ AccountTab: () => <h1>License screen</h1> }));
 vi.mock("../sections/ReportProblemSection", () => ({
   ReportProblemSection: () => <h1>Help screen</h1>,
@@ -40,6 +41,7 @@ describe("TabContainer destinations", () => {
     ["history", "History screen"],
     ["transcription", "Transcription screen"],
     ["polish", "Polish screen"],
+    ["dictionary", "Dictionary screen"],
     ["recording", "Recording screen"],
     ["settings", "Settings"],
     ["help", "Help screen"],
