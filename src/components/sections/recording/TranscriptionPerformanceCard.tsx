@@ -110,7 +110,7 @@ export function TranscriptionPerformanceCard() {
             if (value != null) void handleAccelerationChange(value);
           }}
         >
-          <SelectTrigger className="w-full md:w-[190px]">
+          <SelectTrigger aria-label="Transcription acceleration" className="w-full md:w-[190px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

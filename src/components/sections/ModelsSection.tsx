@@ -1,9 +1,12 @@
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { RadioGroup } from "@base-ui/react/radio-group";
 import { ChoiceCard, SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
 import { SonioxStorageCard } from "@/components/SonioxStorageCard";
 import { useSettings } from "@/contexts/SettingsContext";
 import { isMacOS } from "@/lib/platform";
 import { isCloudModel, isLocalModel } from "@/types";
+import { getModelDisplayName, humanizeModelId } from "@/lib/model-display";
+import { resolveCloudModelLabel } from "@/lib/cloudProviders";
 import { Cloud, Laptop, Network } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { CloudApiKeyModal } from "./models/CloudProvidersBlock";
@@ -97,15 +100,32 @@ export function ModelsSection({
       icon: Network,
     },
   ];
+  const activeSourceName = remotes.activeRemoteServer
+    ? (() => {
+        const server = remotes.remoteServers.find((item) => item.id === remotes.activeRemoteServer);
+        return server?.name || getModelDisplayName(server?.model) || "Another computer";
+      })()
+    : selectedModel && isCloudModel(selectedModel)
+      ? resolveCloudModelLabel(selectedModel) || getModelDisplayName(currentModel, Object.fromEntries(models)) || "Cloud"
+      : getModelDisplayName(currentModel, Object.fromEntries(models)) || (currentModel ? humanizeModelId(currentModel) : "No model selected");
+  const activeSourceFamily = sourceCards.find((source) => source.value === trackedSource)?.label;
+  const selectModel = (name: string) => {
+    void remotes.clearActiveRemote().then(() => onSelect(name));
+  };
   return (
     <>
       <SettingsPage>
         <ModelsSourcesHeader />
+        <p className="text-sm font-medium text-foreground" role="status">
+          In use: {activeSourceName} · {activeSourceFamily}
+        </p>
         <div className="grid gap-3 sm:grid-cols-3" aria-label="Transcription sources">
           {sourceCards.map((source) => (
             <ChoiceCard
               key={source.value}
               {...source}
+              tag={source.value === trackedSource ? "In use" : source.tag}
+              active={source.value === trackedSource}
               selected={sourceFilter === source.value}
               onSelect={() => setSourceFilter(source.value)}
             />
@@ -123,7 +143,11 @@ export function ModelsSection({
             }
             className="!p-0 [&>div:first-child]:px-4 [&>div:first-child]:pt-4 [&>div:last-child]:mt-3"
           >
-            <div role="radiogroup" aria-label="Local models">
+            <RadioGroup
+              aria-label="Local models"
+              value={trackedSource === "local" ? currentModel : undefined}
+              onValueChange={selectModel}
+            >
               <LocalModelsList
                 models={local}
                 downloadProgress={downloadProgress}
@@ -139,7 +163,7 @@ export function ModelsSection({
                 activeRemoteServer={remotes.activeRemoteServer}
                 clearActiveRemote={remotes.clearActiveRemote}
               />
-            </div>
+            </RadioGroup>
             {local.length === 0 && (
               <p className="px-4 pb-4 text-sm text-muted-foreground">
                 {isLoading ? "Loading models…" : "No local models available."}
@@ -153,7 +177,12 @@ export function ModelsSection({
             description="Your own API key connects each provider. Personal Library words and corrections may be sent as context; snippets are not sent."
             className="!p-0 [&>div:first-child]:px-4 [&>div:first-child]:pt-4 [&>div:last-child]:mt-3"
           >
-            <div className="divide-y divide-border" role="radiogroup" aria-label="Cloud providers">
+            <RadioGroup
+              className="divide-y divide-border"
+              aria-label="Cloud providers"
+              value={trackedSource === "cloud" ? currentModel : undefined}
+              onValueChange={selectModel}
+            >
               {providers.map(([name, model]) => (
                 <CloudModelCard
                   key={name}
@@ -168,7 +197,7 @@ export function ModelsSection({
                   onModelChange={cloud.handleCloudModelChange}
                 />
               ))}
-            </div>
+            </RadioGroup>
             {providers.length === 0 && (
               <p className="px-4 pb-4 text-sm text-muted-foreground">
                 No cloud providers available.

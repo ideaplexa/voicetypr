@@ -164,7 +164,7 @@ describe("Recording screen", () => {
       "Recording pill",
       "Paste automatically",
       "Keep in clipboard",
-      "Sounds",
+      "Recording started",
       "More",
       "Pause media during recording",
       "Transcript history cleanup",
@@ -249,6 +249,17 @@ describe("Recording screen", () => {
     });
     expect(mockUpdateSettings).toHaveBeenCalledWith({ play_sound_on_paste_success: false });
   });
+
+  it("gives every Recording switch and select an accessible name", () => {
+    render(<RecordingSettings />);
+    for (const control of [...screen.getAllByRole("switch"), ...screen.getAllByTestId("select-trigger")]) {
+      expect(control).toHaveAccessibleName();
+    }
+    expect(screen.getByRole("switch", { name: "Transcript ready" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Paste completed" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Recording started" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Sounds" })).not.toBeInTheDocument();
+  });
 });
 
 describe("Recording pill behavior", () => {
@@ -315,7 +326,7 @@ describe("Recording audio and clipboard behavior", () => {
 
   it("describes the three exact sound events", () => {
     render(<RecordingSettings />);
-    expect(screen.getByText("A soft tick when recording starts and ends.")).toBeInTheDocument();
+    expect(screen.getByText("Play a sound when the microphone is ready for speech.")).toBeInTheDocument();
     expect(screen.getByText("Play a sound after transcription and optional AI formatting finish.")).toBeInTheDocument();
     expect(screen.getByText("Play a sound after Voicetypr successfully sends the paste command.")).toBeInTheDocument();
   });

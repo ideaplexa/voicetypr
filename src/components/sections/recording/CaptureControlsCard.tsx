@@ -20,7 +20,7 @@ import { useRecordingHotkey } from "./useRecordingHotkey";
 const log = createLogger("recording-settings");
 
 export function CaptureControlsCard() {
-  const { settings, updateSettings } = useSettings();
+  const { settings } = useSettings();
   const canAutoInsert = useCanAutoInsert();
   const [recording, setRecording] = useState(false);
   const [level, setLevel] = useState(0);
@@ -68,6 +68,7 @@ export function CaptureControlsCard() {
     startEditing,
     handleCancelHotkey,
     handleSaveHotkey,
+    changeRecordingMode,
   } = useRecordingHotkey();
   if (!settings) return null;
   const label = formatPrimaryHotkeyLabel(nativeBinding, settings.hotkey);
@@ -132,9 +133,11 @@ export function CaptureControlsCard() {
         <div className="mt-3">
           <Segmented
             label="Recording mode"
-            value={settings.recording_mode ?? "toggle"}
+            value={!settings.hotkey && nativeBinding
+              ? nativeBinding.action === "hold_to_record" ? "push_to_talk" : "toggle"
+              : settings.recording_mode ?? "toggle"}
             onValueChange={(value) => {
-              void updateSettings({ recording_mode: value as "toggle" | "push_to_talk" });
+              void changeRecordingMode(value as "toggle" | "push_to_talk");
             }}
             options={[
               { value: "push_to_talk", label: "Hold to talk" },

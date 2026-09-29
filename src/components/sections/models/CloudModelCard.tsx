@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Radio } from "@base-ui/react/radio";
 import {
   Select,
   SelectContent,
@@ -28,8 +29,6 @@ export function CloudModelCard({
   model,
   currentModel,
   activeRemoteServer,
-  onSelect,
-  clearActiveRemote,
   openCloudModal,
   onDisconnect,
   onModelChange,
@@ -52,15 +51,10 @@ export function CloudModelCard({
   const providerName = provider?.displayName || provider?.providerName || name;
   return (
     <div className={cn("flex flex-wrap items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={selected}
+      <Radio.Root
+        value={name}
         aria-label={`Use ${providerName}`}
         disabled={!ready}
-        onClick={() => {
-          void clearActiveRemote().then(() => onSelect(name));
-        }}
         className={cn(
           "size-4 shrink-0 rounded-full border border-border",
           selected && "border-[5px] border-sage",

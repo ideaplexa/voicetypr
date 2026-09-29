@@ -68,6 +68,35 @@ export function useRecordingHotkey() {
     setPendingBareModifier(null);
   };
 
+  const changeRecordingMode = async (mode: "toggle" | "push_to_talk") => {
+    if (!settings) return;
+    if (settings.hotkey) {
+      await updateSettings({ recording_mode: mode });
+      return;
+    }
+    try {
+      const current = await invoke<ShortcutSettings>("get_shortcut_settings");
+      const active = findActivePrimaryBinding(current.bindings);
+      if (!active) {
+        await updateSettings({ recording_mode: mode });
+        return;
+      }
+      const updated: ShortcutBinding = {
+        ...active,
+        action: mode === "push_to_talk" ? "hold_to_record" : "toggle_recording",
+        trigger_kind: mode === "push_to_talk" ? "modifier_hold" : "isolated_tap",
+        trigger: mode === "push_to_talk" ? "hold" : "pressed",
+      };
+      await invoke("update_shortcut_settings", {
+        settings: { bindings: current.bindings.map((binding) => binding.id === active.id ? updated : binding) },
+      });
+      setNativeBinding(updated);
+    } catch (error) {
+      log.error("Failed to update recording mode:", error);
+      toast.error("Failed to update recording mode.");
+    }
+  };
+
   const handleSaveHotkey = async () => {
     if (!settings) return;
     if (pendingBareModifier) {
@@ -173,5 +202,6 @@ export function useRecordingHotkey() {
     startEditing,
     handleCancelHotkey,
     handleSaveHotkey,
+    changeRecordingMode,
   };
 }

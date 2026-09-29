@@ -71,10 +71,6 @@ vi.mock("@/components/ui/switch", () => ({
     />
   ),
 }));
-vi.mock("@/components/ui/toggle-group", () => ({
-  ToggleGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ToggleGroupItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
 vi.mock("@/components/ui/select", () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -186,5 +182,27 @@ describe("GeneralSettings combo-hotkey save", () => {
     // Other bindings must be left intact.
     const cancel = bindings.find((b) => b.id === "cancel-recording");
     expect(cancel?.enabled).toBe(true);
+  });
+
+  it.each([
+    ["Press to start / stop", "isolated_tap", "toggle_recording", "pressed"],
+    ["Hold to talk", "modifier_hold", "hold_to_record", "hold"],
+  ] as const)("updates the active native binding for %s", async (label, kind, action, trigger) => {
+    mockSettings.recording_mode = label === "Hold to talk" ? "toggle" : "push_to_talk";
+    mockInvoke.mockImplementation(async (cmd) =>
+      cmd === "get_shortcut_settings"
+        ? { bindings: [{ ...nativePrimary, ...(label === "Hold to talk" ? { action: "toggle_recording", trigger: "pressed", trigger_kind: "isolated_tap" } : {}) }, cancelBinding] }
+        : undefined,
+    );
+    render(<RecordingSettings />);
+    await waitFor(() => expect(screen.getByRole("button", { name: label === "Hold to talk" ? "Press to start / stop" : "Hold to talk" })).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("update_shortcut_settings", expect.anything()));
+    const save = mockInvoke.mock.calls.find(([cmd]) => cmd === "update_shortcut_settings");
+    expect(readBindings(save?.[1])).toEqual([
+      expect.objectContaining({ id: nativePrimary.id, trigger_kind: kind, action, trigger, modifier: nativePrimary.modifier }),
+      cancelBinding,
+    ]);
+    expect(mockUpdateSettings).not.toHaveBeenCalledWith({ recording_mode: label === "Hold to talk" ? "push_to_talk" : "toggle" });
   });
 });

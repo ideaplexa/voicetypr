@@ -6,15 +6,19 @@ export function AudioFeedbackCard() {
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
   return (
-    <SettingsCard title="Sounds" description="A soft tick when recording starts and ends.">
-      <div className="mt-3 flex justify-end">
-        <Switch
-          id="sound-on-recording"
-          aria-label="Sounds"
-          checked={settings.play_sound_on_recording ?? true}
-          onCheckedChange={(checked) => void updateSettings({ play_sound_on_recording: checked })}
-        />
-      </div>
+    <SettingsCard title="Sounds">
+      <SettingRow
+        title="Recording started"
+        description="Play a sound when the microphone is ready for speech."
+        htmlFor="sound-on-recording"
+        control={
+          <Switch
+            id="sound-on-recording"
+            checked={settings.play_sound_on_recording ?? true}
+            onCheckedChange={(checked) => void updateSettings({ play_sound_on_recording: checked })}
+          />
+        }
+      />
     </SettingsCard>
   );
 }
@@ -26,6 +30,7 @@ export function AudioFeedbackDetailRows() {
     <>
       <SettingRow
         title="Transcript ready"
+        htmlFor="sound-on-transcription-complete"
         description="Play a sound after transcription and optional AI formatting finish."
         control={
           <Switch
@@ -39,6 +44,7 @@ export function AudioFeedbackDetailRows() {
       />
       <SettingRow
         title="Paste completed"
+        htmlFor="sound-on-paste-success"
         description="Play a sound after Voicetypr successfully sends the paste command."
         control={
           <Switch

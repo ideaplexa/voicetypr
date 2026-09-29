@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Radio } from "@base-ui/react/radio";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,10 +26,8 @@ export function LocalModelsList({
   onDelete,
   onCancelDownload,
   onRepair,
-  onSelect,
   currentModel,
   activeRemoteServer,
-  clearActiveRemote,
 }: LocalModelsListProps) {
   return (
     <div className="divide-y divide-border">
@@ -48,15 +47,10 @@ export function LocalModelsList({
             key={name}
             className={cn("flex min-h-15 items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}
           >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={selected}
+            <Radio.Root
+              value={name}
               aria-label={`Use ${displayName}`}
               disabled={!usable}
-              onClick={() => {
-                void clearActiveRemote().then(() => onSelect(name));
-              }}
               className={cn(
                 "size-4 shrink-0 rounded-full border border-border",
                 selected && "border-[5px] border-sage",

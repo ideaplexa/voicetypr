@@ -201,7 +201,7 @@ export function Segmented({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className="rounded-[7px] px-3 aria-pressed:bg-card aria-pressed:shadow-sm"
+          className="rounded-[7px] border border-transparent bg-transparent px-3 font-medium text-muted-foreground aria-pressed:bg-card! aria-pressed:text-foreground aria-pressed:font-semibold aria-pressed:shadow-sm dark:aria-pressed:border-foreground/30"
         >
           {option.label}
         </ToggleGroupItem>
@@ -216,6 +216,7 @@ export function ChoiceCard({
   icon: Icon,
   tag,
   selected,
+  active,
   onSelect,
 }: {
   label: string;
@@ -223,6 +224,7 @@ export function ChoiceCard({
   icon?: ComponentType<IconProps>;
   tag?: string;
   selected: boolean;
+  active?: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -234,7 +236,8 @@ export function ChoiceCard({
       onClick={onSelect}
       className={cn(
         "h-full min-h-36 w-full flex-col items-start justify-start gap-2 rounded-[14px] border bg-card p-4 text-left whitespace-normal",
-        selected && "border-sage ring-[1.5px] ring-sage",
+        (active ?? selected) && "border-sage ring-[1.5px] ring-sage",
+        active === false && selected && "ring-[1.5px] ring-foreground/20",
       )}
     >
       {Icon ? (

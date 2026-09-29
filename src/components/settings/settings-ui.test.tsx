@@ -11,8 +11,10 @@ describe("settings choices", () => {
     ]} />);
     const selected = screen.getByRole("button", { name: mode === "toggle" ? "Press to start / stop" : "Hold to talk" });
     expect(selected).toHaveAttribute("aria-pressed", "true");
-    expect(selected.className).toContain("aria-pressed:bg-card");
+    expect(selected.className).toContain("aria-pressed:bg-card!");
     expect(selected.className).toContain("aria-pressed:shadow-sm");
+    expect(selected.className).toContain("aria-pressed:font-semibold");
+    expect(selected.className).toContain("dark:aria-pressed:border-");
   });
   it("selects a segment with the keyboard and reports selection", async () => {
     const user = userEvent.setup();
@@ -31,7 +33,7 @@ describe("settings choices", () => {
     );
     expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "System" }).className).toContain(
-      "aria-pressed:bg-card",
+      "aria-pressed:bg-card!",
     );
     act(() => screen.getByRole("button", { name: "Light" }).focus());
     await user.keyboard("{Enter}");

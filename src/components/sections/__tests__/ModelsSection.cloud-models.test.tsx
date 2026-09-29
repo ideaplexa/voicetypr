@@ -158,6 +158,63 @@ describe("Transcription source cards", () => {
     expect(props.onSelect).not.toHaveBeenCalled();
   });
 
+  it("keeps the active source visible and marks only its family while browsing", async () => {
+    const user = userEvent.setup();
+    renderModels();
+    expect(screen.getByText("In use: GPT Transcribe · Cloud")).toBeInTheDocument();
+    const cloudCard = screen.getByRole("button", { name: "Cloud" });
+    expect(cloudCard).toHaveClass("ring-sage");
+    expect(cloudCard).toHaveTextContent("In use");
+    await user.click(screen.getByRole("button", { name: "On this Mac" }));
+    expect(screen.getByText("In use: GPT Transcribe · Cloud")).toBeInTheDocument();
+    const localCard = screen.getByRole("button", { name: "On this Mac" });
+    expect(localCard).toHaveAttribute("aria-pressed", "true");
+    expect(localCard).not.toHaveClass("ring-sage");
+    expect(localCard).not.toHaveTextContent("In use");
+    expect(cloudCard).toHaveClass("ring-sage");
+  });
+
+  it("moves through provider radios with arrows and keeps actions in the tab order", async () => {
+    const user = userEvent.setup();
+    const props = renderModels();
+    const openaiRadio = screen.getByRole("radio", { name: "Use OpenAI" });
+    const sonioxRadio = screen.getByRole("radio", { name: "Use Soniox" });
+    expect(openaiRadio).toHaveAttribute("tabindex", "0");
+    expect(sonioxRadio).toHaveAttribute("tabindex", "-1");
+    openaiRadio.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(sonioxRadio).toHaveFocus();
+    await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("soniox"));
+    expect(screen.getAllByRole("button", { name: "Replace key" })).toHaveLength(2);
+  });
+
+  it("moves through downloaded local models while keeping Download independently focusable", async () => {
+    const user = userEvent.setup();
+    const other = { ...whisper, name: "base", display_name: "Whisper Base" };
+    const unavailable = { ...whisper, name: "small", display_name: "Whisper Small", downloaded: false };
+    const props = renderModels({
+      models: [["tiny", whisper], ["base", other], ["small", unavailable]],
+      currentModel: "tiny",
+      sourceFilter: "local",
+    });
+    const tiny = screen.getByRole("radio", { name: "Use Whisper Tiny" });
+    const base = screen.getByRole("radio", { name: "Use Whisper Base" });
+    expect(tiny).toHaveAttribute("tabindex", "0");
+    expect(base).toHaveAttribute("tabindex", "-1");
+    tiny.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(base).toHaveFocus();
+    await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("base"));
+    expect(screen.getByRole("button", { name: "Download" })).not.toHaveAttribute("tabindex", "-1");
+  });
+
+  it("gives every Transcription switch and select an accessible name", () => {
+    renderModels();
+    for (const control of [...screen.queryAllByRole("switch"), ...screen.queryAllByRole("combobox")]) {
+      expect(control, control.outerHTML).toHaveAccessibleName();
+    }
+  });
+
   it("preserves a controlled Cloud destination with a local active model without render-phase parent updates", () => {
     const errorSpy = vi.spyOn(console, "error");
     try {

@@ -41,6 +41,7 @@ export function PauseMediaRow() {
   return (
     <SettingRow
       title="Pause media during recording"
+      htmlFor="pause-media"
       description="Automatically pause playing music or videos while recording."
       control={
         <Switch
