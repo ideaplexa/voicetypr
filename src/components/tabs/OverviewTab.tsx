@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import type { TranscriptionHistory } from "@/types";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
 import type { SourceFilter } from "@/components/sections/models/types";
+import { useTestDictation } from "./overview/useTestDictation";
 import { useActiveRemoteLabel } from "./overview/useActiveRemoteLabel";
 import { formatTimeSaved, formatWeekSavedTime, useOverviewStats } from "./overview/useOverviewStats";
 
@@ -52,6 +53,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const [polishLabel, setPolishLabel] = useState("Off");
   const [tryOpen, setTryOpen] = useState(false);
   const [tryText, setTryText] = useState("");
+  const { feedback: tryFeedback, contentChanged, reset: resetTryFeedback } = useTestDictation(tryOpen);
   const [shareOpen, setShareOpen] = useState(false);
   const { history, totalCount, isLoading, loadError, refreshHistory } = useTranscriptionHistory({ limit: 500, includeTotalCount: true });
   const stats = useOverviewStats(history, totalCount);
@@ -84,7 +86,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
     <section className="rounded-[14px] border border-border bg-card p-6 sm:p-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-2.5 py-1 text-xs font-medium text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
-        <Button variant="outline" size="sm" onClick={() => { setTryText(""); setTryOpen(true); }}>Try a test dictation</Button>
+        <Button variant="outline" size="sm" onClick={() => { setTryText(""); resetTryFeedback(); setTryOpen(true); }}>Try a test dictation</Button>
       </div>
       <h1 className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-[clamp(1.5rem,3vw,2rem)] font-semibold leading-tight tracking-tight text-foreground">Press <KeyCaps caps={caps} size="lg" /> and start talking</h1>
       <p className="mt-3 text-[13px] text-muted-foreground">{trigger.mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>
@@ -105,7 +107,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
       </SettingsCard>
     </div>
 
-    <Dialog open={tryOpen} onOpenChange={setTryOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Try a test dictation</DialogTitle><DialogDescription>Place the cursor below, press <KeyCaps caps={caps} />, and speak. Your words will appear here.</DialogDescription></DialogHeader><Textarea autoFocus aria-label="Test dictation" placeholder="Dictate here…" value={tryText} onChange={(event) => setTryText(event.target.value)} className="min-h-32" />{/* TODO(plan 079 S7): use the backend paste-outcome event for an honest delivery signal. */}<p role="status" className="text-sm text-muted-foreground">{tryText.trim() ? `${tryText.trim().split(/\s+/).length} words` : "Waiting for your dictation…"}</p></DialogContent></Dialog>
+    <Dialog open={tryOpen} onOpenChange={(open) => { resetTryFeedback(); setTryOpen(open); }}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Try a test dictation</DialogTitle><DialogDescription>Place the cursor below, press <KeyCaps caps={caps} />, and speak. Your words will appear here.</DialogDescription></DialogHeader><Textarea autoFocus aria-label="Test dictation" placeholder="Dictate here…" value={tryText} onChange={(event) => { if (event.target.value !== tryText) contentChanged(); setTryText(event.target.value); }} className="min-h-32" /><p role="status" className="text-sm text-muted-foreground">{tryFeedback ?? (tryText.trim() ? `${tryText.trim().split(/\s+/).length} words` : "Waiting for your dictation…")}</p></DialogContent></Dialog>
     <ShareStatsModal open={shareOpen} onOpenChange={setShareOpen} stats={{ totalTranscriptions: stats.totalTranscriptions, totalWords: stats.totalWords, timeSavedDisplay: formatTimeSaved(stats) }} />
   </SettingsPage>;
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings, TranscriptionHistory } from "@/types";
@@ -204,6 +204,48 @@ describe("Home", () => {
     expect(mock.listeners["transcription-complete"]).toBeUndefined();
     await user.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Test dictation" })).not.toBeInTheDocument());
+  });
+
+  it.each(["text-first", "event-first"])("confirms delivery in %s order", async (order) => {
+    render(<OverviewTab />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
+    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
+    const text = () => fireEvent.change(textarea, { target: { value: "hello world" } });
+    const paste = () => act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "pasted", words: 2 } }));
+    if (order === "text-first") { text(); paste(); } else { paste(); text(); }
+    expect(screen.getByText("Worked · 2 words")).toBeInTheDocument();
+  });
+
+  it.each(["text-first", "event-first"])("does not confirm outside three seconds in %s order", async (order) => {
+    render(<OverviewTab />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
+    const now = vi.spyOn(Date, "now").mockReturnValue(10000);
+    const text = () => fireEvent.change(screen.getByRole("textbox", { name: "Test dictation" }), { target: { value: "hello world" } });
+    const paste = () => act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "pasted", words: 2 } }));
+    if (order === "text-first") { text(); now.mockReturnValue(13001); paste(); } else { paste(); now.mockReturnValue(13001); text(); }
+    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
+    now.mockRestore();
+  });
+
+  it.each([true, false])("shows platform copy guidance without claiming success (Mac: %s)", async (mac) => {
+    mock.mac = mac;
+    render(<OverviewTab />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
+    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
+    fireEvent.change(textarea, { target: { value: "typed first" } });
+    act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "copied", words: 2 } }));
+    expect(screen.getByText(`Copied — press ${mac ? "⌘V" : "Ctrl+V"} to paste here`)).toBeInTheDocument();
+    fireEvent.change(textarea, { target: { value: "manually pasted" } });
+    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
+  });
+
+  it("cancellation clears pending delivery evidence", async () => {
+    render(<OverviewTab />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
+    act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "pasted", words: 2 } }));
+    act(() => mock.listeners["transcription-stream"]?.({ payload: { type: "cancelled" } }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Test dictation" }), { target: { value: "typed afterwards" } });
+    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
   });
 
 });

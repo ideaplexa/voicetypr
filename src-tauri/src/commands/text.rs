@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 
 // rdev keyboard simulation (Linux paste only; macOS uses core-graphics, Windows uses Win32 SendInput).
@@ -120,7 +121,9 @@ pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), Stri
             .unwrap_or(false)
     };
 
-    tokio::task::spawn_blocking(move || {
+    let words = text.split_whitespace().count() as u32;
+    let outcome_app = app.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
         // Apply trailing sentence space only at the insertion boundary,
         // so stored transcription history remains clean.
         let insertable_text = ensure_trailing_sentence_space(&text);
@@ -134,7 +137,12 @@ pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), Stri
         )
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| format!("Task failed: {}", e))??;
+    let _ = outcome_app.emit("paste-outcome", paste_outcome_payload(&outcome, words));
+    if outcome == PasteOutcome::NoPermission {
+        return Err("No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission.".to_string());
+    }
+    Ok(())
 }
 
 /// Copy plain text to the system clipboard without attempting to paste
@@ -173,6 +181,23 @@ enum PasteOutcome {
     Pasted,
     LeftInClipboard,
     NoPermission,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct PasteOutcomePayload {
+    outcome: &'static str,
+    words: u32,
+}
+
+fn paste_outcome_payload(outcome: &PasteOutcome, words: u32) -> PasteOutcomePayload {
+    PasteOutcomePayload {
+        outcome: match outcome {
+            PasteOutcome::Pasted => "pasted",
+            PasteOutcome::LeftInClipboard => "copied",
+            PasteOutcome::NoPermission => "no_permission",
+        },
+        words,
+    }
 }
 
 fn paste_completed_cue_eligible(outcome: &PasteOutcome) -> bool {
@@ -360,7 +385,7 @@ fn insert_via_clipboard(
     has_accessibility_permission: bool,
     app_handle: Option<tauri::AppHandle>,
     keep_transcription_in_clipboard: bool,
-) -> Result<(), String> {
+) -> Result<PasteOutcome, String> {
     // This function handles both copying text to clipboard AND pasting it at cursor
     // Initialize clipboard
     let mut clipboard =
@@ -468,40 +493,31 @@ fn insert_via_clipboard(
     // own (Pasted) or clear it (no-restore outcomes), so a stale restore from a
     // previous dictation can never fire over what we just placed or left.
     let play_completed_cue = paste_completed_cue_eligible(&outcome);
-    let (result, schedule_restore) = match outcome {
-        PasteOutcome::Pasted => {
-            let schedule_restore = match original_to_restore {
-                Some(original) => {
-                    *guard = Some(PendingClipboardRestore {
-                        generation,
-                        transcript: text.clone(),
-                        original,
-                    });
-                    true
-                }
-                None => {
-                    *guard = None;
-                    false
-                }
-            };
-            (Ok(()), schedule_restore)
-        }
+    let schedule_restore = match outcome {
+        PasteOutcome::Pasted => match original_to_restore {
+            Some(original) => {
+                *guard = Some(PendingClipboardRestore {
+                    generation,
+                    transcript: text.clone(),
+                    original,
+                });
+                true
+            }
+            None => {
+                *guard = None;
+                false
+            }
+        },
         // Paste failed but the transcript stays on the clipboard for manual
         // paste; schedule no restore AND invalidate any stale prior restore so
         // it cannot remove the transcript we just left.
         PasteOutcome::LeftInClipboard => {
             *guard = None;
-            (Ok(()), false)
+            false
         }
         PasteOutcome::NoPermission => {
             *guard = None;
-            (
-                Err(
-                    "No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission."
-                        .to_string(),
-                ),
-                false,
-            )
+            false
         }
     };
     drop(guard);
@@ -521,7 +537,7 @@ fn insert_via_clipboard(
         }
     }
 
-    result
+    Ok(outcome)
 }
 
 fn try_paste_with_applescript() -> Result<(), String> {
@@ -1080,6 +1096,28 @@ mod clipboard_insertion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paste_outcomes_map_to_content_free_payloads() {
+        for (outcome, expected) in [
+            (PasteOutcome::Pasted, "pasted"),
+            (PasteOutcome::LeftInClipboard, "copied"),
+            (PasteOutcome::NoPermission, "no_permission"),
+        ] {
+            let payload = paste_outcome_payload(&outcome, 38);
+            let value = serde_json::to_value(payload).unwrap();
+            assert_eq!(value["outcome"], expected);
+            assert_eq!(value["words"], 38);
+            let keys: Vec<_> = value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(keys, vec!["outcome", "words"]);
+            assert!(value.get("text").is_none());
+        }
+    }
 
     #[test]
     fn sentence_end_gets_trailing_space() {

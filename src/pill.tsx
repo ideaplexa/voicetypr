@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { TRANSCRIPTION_STREAM_EVENT, type TranscriptionStreamEvent } from "@/types/streaming";
+import { isMacOS } from "@/lib/platform";
+import type { PasteOutcomePayload } from "@/types/paste-outcome";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import { createPillIcon as createIcon } from "@/pill-icons";
 import "./pill.css";
 
 type BackendRecordingState =
@@ -12,7 +17,8 @@ type BackendRecordingState =
   | "error";
 
 type PillState = "idle" | "listening" | "transcribing" | "formatting";
-type VisibleState = PillState | "error";
+type TerminalState = PasteOutcomePayload["outcome"];
+type VisibleState = PillState | "error" | "too_short" | TerminalState;
 type PillIndicatorMode = "never" | "always" | "when_recording";
 type PillIndicatorStyle = "compact" | "full";
 type PillIndicatorPosition =
@@ -82,10 +88,15 @@ interface PillDom {
   error: HTMLDivElement;
   errorPrimary: HTMLSpanElement;
   errorSecondary: HTMLSpanElement;
+  errorIcon: SVGSVGElement;
+  terminal: HTMLDivElement;
+  terminalIcon: SVGSVGElement;
+  terminalLabel: HTMLSpanElement;
 }
 
 const ERROR_FLASH_MS = 1500;
-const LEVEL_BAR_COUNT = 9;
+const LEVEL_BAR_HEIGHTS = [6, 10, 16, 12, 18, 9, 14, 7, 11];
+const LEVEL_BAR_COUNT = LEVEL_BAR_HEIGHTS.length;
 const LEVEL_ENVELOPE = Array.from({ length: LEVEL_BAR_COUNT }, (_, index) => {
   const center = (LEVEL_BAR_COUNT - 1) / 2;
   const distance = Math.abs(index - center) / center;
@@ -139,14 +150,12 @@ function createProcessingActivity(state: "transcribing" | "formatting") {
   if (state === "transcribing") {
     const scan = createEl("div", "pill-scan");
     scan.dataset.visual = "transcribing";
-    scan.append(createEl("span", "pill-scan-track"), createEl("span", "pill-scan-dot"));
+    for (let index = 0; index < 3; index += 1) scan.append(createEl("span", "pill-scan-dot"));
     activity.append(scan);
   } else {
     const sparkles = createEl("div", "pill-sparkles");
     sparkles.dataset.visual = "formatting";
-    for (let index = 0; index < 3; index += 1) {
-      sparkles.append(createEl("span", `pill-spark pill-spark-${index + 1}`));
-    }
+    sparkles.append(createIcon("sparkles"));
     activity.append(sparkles);
   }
 
@@ -177,7 +186,14 @@ function createPillDom(rootElement: HTMLElement): PillDom {
   committed.dataset.testid = "pill-committed";
   const tentative = createEl("span", "pill-tentative");
   tentative.dataset.testid = "pill-tentative";
-  preview.append(committed, tentative);
+  // The preview box is direction:rtl so it stays right-aligned and clips the
+  // OLDEST words on overflow. Both spans must sit inside ONE ltr isolate;
+  // otherwise the rtl paragraph orders them right-to-left and the tentative
+  // tail renders before the committed text.
+  const previewLine = createEl("span", "pill-preview-line");
+  previewLine.dataset.testid = "pill-preview-line";
+  previewLine.append(committed, tentative);
+  preview.append(previewLine);
   const listeningControls = createEl("div", "pill-listening-controls");
   const listeningLabel = createEl("span", "pill-text-primary");
   listeningLabel.textContent = "Listening";
@@ -188,24 +204,30 @@ function createPillDom(rootElement: HTMLElement): PillDom {
   cancel.setAttribute("aria-label", "Cancel recording");
   cancel.textContent = "×";
   listeningControls.append(bars, listeningLabel, timer, cancel);
-  listening.append(preview, listeningControls);
+  listening.append(listeningControls, preview);
 
   const transcribing = createEl("div", "pill-status pill-status-label");
   transcribing.setAttribute("role", "status");
-  const transcribingText = createTextPair("Transcribing…");
+  const transcribingText = createTextPair("Transcribing");
   transcribing.append(createProcessingActivity("transcribing"), transcribingText.wrapper);
 
   const formatting = createEl("div", "pill-status pill-status-label");
   formatting.setAttribute("role", "status");
-  const formattingText = createTextPair("Polishing…");
+  const formattingText = createTextPair("Polishing");
   formatting.append(createProcessingActivity("formatting"), formattingText.wrapper);
 
   const error = createEl("div", "pill-status pill-status-error");
   error.setAttribute("role", "status");
   const errorText = createTextPair("");
-  error.append(errorText.wrapper);
+  const errorIcon = createIcon("mic-off");
+  error.append(errorIcon, errorText.wrapper);
+  const terminal = createEl("div", "pill-status pill-status-terminal");
+  terminal.setAttribute("role", "status");
+  const terminalIcon = createIcon("check");
+  const terminalLabel = createEl("span", "pill-text-primary");
+  terminal.append(terminalIcon, terminalLabel);
 
-  surface.append(idle, listening, transcribing, formatting, error);
+  surface.append(idle, listening, transcribing, formatting, error, terminal);
   root.append(surface);
   rootElement.replaceChildren(root);
 
@@ -232,6 +254,10 @@ function createPillDom(rootElement: HTMLElement): PillDom {
     error,
     errorPrimary: errorText.primary,
     errorSecondary: errorText.secondary,
+    errorIcon,
+    terminal,
+    terminalIcon,
+    terminalLabel,
   };
 }
 
@@ -246,7 +272,11 @@ function setBars(dom: PillDom, level: number, state: PillState) {
   dom.barSpans.forEach((bar, index) => {
     const envelope = LEVEL_ENVELOPE[index] ?? 0.42;
     const scale =
-      state === "listening" ? 0.22 + clampedLevel * envelope * 0.78 : 0.2 + envelope * 0.12;
+      clampedLevel === 0
+        ? (LEVEL_BAR_HEIGHTS[index] ?? 6) / 18
+        : state === "listening"
+          ? 0.22 + clampedLevel * envelope * 0.78
+          : 0.2 + envelope * 0.12;
     bar.style.transform = `scaleY(${scale.toFixed(3)})`;
   });
 }
@@ -271,6 +301,9 @@ export function createRecordingPill(
   let audioLevel = 0;
   let elapsedSeconds = 0;
   let errorMessage: string | null = null;
+  let tooShort = false;
+  let terminalOutcome: PasteOutcomePayload | null = null;
+  let terminalTimeout: TimeoutHandle | undefined;
   let isCancelling = false;
   let isDestroyed = false;
   let errorTimeout: TimeoutHandle | undefined;
@@ -288,10 +321,18 @@ export function createRecordingPill(
   const unlisteners: UnlistenFn[] = [];
 
   const visibleState = (): VisibleState =>
-    errorMessage ? "error" : isFormatting ? "formatting" : pillState;
+    terminalOutcome
+      ? terminalOutcome.outcome
+      : errorMessage
+        ? tooShort
+          ? "too_short"
+          : "error"
+        : isFormatting
+          ? "formatting"
+          : pillState;
 
   const isVisible = (state: VisibleState) =>
-    errorMessage !== null || mode === "always" || (mode === "when_recording" && state !== "idle");
+    mode !== "never" && (mode === "always" || state !== "idle");
 
   const render = () => {
     if (isDestroyed) return;
@@ -302,13 +343,36 @@ export function createRecordingPill(
     dom.root.dataset.visible = String(visible);
     dom.root.dataset.pillStyle = style;
     dom.root.dataset.pillPosition = position;
+    dom.root.dataset.preview = String(state === "listening" && streamPreviewVisible);
     setHidden(dom.surface, !visible);
 
     setHidden(dom.idle, state !== "idle");
     setHidden(dom.listening, state !== "listening");
     setHidden(dom.transcribing, state !== "transcribing");
     setHidden(dom.formatting, state !== "formatting");
-    setHidden(dom.error, state !== "error");
+    setHidden(dom.error, state !== "error" && state !== "too_short");
+    setHidden(dom.terminal, terminalOutcome === null);
+    if (terminalOutcome) {
+      const outcome = terminalOutcome.outcome;
+      const icon = outcome === "pasted" ? "check" : "clipboard-check";
+      if (dom.terminalIcon.dataset.icon !== icon) {
+        const nextIcon = createIcon(icon);
+        dom.terminalIcon.replaceWith(nextIcon);
+        dom.terminalIcon = nextIcon;
+      }
+      dom.terminalLabel.textContent =
+        outcome === "pasted"
+          ? `Pasted · ${terminalOutcome.words} words`
+          : outcome === "copied"
+            ? `Copied — press ${isMacOS ? "⌘V" : "Ctrl+V"}`
+            : "Copied — allow Accessibility to paste";
+    }
+    const errorIcon = tooShort ? "timer" : "mic-off";
+    if (dom.errorIcon.dataset.icon !== errorIcon) {
+      const nextIcon = createIcon(errorIcon);
+      dom.errorIcon.replaceWith(nextIcon);
+      dom.errorIcon = nextIcon;
+    }
     setHidden(dom.transcribingPrimary.parentElement as HTMLElement, style !== "full");
     setHidden(dom.formattingPrimary.parentElement as HTMLElement, style !== "full");
     setHidden(dom.preview, state !== "listening" || !streamPreviewVisible);
@@ -576,6 +640,16 @@ export function createRecordingPill(
     resetStreamPreview();
   };
 
+  const clearFeedback = () => {
+    if (terminalTimeout !== undefined) cancelTimeout(terminalTimeout);
+    terminalTimeout = undefined;
+    terminalOutcome = null;
+    if (errorTimeout !== undefined) cancelTimeout(errorTimeout);
+    errorTimeout = undefined;
+    errorMessage = null;
+    tooShort = false;
+  };
+
   const resetActiveState = () => {
     isFormatting = false;
     isCancelling = false;
@@ -585,14 +659,16 @@ export function createRecordingPill(
 
   const setPillState = (nextState: PillState) => {
     const wasListening = visibleState() === "listening";
+    if (nextState === "listening") clearFeedback();
     pillState = nextState;
     const nowListening = visibleState() === "listening";
     if (wasListening !== nowListening) syncListeningEffects();
     render();
   };
 
-  const flashError = (message: string) => {
-    if (errorTimeout) cancelTimeout(errorTimeout);
+  const flashError = (message: string, short = false) => {
+    clearFeedback();
+    tooShort = short;
     errorMessage = message;
     syncListeningEffects();
     render();
@@ -633,7 +709,7 @@ export function createRecordingPill(
     resetActiveState();
     setPillState(stateFromBackend(payload.state));
 
-    if (payload.state === "error") {
+    if (payload.state === "error" && !terminalOutcome) {
       flashError(payload.error || "Recording failed");
     }
   };
@@ -711,11 +787,29 @@ export function createRecordingPill(
     render();
   });
 
-  subscribe<string>("recording-too-short", (event) => {
+  subscribe<string>("recording-too-short", () => {
     if (isDestroyed) return;
     resetActiveState();
     setPillState("idle");
-    flashError(event.payload || "Recording too short");
+    flashError("Too short — hold a bit longer", true);
+  });
+
+  subscribe<PasteOutcomePayload>("paste-outcome", ({ payload }) => {
+    if (isDestroyed || pillState === "listening") return;
+    clearFeedback();
+    terminalOutcome = payload;
+    resetActiveState();
+    pillState = "idle";
+    syncListeningEffects();
+    render();
+    terminalTimeout = scheduleTimeout(
+      () => {
+        terminalOutcome = null;
+        terminalTimeout = undefined;
+        render();
+      },
+      payload.outcome === "pasted" ? 1200 : payload.outcome === "copied" ? 1600 : 2500,
+    );
   });
 
   render();
@@ -727,7 +821,7 @@ export function createRecordingPill(
   return {
     destroy: () => {
       isDestroyed = true;
-      if (errorTimeout) cancelTimeout(errorTimeout);
+      clearFeedback();
       stopTimer();
       stopAudioListener();
       stopStreamListener();

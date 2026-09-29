@@ -111,6 +111,14 @@ describe("RecordingPill streaming preview", () => {
     vi.restoreAllMocks();
   });
 
+  it("renders committed text before the tentative tail in one ltr line", async () => {
+    createTestPill();
+    await waitForSettings();
+    const line = getByTestId(root, "pill-preview-line");
+    expect(line.parentElement).toBe(preview());
+    expect(Array.from(line.children)).toEqual([committed(), tentative()]);
+  });
+
   it("does not subscribe to the stream when the setting is off", async () => {
     streamingPreviewEnabled = false;
     createTestPill();

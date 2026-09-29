@@ -9,6 +9,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecordingPill, type RecordingPillController } from "@/pill";
 
+const platform = vi.hoisted(() => ({ mac: true }));
+vi.mock("@/lib/platform", () => ({
+  get isMacOS() {
+    return platform.mac;
+  },
+}));
+
 type PillIndicatorMode = "never" | "always" | "when_recording";
 type Handler = (event: { payload: unknown }) => void;
 
@@ -54,6 +61,7 @@ function pillSurface() {
 describe("RecordingPill", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    platform.mac = true;
     listeners = new Map();
     pillIndicatorMode = "when_recording";
     pillIndicatorStyle = "compact";
@@ -257,15 +265,15 @@ describe("RecordingPill", () => {
 
     emitMockEvent("recording-state-changed", { state: "stopping", error: null });
 
-    expect(getByText(root, "Transcribing…")).toBeVisible();
+    expect(getByText(root, "Transcribing")).toBeVisible();
     expect(root.querySelector(".pill-status-label .pill-text-primary")).toHaveTextContent(
-      "Transcribing…",
+      "Transcribing",
     );
     expect(root.querySelector(".pill-text-secondary")).toHaveTextContent("");
 
     emitMockEvent("recording-state-changed", { state: "transcribing", error: null });
 
-    expect(getByText(root, "Transcribing…")).toBeVisible();
+    expect(getByText(root, "Transcribing")).toBeVisible();
   });
 
   it.each(["compact", "full"] as const)(
@@ -291,13 +299,13 @@ describe("RecordingPill", () => {
       );
       expect(formatting).toHaveAttribute("data-state", "formatting");
       expect(formatting?.querySelector('[data-visual="formatting"]')).toBeVisible();
-      expect(formatting?.querySelectorAll(".pill-spark")).toHaveLength(3);
+      expect(formatting?.querySelector('[data-icon="sparkles"]')).toBeVisible();
       expect(formatting?.querySelector(".pill-scan-dot")).not.toBeInTheDocument();
 
       if (indicatorStyle === "full") {
-        expect(getByText(root, "Polishing…")).toBeVisible();
+        expect(getByText(root, "Polishing")).toBeVisible();
       } else {
-        expect(getByText(root, "Polishing…")).not.toBeVisible();
+        expect(getByText(root, "Polishing")).not.toBeVisible();
       }
     },
   );
@@ -308,26 +316,27 @@ describe("RecordingPill", () => {
     await waitFor(() => expect(pillRoot()).toHaveAttribute("data-pill-style", "full"));
 
     emitMockEvent("transcription-started");
-    expect(getByText(root, "Transcribing…")).toBeVisible();
+    expect(getByText(root, "Transcribing")).toBeVisible();
 
     emitMockEvent("enhancing-started");
-    expect(getByText(root, "Polishing…")).toBeVisible();
+    expect(getByText(root, "Polishing")).toBeVisible();
 
     emitMockEvent("enhancing-completed");
-    expect(getByText(root, "Transcribing…")).toBeVisible();
+    expect(getByText(root, "Transcribing")).toBeVisible();
   });
 
   it("flashes recording-too-short errors briefly", () => {
     vi.useFakeTimers();
     createTestPill();
 
-    emitMockEvent("recording-too-short", "Recording shorter than 1 second");
+    emitMockEvent("recording-too-short", "Too short — hold a bit longer");
 
-    expect(getByText(root, "Recording shorter than 1 second")).toBeVisible();
+    expect(getByText(root, "Too short — hold a bit longer")).toBeVisible();
+    expect(root.querySelector('.pill-status-error [data-icon="timer"]')).toBeVisible();
 
     vi.advanceTimersByTime(1500);
 
-    expect(queryByText(root, "Recording shorter than 1 second")).not.toBeInTheDocument();
+    expect(queryByText(root, "Too short — hold a bit longer")).not.toBeInTheDocument();
   });
 
   it("flashes recording-state error messages briefly", () => {
@@ -337,9 +346,86 @@ describe("RecordingPill", () => {
     emitMockEvent("recording-state-changed", { state: "error", error: "Mic unavailable" });
 
     expect(getByText(root, "Mic unavailable")).toBeVisible();
+    expect(root.querySelector('.pill-status-error [data-icon="mic-off"]')).toBeVisible();
 
     vi.advanceTimersByTime(1500);
 
     expect(queryByText(root, "Mic unavailable")).not.toBeInTheDocument();
+  });
+  it.each([
+    ["pasted", "Pasted · 38 words", "check", 1200],
+    ["copied", "Copied — press ⌘V", "clipboard-check", 1600],
+    ["no_permission", "Copied — allow Accessibility to paste", "clipboard-check", 2500],
+  ] as const)("renders %s feedback until its timeout", async (outcome, label, icon, duration) => {
+    vi.useFakeTimers();
+    createTestPill();
+    await vi.advanceTimersByTimeAsync(0);
+    emitMockEvent("transcription-started");
+    emitMockEvent("paste-outcome", { outcome, words: 38 });
+    emitMockEvent("recording-state-changed", { state: "idle", error: null });
+    expect(getByText(root, label)).toBeVisible();
+    expect(root.querySelector(`.pill-status-terminal [data-icon="${icon}"]`)).toBeVisible();
+    vi.advanceTimersByTime(duration - 1);
+    expect(getByText(root, label)).toBeVisible();
+    vi.advanceTimersByTime(1);
+    expect(pillSurface()).not.toBeVisible();
+  });
+
+  it.each(["pasted", "copied", "no_permission"])(
+    "new recording immediately interrupts %s feedback",
+    async (outcome) => {
+      vi.useFakeTimers();
+      createTestPill();
+      await vi.advanceTimersByTimeAsync(0);
+      emitMockEvent("paste-outcome", { outcome, words: 2 });
+      emitMockEvent("recording-started");
+      expect(getByTestId(root, "pill-bars")).toBeVisible();
+      vi.advanceTimersByTime(2600);
+      expect(pillRoot()).toHaveAttribute("data-state", "listening");
+      expect(getByTestId(root, "pill-bars")).toBeVisible();
+    },
+  );
+
+  it("never mode hides recording, errors and all terminal feedback", async () => {
+    pillIndicatorMode = "never";
+    createTestPill();
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_settings"));
+    emitMockEvent("recording-started");
+    expect(pillSurface()).not.toBeVisible();
+    emitMockEvent("recording-state-changed", { state: "error", error: "Mic unavailable" });
+    expect(pillSurface()).not.toBeVisible();
+    for (const outcome of ["pasted", "copied", "no_permission"]) {
+      emitMockEvent("paste-outcome", { outcome, words: 2 });
+      expect(pillSurface()).not.toBeVisible();
+    }
+  });
+
+  it("returns to ready dots after feedback in always mode", async () => {
+    vi.useFakeTimers();
+    pillIndicatorMode = "always";
+    createTestPill();
+    await vi.advanceTimersByTimeAsync(0);
+    emitMockEvent("paste-outcome", { outcome: "pasted", words: 2 });
+    vi.advanceTimersByTime(1200);
+    expect(getByTestId(root, "pill-dots")).toBeVisible();
+  });
+
+  it("uses Ctrl+V for Windows copied feedback", async () => {
+    platform.mac = false;
+    createTestPill();
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_settings"));
+    emitMockEvent("paste-outcome", { outcome: "copied", words: 2 });
+    expect(getByText(root, "Copied — press Ctrl+V")).toBeVisible();
+  });
+
+  it("keeps permission feedback through the subsequent backend error", async () => {
+    createTestPill();
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_settings"));
+    emitMockEvent("paste-outcome", { outcome: "no_permission", words: 2 });
+    emitMockEvent("recording-state-changed", {
+      state: "error",
+      error: "No accessibility permission",
+    });
+    expect(getByText(root, "Copied — allow Accessibility to paste")).toBeVisible();
   });
 });

@@ -61,6 +61,22 @@ try {
   browser = await chromium.launch({ executablePath: chrome, headless: true, args: ["--no-sandbox"] });
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
+      for (const state of ["idle", "listening", "preview", "transcribing", "formatting", "pasted", "copied", "no_permission", "error", "too_short"]) {
+        const name = `pill-${state}`;
+        if (!shouldCapture(platform, theme, name)) continue;
+        const page = await browser.newPage({ viewport: { width: 760, height: 180 }, deviceScaleFactor: 2 });
+        page.on("pageerror", (error) => errors.push(`${platform}/${theme}/${name}: ${error.stack ?? error}`));
+        await page.goto(`${baseUrl}/pill-preview.html?platform=${platform}&theme=${theme}&state=${state}`, { waitUntil: "networkidle" });
+        await page.waitForSelector('html[data-pill-preview-ready="true"]');
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: path.join(output, `${platform}-${theme}-${name}.png`), animations: "disabled" });
+        shots.push(`${platform}-${theme}-${name}.png`);
+        await page.close();
+      }
+    }
+  }
+  for (const platform of ["macos", "windows"]) {
+    for (const theme of ["light", "dark"]) {
       const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "recording", "settings-general"].includes(id));
       const selectedPanes = panes;
       const hasShot = screens.some(([, id]) => shouldCapture(platform, theme, id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCapture(platform, theme, shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCapture(platform, theme, paneId)))) || (platform === "macos" && shouldCapture(platform, theme, "license"));
