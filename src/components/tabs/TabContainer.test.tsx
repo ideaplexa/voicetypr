@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { TabContainer } from "./TabContainer";
+import { useState } from "react";
+import type { SettingsPane } from "@/components/navigation";
 import type { ScreenId } from "@/components/navigation";
 
 vi.mock("./RecordingsTab", () => ({
@@ -20,16 +22,38 @@ vi.mock("./ModelsTab", () => ({
   ),
 }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
-vi.mock("@/components/sections/GeneralSettings", () => ({ GeneralSettings: () => <p>General controls</p> }));
-vi.mock("@/components/sections/ShortcutsSection", () => ({ ShortcutsSection: () => <p>Shortcut controls</p> }));
-vi.mock("@/components/sections/AdvancedSection", () => ({ AdvancedSection: () => <p>Troubleshooting controls</p> }));
-vi.mock("@/components/sections/NetworkSharingCard", () => ({ NetworkSharingCard: () => <p>Network controls</p> }));
-vi.mock("@/components/sections/AgentCliSection", () => ({ AgentCliSection: () => <p>CLI controls</p> }));
+vi.mock("@/components/sections/GeneralSettings", () => ({
+  GeneralSettings: () => <p>General controls</p>,
+}));
+vi.mock("@/components/sections/ShortcutsSection", () => ({
+  ShortcutsSection: () => <p>Shortcut controls</p>,
+}));
+vi.mock("@/components/sections/AdvancedSection", () => ({
+  AdvancedSection: () => <p>Troubleshooting controls</p>,
+}));
+vi.mock("@/components/sections/NetworkSharingCard", () => ({
+  NetworkSharingCard: () => <p>Network controls</p>,
+}));
+vi.mock("@/components/sections/AgentCliSection", () => ({
+  AgentCliSection: () => <p>CLI controls</p>,
+}));
 vi.mock("./EnhancementsTab", () => ({ EnhancementsTab: () => <h1>Polish screen</h1> }));
-vi.mock("@/components/sections/DictionarySection", () => ({ DictionarySection: () => <h1>Dictionary screen</h1> }));
+vi.mock("@/components/sections/DictionarySection", () => ({
+  DictionarySection: () => <h1>Dictionary screen</h1>,
+}));
 vi.mock("./AccountTab", () => ({ AccountTab: () => <h1>License screen</h1> }));
 vi.mock("../sections/ReportProblemSection", () => ({
-  ReportProblemSection: () => <h1>Help screen</h1>,
+  ReportProblemSection: ({
+    onNavigateSettingsPane,
+  }: {
+    onNavigateSettingsPane: (pane: SettingsPane) => void;
+  }) => (
+    <>
+      <h1>Help screen</h1>
+      <button onClick={() => onNavigateSettingsPane("advanced")}>Troubleshooting</button>
+      <button onClick={() => onNavigateSettingsPane("shortcuts")}>Shortcuts</button>
+    </>
+  ),
 }));
 vi.mock("../sections/AudioUploadSection", () => ({
   AudioUploadSection: () => <p>Choose audio file</p>,
@@ -84,7 +108,13 @@ describe("TabContainer destinations", () => {
 
   it("reports inner Settings pane clicks to navigation", async () => {
     const onSettingsPaneChange = vi.fn();
-    render(<TabContainer activeSection="settings" settingsPane="general" onSettingsPaneChange={onSettingsPaneChange} />);
+    render(
+      <TabContainer
+        activeSection="settings"
+        settingsPane="general"
+        onSettingsPaneChange={onSettingsPaneChange}
+      />,
+    );
     await userEvent.click(screen.getByRole("button", { name: "Shortcuts" }));
     expect(onSettingsPaneChange).toHaveBeenCalledWith("shortcuts");
   });
@@ -101,4 +131,50 @@ describe("TabContainer destinations", () => {
     view.rerender(<TabContainer activeSection="audio" />);
     expect(screen.getByRole("dialog", { name: "Transcribe a file…" })).toBeInTheDocument();
   });
+  it.each([
+    ["Troubleshooting", "Troubleshooting controls"],
+    ["Shortcuts", "Shortcut controls"],
+  ])("navigates Help's %s tile to its Settings pane", async (label, controls) => {
+    function Shell() {
+      const [activeSection, setActiveSection] = useState<ScreenId>("help");
+      return <TabContainer activeSection={activeSection} onNavigate={setActiveSection} />;
+    }
+    render(<Shell />);
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText(controls)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
+  });
+  it.each([
+    ["Troubleshooting", "Troubleshooting controls"],
+    ["Shortcuts", "Shortcut controls"],
+  ] as const)(
+    "keeps Help's %s destination with the app's controlled navigation",
+    async (label, controls) => {
+      const onNavigate = vi.fn();
+      function Shell() {
+        const [navigation, setNavigation] = useState<{
+          activeSection: ScreenId;
+          settingsPane?: SettingsPane;
+        }>({ activeSection: "help" });
+        return (
+          <TabContainer
+            {...navigation}
+            onNavigate={(activeSection) => {
+              onNavigate(activeSection);
+              setNavigation({ activeSection, settingsPane: "general" });
+            }}
+            onSettingsPaneChange={(settingsPane) =>
+              setNavigation({ activeSection: "settings", settingsPane })
+            }
+          />
+        );
+      }
+      render(<Shell />);
+      await userEvent.click(screen.getByRole("button", { name: label }));
+      expect(screen.getByText(controls)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
+      expect(onNavigate).not.toHaveBeenCalled();
+    },
+  );
 });

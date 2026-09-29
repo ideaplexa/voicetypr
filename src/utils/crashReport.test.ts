@@ -204,6 +204,23 @@ describe("report submission payloads", () => {
     });
   });
 
+  it("omits name and email from the actual submitted JSON while retaining diagnostics", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    await submitManualReport(baseReport);
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    const payload: unknown = JSON.parse(String(init?.body));
+    expect(payload).not.toHaveProperty("name");
+    expect(payload).not.toHaveProperty("email");
+    expect(payload).toMatchObject({
+      kind: "manual",
+      message: baseReport.message,
+      environment: { deviceId: baseReport.deviceId },
+      latestLog: { content: baseReport.logContent },
+    });
+  });
+
   it("ships the debug ring in the submitted payload (not just the copy view)", () => {
     const payload = buildManualReportPayload({
       ...baseReport,

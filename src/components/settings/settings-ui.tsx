@@ -40,13 +40,15 @@ export function PageHeader({
   title,
   description,
   action,
+  className,
 }: {
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
+  className?: string;
 }) {
   return (
-    <header className="flex flex-wrap items-start gap-4">
+    <header className={cn("flex flex-wrap items-start gap-4", className)}>
       <div className="min-w-0">
         <h1 className="text-[24px] font-semibold tracking-tight text-foreground">{title}</h1>
         {description ? (
@@ -359,6 +361,45 @@ export function ChoiceCard({
           {tag}
         </span>
       ) : null}
+    </Button>
+  );
+}
+
+/** Navigational counterpart to ChoiceCard, without selection semantics. */
+export function ChoiceLink({
+  label,
+  description,
+  icon: Icon,
+  action,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  description: string;
+  icon: ComponentType<IconProps>;
+  action: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="h-auto w-full flex-col items-start justify-start gap-2 rounded-[14px] border-0 bg-card p-4 text-left whitespace-normal shadow-none ring-1 ring-inset ring-border"
+    >
+      <span className="flex size-[30px] items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        <Icon className="size-4" />
+      </span>
+      <span className="text-sm font-semibold leading-[normal] text-foreground">{label}</span>
+      <span className="w-full text-[12.5px] font-normal leading-[normal] text-muted-foreground">
+        {description}
+      </span>
+      <span className="text-[12.5px] font-medium leading-[normal] text-muted-foreground">
+        {action} →
+      </span>
     </Button>
   );
 }

@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Bug, Check, Copy, Send } from "lucide-react";
+import { AlertCircle, CircleCheck, Check, Copy, Keyboard, Sparkles, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { FieldError } from "@/components/ui/field";
+import { getVersion } from "@tauri-apps/api/app";
+import { UpdateAnnouncementDialog } from "@/components/UpdateAnnouncementDialog";
+import type { SettingsPane } from "@/components/navigation";
 import { Textarea } from "@/components/ui/textarea";
-import { SettingsCard, SettingsHeader, SettingsPage } from "@/components/settings/settings-ui";
+import {
+  ChoiceLink,
+  PageHeader,
+  SettingsCard,
+  SettingsPage,
+} from "@/components/settings/settings-ui";
 import {
   buildReportBody,
   gatherManualReportData,
@@ -19,13 +26,26 @@ import { getModelDisplayName } from "@/lib/model-display";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("report-problem");
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export function ReportProblemSection() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+export function ReportProblemSection({
+  onNavigateSettingsPane,
+}: {
+  onNavigateSettingsPane?: (pane: SettingsPane) => void;
+}) {
+  const [version, setVersion] = useState<string | null>(null);
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void getVersion()
+      .then((value) => {
+        if (active) setVersion(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
   const [message, setMessage] = useState("");
-  const [emailError, setEmailError] = useState("");
   const [messageError, setMessageError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,20 +79,8 @@ export function ReportProblemSection() {
   }, [clearCopyTimer]);
 
   const handleSubmitReport = async () => {
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
     const trimmedMessage = message.trim();
     let isValid = true;
-
-    if (!trimmedEmail) {
-      setEmailError("Enter an email address so we can follow up.");
-      isValid = false;
-    } else if (!EMAIL_PATTERN.test(trimmedEmail)) {
-      setEmailError("Enter a valid email address.");
-      isValid = false;
-    } else {
-      setEmailError("");
-    }
 
     if (!trimmedMessage) {
       setMessageError("Please describe the issue you are experiencing.");
@@ -84,6 +92,7 @@ export function ReportProblemSection() {
     if (!isValid) return;
 
     resetSubmitFallback();
+    setSent(false);
     const actionId = actionIdRef.current + 1;
     actionIdRef.current = actionId;
     setIsSubmitting(true);
@@ -92,8 +101,8 @@ export function ReportProblemSection() {
       let data: ManualReportData;
       try {
         data = await gatherManualReportData(
-          trimmedName || undefined,
-          trimmedEmail,
+          undefined,
+          undefined,
           trimmedMessage,
           currentModelLabel,
         );
@@ -111,8 +120,7 @@ export function ReportProblemSection() {
       if (actionId !== actionIdRef.current) return;
 
       if (result.success) {
-        setName("");
-        setEmail("");
+        setSent(true);
         setMessage("");
         toast.success("Report submitted. Thank you.");
         return;
@@ -150,111 +158,107 @@ export function ReportProblemSection() {
   };
 
   return (
-    <SettingsPage>
-      <SettingsHeader
-        title="Report a problem"
-        description="Tell us what happened and how to reach you. We'll attach the app version, your current model, system details, and recent diagnostic logs automatically."
+    <SettingsPage className="max-w-none gap-[18px] px-7 pb-7 pl-6 pt-1">
+      <PageHeader
+        title="Help & feedback"
+        description="Get unstuck fast, or tell us what broke."
+        className="[&_h1]:leading-[normal] [&_h1]:tracking-[-0.4px] [&_p]:text-[13.5px] [&_p]:leading-[normal]"
       />
-
-      <SettingsCard icon={Bug} title="Report details">
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-3">
+        <ChoiceLink
+          label="Troubleshooting"
+          description="Permissions, quick fixes and reset."
+          icon={Wrench}
+          action="Open"
+          onClick={() => onNavigateSettingsPane?.("advanced")}
+        />
+        <ChoiceLink
+          label="What's new"
+          description={
+            version
+              ? `See what changed in ${version}.`
+              : "See what changed in your installed version."
+          }
+          icon={Sparkles}
+          action="Read"
+          disabled={!version}
+          onClick={() => setAnnouncementOpen(true)}
+        />
+        <ChoiceLink
+          label="Shortcuts"
+          description="Every shortcut in one place."
+          icon={Keyboard}
+          action="Open"
+          onClick={() => onNavigateSettingsPane?.("shortcuts")}
+        />
+      </div>
+      <SettingsCard
+        title="Report a problem"
+        description="Tell us what happened. We never see your audio or transcripts."
+        className="border-0 p-[18px] ring-1 ring-inset ring-border [&_h2]:text-sm [&_h2]:leading-[normal] [&>div:first-child_p]:mt-[3px] [&>div:first-child_p]:text-[12.5px] [&>div:first-child_p]:leading-[normal] [&>div+div]:mt-3"
+      >
         <form
-          className="mt-4"
+          className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             void handleSubmitReport();
           }}
           noValidate
         >
-          <FieldGroup className="gap-5">
-            <FieldGroup className="grid gap-4 sm:grid-cols-2">
-              <Field data-disabled={isSubmitting}>
-                <FieldLabel htmlFor="report-name">Name (optional)</FieldLabel>
-                <Input
-                  id="report-name"
-                  name="name"
-                  autoComplete="name"
-                  placeholder="Your name"
-                  maxLength={200}
-                  value={name}
-                  disabled={isSubmitting}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                    if (submitError) resetSubmitFallback();
-                  }}
-                />
-              </Field>
-
-              <Field data-invalid={Boolean(emailError)} data-disabled={isSubmitting}>
-                <FieldLabel htmlFor="report-email">Email</FieldLabel>
-                <Input
-                  id="report-email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  maxLength={320}
-                  required
-                  value={email}
-                  disabled={isSubmitting}
-                  aria-invalid={Boolean(emailError)}
-                  aria-describedby={emailError ? "report-email-error" : "report-email-description"}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    if (emailError) setEmailError("");
-                    if (submitError) resetSubmitFallback();
-                  }}
-                />
-                {emailError ? (
-                  <FieldError id="report-email-error">{emailError}</FieldError>
-                ) : (
-                  <FieldDescription id="report-email-description">
-                    Used only to follow up about this report.
-                  </FieldDescription>
-                )}
-              </Field>
-            </FieldGroup>
-
-            <Field data-invalid={Boolean(messageError)} data-disabled={isSubmitting}>
-              <FieldLabel htmlFor="report-message">Describe the issue</FieldLabel>
-              <Textarea
-                id="report-message"
-                name="message"
-                placeholder="Tell us what happened..."
-                value={message}
-                onChange={(event) => {
-                  setMessage(event.target.value);
-                  if (messageError) setMessageError("");
-                  if (submitError) resetSubmitFallback();
-                }}
-                rows={8}
-                maxLength={5000}
-                required
-                disabled={isSubmitting}
-                aria-invalid={Boolean(messageError)}
-                aria-describedby={messageError ? "report-message-error" : "report-diagnostics-note"}
-                className="min-h-40 resize-y"
-              />
-              {messageError ? (
-                <FieldError id="report-message-error">{messageError}</FieldError>
-              ) : (
-                <FieldDescription id="report-diagnostics-note">
-                  Include what you expected, what happened instead, and any steps that reproduce it.
-                </FieldDescription>
-              )}
-            </Field>
-
-            {submitError ? (
-              <Alert variant="destructive">
-                <AlertCircle />
-                <AlertTitle>Report not sent</AlertTitle>
-                <AlertDescription>
-                  {submitError} Copy the prepared report and send it manually if this keeps
-                  happening.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            <Field orientation="horizontal" className="justify-end">
+          <label htmlFor="report-message" className="sr-only">
+            What were you doing, and what went wrong?
+          </label>
+          <Textarea
+            id="report-message"
+            name="message"
+            placeholder="What were you doing, and what went wrong?"
+            value={message}
+            onChange={(event) => {
+              setMessage(event.target.value);
+              if (messageError) setMessageError("");
+              if (submitError) resetSubmitFallback();
+            }}
+            maxLength={5000}
+            required
+            disabled={isSubmitting}
+            aria-invalid={Boolean(messageError)}
+            aria-describedby={messageError ? "report-message-error" : "report-diagnostics-note"}
+            className="h-24 min-h-24 resize-y rounded-[10px] border-0 bg-background p-3 text-[13px] leading-[normal] text-muted-foreground shadow-none ring-1 ring-inset ring-border placeholder:text-muted-foreground md:text-[13px]"
+          />
+          {messageError ? (
+            <FieldError id="report-message-error" className="text-muted-foreground">
+              {messageError}
+            </FieldError>
+          ) : null}
+          <p
+            id="report-diagnostics-note"
+            className="min-h-5 text-[12.5px] leading-[normal] text-muted-foreground"
+          >
+            Automatically includes app version, current model, system details, device ID and recent
+            redacted diagnostic logs; no audio or transcripts.
+          </p>
+          {submitError ? (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>Report not sent</AlertTitle>
+              <AlertDescription className="text-muted-foreground">
+                {submitError} Copy the prepared report and send it manually if this keeps happening.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="flex items-center justify-between gap-3">
+            <div
+              role="status"
+              className="flex items-center gap-2 text-[12.5px] leading-[normal] text-muted-foreground"
+            >
+              {sent ? (
+                <>
+                  <CircleCheck className="size-[15px] text-sage" />
+                  Report submitted. Thank you.
+                </>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2">
               {fallbackReportData ? (
                 <Button
                   type="button"
@@ -262,19 +266,28 @@ export function ReportProblemSection() {
                   size="sm"
                   onClick={() => void handleCopyReport()}
                   disabled={isSubmitting}
+                  className="text-muted-foreground"
                 >
-                  {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                  {copied ? <Check /> : <Copy />}
                   {copied ? "Copied" : "Copy report"}
                 </Button>
               ) : null}
-              <Button type="submit" size="sm" disabled={isSubmitting} aria-busy={isSubmitting}>
-                <Send data-icon="inline-start" />
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                aria-busy={isSubmitting}
+                className="h-auto rounded-[10px] bg-primary px-4 py-[9px] text-sm font-medium leading-[normal] text-background"
+              >
                 {isSubmitting ? "Submitting..." : "Send report"}
               </Button>
-            </Field>
-          </FieldGroup>
+            </div>
+          </div>
         </form>
       </SettingsCard>
+      <UpdateAnnouncementDialog
+        version={announcementOpen ? version : null}
+        onClose={() => setAnnouncementOpen(false)}
+      />
     </SettingsPage>
   );
 }

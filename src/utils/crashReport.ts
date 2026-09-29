@@ -177,8 +177,8 @@ export async function gatherManualReportData(
   }
 
   return {
-    name,
-    email,
+    ...(name ? { name } : {}),
+    ...(email ? { email } : {}),
     message,
     appVersion: appVer,
     platform: os,
@@ -350,8 +350,8 @@ export interface ReportSubmitResult {
 export function buildManualReportPayload(data: ManualReportData): BugReportPayload {
   return {
     kind: "manual",
-    name: data.name,
-    email: data.email,
+    ...(data.name ? { name: data.name } : {}),
+    ...(data.email ? { email: data.email } : {}),
     message: data.message,
     environment: buildEnvironmentPayload(data),
     latestLog: buildLatestLogPayload(data),

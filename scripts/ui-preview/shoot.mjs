@@ -94,9 +94,9 @@ try {
   }
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
-      const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "recording", "settings-general"].includes(id));
+      const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "recording", "settings-general", "help"].includes(id));
       const selectedPanes = panes;
-      const hasShot = screens.some(([, id]) => shouldCapture(platform, theme, id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCapture(platform, theme, shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCapture(platform, theme, paneId)))) || (platform === "macos" && shouldCapture(platform, theme, "license"));
+      const hasShot = screens.some(([, id]) => shouldCapture(platform, theme, id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCapture(platform, theme, shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCapture(platform, theme, paneId)))) || shouldCapture(platform, theme, "license");
       if (!hasShot) continue;
       const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
       page.on("pageerror", (error) => errors.push(`${platform}/${theme}: ${error.stack ?? error}`));
@@ -143,7 +143,7 @@ try {
           }
         }
       }
-      if (platform === "macos" && shouldCapture(platform, theme, "license")) {
+      if (shouldCapture(platform, theme, "license")) {
         await page.getByRole("button", { name: /Pro\. Open License/ }).click();
         await page.waitForTimeout(180);
         await capture("license");

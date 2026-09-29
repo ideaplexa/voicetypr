@@ -83,7 +83,15 @@ export function TabContainer({
       );
       break;
     case "help":
-      content = <ReportProblemSection />;
+      content = (
+        <ReportProblemSection
+          onNavigateSettingsPane={(pane) => {
+            setLocalSettingsPane(pane);
+            if (onSettingsPaneChange) onSettingsPaneChange(pane);
+            else onNavigate?.("settings");
+          }}
+        />
+      );
       break;
     case "license":
       content = <AccountTab />;

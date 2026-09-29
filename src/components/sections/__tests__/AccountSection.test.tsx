@@ -1,5 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-shell";
 import { AccountSection } from "../AccountSection";
 
 const mockUseLicense = vi.fn();
@@ -85,5 +87,59 @@ describe("AccountSection license verification", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Revalidate License" }));
     expect(revalidateLicense).toHaveBeenCalledTimes(1);
+  });
+  it("activates a trimmed license key and retains purchase access", async () => {
+    const activateLicense = vi.fn().mockResolvedValue(undefined);
+    const openPurchasePage = vi.fn();
+    mockUseLicense.mockReturnValue({
+      ...mockUseLicense(),
+      status: { status: "trial", trial_days_left: 2 },
+      activateLicense,
+      openPurchasePage,
+    });
+    render(<AccountSection />);
+    fireEvent.change(screen.getByRole("textbox", { name: "License key" }), {
+      target: { value: "  VT-KEY  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+    await waitFor(() => expect(activateLicense).toHaveBeenCalledWith("VT-KEY"));
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "License key" })).toHaveValue(""),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Buy License" }));
+    expect(openPurchasePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the existing license management portal", async () => {
+    render(<AccountSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage License" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("https://polar.sh/ideaplexa/portal"));
+  });
+
+  it("deactivates only after the existing confirmation", async () => {
+    const deactivateLicense = vi.fn().mockResolvedValue(undefined);
+    mockUseLicense.mockReturnValue({ ...mockUseLicense(), deactivateLicense });
+    vi.mocked(ask).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<AccountSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate License" }));
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
+    expect(deactivateLicense).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate License" }));
+    await waitFor(() => expect(deactivateLicense).toHaveBeenCalledTimes(1));
+    expect(ask).toHaveBeenLastCalledWith(
+      "Deactivating your license will make the app unusable.",
+      expect.objectContaining({ title: "Deactivate License" }),
+    );
+  });
+
+  it("shows known plan and expiry and retries status collection", () => {
+    const checkStatus = vi.fn();
+    const view = render(<AccountSection />);
+    expect(screen.getByText("pro", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("89 days offline remaining")).toBeInTheDocument();
+    mockUseLicense.mockReturnValue({ ...mockUseLicense(), status: null, checkStatus });
+    view.rerender(<AccountSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(checkStatus).toHaveBeenCalledTimes(1);
   });
 });
