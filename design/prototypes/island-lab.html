@@ -1,0 +1,354 @@
+<title>Voicetypr Island Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one large desktop stage with the target app and the island, a control rail beside it (stacks under on narrow screens), motion notes below. */
+:root{
+  --bg:#F4F3EF; --panel:#FFFFFF; --ink:#18181A; --muted:#62625E; --line:#E4E4E0; --accent:#3F7D5C; --accent-soft:#E3EFE7; --chip:#EFEEE9;
+  --font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --isl:#121316; --isl-line:rgba(255,255,255,.11); --t1:rgba(255,255,255,.92); --t2:rgba(255,255,255,.55); --sage:#8FD1A8; --amber:#F2B35B; --red:#F28B7A;
+  --wall:linear-gradient(165deg,#E7E2D8 0%,#CFD6E1 100%);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121314;--panel:#1B1C1E;--ink:#F1F1EE;--muted:#A3A3A0;--line:#2C2D30;--accent:#8FD1A8;--accent-soft:#1F3328;--chip:#26272A;--wall:linear-gradient(165deg,#262A31 0%,#121418 100%);color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#121314;--panel:#1B1C1E;--ink:#F1F1EE;--muted:#A3A3A0;--line:#2C2D30;--accent:#8FD1A8;--accent-soft:#1F3328;--chip:#26272A;--wall:linear-gradient(165deg,#262A31 0%,#121418 100%);color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5}
+.wrap{max-width:1200px;margin:0 auto;padding-inline:20px;padding-block:26px 44px;display:flex;flex-direction:column;gap:18px}
+h1{margin:0;font-size:28px;font-weight:600;letter-spacing:-.02em}
+.sub{margin:4px 0 0;color:var(--muted);max-width:70ch}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}
+@media (max-width:880px){.main{grid-template-columns:1fr}}
+.stage{position:relative;height:520px;border-radius:18px;overflow:hidden;background:var(--wall);border:1px solid var(--line)}
+.app{position:absolute;left:50%;top:26px;transform:translateX(-50%);width:min(86%,520px);background:rgba(255,255,255,.95);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.18);overflow:hidden;color:#1d1c1d}
+.app .bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #ecebea;font-size:13px;font-weight:600}
+.app .bar i{width:9px;height:9px;border-radius:50%;background:#dddbd6;display:inline-block}
+.app .msgs{padding:12px 14px;display:flex;flex-direction:column;gap:10px;font-size:13px;min-height:130px}
+.msg b{font-weight:600;margin-right:6px}.msg span{color:#616061}
+.msg.new{animation:land .5s cubic-bezier(.2,.8,.2,1)}
+@keyframes land{from{background:rgba(143,209,168,.45)}to{background:transparent}}
+.compose{margin:0 14px 14px;border:1px solid #d9d7d2;border-radius:10px;padding:9px 11px;font-size:13px;color:#1d1c1d;min-height:40px}
+.compose .ph{color:#9a9894}
+.compose .caret{display:inline-block;width:1.5px;height:15px;background:#1d1c1d;vertical-align:-2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.dock{position:absolute;left:0;right:0;bottom:0;height:120px;pointer-events:none}
+/* island */
+.island{position:absolute;left:50%;bottom:26px;background:var(--isl);border:1px solid var(--isl-line);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 12px 34px rgba(0,0,0,.30);overflow:hidden;color:var(--t1);pointer-events:auto;will-change:width,height,transform}
+.layer{position:absolute;left:0;bottom:0;display:flex;align-items:center;white-space:nowrap;opacity:0;pointer-events:none;will-change:opacity,transform,filter}
+.layer.on{pointer-events:auto}
+.appico{position:absolute;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#4A154B;will-change:left,bottom,width,height,opacity}
+.appico svg{width:62%;height:62%}
+canvas.glyph{position:absolute;will-change:left,bottom}
+.row{height:34px;display:flex;align-items:center;gap:8px}
+.lbl{font-size:12.5px}.dim{color:var(--t2)}.sage{color:var(--sage)}.mono{font-family:var(--mono);font-size:12px;color:var(--t2);font-variant-numeric:tabular-nums}
+.chip{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.07);border-radius:8px;padding:4px 8px;font-size:11.5px;color:rgba(255,255,255,.75);border:0;font-family:inherit;cursor:default}
+.chip.tap{cursor:pointer}.chip.tap:hover{background:rgba(255,255,255,.13)}
+.chip .d{width:6px;height:6px;border-radius:50%;background:var(--sage)}
+.act{font:inherit;font-size:11.5px;color:var(--t1);background:rgba(255,255,255,.09);border:0;border-radius:8px;padding:4px 9px;cursor:pointer}
+.act:hover{background:rgba(255,255,255,.16)}
+.act.primary{background:rgba(143,209,168,.18);color:var(--sage)}
+.round{width:22px;height:22px;border-radius:11px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:0;color:var(--t1);cursor:pointer;padding:0}
+/* stack */
+.stack{position:absolute;left:50%;transform:translateX(-50%);display:grid;justify-items:center;pointer-events:none;transition:opacity .22s ease,transform .32s cubic-bezier(.2,.8,.2,1)}
+.stack.tucked{opacity:0;transform:translateX(-50%) translateY(8px)}
+.card{grid-area:1/1;min-width:220px;max-width:340px;background:var(--isl);border:1px solid var(--isl-line);border-radius:16px;box-shadow:0 10px 28px rgba(0,0,0,.28);color:var(--t1);padding:9px 10px 9px 12px;display:flex;align-items:center;gap:9px;font-size:12.5px;pointer-events:auto;transform-origin:50% 100%;transition:transform .42s cubic-bezier(.2,.9,.25,1.1),opacity .3s ease,filter .3s ease}
+.card.block{border-color:rgba(242,179,91,.55)}
+.card.bad{border-color:rgba(242,139,122,.5);background:#1D1214}
+.card .txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.card .txt small{color:var(--t2);font-size:11.5px}
+.card .n{font-family:var(--mono);font-size:11px;color:var(--t2);background:rgba(255,255,255,.08);border-radius:6px;padding:1px 5px}
+.card .x{background:transparent;border:0;color:var(--t2);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px}
+.card.enter{transform:translateY(10px) scale(.96);opacity:0;filter:blur(2px)}
+.card.leave{transform:translateY(-6px) scale(.96);opacity:0;filter:blur(2px)}
+.more{grid-area:1/1;align-self:start;transform:translateY(-30px);font-family:var(--mono);font-size:10.5px;color:rgba(0,0,0,.5)}
+/* rail */
+.rail{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:14px;align-self:start}
+.rail h2{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:600}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.rail button.b{font:inherit;font-size:12.5px;border:1px solid var(--line);background:var(--chip);color:var(--ink);padding:6px 10px;border-radius:9px;cursor:pointer}
+.rail button.b.main{background:var(--ink);color:var(--panel);border-color:transparent;font-weight:600;width:100%;padding:9px}
+.rail button.b[aria-pressed="true"]{background:var(--accent-soft);border-color:transparent;font-weight:600}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px 22px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+.notes h2{grid-column:1/-1;margin:0;font-size:15px}
+.notes p{margin:0;font-size:12.5px;color:var(--muted)}.notes b{color:var(--ink)}
+.kbd{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line);border-radius:5px;padding:0 4px;background:var(--chip)}
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Island Lab</h1>
+    <p class="sub">The Morphing Island with its real choreography: press dictate and watch it open with context, listen, grow into live words, work, paste into the app and settle back into a dot. Fire problems to see how feedback stacks.</p>
+  </div>
+  <div class="main">
+    <div class="stage" id="stage">
+      <div class="app" id="app">
+        <div class="bar"><i></i><i></i><i></i><span id="appname" style="margin-left:6px">#design-review</span></div>
+        <div class="msgs" id="msgs">
+          <div class="msg"><b>Maya</b><span>Can we move the review? Thursday works for me.</span></div>
+        </div>
+        <div class="compose" id="compose"><span class="ph">Message #design-review</span><span class="caret"></span></div>
+      </div>
+      <div class="dock">
+        <div class="stack tucked" id="stack"></div>
+        <div class="island" id="island">
+          <div class="appico" id="appico"></div>
+          <canvas class="glyph" id="glyph" width="88" height="48"></canvas>
+          <div class="layer" id="L-start" style="flex-direction:column;align-items:stretch;gap:10px;padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:10px;height:28px"><div style="width:28px"></div><div style="display:flex;flex-direction:column;line-height:1.2"><span class="dim" style="font-size:11px">Dictating into</span><span id="startApp" style="font-size:14px;font-weight:600">Slack</span></div></div>
+            <div style="display:flex;gap:5px"><button class="chip tap" id="styleChip" type="button" title="Tap to change style for this dictation"><span class="sage" id="styleIco">✦</span><span id="styleName">Message</span></button><span class="chip"><span>🎙︎</span>MacBook Pro<span class="d"></span></span><span class="chip">Parakeet</span></div>
+          </div>
+          <div class="layer" id="L-listen"><div class="row" style="padding:0 12px 0 86px"><span class="mono" id="timer">0:00</span><span id="hoverCtl" style="display:inline-flex;gap:5px;width:0;overflow:hidden;transition:width .25s cubic-bezier(.2,.8,.2,1)"><button class="round" type="button" title="Stop" id="stopBtn">■</button><button class="round" type="button" title="Cancel" id="cancelBtn">✕</button></span></div></div>
+          <div class="layer" id="L-live" style="flex-direction:column;align-items:stretch">
+            <div style="padding:10px 13px 0;font-size:12.5px;white-space:nowrap;overflow:hidden;display:flex;justify-content:flex-end;-webkit-mask-image:linear-gradient(to right,transparent,#000 24px);mask-image:linear-gradient(to right,transparent,#000 24px)"><span id="committed"></span><span id="tentative" style="color:rgba(255,255,255,.45);font-style:italic;padding-left:4px"></span></div>
+            <div class="row" style="padding:0 12px 0 86px;justify-content:space-between"><span></span><span style="display:flex;gap:8px;align-items:center"><span class="sage" id="liveSpark">✦</span><span class="mono" id="timer2">0:00</span></span></div>
+          </div>
+          <div class="layer" id="L-work"><div class="row" style="padding:0 12px 0 60px"><span class="lbl" id="workLbl">Transcribing</span><span class="lbl sage" id="workStyle"></span><button class="act" id="skipBtn" type="button">Skip</button></div></div>
+          <div class="layer" id="L-done" style="flex-direction:column;align-items:stretch"><div class="row" style="padding:0 12px 0 60px"><span class="lbl" id="doneLbl">Pasted into Slack</span><span class="lbl dim" id="doneCount">· 14 words</span></div><div style="display:flex;gap:5px;padding:0 10px 10px 12px"><button class="act" type="button" id="undoBtn">Undo</button><button class="act" type="button" id="origBtn">Original</button><button class="act primary" type="button" id="retryBtn">Retry with Soniox</button></div></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="rail" aria-label="Controls">
+      <div><button class="b main" id="dictate" type="button">Dictate</button><p class="hint" style="margin-top:6px">Or press <span class="kbd">Space</span> while this page has focus. Hover the island while listening.</p></div>
+      <div><h2>Target app</h2><div class="btns" id="apps"><button class="b" type="button" data-app="slack" aria-pressed="true">Slack</button><button class="b" type="button" data-app="cursor" aria-pressed="false">Cursor</button><button class="b" type="button" data-app="outlook" aria-pressed="false">Outlook</button></div></div>
+      <div><h2>Polish</h2><div class="btns" id="polish"><button class="b" type="button" data-p="on" aria-pressed="true">On</button><button class="b" type="button" data-p="off" aria-pressed="false">Off (raw)</button></div></div>
+      <div><h2>Fire feedback</h2><div class="btns">
+        <button class="b" type="button" data-fb="nomic">No microphone</button>
+        <button class="b" type="button" data-fb="nopaste">Can't paste</button>
+        <button class="b" type="button" data-fb="key">Polish key invalid</button>
+        <button class="b" type="button" data-fb="short">Too short</button>
+        <button class="b" type="button" data-fb="update">Update ready</button>
+      </div><p class="hint" style="margin-top:6px">Timed ones leave oldest-first. Amber and red ones stay until you act. Repeats merge.</p></div>
+      <div><h2>Motion</h2><div class="btns" id="speed"><button class="b" type="button" data-s="1" aria-pressed="true">1×</button><button class="b" type="button" data-s="0.3" aria-pressed="false">Slow-mo</button></div></div>
+    </aside>
+  </div>
+
+  <section class="notes">
+    <h2>What makes it feel right</h2>
+    <p><b>One shape, one spring.</b> Width, height and corners chase one target on a spring (response 0.42 s, bounce 0.2). A new state mid-motion just redirects it; nothing queues or jumps.</p>
+    <p><b>Content choreography.</b> Outgoing content fades in 80 ms. Incoming content waits 60 ms, then lifts 4 px and sharpens from a slight blur over 200 ms.</p>
+    <p><b>Shared elements.</b> The app icon stays on screen in every state. The wave becomes the progress arc, and the arc closes into the check, so your eye follows one thing.</p>
+    <p><b>Weight.</b> The island dips 2% for a beat before it opens wide, so it feels like it has mass.</p>
+    <p><b>Feedback stack.</b> Newest in front, older ones peek behind (3 at most, then "+N"). Timed items leave in arrival order. Blocking problems stay until fixed. It tucks away while you dictate.</p>
+    <p><b>Honest context.</b> App, style, mic and engine are read at key press, and the island shows what will happen. Only the app name and icon are shown, never window titles.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let speed = 1;
+const APPS = {
+  slack:{name:"Slack",room:"#design-review",col:"#4A154B",svg:'<svg viewBox="0 0 24 24" fill="#fff"><rect x="10" y="3" width="4" height="8" rx="2"/><rect x="10" y="13" width="4" height="8" rx="2"/><rect x="3" y="10" width="8" height="4" rx="2"/><rect x="13" y="10" width="8" height="4" rx="2"/></svg>'},
+  cursor:{name:"Cursor",room:"main.rs — voicetypr",col:"#1F6FEB",svg:'<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7 3 12l5 5M16 7l5 5-5 5"/></svg>'},
+  outlook:{name:"Outlook",room:"Re: Thursday review",col:"#0F6CBD",svg:'<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="m3 8 9 6 9-6"/></svg>'},
+};
+let app = "slack", polish = true, style = "Message";
+const STYLES = ["Message","Clean","Writing","Code"];
+const SENT = "Thursday at 3 works, I'll move the review and send the agenda before".split(" ");
+const FINAL = "Thursday at 3 works — I'll move the review and send the agenda before.";
+
+// ----- springs -----
+function Spring(x, response = .42, bounce = .2) { return {x, v: 0, to: x, k: Math.pow(2 * Math.PI / response, 2), z: 1 - bounce}; }
+function step(s, dt) { if (reduce) { s.x = s.to; s.v = 0; return; } const c = 2 * Math.sqrt(s.k) * s.z, n = Math.max(1, Math.ceil(dt / .006)), h = dt / n; for (let i = 0; i < n; i++) { s.v += (s.k * (s.to - s.x) - c * s.v) * h; s.x += s.v * h; } }
+const W = Spring(12), H = Spring(12), R = Spring(6), SC = Spring(1, .28, .35);
+const IX = Spring(0), IY = Spring(8), IS = Spring(0), IO = Spring(0, .25, 0);
+
+// ----- state -----
+let st = "ready", tState = 0, clock = 0, hover = false, timers = [];
+const island = $("island"), appico = $("appico"), glyph = $("glyph"), g = glyph.getContext("2d");
+const layers = {start: $("L-start"), listen: $("L-listen"), live: $("L-live"), work: $("L-work"), done: $("L-done")};
+const layerOf = s => ({start: "start", listen: "listen", live: "live", transcribing: "work", polishing: "work", pasted: "done"})[s];
+let cur = null;
+function show(name) {
+  if (cur === name) return;
+  const out = cur && layers[cur];
+  if (out) { out.classList.remove("on"); out.style.transition = `opacity ${80 / speed}ms ease, filter ${80 / speed}ms ease`; out.style.opacity = 0; out.style.filter = "blur(2px)"; }
+  cur = name;
+  const inn = name && layers[name];
+  if (inn) {
+    inn.style.transition = "none"; inn.style.opacity = 0; inn.style.transform = "translateY(4px)"; inn.style.filter = "blur(3px)";
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      inn.style.transition = `opacity ${200 / speed}ms cubic-bezier(.2,.8,.2,1) ${60 / speed}ms, transform ${220 / speed}ms cubic-bezier(.2,.8,.2,1) ${60 / speed}ms, filter ${200 / speed}ms ease ${60 / speed}ms`;
+      inn.style.opacity = 1; inn.style.transform = "none"; inn.style.filter = "none"; inn.classList.add("on");
+    }));
+  }
+}
+function size(name) { const el = layers[name]; if (!el) return [12, 12]; return [Math.ceil(el.scrollWidth), Math.ceil(el.scrollHeight)]; }
+function later(ms, fn) { timers.push(setTimeout(fn, ms / speed)); }
+function clearLater() { timers.forEach(clearTimeout); timers = []; }
+
+function setApp(k) {
+  app = k; const a = APPS[k]; appico.style.background = a.col; appico.innerHTML = a.svg;
+  $("startApp").textContent = a.name; $("appname").textContent = a.room;
+}
+function go(s) {
+  st = s; tState = 0; stack.classList.toggle("tucked", s !== "ready" || !items.length);
+  const a = APPS[app];
+  if (s === "ready") { show(null); W.to = 12; H.to = 12; R.to = 6; IO.to = 0; return; }
+  if (s === "start") {
+    $("styleName").textContent = polish ? style : "Raw · no Polish"; $("styleIco").textContent = polish ? "✦" : "T";
+    $("styleIco").className = polish ? "sage" : "dim";
+    show("start"); const [w, h] = size("start"); W.to = Math.max(w, 318); H.to = h; R.to = 22; IO.to = 1;
+    SC.x = .98; SC.v = 0; SC.to = 1;
+    return;
+  }
+  if (s === "listen") { show("listen"); const [w] = size("listen"); W.to = w; H.to = 34; R.to = 17; return; }
+  if (s === "live") { show("live"); W.to = 300; H.to = 34 + 30; R.to = 20; return; }
+  if (s === "transcribing" || s === "polishing") {
+    $("workLbl").textContent = s === "transcribing" ? "Transcribing" : "Polishing";
+    $("workStyle").textContent = s === "polishing" ? "· " + style : "";
+    $("skipBtn").style.display = s === "polishing" ? "" : "none";
+    show(null); show("work"); const [w] = size("work"); W.to = w; H.to = 34; R.to = 17; return;
+  }
+  if (s === "pasted") {
+    $("doneLbl").textContent = "Pasted into " + a.name; $("doneCount").textContent = "· " + FINAL.split(" ").length + " words";
+    $("retryBtn").textContent = "Retry with Soniox";
+    show("done"); const [w, h] = size("done"); W.to = w; H.to = h; R.to = 20; return;
+  }
+}
+
+// ----- flow -----
+let raw = false;
+function dictate() {
+  if (st !== "ready") { finishListening(); return; }
+  clearLater(); raw = false;
+  if (items.some(i => i.kind === "nomic")) { bump("nomic"); return; }
+  go("start");
+  later(1200, () => go("listen"));
+  later(3400, () => go("live"));
+  later(7600, finishListening);
+}
+function finishListening() {
+  if (!["start", "listen", "live"].includes(st)) return;
+  clearLater(); go("transcribing");
+  later(1100, () => { if (polish) { go("polishing"); later(1500, paste); } else paste(); });
+}
+function paste() {
+  clearLater();
+  const nopaste = items.some(i => i.kind === "nopaste");
+  if (nopaste) { go("ready"); return; }
+  go("pasted");
+  const m = document.createElement("div"); m.className = "msg new"; m.innerHTML = `<b>You</b><span></span>`; m.querySelector("span").textContent = raw ? FINAL.toLowerCase().replace("—", "") : FINAL; $("msgs").appendChild(m);
+  const msgs = $("msgs"); while (msgs.children.length > 3) msgs.removeChild(msgs.firstChild);
+  later(3200, () => go("ready"));
+}
+$("dictate").onclick = dictate;
+document.addEventListener("keydown", e => { if (e.code === "Space" && !(e.target instanceof HTMLInputElement)) { e.preventDefault(); dictate(); } if (e.key === "Escape" && st !== "ready") { clearLater(); go("ready"); } });
+$("stopBtn").onclick = finishListening;
+$("cancelBtn").onclick = () => { clearLater(); go("ready"); };
+$("skipBtn").onclick = () => { raw = true; paste(); };
+$("undoBtn").onclick = () => { const m = $("msgs").lastElementChild; if (m && m.classList.contains("new")) m.remove(); clearLater(); go("ready"); };
+$("origBtn").onclick = () => { const m = $("msgs").lastElementChild; if (m) m.querySelector("span").textContent = "thursday at 3 works uh I'll move the review and send the agenda before"; };
+$("retryBtn").onclick = () => { $("retryBtn").textContent = "Retrying…"; later(900, () => { $("retryBtn").textContent = "Retried ✓"; }); };
+$("styleChip").onclick = () => { if (!polish) return; style = STYLES[(STYLES.indexOf(style) + 1) % STYLES.length]; $("styleName").textContent = style; };
+island.addEventListener("mouseenter", () => { hover = true; }); island.addEventListener("mouseleave", () => { hover = false; });
+function seg(id, attr, fn) { $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; [...$(id).children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); fn(b.dataset[attr]); }); }
+seg("apps", "app", setApp); seg("polish", "p", v => polish = v === "on"); seg("speed", "s", v => speed = +v);
+
+// ----- feedback stack -----
+const stack = $("stack"); let items = [], uid = 0;
+const FB = {
+  nomic:{sticky:true,cls:"bad",icon:"⌀",t:"No microphone",sub:"Plug one in or choose another",act:"Choose mic"},
+  nopaste:{sticky:true,cls:"block",icon:"⧉",t:"Copied — press ⌘V",sub:"The app didn't accept typed text",act:"Got it"},
+  key:{sticky:true,cls:"block",icon:"✦",t:"Polish key invalid",sub:"Raw text was pasted instead",act:"Fix key"},
+  short:{sticky:false,icon:"◷",t:"Too short — hold a bit longer",dur:2200},
+  update:{sticky:false,icon:"↑",t:"Update ready",sub:"Installs when you quit",dur:3200},
+};
+function fire(kind) {
+  const ex = items.find(i => i.kind === kind);
+  if (ex) { ex.n++; items = items.filter(i => i !== ex).concat(ex); renderStack(); return; }
+  const f = FB[kind]; const it = {id: ++uid, kind, n: 1, born: clock};
+  if (!f.sticky) { const lastTimed = items.filter(i => !FB[i.kind].sticky).reduce((m, i) => Math.max(m, i.expires), 0); it.expires = Math.max(clock + f.dur / 1000, lastTimed + .45); }
+  items.push(it); renderStack(true);
+}
+function bump(kind) { const it = items.find(i => i.kind === kind); if (it) { it.n++; items = items.filter(i => i !== it).concat(it); stack.classList.remove("tucked"); renderStack(); } }
+function dismiss(id) { const el = stack.querySelector(`[data-id="${id}"]`); items = items.filter(i => i.id !== id); if (el) { el.classList.add("leave"); setTimeout(() => { el.remove(); renderStack(); }, 300); } else renderStack(); }
+function renderStack(entering) {
+  stack.classList.toggle("tucked", st !== "ready" || !items.length);
+  const vis = items.slice(-3), extra = items.length - vis.length;
+  [...stack.querySelectorAll(".card")].forEach(el => { if (!vis.some(i => String(i.id) === el.dataset.id) && !el.classList.contains("leave")) el.remove(); });
+  vis.forEach((it, i) => {
+    const depth = vis.length - 1 - i, f = FB[it.kind];
+    let el = stack.querySelector(`[data-id="${it.id}"]`);
+    if (!el) {
+      el = document.createElement("div"); el.dataset.id = it.id; el.className = "card enter " + (f.cls || "");
+      el.innerHTML = `<span style="width:16px;text-align:center;color:${f.cls === "bad" ? "var(--red)" : f.cls === "block" ? "var(--amber)" : "var(--t2)"}">${f.icon}</span><span class="txt"><span>${f.t}</span>${f.sub ? `<small>${f.sub}</small>` : ""}</span><span class="n" hidden></span>${f.act ? `<button class="act" type="button">${f.act}</button>` : ""}<button class="x" type="button" aria-label="Dismiss">×</button>`;
+      el.querySelector(".x").onclick = () => dismiss(it.id); const a = el.querySelector(".act"); if (a) a.onclick = () => dismiss(it.id);
+      stack.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("enter")));
+    }
+    const n = el.querySelector(".n"); n.hidden = it.n < 2; n.textContent = "×" + it.n;
+    el.style.zIndex = 10 - depth; el.style.transform = `translateY(${-depth * 8}px) scale(${1 - depth * .05})`; el.style.opacity = depth ? (depth === 1 ? .7 : .42) : 1;
+    el.style.pointerEvents = depth ? "none" : "auto";
+  });
+  let more = stack.querySelector(".more"); if (extra > 0) { if (!more) { more = document.createElement("div"); more.className = "more"; stack.appendChild(more); } more.textContent = "+" + extra + " more"; } else if (more) more.remove();
+}
+document.querySelectorAll("[data-fb]").forEach(b => b.onclick = () => fire(b.dataset.fb));
+
+// ----- voice + glyph -----
+const bins = new Float32Array(9), peak = new Float32Array(9), peakT = new Float32Array(9); let env = 0, syl = [], nextSyl = 0, pauseUntil = 0;
+function voice(t) { if (t < pauseUntil) return .015 * Math.random(); if (t >= nextSyl) { syl.push({t0: t, a: .35 + Math.random() * .65}); nextSyl = t + .11 + Math.random() * .12; if (Math.random() < .08) pauseUntil = t + .25 + Math.random() * .3; } let v = 0; syl = syl.filter(s => t - s.t0 < .8); for (const s of syl) { const d = t - s.t0; v += s.a * (d < .025 ? d / .025 : Math.exp(-(d - .025) / .12)); } return Math.min(1, v); }
+let arcP = 0, checkP = 0;
+function drawGlyph(dt) {
+  const dpr = 2, w = 44, h = 24; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const listening = st === "listen" || st === "live" || st === "start";
+  const lv = listening && st !== "start" ? voice(clock) : (st === "start" ? .15 * voice(clock) : 0);
+  const up = 1 - Math.exp(-dt / .03), dn = 1 - Math.exp(-dt / .18); env += (lv - env) * (lv > env ? up : dn);
+  const Wt = [.5, .72, .9, 1, 1, 1, .9, .72, .5];
+  for (let i = 0; i < 9; i++) { const target = lv * Wt[i] * (.55 + .45 * Math.random()); bins[i] += (target - bins[i]) * (target > bins[i] ? up : dn); if (bins[i] >= peak[i]) { peak[i] = bins[i]; peakT[i] = clock; } else if (clock - peakT[i] > .3) peak[i] = Math.max(bins[i], peak[i] - dt * 1.2); }
+  const working = st === "transcribing" || st === "polishing", done = st === "pasted";
+  const toArc = working || done ? 1 : 0; arcP += (toArc - arcP) * (1 - Math.exp(-dt / .09));
+  checkP = done ? Math.min(1, checkP + dt / .28) : 0;
+  const cx = 11, cy = h / 2;
+  if (arcP < .98) { // bars collapsing toward the arc position
+    g.globalAlpha = 1 - arcP;
+    for (let i = 0; i < 9; i++) { const bh = 3 + Math.max(bins[i], 0) * 16; const x = 2 + i * 4.6; const px = x + (cx - x) * arcP; g.fillStyle = "rgba(255,255,255,.93)"; g.beginPath(); g.roundRect(px - 1.2, cy - bh / 2, 2.4, bh, 1.2); g.fill(); if (peak[i] > bins[i] + .04) { g.fillStyle = "rgba(143,209,168,.8)"; g.fillRect(px - 1.2, cy - (3 + peak[i] * 16) / 2 - 2, 2.4, 1.4); } }
+    g.globalAlpha = 1;
+  }
+  if (arcP > .02) {
+    g.globalAlpha = arcP; g.lineWidth = 2; g.lineCap = "round";
+    g.strokeStyle = "rgba(255,255,255,.14)"; g.beginPath(); g.arc(cx, cy, 7, 0, Math.PI * 2); g.stroke();
+    const col = st === "polishing" || done ? "#8FD1A8" : "rgba(255,255,255,.95)";
+    if (done) { const sweep = Math.PI * 2 * Math.min(1, checkP * 1.6); g.strokeStyle = col; g.beginPath(); g.arc(cx, cy, 7, -Math.PI / 2, -Math.PI / 2 + sweep); g.stroke(); const p = Math.max(0, checkP * 1.6 - .6) / 1; if (p > 0) { g.lineWidth = 1.8; g.beginPath(); const P = [[cx - 3.2, cy + .2], [cx - 1, cy + 2.6], [cx + 3.4, cy - 2.4]]; const L1 = Math.hypot(2.2, 2.4), L2 = Math.hypot(4.4, 5), d = (L1 + L2) * Math.min(1, p); g.moveTo(...P[0]); if (d <= L1) g.lineTo(P[0][0] + 2.2 * d / L1, P[0][1] + 2.4 * d / L1); else { g.lineTo(...P[1]); const r = (d - L1) / L2; g.lineTo(P[1][0] + 4.4 * r, P[1][1] - 5 * r); } g.stroke(); } }
+    else { const a0 = clock * (st === "polishing" ? 4.2 : 6.5); g.strokeStyle = col; g.beginPath(); g.arc(cx, cy, 7, a0, a0 + 1.9); g.stroke(); }
+    g.globalAlpha = 1;
+  }
+}
+
+// ----- loop -----
+let last = performance.now(), liveWords = 0;
+setApp("slack"); go("ready");
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000) * speed; last = now; clock += dt; tState += dt;
+  // island geometry
+  [W, H, R, SC, IX, IY, IS, IO].forEach(s => step(s, dt));
+  island.style.width = W.x + "px"; island.style.height = H.x + "px"; island.style.borderRadius = R.x + "px";
+  island.style.transform = `translateX(-50%) scale(${SC.x})`;
+  // shared app icon: big in start card, small in compact rows, hidden when ready
+  const big = st === "start";
+  IS.to = st === "ready" ? 0 : (big ? 28 : 18); IX.to = big ? 14 : 12; const topRow = st === "pasted"; IY.to = big ? (H.x - 12 - 28) : (topRow ? H.x - 34 + 8 : 8); IO.to = st === "ready" ? 0 : 1;
+  appico.style.width = appico.style.height = Math.max(0, IS.x) + "px"; appico.style.left = IX.x + "px"; appico.style.bottom = IY.x + "px"; appico.style.opacity = Math.max(0, Math.min(1, IO.x)); appico.style.borderRadius = Math.max(4, IS.x * .28) + "px";
+  // glyph slot follows the icon
+  const gl = st === "start" ? W.x - 14 - 44 : IX.x + 22; glyph.style.left = gl + "px"; glyph.style.bottom = (st === "start" ? H.x - 12 - 26 : (st === "pasted" ? H.x - 34 + 5 : 5)) + "px"; glyph.style.width = "44px"; glyph.style.height = "24px"; glyph.style.opacity = st === "ready" ? 0 : 1;
+  drawGlyph(dt);
+  // timers + live words
+  const secs = st === "listen" ? 1 + Math.floor(tState) : st === "live" ? 3 + Math.floor(tState) : 0;
+  $("timer").textContent = $("timer2").textContent = `0:${String(secs).padStart(2, "0")}`;
+  $("liveSpark").style.visibility = polish ? "visible" : "hidden";
+  if (st === "live") { const n = Math.min(SENT.length, 2 + Math.floor(tState / (4.2 / SENT.length))); $("committed").textContent = SENT.slice(0, Math.max(0, n - 2)).join(" "); $("tentative").textContent = SENT.slice(Math.max(0, n - 2), n).join(" "); }
+  $("hoverCtl").style.width = hover && st === "listen" ? "54px" : "0px";
+  if (st === "listen") { const [w] = size("listen"); W.to = w; }
+  // stack timers (oldest-first)
+  const due = items.find(i => !FB[i.kind].sticky && i.expires && clock >= i.expires); if (due) dismiss(due.id);
+  stack.style.bottom = (26 + (st === "ready" ? 12 : H.x) + 12) + "px";
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+// open on a realistic state: one timed notice already waiting
+fire("update");
+})();
+</script>
