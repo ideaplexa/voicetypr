@@ -38,17 +38,17 @@ export function RecentRecordingsFilters({
     sourceFilter !== "all" || appFilter !== "all" || dateFilter !== "all" || searchQuery;
 
   return (
-    <div className="py-3 pl-2 pr-4">
-      <div className="flex items-center gap-2.5">
+    <div className="w-full">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-0 flex-1">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-[10px] top-1/2 -translate-y-1/2 h-[14px] w-[14px] text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search transcripts…"
-            aria-label="Search transcripts"
+            placeholder="Search your dictations…"
+            aria-label="Search dictations"
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
-            className="h-10 w-full rounded-xl border border-border bg-card pl-10 pr-4 text-sm transition-colors focus:border-sage/50 focus:outline-none focus:ring-2 focus:ring-sage/25"
+            className="h-[35px] w-full rounded-[10px] border border-border bg-card pl-8 pr-4 text-[13px] text-muted-foreground placeholder:text-text-3 focus:border-sage focus:outline-none"
           />
           {searchQuery && (
             <button
@@ -73,7 +73,10 @@ export function RecentRecordingsFilters({
             value={sourceFilter}
             onValueChange={(value) => value != null && onSourceFilterChange(value)}
           >
-            <SelectTrigger className="h-9 w-auto gap-1.5 rounded-lg border-border bg-card text-xs">
+            <SelectTrigger
+              aria-label="Source"
+              className="h-[35px] w-auto min-w-[105px] gap-3 rounded-[10px] border-border bg-card px-[10px] text-[13px] text-muted-foreground"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -93,7 +96,10 @@ export function RecentRecordingsFilters({
             value={dateFilter}
             onValueChange={(value) => value != null && onDateFilterChange(value)}
           >
-            <SelectTrigger className="h-9 w-auto gap-1.5 rounded-lg border-border bg-card text-xs">
+            <SelectTrigger
+              aria-label="Time range"
+              className="h-[35px] w-auto min-w-[124px] gap-3 rounded-[10px] border-border bg-card px-[10px] text-[13px] text-muted-foreground"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -111,7 +117,10 @@ export function RecentRecordingsFilters({
               value={appFilter}
               onValueChange={(value) => value != null && onAppFilterChange(value)}
             >
-              <SelectTrigger className="h-9 w-auto gap-1.5 rounded-lg border-border bg-card text-xs">
+              <SelectTrigger
+                aria-label="App"
+                className="h-[35px] w-auto min-w-[105px] gap-3 rounded-[10px] border-border bg-card px-[10px] text-[13px] text-muted-foreground"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

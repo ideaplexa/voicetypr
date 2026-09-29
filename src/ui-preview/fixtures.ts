@@ -14,36 +14,68 @@ export type PreviewOptions = {
 };
 
 const demoText = [
+  "Let's move the sync to Thursday at 3 and I'll send the notes before.",
+  "Refactor the stream tap so the sink is created after play.",
+  "Thanks for the quick turnaround — the new build fixed it.",
+  "Buy oat milk, coffee filters and the birthday card for Sam.",
+  "Can you review the pricing page copy before lunch?",
   "Please move the design review to Thursday afternoon and send the updated agenda to the team.",
   "The new onboarding flow feels much clearer. I would shorten the first explanation and make the action easier to spot.",
   "Could you share the latest project estimate before our call tomorrow? I want to review the scope with the client.",
-  "Today's priorities are to review the release notes, test the recording shortcut, and check the new settings layout.",
+  "Today's priorities are to review the release notes, test the recording shortcut, and check the new settings layout. Then collect the feedback from the team, compare the Mac and Windows flows, document any differences we can reproduce, and send one clear summary with screenshots and next steps before the end of the day.",
   "I had an idea for the introduction: show the finished result first, then explain how the workflow gets there.",
   "The bug appears after switching from the shortcuts pane back to general settings. The previous pane remains visible.",
   "Thanks for the thoughtful feedback. I'll update the draft and share a revised version later today.",
   "Research note: compare local transcription speed with the cloud option using the same real speech sample.",
   "Let's keep the interface focused on the task and move the advanced controls into a separate settings section.",
   "The presentation is ready for review. Please check the opening slide and the final call to action.",
-  "I will follow up on the customer interview notes after lunch and turn the repeated requests into a short list.",
-  "Remember to test the app in both light and dark themes before sending the preview screenshots.",
 ];
 
 type HistoryWireItem = Omit<TranscriptionHistory, "id" | "timestamp"> & { timestamp: string };
-const apps = ["Mail", "Notes", "Slack", "Chrome", "Linear", "Pages"];
+const apps = [
+  "Slack",
+  "Cursor",
+  "Mail",
+  "Notes",
+  "Slack",
+  "Pages",
+  "Mail",
+  "Cursor",
+  "Notes",
+  "Chrome",
+  "Linear",
+  "Pages",
+  "Mail",
+  "Notes",
+  "Slack",
+];
 export const demoHistory: HistoryWireItem[] = demoText.map((text, index) => ({
   timestamp: new Date(
     Date.now() -
-      (index < 4 ? [2, 18, 60, 180][index] * 60 * 1000 : (index - 3) * 18 * 60 * 60 * 1000),
+      (index < 5
+        ? [2, 26, 73, 159, 172][index] * 60 * 1000
+        : index < 10
+          ? 24 * 60 * 60 * 1000 + (index - 5) * 60 * 60 * 1000
+          : 48 * 60 * 60 * 1000 + (index - 10) * 60 * 60 * 1000),
   ).toISOString(),
   text,
-  model: "parakeet-v3",
+  model: index === 7 || index === 12 ? "whisper-small" : "parakeet-v3",
   status: "completed",
   writing: {
-    source: "desktop_recording",
-    engine: "parakeet",
+    source: index === 7 || index === 12 ? "audio_file" : "desktop_recording",
+    engine: index === 7 || index === 12 ? "whisper" : "parakeet",
     audio_duration_ms: 4100 + index * 380,
-    context_hint: { app_name: apps[index % apps.length] },
-    ai_applied: index % 3 === 0,
+    ...(index === 7 || index === 12 ? {} : { context_hint: { app_name: apps[index] } }),
+    ...(index === 0 || index === 5 || index === 10
+      ? {
+          ai_applied: true,
+          mode: "Message",
+          original_text:
+            index === 0
+              ? "so um let's move the sync to uh thursday at three and I'll send the notes before"
+              : `um ${text.toLowerCase()}`,
+        }
+      : {}),
   },
 }));
 
@@ -128,7 +160,12 @@ export const demoWriting: WritingSettings = {
       enabled: true,
       preserve_literal: false,
     },
-    { trigger: "insert my email", body: "hello@example.com", enabled: true, preserve_literal: true },
+    {
+      trigger: "insert my email",
+      body: "hello@example.com",
+      enabled: true,
+      preserve_literal: true,
+    },
   ],
   app_formatting_rules: [
     { app_name: "Slack", preset: "Message", enabled: true },

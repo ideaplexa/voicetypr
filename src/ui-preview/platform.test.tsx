@@ -19,9 +19,8 @@ describe("UI preview platform", () => {
     const { isMacOS, isWindows } = await import("@/lib/platform");
     const { formatHotkey } = await import("@/lib/hotkey-utils");
     const { RecentRecordingsHeader } = await import("@/components/sections/RecentRecordingsHeader");
-    const osPlugin = await vi.importActual<typeof import("@tauri-apps/plugin-os")>(
-      "@tauri-apps/plugin-os",
-    );
+    const osPlugin =
+      await vi.importActual<typeof import("@tauri-apps/plugin-os")>("@tauri-apps/plugin-os");
     const os = window.__TAURI_OS_PLUGIN_INTERNALS__;
     const fixtures = createFixtures({ platform, theme: "light", empty: false });
 
@@ -56,6 +55,6 @@ describe("UI preview platform", () => {
         onClearAll={vi.fn()}
       />,
     );
-    expect(history).toContain(`stored on this ${platform === "macos" ? "Mac" : "PC"}`);
+    expect(history).toContain(`stored only on this ${platform === "macos" ? "Mac" : "PC"}`);
   });
 });

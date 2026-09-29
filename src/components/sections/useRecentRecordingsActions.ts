@@ -159,7 +159,7 @@ export function useRecentRecordingsActions({
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string): Promise<boolean> => {
     e.stopPropagation();
 
     try {
@@ -168,7 +168,7 @@ export function useRecentRecordingsActions({
         kind: "warning",
       });
 
-      if (!confirmed) return;
+      if (!confirmed) return false;
 
       await invoke("delete_transcription_entry", { timestamp: id });
 
@@ -177,9 +177,11 @@ export function useRecentRecordingsActions({
       if (onHistoryUpdate) {
         onHistoryUpdate();
       }
+      return true;
     } catch (error) {
       log.error("Failed to delete transcription:", error);
       toast.error("Failed to delete transcription");
+      return false;
     }
   };
 
