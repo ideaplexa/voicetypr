@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      tailwind = { config: { corePlugins: { preflight: false } } };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist%3Awght%40100..900&family=Inter%3Awght%40100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *, ::before, ::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body style="background-color: #F7F7F5">
+    <div class="relative w-[1560px] h-[535px]">
+      <div
+        data-pencil-name="Components"
+        class="box-border w-[1120px] h-fit absolute left-0 top-[208px] flex flex-col gap-[28px] p-[40px] justify-start items-start bg-[#F7F7F5]"
+      >
+        <div
+          data-pencil-name="Title"
+          class="text-[22px]/[normal] box-border text-[#18181A] font-[Geist,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+        >
+          Voicetypr 2.1 — components
+        </div>
+        <div
+          data-pencil-name="Row: controls"
+          class="box-border w-fit h-fit shrink-0 flex flex-row gap-[24px] justify-start items-center"
+        >
+          <div
+            data-pencil-name="Button/Primary"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[8px] p-[9px_16px] justify-start items-center bg-[#18181A] rounded-[10px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[13px]/[normal] box-border text-[#F7F7F5] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Primary action
+            </div>
+          </div>
+          <div
+            data-pencil-name="Button/Secondary"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[8px] p-[9px_16px] justify-start items-center bg-[#FFFFFF] [outline:1px_solid_#E4E4E0] [outline-offset:-0.5px] rounded-[10px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[13px]/[normal] box-border text-[#18181A] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Secondary
+            </div>
+          </div>
+          <div
+            data-pencil-name="Button/Ghost"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[6px] p-[9px_12px] justify-start items-center rounded-[10px]"
+          >
+            <svg
+              data-pencil-name="Icon"
+              data-icon-name="plus"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              class="box-border w-[15px] shrink-0 h-[15px]"
+            >
+              <path
+                d="M6.90088 2.35156q-0.0957 0.01367-0.17432 0.05127-0.0752 0.03418-0.15381 0.12647-0.0752 0.08887-0.11279 0.16748-0.03418 0.0752-0.03418 0.32812l0 3.40088-3.66748 0-0.08545 0.04102q-0.22217 0.11279-0.30078 0.33838-0.0752 0.22217 0.00684 0.43408 0.05811 0.0957 0.14013 0.18115 0.08545 0.08203 0.16748 0.11963 0.08545 0.03418 0.33838 0.03418l3.40088 0 0 3.40088q0 0.25293 0.03418 0.33838 0.0376 0.08203 0.11963 0.16748 0.08545 0.08203 0.18799 0.1333 0.10596 0.04785 0.23242 0.04785 0.12646 0 0.229-0.04785 0.10596-0.05127 0.18799-0.1333 0.08545-0.08545 0.11963-0.16748 0.0376-0.08545 0.0376-0.33838l0-3.40088 3.40088 0q0.25293 0 0.33496-0.03418 0.08545-0.0376 0.16748-0.11963 0.08545-0.08545 0.1333-0.18799 0.05127-0.10596 0.05127-0.23242 0-0.12646-0.04102-0.23926-0.09912-0.19482-0.29394-0.29394l-0.08545-0.04102-3.66748 0 0-3.38721q0-0.2666-0.02734-0.32128-0.07178-0.19824-0.25293-0.30079-0.18115-0.10596-0.39307-0.06494z"
+                fill="#6A6A66"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="Label"
+              class="text-[13px]/[normal] box-border text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Ghost
+            </div>
+          </div>
+          <div
+            data-pencil-name="Switch/On"
+            class="box-border w-[34px] shrink-0 h-[20px] flex flex-row gap-0 p-[2px] justify-end items-center bg-[#3F7D5C] rounded-[10px]"
+          >
+            <div
+              data-pencil-name="Knob"
+              class="box-border w-[16px] shrink-0 h-[16px] bg-[#FFFFFF] rounded-full"
+            ></div>
+          </div>
+          <div
+            data-pencil-name="Switch/Off"
+            class="box-border w-[34px] shrink-0 h-[20px] flex flex-row gap-0 p-[2px] justify-start items-center bg-[#E4E4E0] rounded-[10px]"
+          >
+            <div
+              data-pencil-name="Knob"
+              class="box-border w-[16px] shrink-0 h-[16px] bg-[#FFFFFF] rounded-full"
+            ></div>
+          </div>
+          <div
+            data-pencil-name="Kbd"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[3px_7px] justify-start items-start bg-[#FFFFFF] [outline:1px_solid_#E4E4E0] [outline-offset:-0.5px] rounded-[6px]"
+          >
+            <div
+              data-pencil-name="Key"
+              class="text-[12px]/[normal] box-border text-[#18181A] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              ⌥ Space
+            </div>
+          </div>
+          <div
+            data-pencil-name="Badge/Accent"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[5px] p-[3px_9px] justify-start items-center bg-[#E3EFE7] rounded-[20px]"
+          >
+            <div
+              data-pencil-name="Dot"
+              class="box-border w-[6px] shrink-0 h-[6px] bg-[#3F7D5C] rounded-full"
+            ></div>
+            <div
+              data-pencil-name="Label"
+              class="text-[11.5px]/[normal] box-border text-[#3F7D5C] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Ready
+            </div>
+          </div>
+          <div
+            data-pencil-name="Select"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[24px] p-[8px_10px] justify-start items-center bg-[#FFFFFF] [outline:1px_solid_#E4E4E0] [outline-offset:-0.5px] rounded-[10px]"
+          >
+            <div
+              data-pencil-name="Value"
+              class="text-[13px]/[normal] box-border text-[#18181A] font-[Geist,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              English
+            </div>
+            <svg
+              data-pencil-name="Chevron"
+              data-icon-name="chevrons-up-down"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              class="box-border w-[14px] shrink-0 h-[14px]"
+            >
+              <path
+                d="M6.84619 1.77734q-0.08545 0.01367-0.14697 0.05811-0.06152 0.04102-1.58936 1.56543l-1.21679 1.23389q-0.28027 0.28027-0.33838 0.38964-0.05469 0.07178-0.04102 0.18457l0 0.05469q0 0.14014 0.04102 0.23926 0.09912 0.19482 0.31445 0.28027 0.21875 0.08203 0.42725 0.01367 0.07178-0.02734 0.27343-0.22216 0.20508-0.19824 1.12793-1.1211l1.30225-1.28857 1.30225 1.28857q0.92285 0.92285 1.12451 1.1211 0.20508 0.19482 0.27685 0.22216 0.2085 0.06836 0.42383-0.01367 0.21875-0.08545 0.31787-0.28027 0.04102-0.09912 0.04102-0.23926l0-0.05469q0.01367-0.11279-0.04102-0.18457-0.0581-0.10938-0.33838-0.38964l-1.21679-1.23389q-1.5415-1.53809-1.63379-1.58594-0.08887-0.05127-0.2085-0.0581-0.11621-0.00684-0.20166 0.0205z m-2.9668 6.42579q-0.09912 0.04443-0.1914 0.12988-0.08887 0.08203-0.12647 0.16064-0.03418 0.0752-0.04101 0.11621-0.00684 0.04102-0.00684 0.14014l0 0.04102q-0.01367 0.11279 0.04102 0.19824 0.07178 0.10938 0.36572 0.40332 0.19482 0.21191 0.96729 0.98096l1.49707 1.48339q0.28027 0.2666 0.38964 0.33838 0.07178 0.05469 0.18457 0.04102l0.08204 0q0.11279 0.01367 0.18457-0.04102 0.10938-0.07178 0.38964-0.33838l1.49707-1.48339q0.77246-0.76904 0.96729-0.98096 0.29395-0.29395 0.36572-0.40332 0.05469-0.08545 0.04102-0.19824l0-0.04102q0-0.09912-0.00684-0.14014-0.00684-0.04102-0.03418-0.11279-0.04443-0.0957-0.13672-0.1709-0.08887-0.07861-0.18799-0.11279-0.0957-0.0376-0.229-0.0376-0.1333 0-0.22558 0.04443-0.08887 0.04102-1.37745 1.32618l-1.28857 1.28857-1.28857-1.28857q-1.28857-1.28516-1.38086-1.32618-0.08887-0.04443-0.22901-0.04443-0.14014 0-0.22217 0.02735z"
+                fill="#9A9A95"
+              ></path>
+            </svg>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Segmented"
+          class="box-border w-fit h-fit shrink-0 flex flex-row gap-[2px] p-[3px] justify-start items-start bg-[#F1F1EE] rounded-[10px]"
+        >
+          <div
+            data-pencil-name="Seg Off"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[6px_12px] justify-start items-start bg-[#00000000] rounded-[7px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[12.5px]/[normal] box-border text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Off
+            </div>
+          </div>
+          <div
+            data-pencil-name="Seg Clean"
+            class="box-border w-fit shrink-0 h-fit [box-shadow:0px_1px_3px_#0000001A] flex flex-row gap-0 p-[6px_12px] justify-start items-start bg-[#FFFFFF] rounded-[7px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[12.5px]/[normal] box-border text-[#18181A] font-[Geist,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+            >
+              Clean
+            </div>
+          </div>
+          <div
+            data-pencil-name="Seg Writing"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[6px_12px] justify-start items-start bg-[#00000000] rounded-[7px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[12.5px]/[normal] box-border text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Writing
+            </div>
+          </div>
+          <div
+            data-pencil-name="Seg Message"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[6px_12px] justify-start items-start bg-[#00000000] rounded-[7px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[12.5px]/[normal] box-border text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Message
+            </div>
+          </div>
+          <div
+            data-pencil-name="Seg Code"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[6px_12px] justify-start items-start bg-[#00000000] rounded-[7px]"
+          >
+            <div
+              data-pencil-name="Label"
+              class="text-[12.5px]/[normal] box-border text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Code
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Setting Row"
+          class="[box-sizing:content-box] w-[640px] h-[64.5px] shrink-0 flex flex-row gap-[24px] p-[14px_0px] justify-start items-center [border-width:0px_0px_1px_0px] [border-style:solid] [border-color:#E4E4E0] [margin:0px_0px_-0.5px_0px]"
+        >
+          <div
+            data-pencil-name="Text"
+            class="box-border [flex:1_1_0] h-fit flex flex-col gap-[3px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="Title"
+              class="text-[13.5px]/[normal] box-border text-[#18181A] font-[Geist,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Setting title
+            </div>
+            <div
+              data-pencil-name="Description"
+              class="text-[12.5px]/[normal] box-border w-full text-[#6A6A66] font-[Geist,system-ui,sans-serif] font-normal text-left"
+            >
+              One short line that explains what this does.
+            </div>
+          </div>
+          <div
+            data-pencil-name="Control"
+            class="box-border w-[34px] shrink-0 h-[20px] flex flex-row gap-0 p-[2px] justify-end items-center bg-[#3F7D5C] rounded-[10px]"
+          >
+            <div
+              data-pencil-name="Knob"
+              class="box-border w-[16px] shrink-0 h-[16px] bg-[#FFFFFF] rounded-full"
+            ></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

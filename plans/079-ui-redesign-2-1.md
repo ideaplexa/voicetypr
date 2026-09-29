@@ -134,6 +134,15 @@ Old ids stay as aliases in `TabContainer` for one release so the `navigate-to-ov
   and the model list, focus rings, keyboard nav through the sidebar, and a dark-mode sweep of
   every screen.
 
+## Design source of truth (added 2026-09-29)
+
+Every screen is designed in `design/voicetypr-2.1.pen` BEFORE it is built. Its Pencil
+`html-tailwind` export in `design/specs/<screen>.html` is the exact spec: pixel gaps, padding,
+type sizes/weights, radii and layer names. Implementers must match it within ±1px, map hex
+colors to tokens, and list any deviation with its reason. The PNGs in `design/exports/` are
+the visual reference. After S4, one "spec-match" pass brings S1–S4 onto the specs; they were
+built from PNGs only and drifted toward looser density.
+
 ## Gates (every slice)
 
 1. `pnpm typecheck && pnpm lint && pnpm test:frontend` green; `pnpm check` before the
