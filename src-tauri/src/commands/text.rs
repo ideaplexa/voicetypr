@@ -91,6 +91,28 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
 
 #[tauri::command]
 pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    insert_text_with_generation(app, text, None).await
+}
+
+pub(crate) async fn insert_dictation_text(
+    app: tauri::AppHandle,
+    text: String,
+    generation: u64,
+) -> Result<(), String> {
+    let result = insert_text_with_generation(app.clone(), text, Some(generation)).await;
+    if result.is_err() {
+        // A permission outcome already owns its 2.5 s timeout. Other errors
+        // have no terminal feedback; release the window immediately.
+        super::pill_feedback::hide_after_failed_delivery(&app, generation);
+    }
+    result
+}
+
+async fn insert_text_with_generation(
+    app: tauri::AppHandle,
+    text: String,
+    generation: Option<u64>,
+) -> Result<(), String> {
     // Check if already inserting text
     if IS_INSERTING.swap(true, Ordering::SeqCst) {
         log::warn!("Text insertion already in progress, skipping duplicate request");
@@ -139,6 +161,13 @@ pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), Stri
     .await
     .map_err(|e| format!("Task failed: {}", e))??;
     let _ = outcome_app.emit("paste-outcome", paste_outcome_payload(&outcome, words));
+    if let Some(generation) = generation {
+        super::pill_feedback::schedule_terminal_hide(
+            &outcome_app,
+            generation,
+            paste_outcome_payload(&outcome, words).outcome,
+        );
+    }
     if outcome == PasteOutcome::NoPermission {
         return Err("No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission.".to_string());
     }
@@ -197,6 +226,24 @@ fn paste_outcome_payload(outcome: &PasteOutcome, words: u32) -> PasteOutcomePayl
             PasteOutcome::NoPermission => "no_permission",
         },
         words,
+    }
+}
+
+// None means the dictation copy was skipped; false means it failed. Manual
+// copy commands keep using copy_text_to_clipboard and never enter this seam.
+fn dictation_copy_payload(succeeded: Option<bool>, words: u32) -> Option<PasteOutcomePayload> {
+    (succeeded == Some(true)).then(|| paste_outcome_payload(&PasteOutcome::LeftInClipboard, words))
+}
+
+pub(crate) fn emit_dictation_copy_outcome(
+    app: &tauri::AppHandle,
+    succeeded: Option<bool>,
+    words: u32,
+    generation: u64,
+) {
+    if let Some(payload) = dictation_copy_payload(succeeded, words) {
+        let _ = app.emit("paste-outcome", payload.clone());
+        super::pill_feedback::schedule_terminal_hide(app, generation, payload.outcome);
     }
 }
 
@@ -1096,6 +1143,17 @@ mod clipboard_insertion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_successful_dictation_copy_emits_content_free_copied_outcome() {
+        assert!(dictation_copy_payload(None, 38).is_none());
+        assert!(dictation_copy_payload(Some(false), 38).is_none());
+        let payload = dictation_copy_payload(Some(true), 38).unwrap();
+        assert_eq!(
+            serde_json::to_value(payload).unwrap(),
+            serde_json::json!({ "outcome": "copied", "words": 38 })
+        );
+    }
 
     #[test]
     fn paste_outcomes_map_to_content_free_payloads() {

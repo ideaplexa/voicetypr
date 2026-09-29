@@ -973,7 +973,7 @@ fn build_deepgram_stream_sink_factory(
 /// before `Starting` is published, so every stop/cancel and spawned
 /// transcription task within this attempt observes the same generation.
 pub(crate) fn begin_recording_generation() -> u64 {
-    RECORDING_GENERATION.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    crate::commands::pill_feedback::advance_recording_generation(&RECORDING_GENERATION)
 }
 
 /// The generation of the most recently begun recording.
@@ -7482,8 +7482,11 @@ async fn stop_recording_with_mode_at(
                         return;
                     }
 
-                    // Hide pill window first (only if show_pill_indicator is false)
-                    if should_hide_pill(&app_for_process).await {
+                    // Preserve focus-safe insertion ordering unless the native
+                    // pill is proven non-activating. Never show it for feedback.
+                    if should_hide_pill(&app_for_process).await
+                        && !(should_deliver && crate::commands::pill_feedback::keep_visible_for_terminal(&app_for_process))
+                    {
                         if let Some(window_manager) = app_state.get_window_manager() {
                             if let Err(e) = window_manager.hide_pill_window().await {
                                 log::error!("Failed to hide pill window: {}", e);
@@ -7554,9 +7557,10 @@ async fn stop_recording_with_mode_at(
                     if auto_paste {
                         // Auto-paste enabled: insert text at cursor
                         let insert_result = persist_if_current(&app_state, task_generation, || {
-                            crate::commands::text::insert_text(
+                            crate::commands::text::insert_dictation_text(
                                 app_for_process.clone(),
                                 final_text.clone(),
+                                task_generation,
                             )
                         });
                         let Some(insert_future) = insert_result else {
@@ -7643,6 +7647,12 @@ async fn stop_recording_with_mode_at(
                                 dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Skipped;
                                 log::debug!("Text copied to clipboard (auto-paste disabled)");
+                                crate::commands::text::emit_dictation_copy_outcome(
+                                    &app_for_process,
+                                    Some(true),
+                                    final_text.split_whitespace().count() as u32,
+                                    task_generation,
+                                );
                                 pill_toast(&app_for_process, "Transcription copied", 1500);
                             }
                             Err(e) => {
@@ -7651,6 +7661,7 @@ async fn stop_recording_with_mode_at(
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Skipped;
                                 log::error!("Failed to copy text to clipboard: {}", e);
                                 crate::telemetry::capture_paste_failure("clipboard");
+                                crate::commands::pill_feedback::schedule_terminal_hide(&app_for_process, task_generation, "failed");
                                 pill_toast(&app_for_process, "Copy failed", 1500);
                             }
                         }

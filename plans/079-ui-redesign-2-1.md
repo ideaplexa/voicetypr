@@ -115,10 +115,40 @@ Old ids stay as aliases in `TabContainer` for one release so the `navigate-to-ov
   - Retokenize `pill.css`: one dark surface `#121316`, a hairline border, sage bars, Geist.
     The pill stays dark in both themes, by design.
   - New terminal states from the existing Rust `PasteOutcome` (`commands/text.rs:172`):
-    - `Pasted` → "Pasted · N words" (✓)
+    - `Pasted` → "Pasted · N words" (✓), shown for 1.2 s
     - `LeftInClipboard` / `NoPermission` → "Copied — press ⌘V" (Ctrl+V on Windows),
-      shown for 1.6 s
+      shown for 1.6 s / 2.5 s respectively
   - This needs one new event (`paste-outcome` with `{outcome, words}`, no text).
+  - S7 review fixes (2026-09-29): successful dictation with auto-paste off now
+    emits `copied` with a word count. Failed/skipped copies and manual "copy last
+    transcript" do not emit it; the manual actions share the low-level clipboard
+    command, not the dictation completion path.
+  - Native terminal lifetime is gated on proven focus safety: only a safe pill
+    in `when_recording` may stay visible through insertion, with a cancellable
+    recording-generation hide after pasted 1.2 s / copied 1.6 s /
+    no_permission 2.5 s. A new recording invalidates even a queued native hide;
+    `never` never shows the window, and `always` retains its existing behavior.
+  - **Focus-safety follow-up on BOTH platforms:** keep hide-before-insertion
+    (including the existing 20 ms settle) and omit on-screen terminal feedback
+    in `when_recording` until safety is established. macOS uses `to_panel()` in
+    both `lib.rs` and `window_manager.rs`, but pinned tauri-nspanel revision
+    `18ffb9a` returns YES from `canBecomeKeyWindow` and conversion does not set
+    the non-activating style mask. NSPanel conversion and `focused(false)` alone
+    do not prove that the pill cannot become key. Windows has `skip_taskbar`,
+    `focused(false)`, click-through, and a best-effort `WS_EX_NOACTIVATE` style;
+    it lacks `focusable(false)`, checks neither the style write nor its result,
+    and calls `SetWindowPos` without `SWP_NOACTIVATE`. Outcome events still
+    reach Home/onboarding while the native pill stays hidden. Do not re-show it.
+  - Hide-order history: `git log -S 'Hide pill window first'` points to
+    `22e303ac` (2025-08-31), whose message explicitly preserves sequential hide,
+    settle, insert to avoid UI races. `876fda73` already waited for the pill to
+    hide/system to stabilize; blame shows `defc90753` made the hide conditional
+    when the separate toast window was added, and `de387be3` reduced the settle
+    delay to 20 ms for focus stability. Plan 031 requires no focus stealing but
+    preserves these flags; it does not establish native focus safety.
+  - **NEEDS-SMOKE:** real on-screen terminal feedback, paste target/focus,
+    back-to-back dictation and cancellation across macOS/Windows visibility
+    modes. Pure Rust and frontend checks establish contracts only.
   - The same event is the only honest success signal for Home's "Try a test dictation". Until
     S7 lands, that dialog shows only a neutral word count, because no production event
     reliably marks a delivered dictation (re-review 2026-09-29). The existing
