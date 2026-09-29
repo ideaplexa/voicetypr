@@ -10,6 +10,7 @@ import { createLogger } from "@/lib/logger";
 import { isMacOS } from "@/lib/platform";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { formatPrimaryHotkeyLabel } from "@/lib/shortcut-display";
+import { resolvePrimaryShortcut } from "@/lib/primary-shortcut";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
@@ -133,9 +134,7 @@ export function CaptureControlsCard() {
         <div className="mt-3">
           <Segmented
             label="Recording mode"
-            value={!settings.hotkey && nativeBinding
-              ? nativeBinding.action === "hold_to_record" ? "push_to_talk" : "toggle"
-              : settings.recording_mode ?? "toggle"}
+            value={resolvePrimaryShortcut(settings, nativeBinding ? [nativeBinding] : []).mode}
             onValueChange={(value) => {
               void changeRecordingMode(value as "toggle" | "push_to_talk");
             }}

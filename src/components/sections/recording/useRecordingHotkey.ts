@@ -1,7 +1,7 @@
 import type { BareModifierSpec } from "@/components/HotkeyInput";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
-import { findActivePrimaryBinding } from "@/lib/shortcut-display";
+import { findActivePrimaryBinding, resolvePrimaryShortcut } from "@/lib/primary-shortcut";
 import type {
   ModifierKind,
   ModifierSide,
@@ -41,7 +41,7 @@ export function useRecordingHotkey() {
     invoke<ShortcutSettings>("get_shortcut_settings")
       .then((result) => {
         if (cancelled) return;
-        setNativeBinding(findActivePrimaryBinding(result.bindings));
+        setNativeBinding(resolvePrimaryShortcut(settings, result.bindings).binding);
       })
       .catch(() => {
         if (!cancelled) setNativeBinding(null);
@@ -55,10 +55,7 @@ export function useRecordingHotkey() {
     if (!settings) return;
     setPendingHotkey(settings.hotkey || "");
     setPendingBareModifier(null);
-    setHoldToTalk(
-      nativeBinding?.action === "hold_to_record" ||
-        (!nativeBinding && settings.recording_mode === "push_to_talk"),
-    );
+    setHoldToTalk(resolvePrimaryShortcut(settings, nativeBinding ? [nativeBinding] : []).mode === "push_to_talk");
     setIsEditingHotkey(true);
   };
 
@@ -76,7 +73,7 @@ export function useRecordingHotkey() {
     }
     try {
       const current = await invoke<ShortcutSettings>("get_shortcut_settings");
-      const active = findActivePrimaryBinding(current.bindings);
+      const active = resolvePrimaryShortcut(settings, current.bindings).binding;
       if (!active) {
         await updateSettings({ recording_mode: mode });
         return;
@@ -102,14 +99,7 @@ export function useRecordingHotkey() {
     if (pendingBareModifier) {
       try {
         const existing = await invoke<ShortcutSettings>("get_shortcut_settings");
-        const existingPrimary =
-          existing.bindings.find((b) => b.id === "onboarding-primary-hold") ??
-          existing.bindings.find(
-            (b) =>
-              b.enabled &&
-              (b.action === "hold_to_record" || b.action === "toggle_recording") &&
-              (b.trigger_kind === "modifier_hold" || b.trigger_kind === "isolated_tap"),
-          );
+        const existingPrimary = resolvePrimaryShortcut(settings, existing.bindings).binding;
         const stableId = existingPrimary?.id ?? "onboarding-primary-hold";
         const newBinding: ShortcutBinding = holdToTalk
           ? {
@@ -169,6 +159,7 @@ export function useRecordingHotkey() {
         // native trigger and the new combo global shortcut stay active at once.
         const existing = await invoke<ShortcutSettings>("get_shortcut_settings");
         const primary = findActivePrimaryBinding(existing.bindings);
+        const mode = resolvePrimaryShortcut({ ...settings, hotkey: "" }, existing.bindings).mode;
         if (primary) {
           const updatedBindings = existing.bindings.map((b) =>
             b.id === primary.id ? { ...b, enabled: false } : b,
@@ -177,7 +168,7 @@ export function useRecordingHotkey() {
             settings: { bindings: updatedBindings },
           });
         }
-        await updateSettings({ hotkey: pendingHotkey });
+        await updateSettings({ hotkey: pendingHotkey, recording_mode: mode });
         setNativeBinding(null);
         setIsEditingHotkey(false);
         setPendingHotkey("");

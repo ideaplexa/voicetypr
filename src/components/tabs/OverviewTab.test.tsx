@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings, TranscriptionHistory } from "@/types";
@@ -42,7 +42,7 @@ describe("Home", () => {
   it("shows the active local engine, key caps, recording mode and setup chips", async () => {
     const onNavigate = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} />);
-    expect(screen.getByText("Ready · Parakeet V3 runs on this Mac")).toBeInTheDocument();
+    expect(screen.getByText("Ready · Parakeet V3 runs on this Mac")).toHaveClass("text-foreground");
     expect(screen.getByRole("heading", { name: /Press.*and start talking/ })).toBeInTheDocument();
     expect(screen.getByText("⌥")).toBeInTheDocument();
     expect(screen.getByText("Space")).toBeInTheDocument();
@@ -65,11 +65,16 @@ describe("Home", () => {
     expect(screen.getByText(/Press once to start, again to paste/)).toBeInTheDocument();
   });
 
-  it("loads a bare-modifier primary through the real active-trigger hook", async () => {
-    mock.settings = { ...mock.settings, hotkey: "" };
-    mock.shortcutBindings = [{ id: "onboarding-primary-hold", action: "hold_to_record", shortcut: "", trigger: "hold", enabled: true, allow_risky_combo: false, trigger_kind: "modifier_hold", modifier: { modifier: "alt", side: "right" } }];
+  it("shows the enabled native Hold shortcut and its effective mode despite a stale toggle setting and disabled preferred id", async () => {
+    mock.settings = { ...mock.settings, hotkey: "", recording_mode: "toggle" };
+    mock.shortcutBindings = [
+      { id: "onboarding-primary-hold", action: "hold_to_record", shortcut: "", trigger: "hold", enabled: false, allow_risky_combo: false, trigger_kind: "modifier_hold", modifier: { modifier: "meta", side: "left" } },
+      { id: "active-native", action: "hold_to_record", shortcut: "", trigger: "hold", enabled: true, allow_risky_combo: false, trigger_kind: "modifier_hold", modifier: { modifier: "alt", side: "right" } },
+    ];
     render(<OverviewTab />);
     expect(await screen.findByText("Right ⌥")).toBeInTheDocument();
+    expect(screen.getByText(/Hold to talk, release to paste/)).toBeInTheDocument();
+    expect(screen.queryByText("Left ⌘")).not.toBeInTheDocument();
     expect(screen.queryByText("your recording shortcut")).not.toBeInTheDocument();
   });
 
@@ -81,7 +86,9 @@ describe("Home", () => {
     mock.readiness = { ...mock.readiness, ...readiness };
     const onNavigate = vi.fn(); const onNavigateSettingsPane = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onNavigateSettingsPane} />);
-    await userEvent.setup().click(screen.getByRole("button", { name: new RegExp(label) }));
+    const warning = screen.getByRole("button", { name: new RegExp(label) });
+    expect(warning).toHaveClass("text-foreground");
+    await userEvent.setup().click(warning);
     if (pane) expect(onNavigateSettingsPane).toHaveBeenCalledWith(pane);
     else expect(onNavigate).toHaveBeenCalledWith(screenId);
   });
@@ -167,7 +174,7 @@ describe("Home", () => {
     expect(screen.getByRole("img", { name: /1 dictations on/ })).toBeInTheDocument();
   });
 
-  it("reports neutral words until dictation completes and changes the textarea", async () => {
+  it("keeps test dictation neutral through input before idle and cancellation", async () => {
     render(<OverviewTab />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Try a test dictation" }));
@@ -178,39 +185,13 @@ describe("Home", () => {
     fireEvent.paste(textarea, { clipboardData: { getData: () => "manually pasted" } });
     fireEvent.change(textarea, { target: { value: "This really works manually pasted" } });
     expect(screen.getByText("5 words")).toBeInTheDocument();
-    await waitFor(() => expect(mock.listeners["recording-state-changed"]).toBeDefined());
-    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["transcription-complete"]({ payload: {} }); });
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
     fireEvent.change(textarea, { target: { value: "This really works manually pasted now" } });
-    expect(screen.getByText("Worked · 6 words")).toBeInTheDocument();
+    expect(screen.getByText("6 words")).toBeInTheDocument();
+    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
+    expect(mock.listeners["recording-state-changed"]).toBeUndefined();
+    expect(mock.listeners["transcription-complete"]).toBeUndefined();
     await user.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Test dictation" })).not.toBeInTheDocument());
   });
 
-  it("accepts a transcribing-to-idle completion but ignores a cancelled recording", async () => {
-    render(<OverviewTab />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
-    await waitFor(() => expect(mock.listeners["recording-state-changed"]).toBeDefined());
-    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
-    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["recording-state-changed"]({ payload: { state: "idle" } }); });
-    fireEvent.change(textarea, { target: { value: "manual paste" } });
-    expect(screen.getByText("2 words")).toBeInTheDocument();
-    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["recording-state-changed"]({ payload: { state: "transcribing" } }); mock.listeners["recording-state-changed"]({ payload: { state: "idle" } }); });
-    fireEvent.change(textarea, { target: { value: "manual paste dictation" } });
-    expect(screen.getByText("Worked · 3 words")).toBeInTheDocument();
-  });
-
-  it("does not call delayed typing a successful test dictation", async () => {
-    render(<OverviewTab />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
-    await waitFor(() => expect(mock.listeners["transcription-complete"]).toBeDefined());
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-    act(() => { mock.listeners["recording-state-changed"]({ payload: { state: "recording" } }); mock.listeners["transcription-complete"]({ payload: {} }); });
-    clock.mockReturnValue(now + 3001);
-    fireEvent.change(screen.getByRole("textbox", { name: "Test dictation" }), { target: { value: "typed later" } });
-    expect(screen.getByText("2 words")).toBeInTheDocument();
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-    clock.mockRestore();
-  });
 });

@@ -162,6 +162,7 @@ describe("GeneralSettings combo-hotkey save", () => {
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
         hotkey: "CommandOrControl+Shift+Space",
+        recording_mode: "push_to_talk",
       });
     });
 
@@ -182,6 +183,29 @@ describe("GeneralSettings combo-hotkey save", () => {
     // Other bindings must be left intact.
     const cancel = bindings.find((b) => b.id === "cancel-recording");
     expect(cancel?.enabled).toBe(true);
+  });
+
+  it("carries an effective native Hold mode into a replacement combo and preserves other shortcuts", async () => {
+    mockSettings.recording_mode = "toggle";
+    const disabledPreferred = { ...nativePrimary, enabled: false };
+    const active = { ...nativePrimary, id: "custom-hold" };
+    mockInvoke.mockImplementation(async (cmd) => cmd === "get_shortcut_settings"
+      ? { bindings: [disabledPreferred, active, cancelBinding] }
+      : undefined);
+    render(<RecordingSettings />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hold to talk" })).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    act(() => hotkeyInput.onChange?.("CommandOrControl+Shift+Space"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalledWith({
+      hotkey: "CommandOrControl+Shift+Space", recording_mode: "push_to_talk",
+    }));
+    const update = mockInvoke.mock.calls.find(([cmd]) => cmd === "update_shortcut_settings");
+    expect(readBindings(update?.[1])).toEqual([
+      disabledPreferred,
+      expect.objectContaining({ id: "custom-hold", enabled: false }),
+      cancelBinding,
+    ]);
   });
 
   it.each([

@@ -227,6 +227,40 @@ describe("Transcription source cards", () => {
     }
   });
 
+  it("keeps an inactive Cloud group controlled through selection, external change, and failed selection", async () => {
+    const user = userEvent.setup();
+    const props = renderModels({ currentModel: "tiny", sourceFilter: "cloud" });
+    const openaiRadio = screen.getByRole("radio", { name: "Use OpenAI" });
+    const sonioxRadio = screen.getByRole("radio", { name: "Use Soniox" });
+    expect(openaiRadio).toHaveAttribute("aria-checked", "false");
+    await user.click(openaiRadio);
+    await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("openai"));
+    props.rerender(<ModelsSection {...props} currentModel="openai" />);
+    expect(openaiRadio).toHaveAttribute("aria-checked", "true");
+    props.rerender(<ModelsSection {...props} currentModel="soniox" />);
+    expect(openaiRadio).toHaveAttribute("aria-checked", "false");
+    expect(sonioxRadio).toHaveAttribute("aria-checked", "true");
+    await user.click(openaiRadio);
+    await waitFor(() => expect(props.onSelect).toHaveBeenCalledTimes(2));
+    // A failed parent update leaves currentModel on Soniox and restores its checked state.
+    props.rerender(<ModelsSection {...props} currentModel="soniox" />);
+    expect(openaiRadio).toHaveAttribute("aria-checked", "false");
+    expect(sonioxRadio).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("keeps an inactive Local group controlled after a failed selection", async () => {
+    const user = userEvent.setup();
+    const props = renderModels({ models: [["tiny", whisper]], currentModel: "openai", sourceFilter: "local" });
+    const radio = screen.getByRole("radio", { name: "Use Whisper Tiny" });
+    expect(radio).toHaveAttribute("aria-checked", "false");
+    await user.click(radio);
+    await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("tiny"));
+    props.rerender(<ModelsSection {...props} currentModel="openai" />);
+    expect(radio).toHaveAttribute("aria-checked", "false");
+    props.rerender(<ModelsSection {...props} currentModel="tiny" />);
+    expect(radio).toHaveAttribute("aria-checked", "true");
+  });
+
   it("follows a later engine-family change, but preserves browsing within the same family", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<ControlledSources currentModel="tiny" />);

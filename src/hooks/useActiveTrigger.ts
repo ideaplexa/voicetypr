@@ -2,12 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import type { ShortcutBinding, ShortcutSettings } from "@/types/shortcuts";
 import {
-  findActivePrimaryBinding,
   formatModifierLabel,
   formatPrimaryHotkeyLabel,
 } from "@/lib/shortcut-display";
+import { resolvePrimaryShortcut, type PrimaryMode } from "@/lib/primary-shortcut";
 
 export interface ActiveTrigger {
+  mode: PrimaryMode;
   /** Full descriptive label for the active primary trigger (source of truth). */
   label: string;
   /** Raw combo hotkey string, if the active primary is a combo (`settings.hotkey`). */
@@ -30,18 +31,19 @@ export interface ActiveTrigger {
  * native primary binding in that case and resolves the label via the shared
  * `formatPrimaryHotkeyLabel`, keeping every display site consistent.
  */
-export function useActiveTrigger(hotkey: string | undefined): ActiveTrigger {
-  const [binding, setBinding] = useState<ShortcutBinding | null>(null);
+export function useActiveTrigger(settings: { hotkey?: string; recording_mode?: PrimaryMode } | null | undefined): ActiveTrigger {
+  const [bindings, setBindings] = useState<ShortcutBinding[]>([]);
+  const hotkey = settings?.hotkey;
 
   useEffect(() => {
     if (hotkey) return;
     let cancelled = false;
     invoke<ShortcutSettings>("get_shortcut_settings")
       .then((result) => {
-        if (!cancelled) setBinding(findActivePrimaryBinding(result.bindings));
+        if (!cancelled) setBindings(result.bindings);
       })
       .catch(() => {
-        if (!cancelled) setBinding(null);
+        if (!cancelled) setBindings([]);
       });
     return () => {
       cancelled = true;
@@ -50,11 +52,13 @@ export function useActiveTrigger(hotkey: string | undefined): ActiveTrigger {
 
   // A combo primary (non-empty hotkey) wins; ignore any stale bare-modifier
   // binding still in state from a previous empty-hotkey load.
-  const effectiveBinding = hotkey ? null : binding;
+  const primary = resolvePrimaryShortcut(settings, bindings);
+  const effectiveBinding = primary.binding;
   const kbdLabel =
     hotkey || (effectiveBinding?.modifier ? formatModifierLabel(effectiveBinding.modifier) : null);
 
   return {
+    mode: primary.mode,
     label: formatPrimaryHotkeyLabel(effectiveBinding, hotkey),
     hotkey,
     kbdLabel: kbdLabel ?? formatPrimaryHotkeyLabel(effectiveBinding, hotkey),

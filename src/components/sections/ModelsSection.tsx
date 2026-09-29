@@ -145,7 +145,7 @@ export function ModelsSection({
           >
             <RadioGroup
               aria-label="Local models"
-              value={trackedSource === "local" ? currentModel : undefined}
+              value={trackedSource === "local" ? currentModel ?? "" : ""}
               onValueChange={selectModel}
             >
               <LocalModelsList
@@ -180,7 +180,7 @@ export function ModelsSection({
             <RadioGroup
               className="divide-y divide-border"
               aria-label="Cloud providers"
-              value={trackedSource === "cloud" ? currentModel : undefined}
+              value={trackedSource === "cloud" ? currentModel ?? "" : ""}
               onValueChange={selectModel}
             >
               {providers.map(([name, model]) => (

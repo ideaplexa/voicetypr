@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AudioLines, ChevronRight, Languages, Sparkles, TextCursorInput } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -87,15 +86,12 @@ function RecentRow({ item }: { item: TranscriptionHistory }) {
 export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilterChange }: { onNavigate?: (section: ScreenId) => void; onNavigateSettingsPane?: (pane: SettingsPane) => void; onSourceFilterChange?: (source: SourceFilter) => void }) {
   const readiness = useReadiness();
   const { settings } = useSettings();
-  const trigger = useActiveTrigger(settings?.hotkey);
+  const trigger = useActiveTrigger(settings);
   const remoteLabel = useActiveRemoteLabel(readiness.remoteSelected);
   const { downloadProgress } = useModelManagementContext();
   const [polishLabel, setPolishLabel] = useState("Off");
   const [tryOpen, setTryOpen] = useState(false);
   const [tryText, setTryText] = useState("");
-  const [tryWorked, setTryWorked] = useState(false);
-  const tryTextRef = useRef("");
-  const completionRef = useRef<{ until: number; text: string } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const { history, totalCount, isLoading, loadError, refreshHistory } = useTranscriptionHistory({ limit: 500, includeTotalCount: true });
   const stats = useOverviewStats(history, totalCount);
@@ -117,32 +113,6 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
     return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    if (!tryOpen) return;
-    let active = true;
-    let recording = false;
-    let transcribing = false;
-    const unlisteners: Array<() => void> = [];
-    const onState = ({ payload }: { payload: { state: string } }) => {
-      if (payload.state === "recording") { recording = true; transcribing = false; completionRef.current = null; }
-      else if (payload.state === "transcribing" && recording) transcribing = true;
-      else if (payload.state === "idle" && transcribing) {
-        completionRef.current = { until: Date.now() + 3000, text: tryTextRef.current };
-        recording = false; transcribing = false;
-      } else if (payload.state === "error") { recording = false; transcribing = false; completionRef.current = null; }
-    };
-    const onComplete = () => {
-      if (recording) completionRef.current = { until: Date.now() + 3000, text: tryTextRef.current };
-      recording = false; transcribing = false;
-    };
-    const keepListener = (pending: Promise<() => void>) => {
-      void pending.then((unlisten) => { if (active) unlisteners.push(unlisten); else unlisten(); }).catch(() => {});
-    };
-    keepListener(listen<{ state: string }>("recording-state-changed", onState));
-    keepListener(listen("transcription-complete", onComplete));
-    return () => { active = false; unlisteners.forEach((unlisten) => unlisten()); completionRef.current = null; };
-  }, [tryOpen]);
-
   const chips = [
     { label: "Engine", value: engineLabel, screen: "transcription" as const, icon: AudioLines },
     { label: "Language", value: language, screen: "transcription" as const, icon: Languages },
@@ -153,11 +123,11 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   return <SettingsPage wide container className="min-h-full gap-5 pt-0">
     <section className="rounded-[14px] border border-border bg-card p-6 sm:p-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-2.5 py-1 text-xs font-medium text-sage"><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-warn focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3" /></button>}
-        <Button variant="outline" size="sm" onClick={() => { setTryText(""); tryTextRef.current = ""; setTryWorked(false); completionRef.current = null; setTryOpen(true); }}>Try a test dictation</Button>
+        {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-2.5 py-1 text-xs font-medium text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
+        <Button variant="outline" size="sm" onClick={() => { setTryText(""); setTryOpen(true); }}>Try a test dictation</Button>
       </div>
       <h1 className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-[clamp(1.5rem,3vw,2rem)] font-semibold leading-tight tracking-tight text-foreground">Press <KeyCaps caps={caps} size="lg" /> and start talking</h1>
-      <p className="mt-3 text-[13px] text-muted-foreground">{settings?.recording_mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>
+      <p className="mt-3 text-[13px] text-muted-foreground">{trigger.mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>
       <div className="mt-5 flex flex-wrap gap-2">{chips.map(({ label, value, screen, icon: Icon }) => <button key={label} type="button" onClick={() => onNavigate?.(screen)} className="inline-flex min-h-8 max-w-full items-center gap-2 rounded-[10px] bg-muted px-3 text-xs text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /><span className="text-muted-foreground">{label}</span><strong className="truncate font-medium">{value}</strong></button>)}</div>
     </section>
 
@@ -175,7 +145,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
       </SettingsCard>
     </div>
 
-    <Dialog open={tryOpen} onOpenChange={setTryOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Try a test dictation</DialogTitle><DialogDescription>Place the cursor below, press <KeyCaps caps={caps} />, and speak. Your words will appear here.</DialogDescription></DialogHeader><Textarea autoFocus aria-label="Test dictation" placeholder="Dictate here…" value={tryText} onChange={(event) => { const next = event.target.value; const completion = completionRef.current; setTryWorked(Boolean(completion && Date.now() <= completion.until && next !== completion.text && next.trim())); completionRef.current = null; tryTextRef.current = next; setTryText(next); }} className="min-h-32" /><p role="status" className={cn("text-sm", tryWorked ? "text-sage" : "text-muted-foreground")}>{tryText.trim() ? `${tryWorked ? "Worked · " : ""}${tryText.trim().split(/\s+/).length} words` : "Waiting for your dictation…"}</p></DialogContent></Dialog>
+    <Dialog open={tryOpen} onOpenChange={setTryOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Try a test dictation</DialogTitle><DialogDescription>Place the cursor below, press <KeyCaps caps={caps} />, and speak. Your words will appear here.</DialogDescription></DialogHeader><Textarea autoFocus aria-label="Test dictation" placeholder="Dictate here…" value={tryText} onChange={(event) => setTryText(event.target.value)} className="min-h-32" />{/* TODO(plan 079 S7): use the backend paste-outcome event for an honest delivery signal. */}<p role="status" className="text-sm text-muted-foreground">{tryText.trim() ? `${tryText.trim().split(/\s+/).length} words` : "Waiting for your dictation…"}</p></DialogContent></Dialog>
     <ShareStatsModal open={shareOpen} onOpenChange={setShareOpen} stats={{ totalTranscriptions: stats.totalTranscriptions, totalWords: stats.totalWords, timeSavedDisplay: formatTimeSaved(stats) }} />
   </SettingsPage>;
 }

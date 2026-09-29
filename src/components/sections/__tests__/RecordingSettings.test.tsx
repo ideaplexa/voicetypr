@@ -447,7 +447,7 @@ describe("RecordingSettings hotkey editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("set_global_shortcut", { shortcut: "Control+Space" });
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "Control+Space" });
+      expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "Control+Space", recording_mode: "toggle" });
     });
   });
 
@@ -457,7 +457,7 @@ describe("RecordingSettings hotkey editor", () => {
     fireEvent.click(screen.getByTestId("mock-trigger-combo"));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByTestId("hotkey-input")).not.toBeInTheDocument());
-    expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "Control+Space" });
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ hotkey: "Control+Space", recording_mode: "toggle" });
     mockSettings = { ...baseSettings, hotkey: "Control+Space" };
     rerender(<RecordingSettings />);
     expect(screen.getByLabelText("Current shortcut: Ctrl+Space")).toBeInTheDocument();

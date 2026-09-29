@@ -14,7 +14,7 @@ export function RecordingsTab({ onTranscribeFile }: { onTranscribeFile?: () => v
   // bare-modifier primary intentionally leaves `settings.hotkey` empty (the real
   // trigger lives in ShortcutSettings), so `kbdLabel` falls back to the modifier
   // key token — never the stale "Cmd+Shift+Space" default.
-  const { kbdLabel } = useActiveTrigger(settings?.hotkey);
+  const { kbdLabel } = useActiveTrigger(settings);
 
   return (
     <RecentRecordings
