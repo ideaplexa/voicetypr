@@ -85,7 +85,7 @@ jobs:
       CARGO_TARGET_DIR: 'D:\b\app'
       RUST_BACKTRACE: 1
       POSTHOG_PROJECT_TOKEN: ${{ vars.POSTHOG_PROJECT_TOKEN }}
-      VULKAN_RUNTIME_VERSION: 1.3.290.0
+      VULKAN_RUNTIME_VERSION: 1.3.296.0
       WHISPER_VULKAN_TARGET_DIR: 'D:\b\vulkan'
       WINAPPCLI_VERSION: v0.3.2
       WINAPPCLI_X64_SHA256: 231373a4605ce7749172a70534ebab9305f91116e7f68d25cc73051372a6c579
@@ -166,7 +166,7 @@ jobs:
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@b394a1abed9cb019d8e637eeadac93d73e0853da
         with:
-          vulkan_version: 1.3.290.0
+          vulkan_version: 1.3.296.0
           install_runtime: true
           cache: true
 
