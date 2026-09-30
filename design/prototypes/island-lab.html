@@ -105,17 +105,17 @@ canvas.glyph{position:absolute;width:44px;height:24px;will-change:left,bottom}
 #L-start{max-width:418px}
 .stage[data-platform="win"] #L-start{max-width:358px}
 .lbl{font-size:12.5px}.dim{color:var(--t2)}.sage{color:var(--sage)}.mono{font-family:var(--mono);font-size:12px;color:var(--t2);font-variant-numeric:tabular-nums}
-.chips{display:flex;gap:5px;min-width:0}
-#styleChip{position:relative;overflow:hidden;flex:none}#engChip{flex:none}#micChip{position:relative;overflow:hidden;flex:0 1 auto;min-width:0}
-.chips.reserve #engChip{margin-left:auto}
+.chips{display:flex;gap:4px;min-width:0}
+#styleChip{position:relative;overflow:hidden;flex:none}#engChip{flex:none;margin-left:auto}#micChip{position:relative;overflow:hidden;flex:0 1 auto;min-width:0}
+#micChip .nm{flex-shrink:0}#micBad{flex:none} /* a springing chip reveals its text at the clipped edge; the name never squeezes */
 #styleName,#doneLbl,#doneCount{display:inline-block}
 #styleChip:not(.raw) #styleName{color:var(--sage)}
-.chip .mic{flex:none;display:block}
-.chip{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.07);border-radius:8px;padding:4px 8px;font-size:11.5px;color:rgba(255,255,255,.75);border:0;font-family:inherit;cursor:default;white-space:nowrap;transition:background-color .2s ease,color .2s ease}
+.chip .mic{flex:none;display:block;width:10px;height:10px}
+.chip{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.07);border-radius:8px;padding:4px 6px;font-size:11px;color:rgba(255,255,255,.75);border:0;font-family:inherit;cursor:default;white-space:nowrap;transition:background-color .2s ease,color .2s ease}
 .chip.tap{cursor:pointer}.chip.tap:hover,.chip.tap.hov{background:rgba(255,255,255,.13)}
 .chip.raw{color:var(--t2);background:rgba(255,255,255,.045)}
 .chip.bad{background:rgba(242,139,122,.16);color:var(--red)}
-.chip .d{width:6px;height:6px;border-radius:50%;background:var(--sage);flex:none}
+.chip .d{width:5px;height:5px;border-radius:50%;background:var(--sage);flex:none}
 .chip .d.idle{background:rgba(255,255,255,.32)}
 .chip .nm{max-width:152px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .stage[data-platform="win"] .chip .nm{max-width:118px}
@@ -123,6 +123,7 @@ canvas.glyph{position:absolute;width:44px;height:24px;will-change:left,bottom}
 .chip .warn{display:inline-flex;align-items:center;gap:4px;color:var(--amber)}.chip .warn .d{background:var(--amber)}
 .appname{font-size:14px;font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis}
 .act{font:inherit;font-size:11.5px;color:var(--t1);background:rgba(255,255,255,.09);border:0;border-radius:8px;padding:4px 9px;cursor:pointer;white-space:nowrap}
+.act.tog{display:inline-grid;justify-items:center}.act.tog>.al{grid-area:1/1}.act>.alt{visibility:hidden}.act:not(.tog)>.alt{display:none}
 .island.hovered .act{background:rgba(255,255,255,.14)}
 .act:hover,.act.hov,.island.hovered .act:hover,.island.hovered .act.hov{background:rgba(255,255,255,.2)}
 .act.primary{background:rgba(143,209,168,.18);color:var(--sage)}
@@ -133,12 +134,15 @@ canvas.glyph{position:absolute;width:44px;height:24px;will-change:left,bottom}
 .round:hover,.round.hov{background:rgba(255,255,255,.2)}
 .ctl{display:inline-flex;gap:4px;overflow:hidden;margin-left:-8px;flex:none}
 .ctl .round:first-child{margin-left:6px}
-.words{flex:1 1 auto;min-width:0;height:30px;padding:9px 13px 0;font-size:12.5px;white-space:nowrap;overflow:hidden;overflow:clip;display:flex;justify-content:flex-end;-webkit-mask-image:linear-gradient(to right,transparent,#000 24px);mask-image:linear-gradient(to right,transparent,#000 24px)}
+.words{flex:1 1 auto;min-width:0;height:30px;padding:9px 13px 0;font-size:12.5px;white-space:nowrap;overflow:hidden;overflow:clip;display:flex;justify-content:flex-end;-webkit-mask-image:linear-gradient(to right,transparent,#000 24px,#000 calc(100% - 13px),transparent);mask-image:linear-gradient(to right,transparent,#000 24px,#000 calc(100% - 13px),transparent)} /* new words arrive through a soft right edge inside the padding; settled text ends at 100% - 13px */
 .words.fits{justify-content:flex-start;padding-left:var(--row-left,13px)}
-.wl{flex:none;white-space:nowrap}
-#tentative{color:rgba(255,255,255,.5);font-style:italic}
+.wl{position:relative;flex:none;white-space:nowrap} /* positioned: a swapped tentative word's ghost sits where the word was */
+#tentative{color:rgba(255,255,255,.45);font-style:italic}
+#fresh{display:inline-block;white-space:pre;transform-origin:0 72%} /* newly committed words keep the tentative slant (a skew about the baseline, as synthetic italic draws it) and ease upright with their colour */
+#fresh:empty{display:none}
 .drain{width:48px;height:3px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;flex:none}
 .drain i{display:block;height:100%;width:100%;background:rgba(255,255,255,.72);border-radius:2px}
+.drain.under{position:absolute;left:38px;right:14px;bottom:4px;width:auto;height:2px;border-radius:1px} /* drains under the label, so the hint fits the live card's centred row */
 .hold{position:absolute;left:16px;right:16px;bottom:4px;height:2px;border-radius:1px;background:rgba(255,255,255,.05);overflow:hidden}
 .hold i{display:block;height:100%;width:100%;background:rgba(255,255,255,.2);border-radius:1px}
 .acts{display:flex;align-items:center;gap:5px;padding:0 12px 10px 12px}
@@ -151,7 +155,7 @@ canvas.glyph{position:absolute;width:44px;height:24px;will-change:left,bottom}
 .stage[data-platform="win"] .card{transform-origin:100% 100%}
 .card.block{border-color:rgba(242,179,91,.55)}
 .card.bad{border-color:rgba(242,139,122,.5);background:#1D1214}
-.card.ok{border-color:rgba(143,209,168,.45);min-width:0}
+.card.ok{border-color:rgba(143,209,168,.45);min-width:0;justify-content:center} /* turns in place: the card closes around its centred content */
 .stage[data-wall="dark"] .card{border-color:rgba(255,255,255,.34)}
 .stage[data-wall="dark"] .card.block{border-color:rgba(242,179,91,.75)}
 .stage[data-wall="dark"] .card.bad{border-color:rgba(242,139,122,.7)}
@@ -167,9 +171,10 @@ canvas.glyph{position:absolute;width:44px;height:24px;will-change:left,bottom}
 .card.back .tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .ci{width:16px;text-align:center;flex:none;line-height:19px}
 .card .ci svg{display:block;margin:2.5px auto 0}
-.card:has(>.txt small:not([hidden])) .ci{align-self:flex-start}
-.card:not(.back):has(>.txt small:not([hidden]))>.x{align-self:flex-start;margin-top:1px}
-.card:not(.back):has(>.txt small:not([hidden]))>.act{align-self:flex-start;margin-top:-2px}
+.card:has(>.txt:not(.cghost) small:not([hidden])) .ci{align-self:flex-start}
+.card:not(.back):has(>.txt:not(.cghost) small:not([hidden]))>.txt{align-self:flex-start}
+.card:not(.back):has(>.txt:not(.cghost) small:not([hidden]))>.x{align-self:flex-start;margin-top:1px}
+.card:not(.back):has(>.txt:not(.cghost) small:not([hidden]))>.act{align-self:flex-start;margin-top:-2px}
 .card .txt{display:flex;flex-direction:column;min-width:0;flex:1}
 .card .ttl{display:flex;align-items:center;gap:6px;min-width:0}
 .card .tt{min-width:0}
@@ -179,6 +184,10 @@ canvas.glyph{position:absolute;width:44px;height:24px;will-change:left,bottom}
 .stage[data-wall="dark"] .card .txt small{color:rgba(255,255,255,.66)}
 .card .n{font-family:var(--mono);font-size:11px;color:var(--t2);background:rgba(255,255,255,.08);border-radius:6px;padding:1px 5px}
 .card .x{background:transparent;border:0;color:var(--t2);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px}
+.card.back[data-depth="1"]{background:#2E2F33}.card.back[data-depth="2"]{background:#45464A}
+.stage[data-wall="dark"] .card.back[data-depth="1"]{background:#1C1D21}.stage[data-wall="dark"] .card.back[data-depth="2"]{background:#26272B}
+.card.back[data-depth="1"]>.txt{opacity:.75}.card.back[data-depth="2"]>.txt{opacity:.62}
+.card.back .n{color:rgba(255,255,255,.85);background:rgba(255,255,255,.14)}
 .more{grid-area:1/1;align-self:start;justify-self:center;transform:translateY(-30px);font-family:var(--mono);font-size:10.5px;color:#fff;background:rgba(18,19,22,.74);border-radius:6px;padding:1px 7px;opacity:0}
 .stage[data-platform="win"] .more{justify-self:end}
 /* lab overlays */
@@ -260,11 +269,11 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
               </div>
               <div class="layer fill" id="L-words" style="bottom:32px"><div class="words"><span class="wl" id="wl"><span id="committed"></span><span id="fresh"></span><span id="tentative"></span></span></div></div>
               <div class="layer" id="L-row"><div class="row" style="padding:0 12px 0 86px"><span class="sage" id="spark" style="font-size:11px">✦</span><span class="mono" id="timer">0:01</span><span class="ctl" id="hoverCtl" style="width:0"><button class="round" type="button" title="Stop" id="stopBtn"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><rect width="8" height="8" rx="1.5" fill="currentColor"/></svg></button><button class="round" type="button" title="Cancel" id="cancelBtn">✕</button></span></div></div>
-              <div class="layer" id="L-hint"><div class="row" style="padding:0 14px 0 38px;gap:10px"><span class="lbl">Esc again to cancel</span><span class="drain"><i id="drain"></i></span></div></div>
+              <div class="layer" id="L-hint"><div class="row" style="padding:0 14px 0 38px;position:relative"><span class="lbl">Press Esc again to cancel</span><span class="drain under"><i id="drain"></i></span></div></div>
               <div class="layer" id="L-work"><div class="row" style="padding:0 12px 0 60px"><span class="lbl"><span id="workLbl">Transcribing</span><span id="workMeta"></span></span><button class="act" id="skipBtn" type="button">Skip</button></div></div>
               <div class="layer" id="L-done" style="flex-direction:column;align-items:stretch"><div class="row" style="padding:0 14px 0 60px"><span class="lbl" id="doneTxt"><span id="doneLbl">Pasted into Slack</span> <span class="dim" id="doneCount">· 8 words</span><span class="dim" id="doneExtra"></span></span></div><div class="acts" id="doneActs"></div><span class="hold" id="doneHold" aria-hidden="true"><i></i></span></div>
               <div class="layer" id="L-notice" style="flex-direction:column;align-items:stretch"><div class="row" style="padding:0 14px 0 60px"><span class="lbl"><span id="nTitle"></span><span class="dim" id="nMeta"></span></span></div><div class="acts" id="nActs"></div></div>
-              <div class="layer" id="L-fail"><div class="row" style="padding:0 10px 0 60px;gap:8px"><span class="lbl"><span id="fTitle"></span><span class="dim" id="fMeta"></span></span><span id="fActs" style="display:flex;gap:5px"></span></div></div>
+              <div class="layer" id="L-fail"><div class="row" style="padding:0 13px 0 60px;gap:8px"><span class="lbl"><span id="fTitle"></span><span class="dim" id="fMeta"></span></span><span id="fActs" style="display:flex;gap:5px"></span></div></div>
               <div class="layer" id="L-note"><div class="row" style="padding:0 14px 0 38px;gap:7px"><span class="dim" id="noteIco"></span><span class="lbl dim" id="noteTxt"></span></div></div>
               <div class="layer" id="L-dead"><div class="row" style="padding:0 10px 0 60px"><span class="lbl">No audio <span class="dim">— check your microphone</span></span><span class="mono" id="timer3">0:10</span><span class="ctl" style="width:54px"><button class="round" type="button" title="Stop" id="deadStop"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><rect width="8" height="8" rx="1.5" fill="currentColor"/></svg></button><button class="round" type="button" title="Cancel" id="deadCancel">✕</button></span></div></div>
             </div>
@@ -387,18 +396,19 @@ const pasteKey = () => view.platform === "win" ? "Ctrl+V" : "⌘V";
 // ---------- feedback kinds ----------
 const SVG_MICOFF = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="5.6" y="1.8" width="4.8" height="8" rx="2.4"/><path d="M3.4 7.6a4.6 4.6 0 0 0 9.2 0M8 12.2v2"/><path d="M2.4 2.4l11.2 11.2"/></svg>';
 const SVG_CLIP = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="10" height="11.5" rx="2"/><rect x="5.5" y="1.4" width="5" height="3" rx="1" fill="currentColor" stroke="none"/><path d="M5.6 8.2h4.8M5.6 10.9h3" stroke-linecap="round"/></svg>';
+const SVG_CLOCK = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.6V8l2.3 1.6"/></svg>';
 const FB = {
   nomic: {sticky: true, cls: "bad", icon: SVG_MICOFF, t: "No microphone", sub: "Plug one in or choose another", act: "Choose mic"},
   license: {sticky: true, cls: "bad", icon: "!", t: "License expired", sub: "Renew to keep dictating", act: "Renew"},
   nopaste: {sticky: true, cls: "block", icon: SVG_CLIP, t: () => "Copied — press " + pasteKey(), sub: "The app didn't accept the paste", act: "Got it"},
   key: {sticky: true, cls: "block", icon: "✦", t: "Polish key invalid", sub: "Raw text was pasted instead", act: "Fix key"},
-  short: {dur: 2.2, icon: "◷", t: () => "Too short — " + (ctx.mode === "hold" ? "hold" : "talk") + " a bit longer"},
+  short: {dur: 2.2, icon: SVG_CLOCK, t: () => "Too short — " + (ctx.mode === "hold" ? "hold" : "talk") + " a bit longer"},
   nospeech: {dur: 3, icon: "◌", t: "No speech detected", sub: "Try speaking closer to the microphone"},
   update: {dur: 3.2, icon: "↑", t: "Update ready", sub: "Installs when you quit"},
 };
 
 // ---------- scenario spec (verbatim) ----------
-const SPEC = [{"id":"hold-slack-quick-reply","name":"Hold-to-talk: 8-word reply in Slack","category":"everyday","why":"Shows the basic loop (dot, start card, listen, arc, check, dot) finishing in under 8 s, with the start card overlapping real speech so it never feels like a delay or takes focus.","grounding":"recording_mode push_to_talk with default ptt_hotkey Alt+Space (commands/settings.rs); pill events recording-state-changed, transcription-started, enhancing-started, paste-outcome {outcome:'pasted', words} (commands/text.rs); STOP_POST_ROLL 250 ms (audio/recorder.rs); island-lab.html go()/finishListening()/paste(). Today pill.tsx and commands/pill_feedback.rs hold 'pasted' for 1200 ms, not 3.2 s, and terminal display waits on plan 080 task 1 focus safety. Proposed: the start card and Undo/Original/Retry.","steps":[{"at":0,"action":"Slack is frontmost with the caret in the #design-review compose box, under Maya's 'Can we move the review? Thursday works for me.' User presses and holds ⌥Space.","expect":"The 12 px dot dips to 98% for one beat, then springs open into the start card (about 360 px wide with the full mic name, radius 22). It shows the 28 px aubergine Slack icon and 'Dictating into' over 'Slack' (never '#design-review'). Chips: '✦ Message' in sage, '🎙 MacBook Pro Microphone' with a sage live dot, and 'Parakeet'. The Slack caret is still blinking and the feedback stack is tucked."},{"at":0.3,"action":"User starts speaking: 'Sounds good, Thursday at three works for me.'","expect":"The small wave in the card moves with each syllable. The card stays put, with no early fold and no words."},{"at":1.2,"action":"The 1.2 s start-card window ends while the key is still held.","expect":"The card content fades out and the island springs down to the compact row (about 150×34, radius 17). The Slack icon shrinks from 28 to 18 px and glides to the left edge in one move, with no cross-fade. The 9-bar wave sits beside it and the timer reads '0:01'. No live-words card appears, because Parakeet preview is off."},{"at":2.6,"action":"User stops talking but keeps holding the key.","expect":"The bars drop to a flat baseline, the sage peak caps fade a moment later, and the timer reads '0:02'. There is no idle shimmer or pulse."},{"at":2.8,"action":"User releases ⌥Space.","expect":"The wave stays live and the timer keeps counting for the 250 ms post-roll. The state does not change yet."},{"at":3.05,"action":"transcription-started fires.","expect":"The nine bars collapse into a white spinning arc beside the Slack icon, which does not move. The label reads 'Transcribing'. The island's width re-springs to fit without a jump."},{"at":3.5,"action":"enhancing-started fires.","expect":"The label reads 'Polishing · Message' with 'Message' in sage. The arc is sage and slower, a 'Skip' button appears, and the height stays 34 px."},{"at":4.4,"action":"paste-outcome {outcome:'pasted', words:8} arrives.","expect":"The arc sweeps closed into a sage check. The island grows into a two-row card: 'Pasted into Slack · 8 words', then 'Undo', 'Original' and a sage 'Retry with Soniox'. The Slack compose box holds 'Sounds good, Thursday at 3 works for me.', unsent, with the caret after 'me.'."},{"at":7.6,"action":"No hover for 3.2 s.","expect":"The card springs back down to the 12 px dot and the icon fades out with it. The Slack caret is still blinking in the compose box."}]},{"id":"toggle-outlook-email-live-words","name":"Press-to-toggle: 30-word Outlook reply with live words","category":"everyday","why":"Shows live words growing the island upward without jitter while committed text only ever grows, and shows a notice that arrives mid-dictation waiting until the island settles.","grounding":"Toggle hotkey CommandOrControl+Shift+Space (commands/settings.rs). transcription-stream partials carry session, revision, committed and tentative text (transcription/stream.rs; invariant 10; pill.tsx isFreshStreamEvent). Whisper decode-ahead is the live-preview engine that works today. AppFormattingRule {app_name, preset} (writing/settings.rs) and 'outlook' in writing/app_category.rs. Lab: the L-live layer and renderStack() tucking. Proposed: pausing a timed notice while the stack is tucked. The lab counts expiry from fire time, so today a notice can expire unseen.","steps":[{"at":0,"action":"The Outlook reply 'Re: Q4 pricing deck' is frontmost with the caret in the body. User taps ⌘⇧Space once.","expect":"A 2% dip, then the start card: 28 px blue Outlook icon and 'Dictating into' over 'Outlook', with no subject line. Chips: '✦ Writing' (from the Outlook per-app rule), '🎙 AirPods Pro' with a live dot, and 'Whisper Turbo'. The Outlook caret keeps blinking."},{"at":0.4,"action":"User starts: 'Hi Priya, thanks for the deck. I think we should move the enterprise tier above the fold…'","expect":"The small wave in the card moves with speech. The card shows no words yet."},{"at":1.2,"action":"The start-card window ends.","expect":"The card folds into the compact island: the 18 px Outlook icon on the left, the moving wave, '0:01', and a small sage ✦ by the timer."},{"at":2.1,"action":"First partial: committed 'Hi Priya,', tentative 'thanks for'.","expect":"The island grows upward only. Its bottom edge stays 26 px above the screen edge and the icon, wave and timer row do not move. It springs to about 300×64, radius 20. Above the wave row: 'Hi Priya,' in white, then 'thanks for' in italic 45% white."},{"at":4.6,"action":"Partial rev 9: committed '…I think we should move the', tentative 'enterprise tear'.","expect":"The line is right-aligned and the oldest words slide out under the 24 px left fade. The width stays locked at 300 px, with no re-spring per word. The timer reads '0:04'."},{"at":5.3,"action":"Partial rev 10 corrects the word to 'enterprise tier' and commits it.","expect":"Only the italic tail changes, from 'tear' to 'tier', and then turns white. The committed words never shift, shrink or rewrite."},{"at":6,"action":"An 'Update ready' notice fires in the background.","expect":"Nothing changes on screen: no card, badge or bump appears above the live card. The notice's display time has not started."},{"at":9.6,"action":"User finishes '…to go through it with Daniel?' and taps ⌘⇧Space.","expect":"The wave stays live for the 250 ms post-roll, and 'with Daniel' still lands in the words line."},{"at":9.85,"action":"transcription-started fires.","expect":"The words line fades out in 80 ms. The top edge comes down to the 34 px row while the bottom edge stays fixed. The bars fold into a white spinning arc beside the Outlook icon, labelled 'Transcribing'."},{"at":10.5,"action":"enhancing-started fires.","expect":"'Polishing · Writing', with a sage, slower arc and 'Skip'."},{"at":11.8,"action":"paste-outcome {outcome:'pasted', words:30} arrives.","expect":"The arc closes into a check: 'Pasted into Outlook · 30 words', with 'Undo', 'Original' and 'Retry with Soniox'. The Outlook body reads 'Hi Priya,', a blank line, then 'Thanks for the deck. I think we should move the enterprise tier above the fold. Could we take 30 minutes on Thursday to go through it with Daniel?'. The stack is still tucked."},{"at":15,"action":"The pasted card times out (3.2 s, no hover).","expect":"The island settles to the 12 px dot. Only then does the stack untuck: the card 'Update ready' / 'Installs when you quit' rises 8 px and fades in above the dot, and its full 3.2 s starts now."}]},{"id":"whatsapp-original-then-undo","name":"After paste: switch to Original, then Undo from the wrong chat","category":"everyday","why":"Shows that regret after a paste is cheap: hovering holds the done card, Original swaps the text in place, and Undo removes it cleanly. This matters because the island never shows which chat the text went to.","grounding":"The lab's origBtn/undoBtn on the L-done layer. EnhancementPreset::Message for AppCategory Chat ('whatsapp' in writing/app_category.rs). Privacy rule: the app name only, never window titles (the lab's 'Honest context' note). Proposed: the Original/Undo backend, hover pausing the settle, the 'Polished' toggle-back and the 'Removed from' copy.","steps":[{"at":0,"action":"WhatsApp is frontmost with a chat open. User holds ⌥Space.","expect":"Start card: green WhatsApp icon and 'Dictating into' over 'WhatsApp', with no chat name. Chips: '✦ Message', '🎙 MacBook Pro Microphone' with a live dot, and 'Parakeet'."},{"at":0.3,"action":"User says: 'lol yeah I'm gonna be like ten minutes late, save me a seat.'","expect":"The mic dot and the card wave react. The card stays open."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: WhatsApp icon, wave, '0:01'."},{"at":3.5,"action":"User releases ⌥Space.","expect":"250 ms of post-roll, then at 3.75 the wave folds into a white arc labelled 'Transcribing'."},{"at":4.3,"action":"enhancing-started fires.","expect":"'Polishing · Message' with a sage arc and 'Skip'."},{"at":5.3,"action":"paste-outcome {outcome:'pasted', words:10} arrives.","expect":"A check with 'Pasted into WhatsApp · 10 words' and 'Undo', 'Original', 'Retry with Soniox'. The WhatsApp compose box reads 'Yeah, running about ten minutes late — save me a seat.' and is not sent."},{"at":5.8,"action":"The pointer rests on the pasted card.","expect":"The buttons show hover fills, the card stays open while hovered (its thin settle line along the bottom stops draining), and WhatsApp keeps focus."},{"at":6.2,"action":"User clicks 'Original'.","expect":"The compose box now reads 'lol yeah I'm gonna be like ten minutes late, save me a seat', with no duplicate text. The label cross-fades to 'Original in WhatsApp · 13 words' and the check re-ticks once without re-morphing. The button now reads 'Polished'; 'Undo' and 'Retry with Soniox' remain."},{"at":9,"action":"User realises this is the family group, not Sam, and clicks 'Undo', 0.5 s after the card would have settled without the hover.","expect":"The compose box is empty and shows its 'Type a message' placeholder. The action row leaves in 80 ms and the island springs to one row reading 'Removed from WhatsApp' in dim text, with no buttons."},{"at":9.6,"action":"The pointer leaves the island.","expect":"The 'Removed from WhatsApp' row stays for about 0.9 s."},{"at":10.5,"action":"The removal line times out.","expect":"The island settles to the 12 px dot and WhatsApp is still focused."}]},{"id":"start-chip-style-switch-slack","name":"Tap the style chip to post a Slack announcement as Writing","category":"interruption","why":"Shows that the start card can be interrupted with the pointer without losing audio or focus, that a style tap applies to this dictation only, and that the card waits while the user is choosing.","grounding":"The lab's styleChip onclick cycles STYLES (Message → Clean → Writing → Notes → Code), matching the user-facing EnhancementPreset styles in ai/prompts.rs. accept_first_mouse(true) and the non-activating panel come from plan 080 task 1. Proposed: hover holding the start card, the 300 ms grace, and a per-dictation style override.","steps":[{"at":0,"action":"Slack #launch is focused and the default style is Message. User taps ⌘⇧Space.","expect":"A 2% dip, then the start card: Slack icon, 'Dictating into' over 'Slack', and chips '✦ Message', '🎙 AirPods Pro' with a live dot, and 'Parakeet'."},{"at":0.5,"action":"The pointer moves onto the start card.","expect":"The style chip shows its hover fill. No Stop or Cancel appear on the start card, and the mic dot keeps reacting to room noise."},{"at":0.7,"action":"User clicks the style chip.","expect":"The chip label cross-fades from 'Message' to 'Clean' and the ✦ stays sage. The chip width re-springs; the card holds its width. Slack's caret keeps blinking."},{"at":1.1,"action":"User clicks the chip again.","expect":"The chip reads '✦ Writing'. The chip re-springs to fit and the chips beside it glide with it; the card, icon and wave stay put."},{"at":1.5,"action":"The pointer leaves the card, which has now been open past its 1.2 s mark.","expect":"The card stays open for a 300 ms grace."},{"at":1.8,"action":"The grace ends. User begins: 'Hey team, beta four is out. It fixes the pill stealing focus on Windows. Please update and let us know what breaks.'","expect":"The card folds into the compact island: 18 px Slack icon, moving wave and a timer counting from the key press ('0:02' by the time it fades in), so the time spent choosing counted as recording. No live-words card appears (Parakeet preview is off)."},{"at":8,"action":"User taps ⌘⇧Space to stop.","expect":"The wave stays live for the 250 ms post-roll."},{"at":8.25,"action":"transcription-started fires.","expect":"The wave folds into a white arc labelled 'Transcribing'."},{"at":8.8,"action":"enhancing-started fires.","expect":"The label reads 'Polishing · Writing', the tapped style, not 'Message'."},{"at":9.9,"action":"paste-outcome {outcome:'pasted', words:22} arrives.","expect":"A check with 'Pasted into Slack · 22 words' and 'Undo', 'Original', 'Retry with Soniox'. Slack reads 'Hey team, beta 4 is out. It fixes the pill stealing focus on Windows. Please update and let us know what breaks.'"},{"at":13.1,"action":"The pasted card times out.","expect":"The island settles to the 12 px dot."},{"at":13.5,"action":"User taps ⌘⇧Space for the next message. The scenario ends on this start card.","expect":"The start card shows '✦ Message' again: the tap changed only that one dictation, not the saved default."}]},{"id":"cancel-mid-live-words","name":"Cancel with Esc twice during live words, then with ✕","category":"interruption","why":"Shows that the double-Esc guard lives inside the island, that the first Esc only shows a hint, and that a cancel collapses straight to the dot with nothing pasted or kept.","grounding":"recording/escape_handler.rs: the first Esc sends pill_toast('Press ESC again to cancel', 2000 ms) and opens a 2 s window; a second Esc inside it calls cancel_recording. Stale stream revisions are rejected (pill.tsx isFreshStreamEvent; invariant 10). The pill's ✕ invokes cancel_recording. Proposed: the hint shown inside the island, because the toast window is tucked while dictating.","steps":[{"at":0,"action":"Slack #design-review is focused. User taps ⌘⇧Space.","expect":"Start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', '🎙 MacBook Pro Microphone' with a live dot, and 'Whisper Turbo'."},{"at":1.2,"action":"User speaks: 'Thursday at 3 works, I'll move the review and send…'","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":2.4,"action":"The first committed words arrive.","expect":"The island grows upward into the live card showing 'Thursday at 3 works,' plus an italic 'I'll'."},{"at":5,"action":"User keeps talking.","expect":"The live card shows committed '…3 works, I'll move the review', with the oldest words fading out at the left, plus an italic 'and send'. The timer reads '0:05'."},{"at":5.4,"action":"User presses Esc once.","expect":"Nothing is cancelled. The wave row swaps (80 ms out, 60 ms in) to 'Esc again to cancel' with a thin bar that drains over 2 s. The words above keep updating, and no separate toast window appears."},{"at":7.4,"action":"2 s pass with no second Esc.","expect":"The hint fades, and the wave row and timer ('0:07') come back."},{"at":8.8,"action":"User presses Esc.","expect":"The hint appears again with a full bar."},{"at":9.2,"action":"User presses Esc again inside the window.","expect":"The words fade out in 80 ms with a blur, and the live card collapses on one spring straight to the 12 px dot, with no arc and no check. The Slack compose box is unchanged and no 'Cancelled' card appears."},{"at":9.4,"action":"A late partial from the cancelled session arrives.","expect":"It is ignored and the dot stays a dot."},{"at":11,"action":"User taps ⌘⇧Space again.","expect":"The normal start card opens."},{"at":12.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":12.6,"action":"The pointer moves onto the compact island.","expect":"Round Stop ■ and Cancel ✕ slide out after the timer (0 to 54 px over 250 ms), and the island re-springs wider."},{"at":13.1,"action":"User clicks ✕.","expect":"One click cancels, with no confirmation. The island returns to the dot, the Slack compose box is unchanged, and Slack keeps focus."}]},{"id":"retarget-while-finishing","name":"New dictation while the last one is finishing","category":"interruption","why":"Shows that a press during Polishing is acknowledged but not queued, and that a press on the Pasted card redirects the running spring to a new start card instead of playing the old ending first.","grounding":"recording/hotkeys.rs ignores presses in Stopping/Transcribing ('Ignoring hotkey in state'), and Polishing counts as Transcribing. After paste-outcome the backend is Idle, so a press starts a new generation, and pill.tsx setPillState('listening') calls clearFeedback. commands/pill_feedback.rs schedules the terminal hide by generation ('pasted' = 1200 ms), so the old hide cannot close the new recording; that path goes live with plan 080 task 1. The 1.2 s native hide must be aligned with the island's 3.2 s done card. Proposed: the busy shake, and dropping the previous Undo from the island.","steps":[{"at":0,"action":"Slack is focused. User taps ⌘⇧Space and starts: 'Thursday at 3 works, I'll move the review and send the agenda before.'","expect":"Start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', mic with a live dot, 'Whisper Turbo'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":2.4,"action":"The first committed words arrive.","expect":"The island grows upward into the live card: 'Thursday at 3 works,' plus italic 'I'll move'."},{"at":5.6,"action":"User taps ⌘⇧Space to stop.","expect":"The wave and words stay live for the 250 ms post-roll."},{"at":5.85,"action":"transcription-started fires.","expect":"The live card folds down to the compact row, and a white arc reads 'Transcribing'."},{"at":6.4,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip' and a sage arc."},{"at":6.9,"action":"User taps ⌘⇧Space again. The backend ignores it because it is still Transcribing.","expect":"No start card opens and nothing is queued. The island dips 2% and gives one 3 px side-to-side shake, and the label stays 'Polishing · Message'."},{"at":7.8,"action":"paste-outcome {outcome:'pasted', words:13} arrives.","expect":"A sage check with 'Pasted into Slack · 13 words' and 'Undo', 'Original', 'Retry with Soniox'. Slack's compose box holds 'Thursday at 3 works — I'll move the review and send the agenda before.'"},{"at":8.5,"action":"User taps ⌘⇧Space again, 0.7 s into the done card.","expect":"The done card's content leaves in 80 ms and the running spring redirects straight to the start card without passing through the dot. The Slack icon grows from 18 to 28 px in place and the check morphs back into the wave. The card reads 'Dictating into Slack' with '✦ Message'. There is no Undo on the island now."},{"at":9,"action":"The native terminal hide from the first dictation fires, 1.2 s after 'pasted'.","expect":"Nothing happens: the start card does not hide or shrink."},{"at":9.7,"action":"The start-card window ends. User says 'Also booking room 4B.'","expect":"Compact island: Slack icon, wave, '0:01'. No partial arrives in this short take, so it stays compact."},{"at":11,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing' at 11.25."},{"at":11.8,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip'."},{"at":12.6,"action":"paste-outcome {outcome:'pasted', words:4} arrives.","expect":"A sage check with 'Pasted into Slack · 4 words' and 'Undo', 'Original', 'Retry with Soniox'."},{"at":15.8,"action":"No hover for 3.2 s.","expect":"The island settles to the 12 px dot."}]},{"id":"no-mic-at-press","name":"No microphone at key press","category":"failure","why":"Shows that a failed start closes within a second and leaves one red card, that repeat presses merge into it, and that it clears itself when the device returns.","grounding":"commands/audio.rs start_recording: a recorder error containing 'device' or 'not found' sends recording-state-changed {state:'error'} and pill_toast_with_suggestion('No microphone found', 'Connect a microphone and try again'). The recovery signal is audio-devices-updated (audio/device_watcher.rs). The lab has FB.nomic and dictate() bumps it. pill.tsx currently flashes the raw payload.error string. The same blocked-at-press pattern would cover license-required (validate_recording_requirements), which today also calls focus_main_window. Proposed: the red mic chip, the early bail, ×N on repeat and the sage auto-resolve.","steps":[{"at":0,"action":"Slack #design-review is focused with an empty compose box. The selected input is 'AirPods Pro', which are still in their case. User taps ⌘⇧Space.","expect":"The dot dips 2% and springs into the start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', '🎙 AirPods Pro' with a grey (not live) dot, and 'Parakeet'. The stack is tucked."},{"at":0.3,"action":"The recorder fails to start with 'device not found'.","expect":"The mic chip turns red and reads '🎙 AirPods Pro — not found'. The wave is flat and there is no timer. Nothing else in the card moves."},{"at":0.9,"action":"The island gives up before the 1.2 s window ends.","expect":"The card content leaves in 80 ms and the shape springs back to the 12 px dot, with the Slack icon shrinking into it. The stack untucks with one red card: 'No microphone found' / 'Connect a microphone and try again', with 'Choose mic' and ×. No second toast window appears, and the Slack compose box is unchanged."},{"at":3,"action":"User taps ⌘⇧Space again without fixing anything. The start fails the same way.","expect":"The dot dips 2% and stays a dot, with no start card. The red card pulses once and now shows '×2'. No second card appears."},{"at":5.5,"action":"User opens the AirPods case, and audio-devices-updated now lists 'AirPods Pro'.","expect":"The red card turns sage in place and reads '✓ AirPods Pro connected', and its × goes away."},{"at":7,"action":"The resolved card's 1.5 s ends.","expect":"The card lifts 6 px, blurs and leaves, so only the dot remains."},{"at":8,"action":"User taps ⌘⇧Space and says 'On my way.'","expect":"The normal start card opens, with '🎙 AirPods Pro' and a live sage dot."},{"at":9.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, moving wave, '0:01'."},{"at":9.8,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing'."},{"at":10.5,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip'."},{"at":11.1,"action":"paste-outcome {outcome:'pasted', words:3} arrives.","expect":"A sage check with 'Pasted into Slack · 3 words'. Slack's compose box reads 'On my way.'"},{"at":14.3,"action":"No hover for 3.2 s.","expect":"The island settles to the dot and the stack is empty."}]},{"id":"dead-mic-then-no-speech","name":"Silent mic while dictating, then no speech","category":"failure","why":"Shows that a problem found mid-dictation appears inside the island (the stack is tucked), and that a discarded take ends with no check and nothing pasted.","grounding":"audio/silence_detector.rs sets NO_SPEECH_WARNING_AFTER = 10 s. In commands/audio.rs, DeadMicWarn sends 'No audio detected — check your microphone' and Clear removes it. The pre-engine speech-evidence gate (HighConfidenceNoSpeech) skips the engine, deletes the audio and sends 'No speech detected' / 'Try speaking closer to the microphone'. That gate runs before transcription-started, so the arc comes from the stopping state, which pill.tsx already draws as 'transcribing'. useAppEvents.ts listens for no-speech-detected, but the backend never emits it. Proposed: the amber row inside the island while tucked, and click-to-Stop.","steps":[{"at":0,"action":"An Outlook reply 'Re: Thursday review' is focused. The MacBook is in clamshell mode, so its built-in mic hears nothing. User taps ⌘⇧Space.","expect":"Start card: Outlook icon, 'Dictating into' over 'Outlook', '✦ Writing', '🎙 MacBook Pro Microphone' with a live dot, and 'Parakeet'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Outlook icon, a flat wave at rest height, '0:01'."},{"at":4,"action":"User dictates two sentences, but no signal reaches the mic.","expect":"The wave stays flat and the timer reads '0:04'. No live-words card opens and no placeholder words appear."},{"at":10,"action":"DeadMicWarn fires after 10 s with no signal.","expect":"The stack stays tucked. The island widens on the spring into a row with a 1 px amber border: Outlook icon, an amber mic-off glyph where the wave was, 'No audio — check your microphone', '0:10', and ■ Stop and ✕ Cancel shown without hover."},{"at":12,"action":"User clicks ■ Stop in the amber row.","expect":"The first click works and Outlook keeps focus. The amber content leaves in 80 ms and the row shrinks to compact size. After the 250 ms post-roll, the flat wave folds into a white spinning arc labelled 'Transcribing'."},{"at":12.5,"action":"The speech-evidence gate finds no speech. The engine is skipped, the audio is deleted, and nothing is pasted.","expect":"The arc never closes into a check. It fades while the island springs to the dot. The stack untucks with a grey timed card: '◌ No speech detected' / 'Try speaking closer to the microphone'. The Outlook draft is unchanged."},{"at":15.5,"action":"The timed card expires after 3 s.","expect":"The card lifts and leaves, so only the dot remains."}]},{"id":"cloud-engine-offline","name":"Cloud engine unreachable offline, rescued by Parakeet","category":"failure","why":"Shows that when transcription fails, the island stays open with a way forward instead of silently losing the dictation.","grounding":"commands/audio.rs TranscriptionFailure::Local sends 'Transcription failed — try again' (1500 ms). Only with save_recordings on does it point to History. save_recordings defaults to false (commands/settings.rs), and finalize_in_flight_audio deletes the temp WAV whatever the outcome, so today the dictation is lost. There is no cloud-to-local fallback. Proposed: keep the failed clip in temp until the user chooses Retry or Discard, and add an in-island 'Retry with Parakeet' through the existing transcribe_audio_file path.","steps":[{"at":0,"action":"On a train, Wi-Fi has just dropped. The engine is Soniox, Parakeet is downloaded, Polish is off and a Notion page is focused. User taps ⌘⇧Space.","expect":"Start card: Notion 'N' icon, 'Dictating into' over 'Notion', a grey 'T Raw · no Polish' chip, '🎙 MacBook Pro Microphone' with a live dot, and 'Soniox'. No offline warning is guessed."},{"at":1.2,"action":"User starts: 'Notes from the vendor call: they can ship the new batch by the twelfth, pricing stays the same, and Ana will send the contract Friday.'","expect":"Compact island: Notion icon, wave moving with the voice, '0:01'."},{"at":5,"action":"User keeps talking. Recording is local, so it works offline.","expect":"The island stays compact and exactly the same size, with no live-words card and no placeholder words. The timer reads '0:05'."},{"at":8.6,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing · Soniox'."},{"at":9.6,"action":"The Soniox request fails because the DNS lookup fails.","expect":"The arc stops, turns amber and closes into a ring with '!'. The island stays open as one row reading 'Soniox unreachable · recording kept', with a sage 'Retry with Parakeet' and 'Discard'. Nothing is pasted and the stack stays tucked."},{"at":11,"action":"User clicks 'Retry with Parakeet'.","expect":"The first click works and Notion keeps focus. The amber content leaves and the ring spins white again with 'Transcribing · Parakeet'. The Notion icon stays in its slot on the row and never blinks out or moves up or down; it only rides the left edge as the island narrows."},{"at":12.2,"action":"Parakeet finishes. paste-outcome {outcome:'pasted', words:25} arrives.","expect":"The arc closes into a sage check: 'Pasted into Notion · 25 words' with only 'Undo', plus a dim 'via Parakeet' note. There is no Original (raw), and no Retry with Soniox while Soniox is unreachable. The note appears at the Notion caret."},{"at":15.4,"action":"No hover for 3.2 s.","expect":"The island settles to the dot. The stack is empty: the problem was resolved in place and no card is left behind."}]},{"id":"polish-fails-problems-stack","name":"Polish key invalid, then a failed paste: the stack under load","category":"failure","why":"Tests every stack rule at once: it tucks and pauses timers while dictating, repeats merge as ×N, blocking cards outlive timed ones, at most 3 cards show before '+N', and timed items leave oldest-first.","grounding":"commands/audio.rs: an AiProviderError::InvalidApiKey sends enhancing-failed {category:'invalid_api_key'} and 'AI key invalid — check Settings', but the unpolished text is still delivered (paste-outcome 'pasted'). A blocked paste keystroke returns PasteOutcome::LeftInClipboard, which sends paste-outcome 'copied' ('copied' = 1600 ms in commands/pill_feedback.rs) plus a 'Text copied' toast. emit_recording_too_short_feedback sends 'Recording shorter than 0.5 seconds'. The lab has FB.key/nopaste/short/update with fire() merging and oldest-first expiry. Proposed: the multi-card stack (FeedbackToast shows one toast today and the latest wins), timers pausing while tucked, the 'key invalid' mark on the style chip, and the toggle copy 'talk a bit longer' (pill.tsx always says 'hold a bit longer').","steps":[{"at":0,"action":"The stack shows a timed card 'Update ready' / 'Installs when you quit' with 2.0 s left. Slack #design-review is focused, Polish is on (Message) and the OpenAI key was revoked yesterday. User taps ⌘⇧Space and says 'Thursday at 3 works for me.'","expect":"The stack tucks (fades and drops 8 px) and the Update card's clock pauses at 2.0 s. Start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', mic with a live dot, 'Parakeet'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":2.8,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing'."},{"at":3.5,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip' and a sage arc."},{"at":4.1,"action":"enhancing-failed {category:'invalid_api_key'} arrives, and the unpolished text is pasted (6 words).","expect":"The arc flashes amber for 150 ms, then closes into the check because the text did land. The row reads 'Pasted into Slack · 6 words · no Polish' with 'Undo' and 'Fix key', and no Original or Retry. No separate 'AI key invalid' toast window appears."},{"at":7.3,"action":"The done card's 3.2 s ends.","expect":"The island returns to the dot and the stack untucks. In front is an amber card '✦ Polish key invalid' / 'OpenAI rejected the key — raw text was pasted', with 'Fix key' and ×. 'Update ready' peeks behind it at 70% opacity, and its clock resumes at 2.0 s."},{"at":7.8,"action":"User switches to Terminal, taps ⌘⇧Space and says 'git stash and pull origin main'.","expect":"The stack tucks and Update pauses with 1.5 s left. Start card: Terminal icon, 'Dictating into' over 'Terminal', a '✦ Code' chip with an amber dot and 'key invalid', mic, 'Parakeet'."},{"at":9,"action":"The start-card window ends.","expect":"Compact island: Terminal icon, wave, '0:01'."},{"at":10.4,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the arc shows 'Transcribing'."},{"at":11.1,"action":"enhancing-started fires.","expect":"'Polishing · Code' with 'Skip'."},{"at":11.6,"action":"Polish fails again, then the paste keystroke is refused. paste-outcome {outcome:'copied', words:6} arrives.","expect":"The arc closes into an amber clipboard glyph, not a check: 'Copied — press ⌘V · 6 words' with 'Got it'. There is no Undo. The extra 'Text copied' toast does not appear."},{"at":13.2,"action":"The 1.6 s copied time ends.","expect":"The island returns to the dot and the stack untucks with 3 cards. In front: amber '⧉ Copied — press ⌘V' / 'Terminal didn't accept the paste' with 'Got it'. Behind it: 'Polish key invalid ×2', merged and moved up rather than duplicated. At the back: 'Update ready', whose clock resumes at 1.5 s."},{"at":13.5,"action":"User taps ⌘⇧Space twice by accident, 0.35 s apart.","expect":"The stack tucks (Update pauses with 1.2 s left) and the start card begins to open."},{"at":13.85,"action":"The backend reports 'Recording shorter than 0.5 seconds'.","expect":"The nearly open start card retargets mid-spring straight to the dot, with no arc. The stack untucks with 4 items. Front to back it shows grey '◷ Too short — talk a bit longer', 'Copied — press ⌘V' and 'Polish key invalid ×2'. 'Update ready' is hidden and '+1 more' shows above the stack."},{"at":15.05,"action":"'Update ready' runs out. It is the oldest timed item, so it leaves first.","expect":"'+1 more' fades out and the three visible cards do not move."},{"at":16.05,"action":"'Too short' expires after 2.2 s.","expect":"The front card lifts and leaves. 'Copied — press ⌘V' comes to the front at full opacity with 'Polish key invalid ×2' behind it. Both blocking cards stay."}]},{"id":"cursor-code-style-retry-soniox","name":"Cursor switches to Code, then Retry with Soniox fixes jargon","category":"variant","why":"Shows a per-app style switch made visible and explained before speaking, and shows Retry with another engine as a calm redo in place that reuses the arc and check without starting a new session.","grounding":"AppFormattingRule {app_name:'Cursor', preset: Code} over the global Message (writing/settings.rs). AppCategory Code matches 'cursor' (writing/app_category.rs). EnhancementPreset::Code (ai/prompts.rs). The lab has APPS.cursor and retryBtn. Proposed: Retry itself (there is no backend re-transcribe or replace-last-paste yet), the 'Cursor rule' suffix and the 'Replaced in' copy.","steps":[{"at":0,"action":"Cursor is frontmost with the caret in its chat input. The global style is Message. User holds ⌥Space.","expect":"Start card: Cursor icon and 'Dictating into' over 'Cursor' (never 'main.rs — voicetypr'). The style chip reads '✦ Code' with a dim 'Cursor rule' suffix. Other chips: '🎙 MacBook Pro Microphone' with a live dot, and 'Parakeet'."},{"at":0.3,"action":"User says: 'Move the Tauri emit call into the pill window handler and use emit_to instead.'","expect":"The mic dot and card wave react, and the card stays open."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: 18 px Cursor icon, wave, '0:01'."},{"at":4.8,"action":"User releases ⌥Space.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing' at 5.05."},{"at":5.5,"action":"enhancing-started fires.","expect":"'Polishing · Code' with a sage arc and 'Skip'."},{"at":6.6,"action":"paste-outcome {outcome:'pasted', words:15} arrives.","expect":"A check with 'Pasted into Cursor · 15 words' and 'Undo', 'Original', 'Retry with Soniox'. The Cursor chat input reads 'Move the Tory `emit` call into the pill window handler and use emit two instead.'"},{"at":7.4,"action":"User spots 'Tory' and clicks 'Retry with Soniox'.","expect":"The first click works and Cursor keeps focus with the caret in the chat input. The action row fades out in 80 ms and the island springs down to one 34 px row. The check reopens into a white spinning arc labelled 'Retrying with Soniox', beside the same Cursor icon. There is no start card and no dot in between."},{"at":8.9,"action":"Soniox returns a transcript and Polish re-runs with Code.","expect":"'Polishing · Code' with a sage arc and 'Skip'."},{"at":9.9,"action":"The retry result replaces the earlier paste in place.","expect":"The arc closes into a check: 'Replaced in Cursor · 14 words' with 'Undo' and 'Original' and a dim 'via Soniox'. Retry is gone. The Cursor input reads 'Move the Tauri `emit` call into the pill window handler and use `emit_to` instead.' exactly once, with no duplicate text."},{"at":13.1,"action":"No hover for 3.2 s.","expect":"The island settles to the 12 px dot."}]},{"id":"polish-off-raw-notes-hover-stop","name":"Polish off: raw note in Apple Notes, stopped from the island","category":"variant","why":"Shows the raw path is honest (no ✦, no Polishing stage, no pointless Original) and that hovering the island gives a safe mouse Stop that never takes focus from the note.","grounding":"Polish off maps to EnhancementPreset::PersonalDictation, whose requires_ai_formatting() is false (ai/prompts.rs). The lab's go('start') shows 'Raw · no Polish' and hides the ✦ when polish=false, and has hoverCtl/stopBtn/cancelBtn. cancel_recording exists. accept_first_mouse comes from plan 080 task 1. Proposed: click-to-Stop as a user stop with post-roll (src/pill.tsx has only a Cancel × today), a non-tappable raw chip, and hiding Original on raw.","steps":[{"at":0,"action":"Apple Notes is frontmost with the caret at the end of the note 'Tuesday'. Polish is off. User taps ⌘⇧Space.","expect":"A 2% dip, then the start card: yellow Notes icon and 'Dictating into' over 'Notes'. Chips: a dim grey 'T Raw · no Polish' with no sage, no hover fill and a default cursor; '🎙 MacBook Pro Microphone' with a live dot; and 'Parakeet'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Notes icon, wave, '0:01', with no ✦ anywhere."},{"at":1.3,"action":"User says: 'Call the landlord about the heater, pick up the dry cleaning before six, and book the dentist for next week.'","expect":"The wave tracks speech and the timer counts."},{"at":7.6,"action":"The pointer moves onto the island.","expect":"Round Stop ■ and Cancel ✕ slide out after the timer (0 to 54 px over 250 ms). The island re-springs wider, while the icon and wave stay pinned at the left. The wave keeps moving and the timer reads '0:07'."},{"at":8.2,"action":"User clicks ■ Stop.","expect":"The first click works and Notes keeps its blinking caret. This counts as a user stop, so the wave stays live for the 250 ms post-roll and 'week' is not clipped. Stop and Cancel fold away."},{"at":8.45,"action":"transcription-started fires.","expect":"A white arc spins and the label reads 'Transcribing'. There is no Skip button."},{"at":9.3,"action":"paste-outcome {outcome:'pasted', words:20} arrives with no enhancing-started. The pointer moves off the island.","expect":"The white arc closes straight into a sage check with no Polishing step. The card reads 'Pasted into Notes · 20 words' with only 'Undo' and 'Retry with Soniox'; Original is hidden. The note ends with 'Call the landlord about the heater, pick up the dry cleaning before six, and book the dentist for next week.'"},{"at":12.5,"action":"No hover for 3.2 s.","expect":"The island settles to the 12 px dot."}]},{"id":"windows-portrait-outlook-then-vscode-admin","name":"Windows 11, portrait screen, bottom-right pill: Outlook, then VS Code running as admin","category":"variant","why":"Shows the island on Windows keeping focus with the target app, growing away from the screen edge, resetting its context between back-to-back apps, and using Ctrl+V wording when an elevated app refuses the paste.","grounding":"calculate_pill_position 'bottom-right' with DEFAULT_INDICATOR_OFFSET 10 (window_manager.rs, commands/settings.rs). constrain_window_position is compiled only for macOS (and tests), and calculate_toast_position centres the toast on the pill, so on Windows at bottom-right it can spill off-screen. paste_windows sends one SendInput Ctrl+V batch; 0 events injected (for example under UIPI) retries once, then returns Err and ends in PasteOutcome::LeftInClipboard, which sends paste-outcome 'copied' (commands/text.rs). pill.tsx shows 'Copied — press Ctrl+V' on Windows. Focus safety is plan 080 task 1 (focusable(false), WS_EX_NOACTIVATE, SWP_NOACTIVATE, accept_first_mouse). The lab's stack is centred at left:50%. Proposed: right-anchored growth, chip truncation, friendly process names (olk.exe shown as Outlook) and a right-aligned stack.","steps":[{"at":0,"action":"Windows 11 in light mode on a portrait 1080×1920 monitor at 150% (720×1280 logical, 48 px taskbar). The pill is bottom-right with a 10 px offset. New Outlook (olk.exe) is focused with the caret in a reply to Priya. The mic is 'Microphone Array (Intel® Smart Sound Technology for Digital Microphones)', the engine is Whisper Turbo, live preview is on, and the per-app styles are Outlook = Writing and VS Code = Code.","expect":"The 12 px dot sits 10 px from the right edge, just above the taskbar and fully on screen. The stack is empty."},{"at":0.3,"action":"User presses Ctrl+Shift+Space.","expect":"The dot dips 2%, then the start card opens leftward and upward with its right edge pinned 10 px from the screen edge; nothing goes past the edge or behind the taskbar. It shows Outlook's blue icon at 28 px and 'Dictating into' over 'Outlook', never 'olk.exe' or the subject. The chips fit on one line: '✦ Writing', '🎙 Microphone Array (Int…' with the sage live dot still visible after the ellipsis, and 'Whisper Turbo'. The card is at most 360 px wide. Outlook's title bar stays active and no Voicetypr button appears in the taskbar."},{"at":0.7,"action":"User clicks the '✦ Writing' chip once.","expect":"The first click registers and the chip reads '✦ Clean'. Outlook stays in the foreground with its caret in the reply."},{"at":0.9,"action":"The pointer leaves the card.","expect":"The card stays open for the 300 ms grace."},{"at":1.2,"action":"The grace ends. User says 'Hi Priya, Thursday at 3 works for me. Thanks, Sam.'","expect":"Compact island with its right edge pinned: the Outlook icon goes from 28 to 18 px without blinking out, the wave moves, and the timer reads '0:01'."},{"at":2.2,"action":"The first partial arrives.","expect":"The live card (300 px) grows upward and leftward with its right edge still pinned. The words are right-aligned with the newest word at the right edge: 'Hi Priya,' plus italic grey 'Thursday at'. The whole card is on screen."},{"at":4.2,"action":"User presses Ctrl+Shift+Space to stop.","expect":"After the 250 ms post-roll, the words fade in 80 ms, the card shrinks to one row (still pinned right), and the wave folds into the arc labelled 'Transcribing'. Outlook is still focused."},{"at":5,"action":"enhancing-started fires.","expect":"'Polishing · Clean' with 'Skip' and a sage arc."},{"at":5.8,"action":"The SendInput Ctrl+V lands. paste-outcome {outcome:'pasted', words:10} arrives.","expect":"A check with 'Pasted into Outlook · 10 words' and 'Undo', 'Original', 'Retry with Deepgram'. Outlook's body reads 'Hi Priya, Thursday at 3 works for me. Thanks, Sam.' and Outlook's title bar never went inactive."},{"at":9,"action":"No hover for 3.2 s.","expect":"The island settles to the dot in the same bottom-right spot, and the icon fades out."},{"at":9.3,"action":"User clicks into README.md in Visual Studio Code - Insiders, which runs as administrator.","expect":"The dot does not change, and VS Code is now the foreground app."},{"at":9.5,"action":"User presses Ctrl+Shift+Space.","expect":"The start card opens pinned right with VS Code Insiders' green icon and 'Dictating into' over 'Visual Studio Code - Insiders', ellipsized if it doesn't fit. Chips: '✦ Code', the same truncated mic chip with its live dot, and 'Whisper Turbo'. No frame shows the Outlook icon, the name 'Outlook' or the earlier 'Clean' choice."},{"at":10.7,"action":"The start-card window ends. User says 'Note: the build needs Rust 1.91 and the Vulkan sidecar.'","expect":"Compact island, pinned right: VS Code icon, wave, '0:01'."},{"at":11.6,"action":"The first partial arrives.","expect":"The live card grows up and to the left with its right edge pinned: 'Note: the build' plus italic grey 'needs Rust'."},{"at":13,"action":"User presses Ctrl+Shift+Space to stop.","expect":"After the 250 ms post-roll, the card shrinks to one row and the arc reads 'Transcribing'."},{"at":13.7,"action":"enhancing-started fires.","expect":"'Polishing · Code' with 'Skip'. The row stays fully on screen."},{"at":14.4,"action":"Windows blocks the Ctrl+V into the elevated VS Code. paste-outcome {outcome:'copied', words:10} arrives.","expect":"The arc ends on an amber clipboard glyph, not a check: 'Copied — press Ctrl+V · 10 words' (never '⌘V') with 'Got it'. There is no Undo, Original or Retry. VS Code is unchanged and still focused."},{"at":16,"action":"The 1.6 s copied time ends.","expect":"The island settles to the dot. An amber card appears above it, aligned to the island's right edge instead of centred on the dot: '⧉ Copied — press Ctrl+V' / 'VS Code didn't accept the paste', with 'Got it' and ×. The whole card is on screen."}]},{"id":"dark-desktop-reduced-motion","name":"Dark desktop with Reduce motion: a Slack dictation made of cross-fades","category":"variant","why":"Shows the island and stack staying legible on a near-black wallpaper, and Reduce motion, switched on while the app runs, turning every morph into a plain cross-fade while the level meter and progress arc keep carrying information.","grounding":"The prefers-reduced-motion fallback is a shared rule in plan 080 task 2, and src/pill.css already has a reduced-motion block. The lab reads matchMedia once at load (island-lab.html `reduce`), snaps springs instead of cross-fading, and still lifts and unblurs content in show() and stack cards (.card.enter/.leave). The pill's state nodes use role=status (pill.tsx). Proposed: the reduced-motion cross-fade choreography, the static check and the dark-wallpaper contrast targets.","steps":[{"at":0,"action":"macOS is in Dark appearance on a near-black wallpaper (#0B0B0C). Reduce motion was switched on in System Settings › Accessibility › Display while Voicetypr kept running. Slack (dark theme) #design-review is focused. The stack holds one blocking amber card from an earlier Terminal dictation: '⧉ Copied — press ⌘V' / 'Terminal didn't accept the paste'.","expect":"The 12 px dot is easy to find on black: its hairline ring (at least 3:1 against #0B0B0C) and inset highlight set it apart. Above it, the amber card's border and ⧉ icon are clearly visible, and its text is at least 4.5:1. Nothing moves."},{"at":0.8,"action":"User presses ⌘⇧Space and starts: 'Can we push the design review to Thursday at 3? Maya's out Wednesday and I want her in the room.'","expect":"There is no 2% dip, overshoot, 4 px lift or unblur. The amber card fades out in place, without the 8 px drop. The dot cross-fades (about 150 ms, opacity only) into the full-size start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', '🎙 MacBook Pro Microphone' with a live dot, and 'Whisper Turbo'. The grey 'Dictating into' is at least 4.5:1 on the card."},{"at":2,"action":"The start-card window ends.","expect":"The compact island cross-fades in at full size. The Slack icon appears at 18 px in place instead of gliding from 28 px. The wave bars still follow the voice level, and the timer reads '0:01'."},{"at":3,"action":"The first partial arrives.","expect":"The live card cross-fades in at full size instead of growing upward: 'Can we push' plus italic grey 'the design'. New words appear in place without sliding."},{"at":6.5,"action":"User presses ⌘⇧Space to stop.","expect":"The words and wave stay live for the 250 ms post-roll."},{"at":6.75,"action":"transcription-started fires.","expect":"The words and wave fade out while 'Transcribing' and the arc fade in, with no fold. The arc still rotates, because it is the only progress signal."},{"at":7.4,"action":"enhancing-started fires.","expect":"A cross-fade to 'Polishing · Message' with 'Skip'. The arc is sage."},{"at":8.4,"action":"paste-outcome {outcome:'pasted', words:20} arrives.","expect":"A fully drawn, static sage check appears, with no sweep, next to 'Pasted into Slack · 20 words' and 'Undo', 'Original', 'Retry with Soniox'. VoiceOver, if on, says 'Pasted into Slack, 20 words' once and never reads the text."},{"at":11.6,"action":"No hover for 3.2 s.","expect":"The island cross-fades to the dot. The same amber 'Copied — press ⌘V' card fades back in without rising: one card, not dismissed by the tuck, and no ×2."},{"at":12.4,"action":"User clicks 'Got it'.","expect":"The first click works and Slack keeps focus. The card fades out with no lift or blur, the stack is empty and only the dot remains."}]}];
+const SPEC = [{"id":"hold-slack-quick-reply","name":"Hold-to-talk: 8-word reply in Slack","category":"everyday","why":"Shows the basic loop (dot, start card, listen, arc, check, dot) finishing in under 8 s, with the start card overlapping real speech so it never feels like a delay or takes focus.","grounding":"recording_mode push_to_talk with default ptt_hotkey Alt+Space (commands/settings.rs); pill events recording-state-changed, transcription-started, enhancing-started, paste-outcome {outcome:'pasted', words} (commands/text.rs); STOP_POST_ROLL 250 ms (audio/recorder.rs); island-lab.html go()/finishListening()/paste(). Today pill.tsx and commands/pill_feedback.rs hold 'pasted' for 1200 ms, not 3.2 s, and terminal display waits on plan 080 task 1 focus safety. Proposed: the start card and Undo/Original/Retry.","steps":[{"at":0,"action":"Slack is frontmost with the caret in the #design-review compose box, under Maya's 'Can we move the review? Thursday works for me.' User presses and holds ⌥Space.","expect":"The 12 px dot dips to 98% for one beat, then springs open into the start card (about 330 px wide with the full mic name, radius 22). It shows the 28 px aubergine Slack icon and 'Dictating into' over 'Slack' (never '#design-review'). Chips: '✦ Message' in sage, '🎙 MacBook Pro Microphone' with a sage live dot, and 'Parakeet'. The Slack caret is still blinking and the feedback stack is tucked."},{"at":0.3,"action":"User starts speaking: 'Sounds good, Thursday at three works for me.'","expect":"The small wave in the card moves with each syllable. The card stays put, with no early fold and no words."},{"at":1.2,"action":"The 1.2 s start-card window ends while the key is still held.","expect":"The card content fades out and the island springs down to the compact row (about 150×34, radius 17). The Slack icon shrinks from 28 to 18 px and glides to the left edge in one move, with no cross-fade. The 9-bar wave sits beside it and the timer reads '0:01'. No live-words card appears, because Parakeet preview is off."},{"at":2.6,"action":"User stops talking but keeps holding the key.","expect":"The bars drop to a flat baseline, the sage peak caps fade a moment later, and the timer reads '0:02'. There is no idle shimmer or pulse."},{"at":2.8,"action":"User releases ⌥Space.","expect":"The wave stays live and the timer keeps counting for the 250 ms post-roll. The state does not change yet."},{"at":3.05,"action":"transcription-started fires.","expect":"The nine bars collapse into a white spinning arc beside the Slack icon, which does not move. The label reads 'Transcribing'. The island's width re-springs to fit without a jump."},{"at":3.5,"action":"enhancing-started fires.","expect":"The label reads 'Polishing · Message' with 'Message' in sage. The arc is sage and slower, a 'Skip' button appears, and the height stays 34 px."},{"at":4.4,"action":"paste-outcome {outcome:'pasted', words:8} arrives.","expect":"The arc sweeps closed into a sage check. The island grows into a two-row card: 'Pasted into Slack · 8 words', then 'Undo', 'Original' and a sage 'Retry with Soniox'. The Slack compose box holds 'Sounds good, Thursday at 3 works for me.', unsent, with the caret after 'me.'."},{"at":7.6,"action":"No hover for 3.2 s.","expect":"The card springs back down to the 12 px dot and the icon fades out with it. The Slack caret is still blinking in the compose box."}]},{"id":"toggle-outlook-email-live-words","name":"Press-to-toggle: 30-word Outlook reply with live words","category":"everyday","why":"Shows live words growing the island upward without jitter while committed text only ever grows, and shows a notice that arrives mid-dictation waiting until the island settles.","grounding":"Toggle hotkey CommandOrControl+Shift+Space (commands/settings.rs). transcription-stream partials carry session, revision, committed and tentative text (transcription/stream.rs; invariant 10; pill.tsx isFreshStreamEvent). Whisper decode-ahead is the live-preview engine that works today. AppFormattingRule {app_name, preset} (writing/settings.rs) and 'outlook' in writing/app_category.rs. Lab: the L-live layer and renderStack() tucking. Proposed: pausing a timed notice while the stack is tucked. The lab counts expiry from fire time, so today a notice can expire unseen.","steps":[{"at":0,"action":"The Outlook reply 'Re: Q4 pricing deck' is frontmost with the caret in the body. User taps ⌘⇧Space once.","expect":"A 2% dip, then the start card: 28 px blue Outlook icon and 'Dictating into' over 'Outlook', with no subject line. Chips: '✦ Writing' (from the Outlook per-app rule), '🎙 AirPods Pro' with a live dot, and 'Whisper Turbo'. The Outlook caret keeps blinking."},{"at":0.4,"action":"User starts: 'Hi Priya, thanks for the deck. I think we should move the enterprise tier above the fold…'","expect":"The small wave in the card moves with speech. The card shows no words yet."},{"at":1.2,"action":"The start-card window ends.","expect":"The card folds into the compact island: the 18 px Outlook icon on the left, the moving wave, '0:01', and a small sage ✦ by the timer."},{"at":2.1,"action":"First partial: committed 'Hi Priya,', tentative 'thanks for'.","expect":"The island grows upward only. Its bottom edge stays 26 px above the screen edge and the icon, wave and timer row do not move. It springs to about 300×64, radius 20. Above the wave row: 'Hi Priya,' in white, then 'thanks for' in italic 45% white."},{"at":4.6,"action":"Partial rev 9: committed '…I think we should move the', tentative 'enterprise tear'.","expect":"The line is right-aligned and the oldest words slide out under the 24 px left fade. The width stays locked at 300 px, with no re-spring per word. The timer reads '0:04'."},{"at":5.3,"action":"Partial rev 10 corrects the word to 'enterprise tier' and commits it.","expect":"Only the italic tail changes, from 'tear' to 'tier', and then turns white. The committed words never shift, shrink or rewrite."},{"at":6,"action":"An 'Update ready' notice fires in the background.","expect":"Nothing changes on screen: no card, badge or bump appears above the live card. The notice's display time has not started."},{"at":9.6,"action":"User finishes '…to go through it with Daniel?' and taps ⌘⇧Space.","expect":"The wave stays live for the 250 ms post-roll, and 'with Daniel' still lands in the words line."},{"at":9.85,"action":"transcription-started fires.","expect":"The words line fades out in 80 ms. The top edge comes down to the 34 px row while the bottom edge stays fixed. The bars fold into a white spinning arc beside the Outlook icon, labelled 'Transcribing'."},{"at":10.5,"action":"enhancing-started fires.","expect":"'Polishing · Writing', with a sage, slower arc and 'Skip'."},{"at":11.8,"action":"paste-outcome {outcome:'pasted', words:30} arrives.","expect":"The arc closes into a check: 'Pasted into Outlook · 30 words', with 'Undo', 'Original' and 'Retry with Soniox'. The Outlook body reads 'Hi Priya,', a blank line, then 'Thanks for the deck. I think we should move the enterprise tier above the fold. Could we take 30 minutes on Thursday to go through it with Daniel?'. The stack is still tucked."},{"at":15,"action":"The pasted card times out (3.2 s, no hover).","expect":"The island settles to the 12 px dot. Only then does the stack untuck: the card 'Update ready' / 'Installs when you quit' rises 8 px and fades in above the dot, and its full 3.2 s starts now."}]},{"id":"whatsapp-original-then-undo","name":"After paste: switch to Original, then Undo from the wrong chat","category":"everyday","why":"Shows that regret after a paste is cheap: hovering holds the done card, Original swaps the text in place, and Undo removes it cleanly. This matters because the island never shows which chat the text went to.","grounding":"The lab's origBtn/undoBtn on the L-done layer. EnhancementPreset::Message for AppCategory Chat ('whatsapp' in writing/app_category.rs). Privacy rule: the app name only, never window titles (the lab's 'Honest context' note). Proposed: the Original/Undo backend, hover pausing the settle, the 'Polished' toggle-back and the 'Removed from' copy.","steps":[{"at":0,"action":"WhatsApp is frontmost with a chat open. User holds ⌥Space.","expect":"Start card: green WhatsApp icon and 'Dictating into' over 'WhatsApp', with no chat name. Chips: '✦ Message', '🎙 MacBook Pro Microphone' with a live dot, and 'Parakeet'."},{"at":0.3,"action":"User says: 'lol yeah I'm gonna be like ten minutes late, save me a seat.'","expect":"The mic dot and the card wave react. The card stays open."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: WhatsApp icon, wave, '0:01'."},{"at":3.5,"action":"User releases ⌥Space.","expect":"250 ms of post-roll, then at 3.75 the wave folds into a white arc labelled 'Transcribing'."},{"at":4.3,"action":"enhancing-started fires.","expect":"'Polishing · Message' with a sage arc and 'Skip'."},{"at":5.3,"action":"paste-outcome {outcome:'pasted', words:10} arrives.","expect":"A check with 'Pasted into WhatsApp · 10 words' and 'Undo', 'Original', 'Retry with Soniox'. The WhatsApp compose box reads 'Yeah, running about ten minutes late — save me a seat.' and is not sent."},{"at":5.8,"action":"The pointer rests on the pasted card.","expect":"The buttons show hover fills, the card stays open while hovered (its thin settle line along the bottom stops draining), and WhatsApp keeps focus."},{"at":6.2,"action":"User clicks 'Original'.","expect":"The compose box now reads 'lol yeah I'm gonna be like ten minutes late, save me a seat', with no duplicate text. The label cross-fades to 'Original in WhatsApp · 13 words' and the check re-ticks once without re-morphing. The button now reads 'Polished'; 'Undo' and 'Retry with Soniox' remain."},{"at":9,"action":"User realises this is the family group, not Sam, and clicks 'Undo', 0.5 s after the card would have settled without the hover.","expect":"The compose box is empty and shows its 'Type a message' placeholder. The action row leaves in 80 ms and the island springs to one row reading 'Removed from WhatsApp' in dim text, with no buttons."},{"at":9.6,"action":"The pointer leaves the island.","expect":"The 'Removed from WhatsApp' row stays for about 0.9 s."},{"at":10.5,"action":"The removal line times out.","expect":"The island settles to the 12 px dot and WhatsApp is still focused."}]},{"id":"start-chip-style-switch-slack","name":"Tap the style chip to post a Slack announcement as Writing","category":"interruption","why":"Shows that the start card can be interrupted with the pointer without losing audio or focus, that a style tap applies to this dictation only, and that the card waits while the user is choosing.","grounding":"The lab's styleChip onclick cycles STYLES (Message → Clean → Writing → Notes → Code), matching the user-facing EnhancementPreset styles in ai/prompts.rs. accept_first_mouse(true) and the non-activating panel come from plan 080 task 1. Proposed: hover holding the start card, the 300 ms grace, and a per-dictation style override.","steps":[{"at":0,"action":"Slack #launch is focused and the default style is Message. User taps ⌘⇧Space.","expect":"A 2% dip, then the start card: Slack icon, 'Dictating into' over 'Slack', and chips '✦ Message', '🎙 AirPods Pro' with a live dot, and 'Parakeet'."},{"at":0.5,"action":"The pointer moves onto the start card.","expect":"The style chip shows its hover fill. No Stop or Cancel appear on the start card, and the mic dot keeps reacting to room noise."},{"at":0.7,"action":"User clicks the style chip.","expect":"The chip label cross-fades from 'Message' to 'Clean' and the ✦ stays sage. The chip width re-springs; the card holds its width. Slack's caret keeps blinking."},{"at":1.1,"action":"User clicks the chip again.","expect":"The chip reads '✦ Writing'. The chip re-springs to fit and the mic chip beside it glides with it; the engine chip, card, icon and wave stay put."},{"at":1.5,"action":"The pointer leaves the card, which has now been open past its 1.2 s mark.","expect":"The card stays open for a 300 ms grace."},{"at":1.8,"action":"The grace ends. User begins: 'Hey team, beta four is out. It fixes the pill stealing focus on Windows. Please update and let us know what breaks.'","expect":"The card folds into the compact island: 18 px Slack icon, moving wave and a timer counting from the key press ('0:02' by the time it fades in), so the time spent choosing counted as recording. No live-words card appears (Parakeet preview is off)."},{"at":8,"action":"User taps ⌘⇧Space to stop.","expect":"The wave stays live for the 250 ms post-roll."},{"at":8.25,"action":"transcription-started fires.","expect":"The wave folds into a white arc labelled 'Transcribing'."},{"at":8.8,"action":"enhancing-started fires.","expect":"The label reads 'Polishing · Writing', the tapped style, not 'Message'."},{"at":9.9,"action":"paste-outcome {outcome:'pasted', words:22} arrives.","expect":"A check with 'Pasted into Slack · 22 words' and 'Undo', 'Original', 'Retry with Soniox'. Slack reads 'Hey team, beta 4 is out. It fixes the pill stealing focus on Windows. Please update and let us know what breaks.'"},{"at":13.1,"action":"The pasted card times out.","expect":"The island settles to the 12 px dot."},{"at":13.5,"action":"User taps ⌘⇧Space for the next message. The scenario ends on this start card.","expect":"The start card shows '✦ Message' again: the tap changed only that one dictation, not the saved default."}]},{"id":"cancel-mid-live-words","name":"Cancel with Esc twice during live words, then with ✕","category":"interruption","why":"Shows that the double-Esc guard lives inside the island, that the first Esc only shows a hint, and that a cancel collapses straight to the dot with nothing pasted or kept.","grounding":"recording/escape_handler.rs: the first Esc sends pill_toast('Press ESC again to cancel', 2000 ms) and opens a 2 s window; a second Esc inside it calls cancel_recording. Stale stream revisions are rejected (pill.tsx isFreshStreamEvent; invariant 10). The pill's ✕ invokes cancel_recording. Proposed: the hint shown inside the island, because the toast window is tucked while dictating.","steps":[{"at":0,"action":"Slack #design-review is focused. User taps ⌘⇧Space.","expect":"Start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', '🎙 MacBook Pro Microphone' with a live dot, and 'Whisper Turbo'."},{"at":1.2,"action":"User speaks: 'Thursday at 3 works, I'll move the review and send…'","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":2.4,"action":"The first committed words arrive.","expect":"The island grows upward into the live card showing 'Thursday at 3 works,' plus an italic 'I'll'."},{"at":5,"action":"User keeps talking.","expect":"The live card shows committed '…3 works, I'll move the review', with the oldest words fading out at the left, plus an italic 'and send'. The timer reads '0:05'."},{"at":5.4,"action":"User presses Esc once.","expect":"Nothing is cancelled. The wave row swaps (80 ms out, 60 ms in) to 'Press Esc again to cancel' with a thin bar that drains over 2 s. The words above keep updating, and no separate toast window appears."},{"at":7.4,"action":"2 s pass with no second Esc.","expect":"The hint fades, and the wave row and timer ('0:07') come back."},{"at":8.8,"action":"User presses Esc.","expect":"The hint appears again with a full bar."},{"at":9.2,"action":"User presses Esc again inside the window.","expect":"The words fade out in 80 ms with a blur, and the live card collapses on one spring straight to the 12 px dot, with no arc and no check. The Slack compose box is unchanged and no 'Cancelled' card appears."},{"at":9.4,"action":"A late partial from the cancelled session arrives.","expect":"It is ignored and the dot stays a dot."},{"at":11,"action":"User taps ⌘⇧Space again.","expect":"The normal start card opens."},{"at":12.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":12.6,"action":"The pointer moves onto the compact island.","expect":"Round Stop ■ and Cancel ✕ slide out after the timer (0 to 54 px over 250 ms), and the island re-springs wider."},{"at":13.1,"action":"User clicks ✕.","expect":"One click cancels, with no confirmation. The island returns to the dot, the Slack compose box is unchanged, and Slack keeps focus."}]},{"id":"retarget-while-finishing","name":"New dictation while the last one is finishing","category":"interruption","why":"Shows that a press during Polishing is acknowledged but not queued, and that a press on the Pasted card redirects the running spring to a new start card instead of playing the old ending first.","grounding":"recording/hotkeys.rs ignores presses in Stopping/Transcribing ('Ignoring hotkey in state'), and Polishing counts as Transcribing. After paste-outcome the backend is Idle, so a press starts a new generation, and pill.tsx setPillState('listening') calls clearFeedback. commands/pill_feedback.rs schedules the terminal hide by generation ('pasted' = 1200 ms), so the old hide cannot close the new recording; that path goes live with plan 080 task 1. The 1.2 s native hide must be aligned with the island's 3.2 s done card. Proposed: the busy shake, and dropping the previous Undo from the island.","steps":[{"at":0,"action":"Slack is focused. User taps ⌘⇧Space and starts: 'Thursday at 3 works, I'll move the review and send the agenda before.'","expect":"Start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', mic with a live dot, 'Whisper Turbo'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":2.4,"action":"The first committed words arrive.","expect":"The island grows upward into the live card: 'Thursday at 3 works,' plus italic 'I'll move'."},{"at":5.6,"action":"User taps ⌘⇧Space to stop.","expect":"The wave and words stay live for the 250 ms post-roll."},{"at":5.85,"action":"transcription-started fires.","expect":"The live card folds down to the compact row, and a white arc reads 'Transcribing'."},{"at":6.4,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip' and a sage arc."},{"at":6.9,"action":"User taps ⌘⇧Space again. The backend ignores it because it is still Transcribing.","expect":"No start card opens and nothing is queued. The island dips 2% and gives one 3 px side-to-side shake, and the label stays 'Polishing · Message'."},{"at":7.8,"action":"paste-outcome {outcome:'pasted', words:13} arrives.","expect":"A sage check with 'Pasted into Slack · 13 words' and 'Undo', 'Original', 'Retry with Soniox'. Slack's compose box holds 'Thursday at 3 works — I'll move the review and send the agenda before.'"},{"at":8.5,"action":"User taps ⌘⇧Space again, 0.7 s into the done card.","expect":"The done card's content leaves in 80 ms and the running spring redirects straight to the start card without passing through the dot. The Slack icon grows from 18 to 28 px in place and the check morphs back into the wave. The card reads 'Dictating into Slack' with '✦ Message'. There is no Undo on the island now."},{"at":9,"action":"The native terminal hide from the first dictation fires, 1.2 s after 'pasted'.","expect":"Nothing happens: the start card does not hide or shrink."},{"at":9.7,"action":"The start-card window ends. User says 'Also booking room 4B.'","expect":"Compact island: Slack icon, wave, '0:01'. No partial arrives in this short take, so it stays compact."},{"at":11,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing' at 11.25."},{"at":11.8,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip'."},{"at":12.6,"action":"paste-outcome {outcome:'pasted', words:4} arrives.","expect":"A sage check with 'Pasted into Slack · 4 words' and 'Undo', 'Original', 'Retry with Soniox'."},{"at":15.8,"action":"No hover for 3.2 s.","expect":"The island settles to the 12 px dot."}]},{"id":"no-mic-at-press","name":"No microphone at key press","category":"failure","why":"Shows that a failed start closes within a second and leaves one red card, that repeat presses merge into it, and that it clears itself when the device returns.","grounding":"commands/audio.rs start_recording: a recorder error containing 'device' or 'not found' sends recording-state-changed {state:'error'} and pill_toast_with_suggestion('No microphone found', 'Connect a microphone and try again'). The recovery signal is audio-devices-updated (audio/device_watcher.rs). The lab has FB.nomic and dictate() bumps it. pill.tsx currently flashes the raw payload.error string. The same blocked-at-press pattern would cover license-required (validate_recording_requirements), which today also calls focus_main_window. Proposed: the red mic chip, the early bail, ×N on repeat and the sage auto-resolve.","steps":[{"at":0,"action":"Slack #design-review is focused with an empty compose box. The selected input is 'AirPods Pro', which are still in their case. User taps ⌘⇧Space.","expect":"The dot dips 2% and springs into the start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', '🎙 AirPods Pro' with a grey (not live) dot, and 'Parakeet'. The stack is tucked."},{"at":0.3,"action":"The recorder fails to start with 'device not found'.","expect":"The mic chip turns red and reads '🎙 AirPods Pro — not found'. The wave is flat and there is no timer. Nothing else in the card moves."},{"at":0.9,"action":"The island gives up before the 1.2 s window ends.","expect":"The card content leaves in 80 ms and the shape springs back to the 12 px dot, with the Slack icon shrinking into it. The stack untucks with one red card: 'No microphone found' / 'Connect a microphone and try again', with 'Choose mic' and ×. No second toast window appears, and the Slack compose box is unchanged."},{"at":3,"action":"User taps ⌘⇧Space again without fixing anything. The start fails the same way.","expect":"The dot dips 2% and stays a dot, with no start card. The red card pulses once and now shows '×2'. No second card appears."},{"at":5.5,"action":"User opens the AirPods case, and audio-devices-updated now lists 'AirPods Pro'.","expect":"The red card turns sage in place and reads '✓ AirPods Pro connected', and its × goes away."},{"at":7,"action":"The resolved card's 1.5 s ends.","expect":"The card lifts 6 px, blurs and leaves, so only the dot remains."},{"at":8,"action":"User taps ⌘⇧Space and says 'On my way.'","expect":"The normal start card opens, with '🎙 AirPods Pro' and a live sage dot."},{"at":9.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, moving wave, '0:01'."},{"at":9.8,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing'."},{"at":10.5,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip'."},{"at":11.1,"action":"paste-outcome {outcome:'pasted', words:3} arrives.","expect":"A sage check with 'Pasted into Slack · 3 words'. Slack's compose box reads 'On my way.'"},{"at":14.3,"action":"No hover for 3.2 s.","expect":"The island settles to the dot and the stack is empty."}]},{"id":"dead-mic-then-no-speech","name":"Silent mic while dictating, then no speech","category":"failure","why":"Shows that a problem found mid-dictation appears inside the island (the stack is tucked), and that a discarded take ends with no check and nothing pasted.","grounding":"audio/silence_detector.rs sets NO_SPEECH_WARNING_AFTER = 10 s. In commands/audio.rs, DeadMicWarn sends 'No audio detected — check your microphone' and Clear removes it. The pre-engine speech-evidence gate (HighConfidenceNoSpeech) skips the engine, deletes the audio and sends 'No speech detected' / 'Try speaking closer to the microphone'. That gate runs before transcription-started, so the arc comes from the stopping state, which pill.tsx already draws as 'transcribing'. useAppEvents.ts listens for no-speech-detected, but the backend never emits it. Proposed: the amber row inside the island while tucked, and click-to-Stop.","steps":[{"at":0,"action":"An Outlook reply 'Re: Thursday review' is focused. The MacBook is in clamshell mode, so its built-in mic hears nothing. User taps ⌘⇧Space.","expect":"Start card: Outlook icon, 'Dictating into' over 'Outlook', '✦ Writing', '🎙 MacBook Pro Microphone' with a live dot, and 'Parakeet'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Outlook icon, a flat wave at rest height, '0:01'."},{"at":4,"action":"User dictates two sentences, but no signal reaches the mic.","expect":"The wave stays flat and the timer reads '0:04'. No live-words card opens and no placeholder words appear."},{"at":10,"action":"DeadMicWarn fires after 10 s with no signal.","expect":"The stack stays tucked. The island widens on the spring into a row with a 1 px amber border: Outlook icon, an amber mic-off glyph where the wave was, 'No audio — check your microphone', '0:10', and ■ Stop and ✕ Cancel shown without hover."},{"at":12,"action":"User clicks ■ Stop in the amber row.","expect":"The first click works and Outlook keeps focus. The amber content leaves in 80 ms and the row shrinks to compact size. After the 250 ms post-roll, the flat wave folds into a white spinning arc labelled 'Transcribing'."},{"at":12.5,"action":"The speech-evidence gate finds no speech. The engine is skipped, the audio is deleted, and nothing is pasted.","expect":"The arc never closes into a check. It fades while the island springs to the dot. The stack untucks with a grey timed card: '◌ No speech detected' / 'Try speaking closer to the microphone'. The Outlook draft is unchanged."},{"at":15.8,"action":"The timed card expires after 3 s.","expect":"The card lifts and leaves, so only the dot remains."}]},{"id":"cloud-engine-offline","name":"Cloud engine unreachable offline, rescued by Parakeet","category":"failure","why":"Shows that when transcription fails, the island stays open with a way forward instead of silently losing the dictation.","grounding":"commands/audio.rs TranscriptionFailure::Local sends 'Transcription failed — try again' (1500 ms). Only with save_recordings on does it point to History. save_recordings defaults to false (commands/settings.rs), and finalize_in_flight_audio deletes the temp WAV whatever the outcome, so today the dictation is lost. There is no cloud-to-local fallback. Proposed: keep the failed clip in temp until the user chooses Retry or Discard, and add an in-island 'Retry with Parakeet' through the existing transcribe_audio_file path.","steps":[{"at":0,"action":"On a train, Wi-Fi has just dropped. The engine is Soniox, Parakeet is downloaded, Polish is off and a Notion page is focused. User taps ⌘⇧Space.","expect":"Start card: Notion 'N' icon, 'Dictating into' over 'Notion', a grey 'T Raw · no Polish' chip, '🎙 MacBook Pro Microphone' with a live dot, and 'Soniox'. No offline warning is guessed."},{"at":1.2,"action":"User starts: 'Notes from the vendor call: they can ship the new batch by the twelfth, pricing stays the same, and Ana will send the contract Friday.'","expect":"Compact island: Notion icon, wave moving with the voice, '0:01'."},{"at":5,"action":"User keeps talking. Recording is local, so it works offline.","expect":"The island stays compact and exactly the same size, with no live-words card and no placeholder words. The timer reads '0:05'."},{"at":8.6,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing · Soniox'."},{"at":9.6,"action":"The Soniox request fails because the DNS lookup fails.","expect":"The arc stops, turns amber and closes into a ring with '!'. The island stays open as one row reading 'Soniox unreachable · recording kept', with a sage 'Retry with Parakeet' and 'Discard'. Nothing is pasted and the stack stays tucked."},{"at":11,"action":"User clicks 'Retry with Parakeet'.","expect":"The first click works and Notion keeps focus. The amber content leaves and the ring spins white again with 'Transcribing · Parakeet'. The Notion icon stays in its slot on the row and never blinks out or moves up or down; it only rides the left edge as the island narrows."},{"at":12.2,"action":"Parakeet finishes. paste-outcome {outcome:'pasted', words:25} arrives.","expect":"The arc closes into a sage check: 'Pasted into Notion · 25 words' with only 'Undo', plus a dim 'via Parakeet' note. There is no Original (raw), and no Retry with Soniox while Soniox is unreachable. The note appears at the Notion caret."},{"at":15.4,"action":"No hover for 3.2 s.","expect":"The island settles to the dot. The stack is empty: the problem was resolved in place and no card is left behind."}]},{"id":"polish-fails-problems-stack","name":"Polish key invalid, then a failed paste: the stack under load","category":"failure","why":"Tests every stack rule at once: it tucks and pauses timers while dictating, repeats merge as ×N, blocking cards outlive timed ones, at most 3 cards show before '+N', and timed items leave oldest-first.","grounding":"commands/audio.rs: an AiProviderError::InvalidApiKey sends enhancing-failed {category:'invalid_api_key'} and 'AI key invalid — check Settings', but the unpolished text is still delivered (paste-outcome 'pasted'). A blocked paste keystroke returns PasteOutcome::LeftInClipboard, which sends paste-outcome 'copied' ('copied' = 1600 ms in commands/pill_feedback.rs) plus a 'Text copied' toast. emit_recording_too_short_feedback sends 'Recording shorter than 0.5 seconds'. The lab has FB.key/nopaste/short/update with fire() merging and oldest-first expiry. Proposed: the multi-card stack (FeedbackToast shows one toast today and the latest wins), timers pausing while tucked, the 'key invalid' mark on the style chip, and the toggle copy 'talk a bit longer' (pill.tsx always says 'hold a bit longer').","steps":[{"at":0,"action":"The stack shows a timed card 'Update ready' / 'Installs when you quit' with 2.0 s left. Slack #design-review is focused, Polish is on (Message) and the OpenAI key was revoked yesterday. User taps ⌘⇧Space and says 'Thursday at 3 works for me.'","expect":"The stack tucks (fades and drops 8 px) and the Update card's clock pauses at 2.0 s. Start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', mic with a live dot, 'Parakeet'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Slack icon, wave, '0:01'."},{"at":2.8,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing'."},{"at":3.5,"action":"enhancing-started fires.","expect":"'Polishing · Message' with 'Skip' and a sage arc."},{"at":4.1,"action":"enhancing-failed {category:'invalid_api_key'} arrives, and the unpolished text is pasted (6 words).","expect":"The arc flashes amber for 150 ms, then closes into the check because the text did land. The row reads 'Pasted into Slack · 6 words · no Polish' with 'Undo' and 'Fix key', and no Original or Retry. No separate 'AI key invalid' toast window appears."},{"at":7.3,"action":"The done card's 3.2 s ends.","expect":"The island returns to the dot and the stack untucks. In front is an amber card '✦ Polish key invalid' / 'OpenAI rejected the key — raw text was pasted', with 'Fix key' and ×. 'Update ready' peeks behind it, dimmed, and its clock resumes at 2.0 s once the stack is shown."},{"at":7.8,"action":"User switches to Terminal, taps ⌘⇧Space and says 'git stash and pull origin main'.","expect":"The stack tucks and Update pauses with about 1.8 s left. Start card: Terminal icon, 'Dictating into' over 'Terminal', a '✦ Code' chip with an amber dot and 'key invalid', mic, 'Parakeet'."},{"at":9,"action":"The start-card window ends.","expect":"Compact island: Terminal icon, wave, '0:01'."},{"at":10.4,"action":"User taps ⌘⇧Space to stop.","expect":"After the 250 ms post-roll, the arc shows 'Transcribing'."},{"at":11.1,"action":"enhancing-started fires.","expect":"'Polishing · Code' with 'Skip'."},{"at":11.6,"action":"Polish fails again, then the paste keystroke is refused. paste-outcome {outcome:'copied', words:6} arrives.","expect":"The arc closes into an amber clipboard glyph, not a check: 'Copied — press ⌘V · 6 words' with 'Got it'. There is no Undo. The extra 'Text copied' toast does not appear."},{"at":13.2,"action":"The 1.6 s copied time ends.","expect":"The island returns to the dot and the stack untucks with 3 cards. In front: amber '⧉ Copied — press ⌘V' / 'Terminal didn't accept the paste' with 'Got it'. Behind it: 'Polish key invalid ×2', merged and moved up rather than duplicated. At the back: 'Update ready', whose clock resumes at about 1.8 s."},{"at":14,"action":"User taps ⌘⇧Space twice by accident, 0.2 s apart.","expect":"The stack tucks again (Update now has about 1.35 s left) and the start card begins to open."},{"at":14.2,"action":"The backend reports 'Recording shorter than 0.5 seconds'.","expect":"The half-open start card retargets mid-spring straight to the dot, with no arc. The stack untucks with 4 items. Front to back it shows grey '◷ Too short — talk a bit longer', 'Copied — press ⌘V' and 'Polish key invalid ×2'. 'Update ready' is hidden and '+1 more' shows above the stack."},{"at":15.9,"action":"'Update ready' runs out. It is the oldest timed item, so it leaves first.","expect":"'+1 more' fades out and the three visible cards do not move."},{"at":16.75,"action":"'Too short' expires after 2.2 s.","expect":"The front card lifts and leaves. 'Copied — press ⌘V' comes to the front at full opacity with 'Polish key invalid ×2' behind it. Both blocking cards stay."}]},{"id":"cursor-code-style-retry-soniox","name":"Cursor switches to Code, then Retry with Soniox fixes jargon","category":"variant","why":"Shows a per-app style switch made visible and explained before speaking, and shows Retry with another engine as a calm redo in place that reuses the arc and check without starting a new session.","grounding":"AppFormattingRule {app_name:'Cursor', preset: Code} over the global Message (writing/settings.rs). AppCategory Code matches 'cursor' (writing/app_category.rs). EnhancementPreset::Code (ai/prompts.rs). The lab has APPS.cursor and retryBtn. Proposed: Retry itself (there is no backend re-transcribe or replace-last-paste yet), the 'Cursor rule' suffix and the 'Replaced in' copy.","steps":[{"at":0,"action":"Cursor is frontmost with the caret in its chat input. The global style is Message. User holds ⌥Space.","expect":"Start card: Cursor icon and 'Dictating into' over 'Cursor' (never 'main.rs — voicetypr'). The style chip reads '✦ Code' with a dim 'Cursor rule' suffix. Other chips: '🎙 MacBook Pro Microphone' with a live dot, and 'Parakeet'."},{"at":0.3,"action":"User says: 'Move the Tauri emit call into the pill window handler and use emit_to instead.'","expect":"The mic dot and card wave react, and the card stays open."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: 18 px Cursor icon, wave, '0:01'."},{"at":4.8,"action":"User releases ⌥Space.","expect":"After the 250 ms post-roll, the wave folds into the white arc labelled 'Transcribing' at 5.05."},{"at":5.5,"action":"enhancing-started fires.","expect":"'Polishing · Code' with a sage arc and 'Skip'."},{"at":6.6,"action":"paste-outcome {outcome:'pasted', words:15} arrives.","expect":"A check with 'Pasted into Cursor · 15 words' and 'Undo', 'Original', 'Retry with Soniox'. The Cursor chat input reads 'Move the Tory `emit` call into the pill window handler and use emit two instead.'"},{"at":7.4,"action":"User spots 'Tory' and clicks 'Retry with Soniox'.","expect":"The first click works and Cursor keeps focus with the caret in the chat input. The action row fades out in 80 ms and the island springs down to one 34 px row. The check reopens into a white spinning arc labelled 'Retrying with Soniox', beside the same Cursor icon. There is no start card and no dot in between."},{"at":8.9,"action":"Soniox returns a transcript and Polish re-runs with Code.","expect":"'Polishing · Code' with a sage arc and 'Skip'."},{"at":9.9,"action":"The retry result replaces the earlier paste in place.","expect":"The arc closes into a check: 'Replaced in Cursor · 14 words' with 'Undo' and 'Original' and a dim 'via Soniox'. Retry is gone. The Cursor input reads 'Move the Tauri `emit` call into the pill window handler and use `emit_to` instead.' exactly once, with no duplicate text."},{"at":13.1,"action":"No hover for 3.2 s.","expect":"The island settles to the 12 px dot."}]},{"id":"polish-off-raw-notes-hover-stop","name":"Polish off: raw note in Apple Notes, stopped from the island","category":"variant","why":"Shows the raw path is honest (no ✦, no Polishing stage, no pointless Original) and that hovering the island gives a safe mouse Stop that never takes focus from the note.","grounding":"Polish off maps to EnhancementPreset::PersonalDictation, whose requires_ai_formatting() is false (ai/prompts.rs). The lab's go('start') shows 'Raw · no Polish' and hides the ✦ when polish=false, and has hoverCtl/stopBtn/cancelBtn. cancel_recording exists. accept_first_mouse comes from plan 080 task 1. Proposed: click-to-Stop as a user stop with post-roll (src/pill.tsx has only a Cancel × today), a non-tappable raw chip, and hiding Original on raw.","steps":[{"at":0,"action":"Apple Notes is frontmost with the caret at the end of the note 'Tuesday'. Polish is off. User taps ⌘⇧Space.","expect":"A 2% dip, then the start card: yellow Notes icon and 'Dictating into' over 'Notes'. Chips: a dim grey 'T Raw · no Polish' with no sage, no hover fill and a default cursor; '🎙 MacBook Pro Microphone' with a live dot; and 'Parakeet'."},{"at":1.2,"action":"The start-card window ends.","expect":"Compact island: Notes icon, wave, '0:01', with no ✦ anywhere."},{"at":1.3,"action":"User says: 'Call the landlord about the heater, pick up the dry cleaning before six, and book the dentist for next week.'","expect":"The wave tracks speech and the timer counts."},{"at":7.6,"action":"The pointer moves onto the island.","expect":"Round Stop ■ and Cancel ✕ slide out after the timer (0 to 54 px over 250 ms). The island re-springs wider, while the icon and wave stay pinned at the left. The wave keeps moving and the timer reads '0:07'."},{"at":8.2,"action":"User clicks ■ Stop.","expect":"The first click works and Notes keeps its blinking caret. This counts as a user stop, so the wave stays live for the 250 ms post-roll and 'week' is not clipped. Stop and Cancel fold away."},{"at":8.45,"action":"transcription-started fires.","expect":"A white arc spins and the label reads 'Transcribing'. There is no Skip button."},{"at":9.3,"action":"paste-outcome {outcome:'pasted', words:20} arrives with no enhancing-started. The pointer moves off the island.","expect":"The white arc closes straight into a sage check with no Polishing step. The card reads 'Pasted into Notes · 20 words' with only 'Undo' and 'Retry with Soniox'; Original is hidden. The note ends with 'Call the landlord about the heater, pick up the dry cleaning before six, and book the dentist for next week.'"},{"at":12.5,"action":"No hover for 3.2 s.","expect":"The island settles to the 12 px dot."}]},{"id":"windows-portrait-outlook-then-vscode-admin","name":"Windows 11, portrait screen, bottom-right pill: Outlook, then VS Code running as admin","category":"variant","why":"Shows the island on Windows keeping focus with the target app, growing away from the screen edge, resetting its context between back-to-back apps, and using Ctrl+V wording when an elevated app refuses the paste.","grounding":"calculate_pill_position 'bottom-right' with DEFAULT_INDICATOR_OFFSET 10 (window_manager.rs, commands/settings.rs). constrain_window_position is compiled only for macOS (and tests), and calculate_toast_position centres the toast on the pill, so on Windows at bottom-right it can spill off-screen. paste_windows sends one SendInput Ctrl+V batch; 0 events injected (for example under UIPI) retries once, then returns Err and ends in PasteOutcome::LeftInClipboard, which sends paste-outcome 'copied' (commands/text.rs). pill.tsx shows 'Copied — press Ctrl+V' on Windows. Focus safety is plan 080 task 1 (focusable(false), WS_EX_NOACTIVATE, SWP_NOACTIVATE, accept_first_mouse). The lab's stack is centred at left:50%. Proposed: right-anchored growth, chip truncation, friendly process names (olk.exe shown as Outlook) and a right-aligned stack.","steps":[{"at":0,"action":"Windows 11 in light mode on a portrait 1080×1920 monitor at 150% (720×1280 logical, 48 px taskbar). The pill is bottom-right with a 10 px offset. New Outlook (olk.exe) is focused with the caret in a reply to Priya. The mic is 'Microphone Array (Intel® Smart Sound Technology for Digital Microphones)', the engine is Whisper Turbo, live preview is on, and the per-app styles are Outlook = Writing and VS Code = Code.","expect":"The 12 px dot sits 10 px from the right edge, just above the taskbar and fully on screen. The stack is empty."},{"at":0.3,"action":"User presses Ctrl+Shift+Space.","expect":"The dot dips 2%, then the start card opens leftward and upward with its right edge pinned 10 px from the screen edge; nothing goes past the edge or behind the taskbar. It shows Outlook's blue icon at 28 px and 'Dictating into' over 'Outlook', never 'olk.exe' or the subject. The chips fit on one line: '✦ Writing', '🎙 Microphone Array (Int…' with the sage live dot still visible after the ellipsis, and 'Whisper Turbo'. The card is at most 360 px wide. Outlook's title bar stays active and no Voicetypr button appears in the taskbar."},{"at":0.7,"action":"User clicks the '✦ Writing' chip once.","expect":"The first click registers and the chip reads '✦ Clean'. Outlook stays in the foreground with its caret in the reply."},{"at":0.9,"action":"The pointer leaves the card.","expect":"The card stays open for the 300 ms grace."},{"at":1.2,"action":"The grace ends. User says 'Hi Priya, Thursday at 3 works for me. Thanks, Sam.'","expect":"Compact island with its right edge pinned: the Outlook icon goes from 28 to 18 px without blinking out, the wave moves, and the timer reads '0:01'."},{"at":2.2,"action":"The first partial arrives.","expect":"The live card (300 px) grows upward and leftward with its right edge still pinned. The words are right-aligned with the newest word at the right edge: 'Hi Priya,' plus italic grey 'Thursday at'. The whole card is on screen."},{"at":4.2,"action":"User presses Ctrl+Shift+Space to stop.","expect":"After the 250 ms post-roll, the words fade in 80 ms, the card shrinks to one row (still pinned right), and the wave folds into the arc labelled 'Transcribing'. Outlook is still focused."},{"at":5,"action":"enhancing-started fires.","expect":"'Polishing · Clean' with 'Skip' and a sage arc."},{"at":5.8,"action":"The SendInput Ctrl+V lands. paste-outcome {outcome:'pasted', words:10} arrives.","expect":"A check with 'Pasted into Outlook · 10 words' and 'Undo', 'Original', 'Retry with Deepgram'. Outlook's body reads 'Hi Priya, Thursday at 3 works for me. Thanks, Sam.' and Outlook's title bar never went inactive."},{"at":9,"action":"No hover for 3.2 s.","expect":"The island settles to the dot in the same bottom-right spot, and the icon fades out."},{"at":9.3,"action":"User clicks into README.md in Visual Studio Code - Insiders, which runs as administrator.","expect":"The dot does not change, and VS Code is now the foreground app."},{"at":9.5,"action":"User presses Ctrl+Shift+Space.","expect":"The start card opens pinned right with VS Code Insiders' green icon and 'Dictating into' over 'Visual Studio Code - Insiders', ellipsized if it doesn't fit. Chips: '✦ Code', the same truncated mic chip with its live dot, and 'Whisper Turbo'. No frame shows the Outlook icon, the name 'Outlook' or the earlier 'Clean' choice."},{"at":10.7,"action":"The start-card window ends. User says 'Note: the build needs Rust 1.91 and the Vulkan sidecar.'","expect":"Compact island, pinned right: VS Code icon, wave, '0:01'."},{"at":11.6,"action":"The first partial arrives.","expect":"The live card grows up and to the left with its right edge pinned: 'Note: the build' plus italic grey 'needs Rust'."},{"at":13,"action":"User presses Ctrl+Shift+Space to stop.","expect":"After the 250 ms post-roll, the card shrinks to one row and the arc reads 'Transcribing'."},{"at":13.7,"action":"enhancing-started fires.","expect":"'Polishing · Code' with 'Skip'. The row stays fully on screen."},{"at":14.4,"action":"Windows blocks the Ctrl+V into the elevated VS Code. paste-outcome {outcome:'copied', words:10} arrives.","expect":"The arc ends on an amber clipboard glyph, not a check: 'Copied — press Ctrl+V · 10 words' (never '⌘V') with 'Got it'. There is no Undo, Original or Retry. VS Code is unchanged and still focused."},{"at":16,"action":"The 1.6 s copied time ends.","expect":"The island settles to the dot. An amber card appears above it, aligned to the island's right edge instead of centred on the dot: '⧉ Copied — press Ctrl+V' / 'VS Code didn't accept the paste', with 'Got it' and ×. The whole card is on screen."}]},{"id":"dark-desktop-reduced-motion","name":"Dark desktop with Reduce motion: a Slack dictation made of cross-fades","category":"variant","why":"Shows the island and stack staying legible on a near-black wallpaper, and Reduce motion, switched on while the app runs, turning every morph into a plain cross-fade while the level meter and progress arc keep carrying information.","grounding":"The prefers-reduced-motion fallback is a shared rule in plan 080 task 2, and src/pill.css already has a reduced-motion block. The lab reads matchMedia once at load (island-lab.html `reduce`), snaps springs instead of cross-fading, and still lifts and unblurs content in show() and stack cards (.card.enter/.leave). The pill's state nodes use role=status (pill.tsx). Proposed: the reduced-motion cross-fade choreography, the static check and the dark-wallpaper contrast targets.","steps":[{"at":0,"action":"macOS is in Dark appearance on a near-black wallpaper (#0B0B0C). Reduce motion was switched on in System Settings › Accessibility › Display while Voicetypr kept running. Slack (dark theme) #design-review is focused. The stack holds one blocking amber card from an earlier Terminal dictation: '⧉ Copied — press ⌘V' / 'Terminal didn't accept the paste'.","expect":"The 12 px dot is easy to find on black: its hairline ring (at least 3:1 against #0B0B0C) and inset highlight set it apart. Above it, the amber card's border and ⧉ icon are clearly visible, and its text is at least 4.5:1. Nothing moves."},{"at":0.8,"action":"User presses ⌘⇧Space and starts: 'Can we push the design review to Thursday at 3? Maya's out Wednesday and I want her in the room.'","expect":"There is no 2% dip, overshoot, 4 px lift or unblur. The amber card fades out in place, without the 8 px drop. The dot cross-fades (about 150 ms, opacity only) into the full-size start card: Slack icon, 'Dictating into' over 'Slack', '✦ Message', '🎙 MacBook Pro Microphone' with a live dot, and 'Whisper Turbo'. The grey 'Dictating into' is at least 4.5:1 on the card."},{"at":2,"action":"The start-card window ends.","expect":"The compact island cross-fades in at full size. The Slack icon appears at 18 px in place instead of gliding from 28 px. The wave bars still follow the voice level, and the timer reads '0:01'."},{"at":3,"action":"The first partial arrives.","expect":"The live card cross-fades in at full size instead of growing upward: 'Can we push' plus italic grey 'the design'. New words appear in place without sliding."},{"at":6.5,"action":"User presses ⌘⇧Space to stop.","expect":"The words and wave stay live for the 250 ms post-roll."},{"at":6.75,"action":"transcription-started fires.","expect":"The words and wave fade out while 'Transcribing' and the arc fade in, with no fold. The arc still rotates, because it is the only progress signal."},{"at":7.4,"action":"enhancing-started fires.","expect":"A cross-fade to 'Polishing · Message' with 'Skip'. The arc is sage."},{"at":8.4,"action":"paste-outcome {outcome:'pasted', words:20} arrives.","expect":"A fully drawn, static sage check appears, with no sweep, next to 'Pasted into Slack · 20 words' and 'Undo', 'Original', 'Retry with Soniox'. VoiceOver, if on, says 'Pasted into Slack, 20 words' once and never reads the text."},{"at":11.6,"action":"No hover for 3.2 s.","expect":"The island cross-fades to the dot. The same amber 'Copied — press ⌘V' card fades back in without rising: one card, not dismissed by the tuck, and no ×2."},{"at":12.4,"action":"User clicks 'Got it'.","expect":"The first click works and Slack keeps focus. The card fades out with no lift or blur, the stack is empty and only the dot remains."}]}];
 
 // ---------- scenario timelines: what each spec step does to the lab (keyed by step time) ----------
 // ops: app, key, mic, signal, stopping, press, style, voice, island, partial, hint, shake, paste, compose, fire, resolve, expire, dismiss, pointer, click, then
@@ -441,7 +451,7 @@ const DO = {
     8.8: {key: "esc", hint: 1, partial: ["Thursday at 3 works, I'll move the review and send the agenda before the meeting", "so we"]},
     9.2: {key: "esc", voice: 0, island: "ready"},
     9.4: {partial: ["Thursday at 3 works, I'll move the review and send the agenda before the meeting so", "we can"]},
-    11: {key: "tap", press: 1}, 12.2: {island: "listening", voice: 1}, 12.6: {pointer: "island", then: [0.1, {pointer: "cancel"}]},
+    11: {key: "tap", press: 1}, 12.2: {island: "listening", voice: 1, then: [0.1, {pointer: "island"}]}, 12.6: {pointer: "cancel"},
     13.1: {click: 1, voice: 0, island: "ready", then: [0.5, {pointer: "off"}]}}},
   "retarget-while-finishing": {setup: {app: "slack", engine: "Whisper Turbo", preview: true}, steps: {
     0: {key: "tap", press: 1, voice: 1}, 1.2: {island: "listening"},
@@ -449,7 +459,7 @@ const DO = {
     5.6: {key: "tap", stopping: 1, partial: ["Thursday at 3 works, I'll move the review and send the agenda before.", ""]},
     5.85: {voice: 0, island: "transcribing"}, 6.4: {island: "polishing"}, 6.9: {key: "tap", shake: 1},
     7.8: {paste: {words: 13, text: "Thursday at 3 works — I'll move the review and send the agenda before."}},
-    8.5: {key: "tap", press: 1}, 9: {},
+    8.5: {key: "tap", press: 1}, 9: {key: "hide"},
     9.7: {island: "listening", voice: 1},
     11: {key: "tap", stopping: 1, then: [T, {voice: 0, island: "transcribing"}]}, 11.8: {island: "polishing"},
     12.6: {paste: {words: 4, append: 1, text: "Also booking room 4B."}}, 15.8: {island: "ready"}}},
@@ -465,7 +475,7 @@ const DO = {
     0: {key: "tap", press: 1}, 1.2: {island: "listening"}, 4: {voice: 1, signal: 0},
     10: {island: "no-audio", then: [1.4, {pointer: "dead:stop"}]},
     12: {click: 1, stopping: 1, island: "listening", voice: 0, then: [T, {island: "transcribing"}]},
-    12.5: {pointer: "off", island: "ready", fire: "nospeech"}, 15.5: {expire: "nospeech"}}},
+    12.5: {pointer: "off", island: "ready", fire: "nospeech"}, 15.8: {expire: "nospeech"}}}, // its 3 s start once the stack shows (about 12.8)
   "cloud-engine-offline": {setup: {app: "notion", polish: false, engine: "Soniox", preview: false}, steps: {
     0: {key: "tap", press: 1, voice: "room"}, 1.2: {island: "listening", voice: 1}, 5: {},
     8.6: {key: "tap", stopping: 1, voice: 0, then: [T, {island: ["transcribing", {meta: "Soniox"}]}]},
@@ -481,8 +491,8 @@ const DO = {
     7.8: {app: "terminal", key: "tap", press: 1, voice: 1}, 9: {island: "listening"},
     10.4: {key: "tap", stopping: 1, voice: 0, then: [T, {island: "transcribing"}]}, 11.1: {island: "polishing"},
     11.6: {fire: [["key"], ["nopaste", {sub: "Terminal didn't accept the paste"}]], island: ["copied", {words: 6, reason: "Terminal didn't accept the paste"}]},
-    13.2: {island: "ready"}, 13.5: {key: "tap", press: 1},
-    13.85: {key: "tap", island: "ready", fire: "short"}, 15.05: {}, 16.05: {}}}, // both timed items leave on their own clocks
+    13.2: {island: "ready"}, 14: {key: "tap", press: 1}, // the 3-card stack gets about 0.5 s above the settled dot before the double-tap
+    14.2: {key: "tap", island: "ready", fire: "short"}, 15.9: {}, 16.75: {}}}, // both timed items leave on their own clocks, which run only while the stack shows
   "cursor-code-style-retry-soniox": {setup: {app: "cursor", mode: "hold", rules: {cursor: "Code"}, ruleNote: {cursor: "Cursor rule"}, engine: "Parakeet", preview: false}, steps: {
     0: {key: "hold", press: 1}, 0.3: {voice: 1}, 1.2: {island: "listening"},
     4.8: {key: "release", stopping: 1, voice: 0, then: [T, {island: "transcribing"}]}, 5.5: {island: "polishing"},
@@ -547,12 +557,13 @@ const W = Spring(12), H = Spring(12), R = Spring(6), SC = Spring(1, .28, .35), S
 const IX = Spring(5), IY = Spring(5), IS = Spring(0), IO = Spring(0, .25, 0), GX = Spring(34), GY = Spring(5), HC = Spring(0, .25, 0), TY = Spring(8, .32, 0);
 // Offsets for shared elements pinned to a moving edge (distance below the top edge, glyph distance from the right edge), and the style chip width.
 const GR = 57; // the start card's wave: its last bar ends on the chip row's right edge
-const ITOP = Spring(16), GTOP = Spring(28), GRIGHT = Spring(GR), CW = Spring(0), MW = Spring(0);
+const ITOP = Spring(16), GTOP = Spring(28), GRIGHT = Spring(GR), CW = Spring(0), MW = Spring(0, .3); // the mic chip opens quickly: a failed recorder has little time before the island gives up
 const SHARED = [IX, IY, IS, GX, GY, ITOP, GTOP, GRIGHT];
 const BD = 2; // the island is border-box with a 1 px border, so it needs 2 px more than its content measures
-let IA = 1, openHold = 0, dipHold = 0, shakeT = -1, landA = 0, TA = 0, moreA = 0, liveRowW = 0, pinV = false, pinR = false, freshT = 9, startMinW = 0;
+let IA = 1, openHold = 0, closeHold = 0, ctlOut = 0, pendingMic = null, dipHold = 0, shakeT = -1, landA = 0, TA = 0, moreA = 0, liveRowW = 0, pinV = false, pinR = false, freshT = 9, startMinW = 0, startTitleW = 0;
 let ghosts = [], lghosts = [];
 const WS = {x: 0}; // live-words line offset (FLIP): a new word slides the line left instead of jumping it
+let WR = []; // live-words reveal: ink added past the old line end ({x: its start in line px}) stays masked until the slide has brought it inside the padding, then fades in
 
 // ---------- world state ----------
 const BASE = () => ({app: "slack", titles: {}, polish: true, style: "Message", engine: "Parakeet", mic: "MacBook Pro Microphone", micState: "live", preview: false, mode: "toggle", retry: "Soniox", rules: {}, ruleNote: {}, compose: {}, stack: []});
@@ -568,49 +579,77 @@ function runQueue() { for (;;) { let k = -1; for (let i = 0; i < wq.length; i++)
 
 // ---------- layers ----------
 const LAY = ["start", "words", "row", "hint", "work", "done", "notice", "fail", "note", "dead"];
-const L = {}; LAY.forEach(k => { L[k] = {el: $("L-" + k), on: false, a: 0, t: 0, from: 0, lift: 0, blur: 0}; });
+const L = {}; LAY.forEach(k => { L[k] = {el: $("L-" + k), on: false, a: 0, t: 0, t2: 0, from: 0, lift: 0, blur: 0}; });
 const LAYERS_OF = {ready: [], start: ["start"], listening: ["row"], live: ["words", "row"], transcribing: ["work"], polishing: ["work"], pasted: ["done"], copied: ["notice"], failed: ["fail"], error: ["notice"], removed: ["note"], "too-short": ["note"], "no-speech": ["note"], "no-audio": ["dead"]};
 const ONE = {transcribing: "work", polishing: "work", failed: "fail", removed: "note", "too-short": "note", "no-speech": "note", "no-audio": "dead"};
 const TWO = {pasted: "done", copied: "notice", error: "notice"};
 const ROWS = ["row", "work", "fail", "note", "hint", "dead"]; // one-row layers ride with the icon's row
-const ROW2 = [["start", "chipsRow"], ["done", "doneActs"], ["notice", "nActs"]]; // second rows arrive a beat after the first
+const ROW2 = [["start", "chipsRow"], ["done", "doneActs"], ["notice", "nActs"], ["fail", "fActs"]]; // second rows (and the failed row's buttons) arrive a beat after the first
+const ROW2W = ["start", "fail"]; // these also wait until the card is nearly at its full width
 function wantLayers() { const l = (LAYERS_OF[st] || []).slice(); return hint ? l.map(x => x === "row" ? "hint" : x) : l; }
 function syncLayers(instant) {
   const want = wantLayers();
-  for (const k of LAY) { const x = L[k], on = want.includes(k); if (on === x.on) continue; x.on = on; x.t = 0; x.from = x.a; if (instant) { x.a = on ? 1 : 0; x.from = x.a; x.lift = 0; x.blur = 0; } }
+  for (const k of LAY) { const x = L[k], on = want.includes(k); if (on === x.on) continue; x.on = on; x.t = x.t2 = 0; x.from = x.a; if (instant) { x.a = on ? 1 : 0; x.from = x.a; x.lift = 0; x.blur = 0; } }
 }
 function replay(k) { const x = L[k]; if (x.on) { x.a = 0; x.from = 0; x.t = 0; } }
 function layerAnim(dt) {
   for (const k of LAY) {
     const x = L[k]; x.t += dt;
     if (x.on) {
-      if (reduce) { x.a = Math.min(1, x.a + dt / .15); x.lift = 0; x.blur = 0; continue; }
+      if (reduce) { x.a = Math.min(1, x.a + dt / .15); x.lift = 0; x.blur = 0; x.t2 = 9; continue; }
+      const wait = () => { x.t = Math.min(x.t, .06); x.lift = 4; x.blur = 3; }, fresh = x.from <= .05 && x.a < .01; // the 60 ms in-delay counts from the state change, not from the fit
       // folding out of the start card, the timer row waits until the gliding wave has landed beside the icon, so the two never cross
-      if (k === "row" && st !== "live" && x.from <= .05 && x.a < .01 && G.alphaTo > 0 && Math.abs(GX.x - GX.to) > 8) { x.t = 0; x.lift = 4; x.blur = 3; continue; }
-      // while the shape grows, incoming content waits until the shape nearly fits it, so the island's edge never cuts a word
-      if (k !== "row" && k !== "words" && x.from <= .05 && x.a < .01 && W.x < Math.min(W.to, x.el.scrollWidth + BD) - 16) { x.t = 0; x.lift = 4; x.blur = 3; continue; }
+      // (the timer starts at opacity 0 after its 60 ms delay, so it can start while the wave covers its last few px)
+      if (k === "row" && st !== "live" && fresh && G.alphaTo > 0 && Math.abs(GX.x - GX.to) > 18) { wait(); continue; }
+      // the live words wait until the card has nearly grown to its height, so its top edge never cuts them
+      if (k === "words" && fresh && H.x < H.to - 6) { wait(); continue; }
+      // a glyph gliding out of a two-row card (check → wave) crosses the start card's title row, so the title waits until it has passed
+      if (k === "start" && fresh && G.alpha > .05 && GX.x < startTitleW - 72) { wait(); continue; }
+      // while the shape grows, incoming content waits until the shape nearly fits it, so the island's edge never cuts a word.
+      // The start card's title row and the failed row's title only need their own width (their second parts wait for the card's, in render())
+      // (the start title's text ends 72 px inside startTitleW, before the 48 px wave slot and the padding, so it starts 24 px sooner
+      // and the opening card never shows the icon alone for more than a few frames)
+      const need = k === "start" ? startTitleW + BD : k === "fail" ? failTitleW() + BD : x.el.scrollWidth + BD;
+      if (k !== "row" && k !== "words" && fresh && W.x < Math.min(W.to, need) - (k === "start" ? 40 : 16)) { wait(); continue; }
       const p = x.from > .05 ? x.t / .2 : (x.t - .06) / .2, e = ease(p);
       x.a = x.from + (1 - x.from) * e; x.lift = 4 * (1 - e) * (1 - x.from); x.blur = 3 * (1 - e) * (1 - x.from);
-    } else { x.a = Math.max(0, x.a - dt / (reduce ? .15 : .08)); x.lift = 0; x.blur = reduce ? 0 : 2 * (1 - x.a); }
+      if (x.t2 > 0 || W.x >= W.to - 16) x.t2 += dt; // the second row's clock starts once the card is nearly at its width
+    } else {
+      x.a = Math.max(0, x.a - dt / (reduce ? .15 : .08));
+      if (!reduce && x.a > 0 && k !== "words") x.a = Math.min(x.a, exitRoom(k)); // outgoing text is gone before a shrinking edge reaches it
+      x.lift = 0; x.blur = reduce ? 0 : 2 * (1 - x.a);
+    }
   }
+}
+const failTitleW = () => { const t = $("fTitle").parentNode; return t.offsetLeft + t.offsetWidth + 13; }; // the row's title and its right padding
+function exitRoom(k) { // an outgoing layer fades out over the last 8 px before the shape's edge would cut its text (the words layer clips itself)
+  const el = L[k].el, row = ROWS.includes(k), title = k === "start" && !(L.start.r2 > .05); // a start card whose chips never showed: only its title row counts
+  const right = title ? startTitleW - 12 : (row ? rowL : 0) + el.scrollWidth - 12, top = title ? 40 : row ? rowB + 24 : el.scrollHeight - 8; // text ends inside the 12–14 px padding
+  return clamp(Math.min(W.x - BD - right, H.x - BD - top) / 8, 0, 1);
+}
+function exitHold() { // a resting shape holds 40 ms before it shrinks under content that is fading out, so the edge never cuts it
+  if (reduce || (W.to > W.x - 8 && H.to > H.x - 8) || Math.abs(W.v) > 60 || Math.abs(H.v) > 60) return;
+  if (LAY.some(k => k !== "words" && !L[k].on && L[k].a > .3)) closeHold = Math.max(closeHold, .04);
 }
 // small in-place cross-fades: fadeIn() lifts new content in after 60 ms while a ghost of the old content fades out in 80 ms
 const FX = new Map();
-function fadeIn(el) { el.style.transition = "none"; FX.set(el, {t: 0, lift: getComputedStyle(el).transform === "none"}); } // elements with their own transform only fade
+function fadeIn(el, gate) { el.style.transition = "none"; if (!seeking) el.style.opacity = "0"; FX.set(el, {t: 0, lift: getComputedStyle(el).transform === "none", gate: typeof gate === "function" ? gate : null}); } // elements with their own transform only fade
 const clearFx = el => { el.style.opacity = el.style.transition = el.style.transform = el.style.filter = ""; };
 function fxAnim(dt) {
   FX.forEach((f, el) => {
+    if (f.gate) { if (reduce || f.gate()) f.gate = null; else f.t = -dt; } // gated: waits at 0 until the island has room for it
     f.t += dt; const a = reduce ? clamp(f.t / .15, 0, 1) : ease((f.t - .06) / .2), m = f.lift && !reduce;
     if (a >= 1) { FX.delete(el); clearFx(el); return; }
     el.style.opacity = a; el.style.transform = m ? `translateY(${(4 * (1 - a)).toFixed(2)}px)` : ""; el.style.filter = m ? `blur(${(2 * (1 - a)).toFixed(2)}px)` : ""; // lifts 4 px and unblurs
   });
   lghosts = lghosts.filter(x => { x.a -= dt / (reduce ? .15 : .08); if (x.a <= 0) { x.el.remove(); return false; } x.el.style.opacity = x.a; return true; });
 }
+const fits = el => () => W.x - BD >= rowL + el.offsetLeft + el.offsetWidth - 12;
 function stripIds(c) { c.removeAttribute("id"); c.querySelectorAll("[id]").forEach(e => e.removeAttribute("id")); c.setAttribute("aria-hidden", "true"); return c; }
 function ghostEl(el) { // a fading copy of one element, left where it was (its parent must be positioned)
   if (seeking || !el.isConnected) return null;
   const c = stripIds(el.cloneNode(true)), cs = getComputedStyle(el), a = +cs.opacity || 1;
-  c.classList.add("cghost"); Object.assign(c.style, {left: el.offsetLeft + "px", top: el.offsetTop + "px", width: el.offsetWidth + "px", color: cs.color, opacity: a, transition: "none", transform: "none"});
+  c.classList.add("cghost"); Object.assign(c.style, {left: el.offsetLeft + "px", top: el.offsetTop + "px", width: el.offsetWidth + "px", color: cs.color, fontStyle: cs.fontStyle, opacity: a, transition: "none", transform: "none"});
   el.parentNode.appendChild(c); const gh = {el: c, a}; lghosts.push(gh); return gh;
 }
 function ghostLayer(k) { // a fading copy of a whole layer, for a same-layer state change
@@ -619,34 +658,49 @@ function ghostLayer(k) { // a fading copy of a whole layer, for a same-layer sta
   x.el.after(c); const gh = {el: c, a: x.a}; lghosts.push(gh); return gh;
 }
 function dropGhost(gh) { if (!gh) return; gh.el.remove(); lghosts = lghosts.filter(x => x !== gh); }
-function measure(k) { const el = L[k].el; return [Math.ceil(el.scrollWidth), Math.ceil(el.scrollHeight)]; }
+const usedW = el => parseFloat(getComputedStyle(el).width) || 0, usedH = el => parseFloat(getComputedStyle(el).height) || 0; // layout size, unaffected by the dip's scale
+function measure(k) { const el = L[k].el; return [Math.ceil(Math.max(el.scrollWidth, usedW(el)) - .01), Math.ceil(Math.max(el.scrollHeight, usedH(el)) - .01)]; } // never rounds a sub-pixel width down
 function measureRow() { const hc = $("hoverCtl"), w0 = hc.style.width; hc.style.width = "0px"; const w = L.row.el.scrollWidth; hc.style.width = w0; return Math.ceil(w); }
 function measureStart() { // natural size, with the style and mic chips at their natural widths
   const sc = $("styleChip"), mc = $("micChip"), el = L.start.el, cw = sc.style.width, mw = mc.style.width;
   sc.style.width = mc.style.width = el.style.minWidth = "";
   let [w, h] = measure("start"), res = 0;
   if (ctx.micState !== "live") { // the recorder may still fail: reserve the "not found" width so the card never re-springs for it
-    const mb = $("micBad"), md = $("micDot"), hb = mb.hidden, hd = md.hidden; mb.hidden = false; md.hidden = true; res = measure("start")[0]; w = Math.max(w, res); mb.hidden = hb; md.hidden = hd;
+    const mb = $("micBad"), md = $("micDot"), hb = mb.hidden, hd = md.hidden; mb.hidden = false; md.hidden = true; res = measure("start")[0] + 2; w = Math.max(w, res); mb.hidden = hb; md.hidden = hd;
   }
-  el.style.minWidth = res ? res + "px" : ""; // the chip row spans the reserved width, so the engine chip sits at its right end from the first frame
   sc.style.width = cw; mc.style.width = mw; return [w, h];
 }
-function natW(c, s, snapIt) { const w = c.style.width; c.style.width = ""; s.to = Math.ceil(c.getBoundingClientRect().width / (SC.x || 1) - .01); c.style.width = w; if (snapIt) snap(s); }
+const domScale = () => { const w = parseFloat(island.style.width); return w ? island.getBoundingClientRect().width / w : 1; }; // the scale on screen right now
+const textW = el => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width / domScale(); };
+function natW(c, s, snapIt) { const w = c.style.width; c.style.width = ""; s.to = Math.ceil(usedW(c) - .01); c.style.width = w; if (snapIt) snap(s); }
 function measureChip(snapStyle, snapMic = snapStyle) { natW($("styleChip"), CW, snapStyle); natW($("micChip"), MW, snapMic); }
 const showCtl = () => st === "listening" && !stopping && !hint && (simHover || (!scn && realHover));
 
 function retarget() {
-  HC.to = showCtl() ? 54 : 0;
+  const hcTo = showCtl() ? 54 : 0;
+  // hover controls folding: Stop and Cancel fade out in place first (80 ms); while the row stays, the shape holds for them too
+  if (hcTo === 0 && HC.to > 0 && HC.x > 1 && !reduce) { ctlOut = 1; if (st === "listening" && !hint) closeHold = Math.max(closeHold, .08); }
+  if (hcTo > 0) ctlOut = 0;
+  HC.to = hcTo;
   if (st === "ready") { W.to = 12; H.to = 12; R.to = 6; return; }
-  if (st === "start") { const [w, h] = measureStart(); W.to = startMinW = Math.max(startMinW, 318, Math.min(view.platform === "win" ? 360 : 420, w + BD)); H.to = h + BD; R.to = 22; return; } // never narrower within one press, so the icon and title stay put
+  if (st === "start") { // never narrower within one press, so the icon and title stay put
+    const [w, h] = measureStart(); W.to = startMinW = Math.max(startMinW, 318, Math.min(view.platform === "win" ? 360 : 420, w + BD)); H.to = h + BD; R.to = 22;
+    L.start.el.style.minWidth = W.to - BD + "px"; // the layer spans the card, so the engine chip ends under the wave's last bar
+    const app = $("startApp"); startTitleW = 124 + Math.max(textW(app.previousElementSibling), Math.min(200, textW(app))); // 14 + 28 icon + 10 + text + 10 + 48 wave + 14
+    return;
+  }
   if (st === "listening") { W.to = (hint ? measure("hint")[0] : measureRow() + (showCtl() ? 54 : 0)) + BD; H.to = 34; R.to = 17; return; }
   if (st === "live") { W.to = 300; H.to = 64; R.to = 20; return; }
   if (ONE[st]) { W.to = measure(ONE[st])[0] + BD; H.to = 34; R.to = 17; return; }
-  if (TWO[st]) { const [w, h] = measure(TWO[st]); W.to = Math.max(w + BD, st === "pasted" && doneCfg && doneCfg.minW || 0); H.to = h + BD; R.to = 20; }
+  if (TWO[st]) {
+    const hold = st === "pasted" && doneCfg && doneCfg.minW || 0; if (st === "pasted") L.done.el.classList.remove("fill");
+    const [w, h] = measure(TWO[st]); W.to = Math.max(w + BD, hold); H.to = h + BD; R.to = 20;
+    if (hold) L.done.el.classList.add("fill"); // held wider than its content: the layer spans the island, so the settle line keeps its 16 px insets
+  }
 }
 function depTargets() {
   const big = st === "start";
-  IS.to = st === "ready" ? 0 : big ? 28 : 18; IO.to = st === "ready" ? 0 : 1;
+  IS.to = st === "ready" ? 0 : big ? 28 : 18; IO.to = st === "ready" && IS.x <= 3 ? 0 : 1; // shrinks into the dot before it fades
   IX.to = st === "ready" ? 5 : big ? 28 : 21; IY.to = st === "ready" ? 5 : 16; // the dot's centre; else the 32 px row's
   GX.to = 34; GY.to = 4;
   ITOP.to = big ? 26 : 16; GTOP.to = big ? 38 : 28; GRIGHT.to = GR;
@@ -656,7 +710,7 @@ function depTargets() {
 // card the icon/wave/timer row keeps its screen position while the card grows around it.
 const pin = (s, x, v) => { s.x = s.to = x; s.v = v; };
 function pinShared() {
-  const pw = W.x - BD, ph = H.x - BD, wantV = st === "start" || !!TWO[st], wantR = st === "start" && G.hop !== 1; // a hopping glyph stays put until it lands
+  const pw = W.x - BD, ph = H.x - BD, wantV = st === "start" || !!TWO[st], wantR = st === "start" && L.done.a < .02 && L.notice.a < .02; // leaving a two-row card, the glyph morphs in place until that content is gone, then glides
   if (wantV && !pinV) { ITOP.x = ph - IY.x; ITOP.v = H.v - IY.v; GTOP.x = ph - GY.x; GTOP.v = H.v - GY.v; }
   if (wantR && !pinR) { GRIGHT.x = pw - GX.x; GRIGHT.v = W.v - GX.v; }
   pinV = wantV; pinR = wantR;
@@ -666,7 +720,7 @@ function pinShared() {
 }
 
 // ---------- glyph model: wave → arc → check / clipboard / ring-with-! ----------
-const G0 = () => ({kind: "spin", spin: "white", spinT0: -9, tint: "amber", arcTo: 0, arcP: 0, endP: 0, alpha: 0, alphaTo: 0, micP: 0, micTo: 0, flash: 0, inT: 0, spinA: 0, reopen: 0, reopenT0: 0, a0: -Math.PI / 2, len0: 0, col0: null, hop: 0});
+const G0 = () => ({kind: "spin", spin: "white", spinT0: -9, tint: "amber", arcTo: 0, arcP: 0, endP: 0, alpha: 0, alphaTo: 0, micP: 0, micTo: 0, flash: 0, inT: 0, spinA: 0, reopen: 0, reopenT0: 0, a0: -Math.PI / 2, len0: 0, col0: null});
 const G = G0();
 const COL = {amber: "#F2B35B", red: "#F28B7A", sage: "#8FD1A8", white: "rgba(255,255,255,.95)"};
 const RGB = {amber: [242, 179, 91, 1], red: [242, 139, 122, 1], sage: [143, 209, 168, 1], white: [255, 255, 255, .95]};
@@ -689,9 +743,16 @@ function spinGlyph(s) { // back to a spinning arc; a closed ring reopens into it
   else if (!G.reopen) G.kind = "spin";
 }
 function captureArc() { const c = curArc(); if (c) { G.a0 = c.tail; G.len0 = c.len; G.col0 = c.col; } else { G.a0 = -Math.PI / 2; G.len0 = 0; G.col0 = null; } }
+function glyphInside() { // the bars' top-right corner is inside the shape's rounded rect
+  const pw = W.x - BD, ph = H.x - BD, r = Math.max(0, R.x - 1), dr = pw - (GX.x + 43), dt = ph - GY.x - 21.5;
+  return dr >= 2 && dt >= 1 && (dr >= r || dt >= r || Math.hypot(r - dr, r - dt) <= r - 1);
+}
 function glyphAnim(dt) {
   if (G.alpha > G.alphaTo) { G.alpha = toward(G.alpha, G.alphaTo, dt / (reduce ? .15 : .08)); G.inT = 0; } // out in 80 ms
-  else if (G.alpha < G.alphaTo) { G.inT += dt; if (reduce || G.alpha > .01 || G.inT >= .06) G.alpha = toward(G.alpha, G.alphaTo, dt / .15); } // in after 60 ms
+  else if (G.alpha < G.alphaTo) { // in after 60 ms, and only once the wave sits wholly inside the opening start card
+    if (!reduce && st === "start" && G.alpha <= .01 && !glyphInside()) G.inT = 0;
+    else { G.inT += dt; if (reduce || G.alpha > .01 || G.inT >= .06) G.alpha = toward(G.alpha, G.alphaTo, dt / .15); }
+  }
   else G.inT = 0;
   G.arcP = reduce ? toward(G.arcP, G.arcTo, dt / .15) : G.arcP + (G.arcTo - G.arcP) * (1 - Math.exp(-dt / .09));
   G.micP = toward(G.micP, G.micTo, dt / .15);
@@ -734,7 +795,7 @@ function drawGlyph() {
     const track = () => { g.strokeStyle = "rgba(255,255,255,.14)"; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, 7, 0, TAU); g.stroke(); };
     if (G.reopen) { // the closed ring opens back into the spinner: its tail races ahead while the head keeps spinning
       const q = clamp((wT - G.reopenT0) / .3, 0, 1), len = TAU - (TAU - 1.9) * ease(q), head = G.spinA + 1.9, from = G.col0 || RGB.sage;
-      track(); g.strokeStyle = mixCol(from, spinRGB(), clamp(q / .4, 0, 1)); g.beginPath(); g.arc(cx, cy, 7, head - len, head); g.stroke();
+      track(); g.strokeStyle = mixCol(from, spinRGB(), clamp(q / .4, 0, 1)); g.beginPath(); if (q <= 0) g.arc(cx, cy, 7, 0, TAU); else g.arc(cx, cy, 7, head - Math.min(len, TAU - 1e-3), head); g.stroke();
       const ta = 1 - clamp(q / .35, 0, 1); if (ta > .01) { g.globalAlpha = A * arc * ta; drawMark(k, 1, mixCol(from, from, 1)); }
     } else if (G.flash > 0) { // only the arc that was spinning flashes amber; the ring then closes from that same arc
       track(); g.strokeStyle = COL.amber; g.beginPath(); if (G.len0 > 0) g.arc(cx, cy, 7, G.a0, G.a0 + G.len0); else g.arc(cx, cy, 7, 0, TAU); g.stroke();
@@ -749,7 +810,8 @@ function drawGlyph() {
       if (stroke > 0) { g.globalAlpha = A * arc * stroke; g.fillStyle = COL.amber; g.beginPath(); g.roundRect(cx - 2.8, cy - 7.6, 5.6, 3.6, 1.2); g.fill(); g.fillRect(cx - 2.6, cy - .2, 5.2, 1.4); g.fillRect(cx - 2.6, cy + 2.8, 3.4, 1.4); }
     } else { // check / bang: the ring closes from where the spinner's arc was, shifting from its colour to the result's
       const to = k === "check" ? RGB.sage : RGB[G.tint];
-      track(); g.strokeStyle = mixCol(G.col0 && !reduce ? G.col0 : to, to, clamp(G.endP / .25, 0, 1)); g.beginPath(); g.arc(cx, cy, 7, G.a0, G.a0 + G.len0 + (TAU - G.len0) * ring); g.stroke();
+      const sweep = G.len0 + (TAU - G.len0) * ring; // a closed ring is drawn as one: a sweep within an ulp of 2π can draw nothing
+      track(); g.strokeStyle = mixCol(G.col0 && !reduce ? G.col0 : to, to, clamp(G.endP / .25, 0, 1)); g.beginPath(); if (ring >= 1 - 1e-6) g.arc(cx, cy, 7, 0, TAU); else g.arc(cx, cy, 7, G.a0, G.a0 + Math.min(sweep, TAU - 1e-3)); g.stroke();
       drawMark(k, stroke, k === "check" ? COL.sage : COL[G.tint]);
     }
   }
@@ -765,10 +827,11 @@ function voiceAt(t) {
   if (t >= nextSyl) { syl.push({t0: t, a: .35 + rnd() * .65}); nextSyl = t + .11 + rnd() * .12; const r = rnd(); if (t - voiceT0 > .6 && r < .08) pauseUntil = t + .25 + rnd() * .3; }
   let v = 0; syl = syl.filter(s => t - s.t0 < .8); for (const s of syl) { const d = t - s.t0; v += s.a * (d < .025 ? d / .025 : Math.exp(-(d - .025) / .12)); } return Math.min(1, v);
 }
+const voiceLive = () => voiceOn && signal && (st === "start" || st === "listening" || st === "live");
 function voiceWorld(dt) {
-  const live = voiceOn && signal && (st === "start" || st === "listening" || st === "live");
+  const live = voiceLive();
   const lv = live ? voiceAt(wT) * (voiceOn === "room" ? .22 : 1) * (st === "start" ? .85 : 1) : 0;
-  const up = 1 - Math.exp(-dt / .03), dn = 1 - Math.exp(-dt / .18); env += (lv - env) * (lv > env ? up : dn);
+  const up = 1 - Math.exp(-dt / .03), dn = 1 - Math.exp(-dt / (live ? .18 : .07)); env += (lv - env) * (lv > env ? up : dn); // silence: the bars drop to the baseline within ~0.2 s
   for (let i = 0; i < 9; i++) { const target = lv * WTS[i] * (.55 + .45 * rnd()); bins[i] += (target - bins[i]) * (target > bins[i] ? up : dn); if (bins[i] >= peak[i]) { peak[i] = bins[i]; peakT[i] = wT; } else if (wT - peakT[i] > .3) peak[i] = Math.max(bins[i], peak[i] - dt * 1.2); }
 }
 
@@ -794,35 +857,45 @@ function fillStart(fade, micFade) {
   if (mf) ghostEl(bad ? md : mb); // the dot and '— not found' cross-fade while the chip's width springs
   $("micName").textContent = ctx.mic; $("micChip").classList.toggle("bad", bad);
   mb.hidden = !bad; md.hidden = bad; md.classList.toggle("idle", ctx.micState !== "live");
-  if (mf) fadeIn(bad ? mb : md);
-  $("chipsRow").classList.toggle("reserve", ctx.micState !== "live");
+  if (mf) fadeIn(bad ? mb : md); // '— not found' is revealed by the chip's own springing edge (it clips), so it need not wait for the width
   $("engChip").textContent = ctx.engine; $("spark").hidden = raw;
   if (fade) fadeIn(nm);
   measureChip(!fade || st !== "start", !mf); // the chip widths re-spring; their neighbours glide instead of jumping
   if (st === "start") retarget();
 }
-function fillWork(s, o) {
-  $("workLbl").textContent = o.label || (s === "polishing" ? "Polishing" : "Transcribing");
-  const m = $("workMeta");
-  if (s === "polishing") { m.textContent = " · " + ctx.style; m.className = "sage"; }
-  else { m.textContent = o.meta ? " · " + o.meta : ""; m.className = "dim"; }
-  $("skipBtn").style.display = s === "polishing" ? "" : "none";
+function fillWork(s, o, fade) { // fade: same row, new words (Transcribing → Polishing): the label cross-fades in place, Skip arrives once it fits
+  const lbl = $("workLbl"), m = $("workMeta"), box = lbl.parentNode, sk = $("skipBtn"), skip = s === "polishing";
+  const t = o.label || (skip ? "Polishing" : "Transcribing");
+  const meta = skip ? ` <span class="dim">·</span> <span class="sage">${esc(ctx.style)}</span>` : o.meta ? ` <span class="dim">· ${esc(o.meta)}</span>` : "";
+  if (!fade) [box, sk].forEach(e => { FX.delete(e); clearFx(e); });
+  if (box.dataset.k !== t + "|" + meta) {
+    if (fade) ghostEl(box);
+    lbl.textContent = t; m.className = ""; m.innerHTML = meta; box.dataset.k = t + "|" + meta;
+    if (fade) fadeIn(box, fits(box));
+  }
+  if (skip !== (sk.style.display !== "none")) { if (fade && !skip) ghostEl(sk); sk.style.display = skip ? "" : "none"; if (fade && skip) fadeIn(sk, fits(sk)); }
 }
 const ACT = {undo: ["Undo", ""], orig: ["Original", ""], polished: ["Polished", ""], retry: [null, "primary"], fixkey: ["Fix key", ""]};
-function swapText(el, t, fade) { if (el.textContent === t) return; if (fade) ghostEl(el); el.textContent = t; if (fade) fadeIn(el); }
-function fillDone(fade) { // fade: an in-place swap cross-fades only the text that changed; untouched buttons keep their node and hover
-  const c = doneCfg, a = APPS[ctx.app], box = $("doneActs");
-  swapText($("doneLbl"), `${c.label} ${a.short || a.name}`, fade); swapText($("doneCount"), `· ${c.words} words`, fade); $("doneExtra").textContent = c.extra || "";
+const TOGGLE = {orig: "Polished", polished: "Original"}; // the toggle reserves the wider of its two labels, so its neighbours never move
+function fillDone(fade) { // fade: an in-place swap cross-fades only the text that changed; buttons keep their node, fill and hover
+  const c = doneCfg, a = APPS[ctx.app], box = $("doneActs"), txt = $("doneTxt");
+  const lbl = `${c.label} ${a.short || a.name}`, cnt = `· ${c.words} words`, ex = c.extra || "";
+  if ($("doneLbl").textContent !== lbl || $("doneCount").textContent !== cnt || $("doneExtra").textContent !== ex) {
+    if (fade) ghostEl(txt); // one ghost of the whole line, taken before any text changes, so nothing lands out of place
+    $("doneLbl").textContent = lbl; $("doneCount").textContent = cnt; $("doneExtra").textContent = ex;
+    if (fade) fadeIn(txt);
+  }
   if (!fade) box.textContent = "";
   const btns = [...box.querySelectorAll("button")];
   c.acts.forEach((k, i) => {
     const t = k === "retry" ? "Retry with " + ctx.retry : ACT[k][0];
     let b = btns[i];
-    if (!b) { b = document.createElement("button"); b.type = "button"; b.className = "act"; box.insertBefore(b, box.querySelector(".via")); }
-    else if (b.dataset.act === k && b.textContent === t) return;
-    else if (fade) ghostEl(b);
-    b.classList.toggle("primary", ACT[k][1] === "primary"); b.dataset.act = k; b.textContent = t;
-    if (fade) fadeIn(b);
+    if (!b) { b = document.createElement("button"); b.type = "button"; b.className = "act"; b.innerHTML = '<span class="al"></span><span class="al alt" aria-hidden="true"></span>'; box.insertBefore(b, box.querySelector(".via")); }
+    const al = b.firstChild;
+    if (b.dataset.act === k && al.textContent === t) return;
+    if (fade && al.textContent) ghostEl(al); // only the label cross-fades
+    b.classList.toggle("primary", ACT[k][1] === "primary"); b.classList.toggle("tog", !!TOGGLE[k]); b.dataset.act = k; al.textContent = t; b.lastChild.textContent = TOGGLE[k] || "";
+    if (fade) fadeIn(al);
   });
   btns.slice(c.acts.length).forEach(b => { if (fade) ghostEl(b); b.remove(); });
   let via = box.querySelector(".via");
@@ -852,17 +925,29 @@ function setWords(c, t) {
   const wl = $("wl"), box = wl.parentNode;
   if (!c && !t) { wl.style.minWidth = ""; box.classList.remove("fits"); }
   if (c === wC && t === wTail) return;
+  $("fresh").style.transform = ""; // measured upright; render() puts the easing slant back
   const flip = !reduce && L.words.on && L.words.a > .05 && !!(wC || wTail);
-  const before = flip ? wl.offsetLeft + WS.x : 0;
+  const before = flip ? wl.offsetLeft + WS.x : 0, oldInk = flip ? inkW() : 0;
+  // only the tentative tail changed (a corrected guess): its words cross-fade, 80 ms out and 60 ms in, instead of swapping in one frame
+  const tn = $("tentative"), tg = flip && c === wC && wTail ? ghostEl(tn) : null; if (tg) tg.el.style.whiteSpace = "pre";
   if (c !== wC) { if (wC && c.startsWith(wC)) { freshAt = wC.length; freshT = 0; } else { freshAt = c.length; freshT = 9; } wC = c; }
   wTail = t;
   let base = c.slice(0, freshAt); if (base.length > 260) base = "…" + base.slice(-260);
-  $("committed").textContent = base; $("fresh").textContent = c.slice(freshAt); $("tentative").textContent = t ? (c ? " " : "") + t : "";
+  $("committed").textContent = base; $("fresh").textContent = c.slice(freshAt); tn.textContent = t ? (c ? " " : "") + t : "";
+  if (tg) fadeIn(tn);
   if (c || t) {
-    const cw = Math.max($("committed").offsetWidth + $("fresh").offsetWidth + $("tentative").offsetWidth, parseFloat(wl.style.minWidth) || 0);
+    const cw = Math.max(Math.ceil(["committed", "fresh", "tentative"].reduce((n, id) => n + $(id).getBoundingClientRect().width, 0) / domScale() - .01), parseFloat(wl.style.minWidth) || 0);
     wl.style.minWidth = cw + "px"; box.classList.toggle("fits", fitsLine(cw));
   }
   WS.x = flip ? before - wl.offsetLeft : 0;
+  // the slide starts with the new words past the island's edge (the line rests 13 px inside it): they stay masked until they are inside
+  if (!flip) WR = []; else if (WS.x > 13) { WR = WR.filter(r => r.x < oldInk - .5); WR.push({x: oldInk, t: 0, wait: true}); }
+}
+const inkW = () => ["committed", "fresh", "tentative"].reduce((n, id) => n + $(id).getBoundingClientRect().width, 0) / domScale();
+const wrA = r => r.wait ? 0 : ease((r.t - .06) / .2);
+function wordsAnim(dt) {
+  WR.forEach(r => { r.t += dt; if (r.wait) { if (WS.x <= 13) r.wait = false; else r.t = Math.min(r.t, .06); } });
+  while (WR.length && wrA(WR[0]) >= 1) WR.shift(); // the oldest (leftmost) reveal finishes first
 }
 function updateTimer() {
   if (st !== "listening" && st !== "live" && st !== "no-audio") return;
@@ -880,22 +965,19 @@ function go(s, o = {}) {
   const prev = st, pw = W.to, ph = H.to;
   const gh = reduce && !seeking && s !== prev ? makeGhost() : null;
   const lk = (LAYERS_OF[s] || [])[0], same = s !== prev && !!lk && (LAYERS_OF[prev] || []).join() === (LAYERS_OF[s] || []).join();
-  const lg = same ? ghostLayer(lk) : null; // same layer, new words: the old content fades out while the new lifts in
-  st = s; G.hop = 0;
+  const swap = same && lk === "work" && !reduce; // same row (Transcribing → Polishing): only its text cross-fades, the row stays
+  const lg = same && !swap ? ghostLayer(lk) : null; // same layer, new words: the old content fades out while the new lifts in
+  st = s;
   if (s === "live" && prev !== "live") liveRowW = W.x;
   if (s !== "listening" && s !== "live") { hint = false; stream = null; }
   let edge = ""; G.micTo = 0;
   const fresh = () => { if (G.alpha < .05) { G.kind = "spin"; G.arcP = 0; G.endP = 0; G.reopen = 0; } }; // a new dictation starts from the wave
   switch (s) {
     case "ready": G.alphaTo = 0; break;
-    case "start": fresh(); fillStart();
-      // leaving a two-row card, a long glide would drag the check across the outgoing text: it fades out in place with that content,
-      // lands in the start card's wave slot, fades back in and only then unfolds into the wave (anim())
-      if (TWO[prev] && G.alpha > .05 && !reduce && Math.abs(W.to - BD - GR - GX.x) > 40) { G.hop = 1; G.alphaTo = 0; } else { G.alphaTo = 1; G.arcTo = 0; }
-      break;
+    case "start": fresh(); fillStart(); G.alphaTo = 1; G.arcTo = 0; break; // a check on screen unfolds into the wave where it is, then glides (pinShared)
     case "listening": case "live": fresh(); G.alphaTo = hint ? 0 : 1; G.arcTo = 0; break;
     case "no-audio": edge = "amber"; G.alphaTo = 1; G.arcTo = 0; G.micTo = 1; G.tint = "amber"; break;
-    case "transcribing": case "polishing": fillWork(s, o); spinGlyph(s); break;
+    case "transcribing": case "polishing": fillWork(s, o, swap); spinGlyph(s); break;
     case "pasted": closeGlyph("check"); G.flash = o.flash ? .15 : 0; if (o.flash) G.col0 = RGB.amber; break;
     case "copied": captureArc(); fillNotice({title: `Copied — press ${pasteKey()}`, meta: `· ${o.words} words`, reason: o.reason, acts: [["Got it", "", "got"]]}); edge = "amber"; G.alphaTo = 1; G.arcTo = 1; G.kind = "clip"; G.reopen = 0; G.endP = 0; break;
     case "failed": fillFail(o); edge = "amber"; G.tint = "amber"; closeGlyph("bang"); break;
@@ -908,9 +990,11 @@ function go(s, o = {}) {
   if (gh && !shape) { gh.el.remove(); ghosts = ghosts.filter(x => x !== gh); }
   const useGhost = gh && shape;
   if (useGhost) dropGhost(lg);
-  syncLayers(useGhost);
-  if (useGhost) IA = -.4; // reduced motion: the new island waits 60 ms while the old one fades out in 80 ms
-  else if (same) replay(lk);
+  // a start card that never fully showed its content (a second press right after the first) collapses at once instead of coasting on outward
+  if (s === "ready" && prev === "start" && L.start.a < .5 && !reduce) { W.v = Math.min(W.v, 0); H.v = Math.min(H.v, 0); }
+  syncLayers(useGhost); exitHold();
+  if (useGhost) IA = 0; // reduced motion: the old island and the new one cross-fade over the same 150 ms
+  else if (same && !swap) replay(lk);
   announce(s);
 }
 function makeGhost() {
@@ -941,8 +1025,9 @@ function partial(v, link) {
 }
 function setHint(on) {
   if (on && st !== "listening" && st !== "live") return;
-  hintT0 = wT; if (on === hint) return;
-  hint = on; G.alphaTo = on ? 0 : 1; syncLayers(false); retarget();
+  if (on) hintT0 = wT; // a second Esc restarts the window; hiding never refills the draining bar
+  if (on === hint) return;
+  hint = on; G.alphaTo = on ? 0 : 1; syncLayers(false); retarget(); exitHold();
 }
 function doPaste(v) {
   const acts = v.acts || (ctx.polish ? ["undo", "orig", "retry"] : ["undo", "retry"]);
@@ -992,7 +1077,11 @@ function setApp(k) { ctx.app = k; renderApp(); setIcon(); }
 
 // ---------- feedback stack ----------
 let items = [], leaving = [], uid = 0;
-function addItem(kind, opts) { const f = FB[kind]; const it = {id: ++uid, kind, n: 1, opts: Object.assign({}, opts), sticky: !!f.sticky, left: (opts && opts.left) || f.dur || 0, resolved: false, el: null}; items.push(it); return it; }
+function addItem(kind, opts) {
+  const f = FB[kind]; const it = {id: ++uid, kind, n: 1, opts: Object.assign({}, opts), sticky: !!f.sticky, left: (opts && opts.left) || f.dur || 0, resolved: false, el: null, promo: false};
+  if (kind === "short" && !it.opts.t) it.opts.t = f.t(); // hold vs toggle copy is fixed by the mode of the take that was too short
+  items.push(it); return it;
+}
 function fire(kind, opts) {
   const ex = items.find(i => i.kind === kind && !i.resolved);
   if (ex) { ex.n++; items = items.filter(i => i !== ex).concat(ex); if (!ex.sticky) ex.left = Math.max(ex.left, FB[kind].dur); if (ex.s && !reduce) ex.s.v += 1.4; if (ex.el) fillCard(ex); return ex; }
@@ -1001,11 +1090,16 @@ function fire(kind, opts) {
 function resolve(kind, opts) {
   const it = items.find(i => i.kind === kind); if (!it) return;
   it.resolved = true; it.sticky = false; it.left = 1.5; it.opts = Object.assign({}, it.opts, opts); // never write into a scenario's op objects
-  if (it.el) { it.el.querySelectorAll(":scope>.ci,:scope>.txt").forEach(ghostEl); fillCard(it); it.el.querySelectorAll(":scope>.ci,:scope>.txt").forEach(fadeIn); } // turns in place: text cross-fades, size re-springs
+  if (it.el) { // turns in place: text and buttons cross-fade, size re-springs
+    const olds = [...it.el.querySelectorAll(":scope>.ci,:scope>.txt")];
+    it.el.querySelectorAll(":scope>.ci,:scope>.txt,:scope>.act:not([hidden]),:scope>.x:not([hidden])").forEach(ghostEl); // taken before fillCard hides any
+    fillCard(it); olds.forEach(e => fadeIn(e));
+    it.wHold = wT + .08; // the size holds while the old text and buttons fade out, so the closing edges never cut them
+  }
 }
 function removeItem(it) {
   items = items.filter(i => i !== it);
-  if (it.el) { leaving.push(it); if (!reduce) { it.y.to = it.y.x - 6; it.s.to = .96; } } // reduced motion: opacity only
+  if (it.el) { leaving.push(it); if (!reduce) { it.y.k = Math.pow(TAU / .12, 2); it.y.to = it.y.x - 6; it.s.to = .96; } } // lifts 6 px within its 80 ms fade, on top; reduced motion: opacity only
   if (it.kind === "key" && st === "start") fillStart();
 }
 function removeKind(kind) { items.filter(i => i.kind === kind).forEach(removeItem); }
@@ -1035,58 +1129,82 @@ function syncCards() {
       it.y = Spring(reduce ? 0 : 10); it.s = Spring(reduce ? 1 : .96); it.op = 0; it.b = reduce ? 0 : 2; const [nw, nh] = natSize(el); it.w = Spring(nw); it.h = Spring(nh);
     }
     const depth = n - 1 - idx, d = Math.min(depth, 2);
-    it.depth = depth; it.el.classList.toggle("back", depth > 0);
-    it.y.to = -d * PEEK; it.s.to = 1 - d * .05; it.opTo = depth === 0 ? 1 : depth === 1 ? .7 : depth === 2 ? .55 : 0;
+    if (depth === 0 && it.depth > 0) it.promo = true; // coming to the front: its buttons and subtitle wait until the card nearly fits them
+    it.depth = depth; it.el.classList.toggle("back", depth > 0); it.el.dataset.depth = Math.min(depth, 3);
+    it.y.to = -d * PEEK; it.s.to = 1 - d * .05; it.opTo = depth <= 2 ? 1 : 0; // back cards stay opaque and dim by colour (CSS), so layers never show through
   });
 }
-function natSize(e) { // natural size, rounded up (offsetWidth can round down and wrap a one-line card)
-  const {width: ow, height: oh, transform: ot} = e.style; e.style.width = e.style.height = ""; e.style.transform = "none";
-  const r = e.getBoundingClientRect(); e.style.width = ow; e.style.height = oh; e.style.transform = ot;
-  return [Math.ceil(r.width - .01), Math.ceil(r.height - .01)];
+function natSize(e) { // natural size, rounded up (offsetWidth can round down and wrap a one-line card), and its text column's width
+  const t = e.querySelector(":scope>.txt:not(.cghost)"), {width: ow, height: oh, transform: ot} = e.style, tw = t ? t.style.width : "", tf = t ? t.style.flex : "";
+  e.style.width = e.style.height = ""; e.style.transform = "none"; if (t) t.style.width = t.style.flex = "";
+  const r = e.getBoundingClientRect(), trw = t ? t.getBoundingClientRect().width : 0;
+  e.style.width = ow; e.style.height = oh; e.style.transform = ot; if (t) { t.style.width = tw; t.style.flex = tf; }
+  return [Math.ceil(r.width - .01), Math.ceil(r.height - .01), trw];
 }
 function cardTargets() { // every card springs to the front card's natural size (one spring for size, never a jump)
   const front = items[items.length - 1]; if (!front || !front.el) return;
-  const [fw, fh] = natSize(front.el);
+  const [fw, fh, ftw] = natSize(front.el), held = front.wHold > wT + 1e-9;
+  // the front card's text is laid out at its final width, so a springing card reveals it instead of re-wrapping it
+  items.forEach(it => { const t = it.el && it.el.querySelector(":scope>.txt:not(.cghost)"); if (t) { t.style.flex = it === front ? "none" : ""; t.style.width = it === front ? (ftw + .25).toFixed(2) + "px" : ""; } });
   // back cards scale about their bottom edge, so lift them by what the scale takes off: each shows a full PEEK strip for its title
-  items.forEach(it => { if (it.w) { it.w.to = fw; it.h.to = fh; if (it.depth > 0) it.y.to = -Math.min(it.depth, 2) * PEEK - fh * (1 - it.s.to); } });
+  items.forEach(it => { if (it.w) { if (!held) { it.w.to = fw; it.h.to = fh; } if (it.depth > 0) it.y.to = -Math.min(it.depth, 2) * PEEK - it.h.to * (1 - it.s.to); } });
 }
-// The stack only shows above the settled 12 px dot: it untucks once the island has landed (and any cross-fade ghost is gone).
-// Timed clocks run whenever the island is back at the dot, and pause from the key press until it returns.
+// The stack only shows above the settled 12 px dot: it untucks once the island has landed on the dot (its content gone, and any
+// cross-fade ghost gone), then rises 8 px and fades in where it rests. It never rides a shrinking island down.
+// Timed clocks run only while the stack is untucked: they pause from the key press and start again as the stack untucks above the dot.
 const dotSettled = () => st === "ready" && Math.max(W.x, 12) < 12.5 && Math.max(H.x, 12) < 12.5;
-const tucked = () => !dotSettled() || (!items.length && !leaving.length) || ghosts.length > 0;
+const landed = () => dotSettled() && LAY.every(k => L[k].a < .05);
+const tucked = () => !landed() || (!items.length && !leaving.length) || ghosts.length > 0;
 function stackWorld(dt) {
-  if (st !== "ready" || ghosts.length > 0) return; // timed clocks pause while the island is busy
+  if (tucked()) return; // timed clocks pause while the stack is tucked, and run from the moment it untucks above the settled dot
   items.forEach(i => { if (!i.sticky) i.left -= dt; });
   for (;;) { const t = items.filter(i => !i.sticky).sort((a, b) => a.id - b.id)[0]; if (!t || t.left > 1e-6) break; removeItem(t); } // oldest-first
 }
 function stackAnim(dt) {
   syncCards(); cardTargets();
   const tk = tucked();
-  TA = toward(TA, tk ? 0 : 1, dt / (reduce ? (tk ? .08 : .15) : tk ? .12 : .22)); TY.to = tk && !reduce ? 8 : 0; // reduced motion: tucks before the island fades in
+  TA = toward(TA, tk ? 0 : 1, dt / (reduce ? (tk ? .08 : .15) : tk ? .12 : .18)); TY.to = tk && !reduce ? 8 : 0; // reduced motion: tucks before the island fades in
   moreA = toward(moreA, items.length > 3 && !tk ? 1 : 0, dt / .2);
-  items.forEach(it => { sstep(it.y, dt); sstep(it.s, dt); sstep(it.w, dt); sstep(it.h, dt); it.op = toward(it.op, it.opTo, dt / (reduce ? .15 : .3)); it.b = toward(it.b, 0, dt / .3); });
-  leaving = leaving.filter(it => { sstep(it.y, dt); sstep(it.s, dt); it.op = toward(it.op, 0, dt / (reduce ? .15 : .3)); it.b = reduce ? 0 : toward(it.b, 2, dt / .3); if (it.op <= .01) { it.el.remove(); return false; } return true; });
+  // while the stack is fully hidden, cards that arrived, moved or left meanwhile take their final place at once, so the stack untucks
+  // already in its final layering and its own fade is the only entrance (no half-faded card shows through the one in front)
+  const hidden = TA < .01;
+  items.forEach(it => {
+    if (hidden) { it.op = it.opTo; it.b = 0; [it.y, it.s, it.w, it.h].forEach(snap); it.promo = false; return; }
+    sstep(it.y, dt); sstep(it.s, dt); sstep(it.w, dt); sstep(it.h, dt); it.op = toward(it.op, it.opTo, dt / (reduce ? .15 : .3)); it.b = toward(it.b, 0, dt / .1); // unblurs in 200 ms
+    if (it.promo && Math.abs(it.w.x - it.w.to) < 8 && Math.abs(it.h.x - it.h.to) < 4) it.promo = false;
+  });
+  if (hidden && leaving.length) { leaving.forEach(it => it.el.remove()); leaving = []; }
+  leaving = leaving.filter(it => { sstep(it.y, dt); sstep(it.s, dt); it.op = toward(it.op, 0, dt / (reduce ? .15 : .08)); it.b = reduce ? 0 : toward(it.b, 2, dt / .08); if (it.op <= .01) { it.el.remove(); return false; } return true; }); // out in 80 ms
 }
 function stackSettle() {
   syncCards(); cardTargets(); leaving.forEach(it => it.el.remove()); leaving = [];
-  items.forEach(it => { snap(it.y); snap(it.s); snap(it.w); snap(it.h); it.op = it.opTo; it.b = 0; });
+  items.forEach(it => { snap(it.y); snap(it.s); snap(it.w); snap(it.h); it.op = it.opTo; it.b = 0; it.promo = false; });
   TA = tucked() ? 0 : 1; TY.to = tucked() && !reduce ? 8 : 0; snap(TY); moreA = items.length > 3 && !tucked() ? 1 : 0;
 }
 
 // ---------- lab pointer + key HUD ----------
-const P = {slot: -1, target: null, x: 0, y: 0, fx: 0, fy: 0, tx: 0, ty: 0, t: 9, vis: 0, visTo: 0, fresh: true, clickW: -9, hovEl: null, frozen: false, hoverPending: false, hoverT: 0};
+const P = {slot: -1, target: null, x: 0, y: 0, fx: 0, fy: 0, tx: 0, ty: 0, t: 9, dur: .38, lastEl: null, vis: 0, visTo: 0, fresh: true, clickW: -9, clickEl: null, ripK: 1, ripSnap: false, hovEl: null, frozen: false, hoverPending: false, hoverT: 0, fadeAt: 0};
 const ISLAND_TARGETS = t => t === "island" || t === "styleChip" || t === "stop" || t === "cancel" || t === "dead:stop" || /^n?act:/.test(t);
 function aimPtr(el) {
   const sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect(); if (!(r.width || r.height)) return;
   if (el === island) { P.tx = r.left - sr.left + r.width * .3; P.ty = r.top - sr.top + Math.max(r.height * .5, r.height - 6); } // rests low over the wave, never on the timer
-  else { P.tx = r.left - sr.left + r.width * .5; P.ty = r.top - sr.top + r.height * .58; }
+  else if (el.id === "styleChip") { P.tx = r.left - sr.left + 12; P.ty = r.top - sr.top + r.height * .62; } // clicks on the ✦, so the ripple never covers the label
+  else { P.tx = r.left - sr.left + r.width * .5 - (ctlBtns.includes(el) ? Math.min(0, HC.x - 54) * domScale() : 0); P.ty = r.top - sr.top + r.height * .58; } // Stop/Cancel: where they land, not where they slide
 }
 function pointTo(v) {
-  P.fx = P.x; P.fy = P.y; P.t = 0; P.frozen = false;
-  if (v === "off") { P.target = null; P.visTo = 0; P.tx += 34; P.ty -= 46; P.hoverPending = false; simHover = false; }
+  P.fx = P.x; P.fy = P.y; P.t = 0; P.dur = .38; P.frozen = false; P.fadeAt = 0;
+  if (v === "off") { // the pointer visibly leaves: it moves off (over the island's top edge if it is still over it) and fades once outside
+    P.target = null; P.lastEl = null; P.tx += 34; P.ty -= 46; P.hoverPending = false; simHover = false;
+    // tested against the shape the island is heading for (a card may be about to grow under the pointer), and the one on screen
+    const ir = island.getBoundingClientRect(), sr = stage.getBoundingClientRect(), x = P.tx + sr.left, y = P.ty + sr.top, k = domScale();
+    const w = Math.max(ir.width, W.to * k), h = Math.max(ir.height, H.to * k), cx = (ir.left + ir.right) / 2;
+    const l = view.platform === "win" ? ir.right - w : cx - w / 2, r = view.platform === "win" ? ir.right : cx + w / 2, top = ir.bottom - h;
+    if (x > l - 8 && x < r + 8 && y > top - 8) P.ty = top - sr.top - 30;
+    if (P.visTo > 0) P.fadeAt = wT + .3; else P.visTo = 0;
+  }
   else {
     if (P.vis < .05) P.fresh = true; P.target = v; P.visTo = 1;
-    const b = ptrEl(); P.slot = b && b.parentNode ? [...b.parentNode.children].indexOf(b) : -1;
+    const b = ptrEl(); P.slot = b && b.parentNode ? [...b.parentNode.children].indexOf(b) : -1; P.lastEl = b;
     if (b && b.isConnected) aimPtr(b);
     if (!ISLAND_TARGETS(v)) { simHover = false; P.hoverPending = false; }
     else if (!simHover && !P.hoverPending) { if (reduce) simHover = true; else { P.hoverPending = true; P.hoverT = 0; } } // the hover lands when the pointer does
@@ -1097,8 +1215,7 @@ function ptrEl() { // null while the target is not on screen, so the pointer kee
   const t = P.target; if (!t) return null;
   if (t === "island") return island;
   if (t === "styleChip") return L.start.on ? $("styleChip") : null;
-  if (t === "stop") return HC.x >= 1 ? $("stopBtn") : null;
-  if (t === "cancel") return HC.x >= 1 ? $("cancelBtn") : null;
+  if (t === "stop" || t === "cancel") return HC.x >= 1 ? $(t === "stop" ? "stopBtn" : "cancelBtn") : $("timer"); // heads for where the controls will slide out
   if (t === "dead:stop") return L.dead.on ? $("deadStop") : null;
   if (t === "compose") return $("compose");
   if (t.startsWith("act:")) return L.done.on ? $("doneActs").querySelector(`[data-act="${t.slice(4)}"]`) || $("doneActs").children[P.slot] || null : null;
@@ -1106,14 +1223,20 @@ function ptrEl() { // null while the target is not on screen, so the pointer kee
   if (t.startsWith("card:")) { const it = items.concat(leaving).find(i => i.kind === t.slice(5)); return it && it.el ? it.el.querySelector(".act") : null; }
   return null;
 }
-const K = {label: "", mode: "", t0: -9, again: false}; let keysHtml = "";
-function keyEvent(v) { K.again = v === "esc" && K.mode === "esc" && wT - K.t0 < .9; K.label = v === "esc" ? "Esc" : hotkey(); K.mode = v; K.t0 = wT; }
+const K = {label: "", mode: "", t0: -9, again: false, busy: false}; let keysHtml = "";
+function keyEvent(v) { // "hide" is the native terminal hide from an older generation (retarget-while-finishing), shown so a still frame proves it was ignored
+  K.again = v === "esc" && K.mode === "esc" && wT - K.t0 < 2; K.busy = false; // a second Esc inside the 2 s window
+  K.label = v === "esc" ? "Esc" : v === "hide" ? "native hide · gen 1" : hotkey(); K.mode = v; K.t0 = wT;
+}
 
 // ---------- scenario ops ----------
 const OPS = {
   app: v => setApp(v),
   key: v => keyEvent(v),
-  mic: v => { const flip = (ctx.micState === "bad") !== (v === "bad"); ctx.micState = v; fillStart(false, flip); },
+  mic: v => { // a recorder that fails while the chips row is still arriving turns red once the row has landed, so the change is seen
+    if (v === "bad" && st === "start" && !reduce && !seeking && !chipsIn()) { pendingMic = v; return; }
+    applyMic(v);
+  },
   signal: v => { signal = !!v; },
   stopping: v => { stopping = !!v; retarget(); },
   press: v => press(v),
@@ -1122,7 +1245,7 @@ const OPS = {
   island: v => { const [s, o] = Array.isArray(v) ? v : [v, {}]; go(s, o || {}); },
   partial: (v, s) => partial(v, s && s.next),
   hint: v => setHint(!!v),
-  shake: () => busy(),
+  shake: () => { busy(); K.busy = true; }, // the press is shown as rejected
   paste: v => doPaste(v),
   compose: v => setCompose(v, false, false),
   fire: v => (Array.isArray(v) && Array.isArray(v[0]) ? v : [v]).forEach(f => Array.isArray(f) ? fire(f[0], f[1]) : fire(f)),
@@ -1130,11 +1253,17 @@ const OPS = {
   expire: v => [].concat(v).forEach(removeKind),
   dismiss: v => [].concat(v).forEach(removeKind),
   pointer: v => pointTo(v),
-  click: () => { P.clickW = wT; P.frozen = true; }, // a real pointer stays where it clicked
+  click: () => { P.clickW = wT; P.frozen = true; P.clickEl = P.hovEl; P.ripK = 1; }, // a real pointer stays where it clicked; its ripple belongs to the control it clicked
   then: (v, s) => later(v[0], () => applyDo(v[1], s)),
 };
+function applyMic(v) { pendingMic = null; const flip = (ctx.micState === "bad") !== (v === "bad"); ctx.micState = v; fillStart(false, flip); }
+const chipsIn = () => L.start.t >= .3 && L.start.t2 >= .16; // the start card's chips row is mostly in (about 90 %, see render()'s ROW2), so the red change is seen early
 const ORDER = ["app", "key", "pointer", "click", "mic", "signal", "stopping", "press", "style", "voice", "island", "partial", "hint", "shake", "paste", "compose", "fire", "resolve", "expire", "dismiss", "then"];
-function applyDo(d, s) { for (const k of ORDER) if (k in d) OPS[k](d[k], s); }
+function applyDo(d, s) { // a pointer leaving moves last, so it clears the shape the island is heading for
+  const off = d.pointer === "off";
+  for (const k of ORDER) if (k in d && !(off && k === "pointer")) OPS[k](d[k], s);
+  if (off) OPS.pointer("off");
+}
 function applyDue() {
   if (!scn) return;
   let moved = false;
@@ -1159,24 +1288,25 @@ function world(dt) {
     if (wT > doneCfg.since + 1e-9 && !(simHover || (!scn && realHover))) doneCfg.left -= dt;
     if (doneCfg.left <= 1e-6) go("ready");
   }
+  if (P.fadeAt && wT >= P.fadeAt - 1e-9) { P.visTo = 0; P.fadeAt = 0; }
   stackWorld(dt);
 }
 function anim(dt) {
-  const hold = openHold > 0;
-  if (hold) openHold -= dt; else { sstep(W, dt); sstep(H, dt); sstep(R, dt); }
+  const hold = openHold > 0 || closeHold > 0; // opening: the dip; closing: outgoing content clears before the edge moves in
+  if (openHold > 0) openHold -= dt; else if (closeHold > 0) closeHold -= dt; else { sstep(W, dt); sstep(H, dt); sstep(R, dt); }
   if (dipHold > 0) { dipHold -= dt; if (dipHold <= 0) { SC.to = 1; SC.k = SC_K; } }
   sstep(SC, dt); depTargets();
   if (!hold) SHARED.forEach(s => sstep(s, dt)); // shared elements wait out the dip with the shape, then move in lockstep with it
-  [IO, HC, TY, CW, MW].forEach(s => sstep(s, dt));
-  if (G.hop === 1 && st === "start" && G.alpha < .02 && L.done.a < .02 && L.notice.a < .02) { // the faded check lands in the wave slot
-    G.hop = 2; pinR = true; GRIGHT.x = GRIGHT.to = GR; GRIGHT.v = 0; G.alphaTo = 1;
-  }
-  if (G.hop === 2 && G.alpha > .9) { G.hop = 0; G.arcTo = 0; } // back in view: the check unfolds into the wave
+  [IO, TY, CW, MW].forEach(s => sstep(s, dt));
+  if (ctlOut > 0) ctlOut = Math.max(0, ctlOut - dt / .08); else sstep(HC, dt); // folding controls keep their width until they have faded
   pinShared();
-  layerAnim(dt); fxAnim(dt); glyphAnim(dt);
-  if (reduce && TA > .01 && st !== "ready") IA = Math.min(IA, 0); // reduced motion: the island fades in only once the stack has tucked
-  else IA = Math.min(1, IA + dt / .15);
-  ghosts = ghosts.filter(x => { x.a -= dt / (reduce ? .08 : .15); if (x.a <= 0) { x.el.remove(); return false; } return true; });
+  layerAnim(dt); fxAnim(dt); glyphAnim(dt); wordsAnim(dt);
+  if (pendingMic && (st !== "start" || chipsIn())) applyMic(pendingMic); // the mic turns red in place once the chips row has landed
+  if (P.clickEl && P.hovEl !== P.clickEl) P.ripK = Math.max(0, P.ripK - dt / .08); // the clicked control left from under the pointer: its ripple goes too
+  if (P.clickEl && ctlBtns.includes(P.clickEl) && HC.to === 0) P.ripK = Math.min(P.ripK, ctlOut); // a clicked Stop/Cancel folding away takes its ripple with it
+  // reduced motion: the island fades in only once the stack has tucked (its wait runs meanwhile, so no blank frame follows)
+  IA = reduce && TA > .01 && st !== "ready" ? Math.min(IA + dt / .15, 0) : Math.min(1, IA + dt / .15);
+  ghosts = ghosts.filter(x => { x.a -= dt / .15; if (x.a <= 0) { x.el.remove(); return false; } return true; }); // cross-fades with the new island
   if (!L.words.on && L.words.a <= 0 && (wC || wTail)) setWords("", ""); // once faded, the transcript leaves the DOM
   if (shakeT >= 0 && aT - shakeT > .24) shakeT = -1;
   WS.x = Math.abs(WS.x) < .05 ? 0 : WS.x * Math.exp(-dt / .06); freshT += dt;
@@ -1193,25 +1323,26 @@ function tick(dw, da) {
 }
 function settle() {
   if (P.hoverPending) { P.hoverPending = false; simHover = true; }
-  retarget(); openHold = 0; dipHold = 0; SC.to = 1; SC.k = SC_K; shakeT = -1;
-  if (G.hop) { G.hop = 0; G.alphaTo = 1; G.arcTo = 0; }
+  if (pendingMic) applyMic(pendingMic);
+  retarget(); openHold = 0; closeHold = 0; ctlOut = 0; dipHold = 0; SC.to = 1; SC.k = SC_K; shakeT = -1;
+  if (!voiceLive()) { bins.fill(0); env = 0; } // a settled frame shows silence as flat bars; the peak caps keep their own fade
   [W, H, R, SC].forEach(snap); depTargets(); [IX, IY, IS, IO, GX, GY, HC, ITOP, GTOP, GRIGHT, CW, MW].forEach(snap);
-  pinV = st === "start" || !!TWO[st]; pinR = st === "start"; pinShared();
-  LAY.forEach(k => { const x = L[k]; x.a = x.on ? 1 : 0; x.from = x.a; x.t = 9; x.lift = 0; x.blur = 0; });
+  pinV = st === "start" || !!TWO[st]; pinR = st === "start"; LAY.forEach(k => { L[k].a = L[k].on ? 1 : 0; }); pinShared();
+  LAY.forEach(k => { const x = L[k]; x.a = x.on ? 1 : 0; x.from = x.a; x.t = x.t2 = 9; x.lift = 0; x.blur = 0; });
   FX.forEach((f, el) => clearFx(el)); FX.clear();
   lghosts.forEach(x => x.el.remove()); lghosts = [];
   if (G.reopen) { G.reopen = 0; G.kind = "spin"; }
   G.alpha = G.alphaTo; G.arcP = G.arcTo; G.micP = G.micTo; G.flash = 0; G.spinT0 = -9; if (G.arcTo === 1 && G.kind !== "spin") G.endP = 1;
   IA = 1; ghosts.forEach(x => x.el.remove()); ghosts = [];
-  WS.x = 0; freshT = 9;
+  WS.x = 0; freshT = 9; WR = [];
   stackSettle();
-  P.t = 9; P.vis = P.visTo; landA = 0;
+  P.t = 9; P.vis = P.visTo; landA = 0; P.ripSnap = true;
 }
 
 // ---------- render ----------
 const ptr = $("ptr"), rip = $("rip");
 const ctlBtns = [$("stopBtn"), $("cancelBtn")];
-let rowL = 0, rowB = 0;
+let rowL = 0, rowB = 0, wmask = "";
 function render() {
   const win = view.platform === "win", cap = win ? 360 : 420;
   // the dot never dips below 12 px while it settles (stays round); the start card never overshoots its cap
@@ -1225,7 +1356,8 @@ function render() {
   island.classList.toggle("hovered", simHover || (!scn && realHover));
   const is = Math.max(0, IS.x);
   appico.style.width = appico.style.height = is + "px"; appico.style.left = IX.x - is / 2 + "px"; appico.style.bottom = IY.x - is / 2 + "px";
-  appico.style.opacity = clamp(IO.x, 0, 1); appico.style.borderRadius = Math.max(3, is * (win ? .22 : .28)) + "px";
+  appico.style.opacity = clamp(st === "ready" ? Math.min(IO.x, IS.x / 6) : IO.x, 0, 1); // into the dot: fades only in its last few px
+  appico.style.borderRadius = Math.max(3, is * (win ? .22 : .28)) + "px";
   glyph.style.left = GX.x + "px"; glyph.style.bottom = GY.x + "px"; drawGlyph();
   if (st !== "ready") { rowL = IX.x - 21; rowB = Math.max(0, IY.x - 16); } // one-row content rides with the icon's row
   for (const k of LAY) {
@@ -1233,22 +1365,47 @@ function render() {
     if (el.inert === x.on) { el.inert = !x.on; if (x.on) el.removeAttribute("aria-hidden"); else el.setAttribute("aria-hidden", "true"); } // off layers are neither focusable nor read out
   }
   for (const k of ROWS) { const s = L[k].el.style; s.left = rowL.toFixed(2) + "px"; s.bottom = rowB.toFixed(2) + "px"; }
-  for (const [k, id] of ROW2) { const x = L[k], a = x.on && !reduce && x.from <= .05 ? ease((x.t - .18) / .2) : 1; $(id).style.opacity = a < 1 ? a : ""; }
-  const hk = clamp(HC.x / 54, 0, 1); $("hoverCtl").style.width = Math.max(0, HC.x) + "px"; $("hoverCtl").style.opacity = hk < 1 ? hk : ""; const hcOff = HC.x < 1; if ($("hoverCtl").inert !== hcOff) { $("hoverCtl").inert = hcOff; if (hcOff) $("hoverCtl").setAttribute("aria-hidden", "true"); else $("hoverCtl").removeAttribute("aria-hidden"); }
-  ctlBtns.forEach(b => { b.style.transform = hk < 1 ? `translateX(${((1 - hk) * -10).toFixed(2)}px)` : ""; }); // Stop and Cancel slide out, not wipe
+  for (const [k, id] of ROW2) { // second rows arrive a beat after the first; the start card's chips and the failed row's buttons also wait until the card is nearly at its width
+    const x = L[k], a = x.on ? (!reduce && x.from <= .05 ? Math.min(ease((x.t - .18) / .2), ROW2W.includes(k) ? ease((x.t2 - .06) / .2) : 1) : 1) : reduce ? 1 : Math.min(x.r2 == null ? 1 : x.r2, x.a * x.a); // leaving: the far row clears first (a row that never showed stays hidden)
+    if (x.on) x.r2 = a;
+    $(id).style.opacity = a < 1 ? a.toFixed(3) : "";
+  }
+  // the controls stop taking clicks the moment they start to fold, so a second click can never land on a control sliding under the pointer
+  const hk = clamp(HC.x / 54, 0, 1); $("hoverCtl").style.width = Math.max(0, HC.x) + "px"; $("hoverCtl").style.opacity = hk < 1 ? hk : ""; const hcOff = HC.to === 0 || HC.x < 1; if ($("hoverCtl").inert !== hcOff) { $("hoverCtl").inert = hcOff; if (hcOff) $("hoverCtl").setAttribute("aria-hidden", "true"); else $("hoverCtl").removeAttribute("aria-hidden"); }
+  // Stop and Cancel ride the controls' growing edge, sliding out from behind the timer, and show together only once both are nearly
+  // clear of that edge and the island's (over the last 8 px), so neither is ever seen sliced and Cancel never leads Stop.
+  // Folding, they fade out in place in 80 ms (the controls' width holds meanwhile, see anim()), so nothing slides under the pointer.
+  const fold = HC.to === 0 ? ctlOut : 1;
+  if (HC.x < 54 - 1e-3 || fold < 1) {
+    const off = Math.min(0, HC.x - 54), hl = rowL + $("hoverCtl").offsetLeft, lim = W.x - BD - 2;
+    const o = Math.min(...ctlBtns.map((b, i) => { const l = 6 + i * 26 + off; return clamp(Math.min(l, lim - (hl + l + 22)) / 8 + 1, 0, 1); })) * fold;
+    ctlBtns.forEach(b => { b.style.transform = off ? `translateX(${off.toFixed(2)}px)` : ""; b.style.opacity = o.toFixed(3); });
+  } else ctlBtns.forEach(b => { b.style.transform = b.style.opacity = ""; });
   $("drain").style.width = 100 * clamp(1 - (wT - hintT0) / 2, 0, 1) + "%";
   const md = $("micDot"); md.style.transform = ctx.micState === "live" && voiceOn ? `scale(${(1 + Math.sqrt(env) * .7).toFixed(3)})` : "";
   $("styleChip").style.width = CW.x > 0 ? CW.x + "px" : ""; $("micChip").style.width = MW.x > 0 ? MW.x + "px" : "";
   L.words.el.style.setProperty("--row-left", (IX.x - 9).toFixed(2) + "px"); // a fitting words line starts under the app icon
   if (st === "pasted" && doneCfg) $("doneHold").firstChild.style.width = (doneCfg.hold > 0 ? 100 * clamp(doneCfg.left / doneCfg.hold, 0, 1) : 0) + "%";
-  $("wl").style.transform = WS.x ? `translateX(${WS.x.toFixed(2)}px)` : "";
-  const fa = reduce ? 1 : clamp(freshT / .2, 0, 1); $("fresh").style.color = fa < 1 ? `rgba(255,255,255,${(.5 + .42 * fa).toFixed(3)})` : "";
-  // stack: it only shows above the settled dot, so its base never moves
+  const wl = $("wl"); wl.style.transform = WS.x ? `translateX(${WS.x.toFixed(2)}px)` : "";
+  // new words that arrived past the edge are masked (in line px, so the mask slides with them) until they are inside, then fade in
+  let wm = "";
+  if (WR.length && !reduce) { let prev = "#000"; const stops = ["#000 0px"]; WR.forEach(r => { const x = r.x.toFixed(1), c = `rgba(0,0,0,${wrA(r).toFixed(3)})`; stops.push(`${prev} ${x}px`, `${c} ${x}px`); prev = c; }); stops.push(`${prev} 100%`); wm = `linear-gradient(to right,${stops.join(",")})`; }
+  if (wm !== wmask) { wmask = wm; wl.style.maskImage = wm; wl.style.webkitMaskImage = wm; }
+  const fa = reduce ? 1 : clamp(freshT / .2, 0, 1), fr = $("fresh"); fr.style.color = fa < 1 ? `rgba(255,255,255,${(.45 + .47 * fa).toFixed(3)})` : "";
+  fr.style.transform = fa < 1 && fr.textContent ? `skewX(${(-14.04 * (1 - fa)).toFixed(2)}deg)` : ""; // from the tentative's slant to upright, with the colour
+  // stack: it rests 12 px above the settled dot and only ever shows there (its entrance is TY's 8 px rise with its fade)
   const base = win ? 58 : 26;
   stackEl.style.bottom = base + 24 + "px"; stackEl.style.opacity = TA;
   stackEl.style.transform = `${win ? "" : "translateX(-50%) "}translateY(${TY.x}px)`;
   const all = items.concat(leaving);
-  all.forEach(it => { if (!it.el) return; const e = it.el, gone = leaving.includes(it); e.style.width = it.w.x + "px"; e.style.height = it.h.x + "px"; e.style.transform = `translateY(${it.y.x}px) scale(${it.s.x})`; e.style.opacity = it.op; e.style.filter = it.b > .05 ? `blur(${it.b}px)` : ""; e.style.zIndex = gone ? 19 : 20 - (it.depth || 0); e.style.pointerEvents = !gone && it.depth === 0 && TA > .5 ? "auto" : "none"; });
+  all.forEach(it => {
+    if (!it.el) return; const e = it.el, gone = leaving.includes(it);
+    e.style.width = it.w.x + "px"; e.style.height = it.h.x + "px"; e.style.transform = `translateY(${it.y.x}px) scale(${it.s.x})`; e.style.opacity = it.op; e.style.filter = it.b > .05 ? `blur(${it.b}px)` : "";
+    e.style.zIndex = gone ? 21 : 20 - (it.depth || 0); e.style.pointerEvents = !gone && it.depth === 0 && TA > .5 ? "auto" : "none"; // a leaving card lifts away on top of the new front card
+    const hold = it.promo && !gone; // a promoted card's subtitle and buttons wait until it has nearly grown to fit them
+    if (hold || it.held) e.querySelectorAll(":scope>.txt:not(.cghost) small,:scope>.act:not(.cghost),:scope>.x:not(.cghost)").forEach(c => { c.style.opacity = hold ? "0" : ""; });
+    it.held = hold;
+  });
   const more = $("more"); more.style.opacity = moreA;
   if (items.length > 3) {
     more.textContent = `+${items.length - 3} more`;
@@ -1263,21 +1420,24 @@ function render() {
   renderPointer(); renderKeys(); renderTime();
 }
 function renderPointer() {
-  const el = ptrEl();
+  const el = ptrEl(), moved = el !== P.lastEl && !!el && !!P.target && !P.frozen && !P.fresh; P.lastEl = el;
   if (el && el.isConnected && !P.frozen) aimPtr(el);
+  if (moved) { P.fx = P.x; P.fy = P.y; P.t = 0; P.dur = clamp(.1 + Math.hypot(P.tx - P.fx, P.ty - P.fy) / 400, .16, .38); } // a new aim (a button appears) glides on from where the pointer is
   if (P.fresh && P.target) { P.fx = P.tx + 56; P.fy = P.ty + 64; P.fresh = false; }
-  const e = reduce ? 1 : ease(P.t / .38);
+  const e = reduce ? 1 : ease(P.t / P.dur);
   P.x = P.fx + (P.tx - P.fx) * e; P.y = P.fy + (P.ty - P.fy) * e;
   ptr.style.transform = `translate(${P.x.toFixed(1)}px,${P.y.toFixed(1)}px)`; ptr.style.opacity = P.vis;
-  const hv = el && el !== island && el.id !== "compose" && P.target ? el : null;
+  let hv = null; // a button shows its hover only once the pointer's tip is over it
+  if (el && el.tagName === "BUTTON" && P.target && P.vis > .3) { const sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect(), x = P.x + sr.left, y = P.y + sr.top; if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) hv = el; }
   if (hv !== P.hovEl) { if (P.hovEl) P.hovEl.classList.remove("hov"); if (hv) hv.classList.add("hov"); P.hovEl = hv; }
-  const rp = (wT - P.clickW) / .45;
-  if (rp >= 0 && rp < 1 && P.vis > .3) { rip.style.opacity = (1 - rp).toFixed(2); rip.style.transform = `scale(${(.45 + rp * 1.1).toFixed(2)})`; } else rip.style.opacity = 0;
+  if (P.ripSnap) { P.ripSnap = false; if (P.clickEl && hv !== P.clickEl) P.ripK = 0; } // a settled frame: the clicked control has already gone from under the pointer
+  const rp = (wT - P.clickW) / .3;
+  if (rp >= 0 && rp < 1 && P.vis > .3 && P.ripK > .01) { rip.style.opacity = ((1 - rp) * P.ripK).toFixed(2); rip.style.transform = `scale(${(.45 + rp * 1.1).toFixed(2)})`; } else rip.style.opacity = 0;
 }
 function renderKeys() {
   let h = "";
   if (K.mode === "hold") h = `<span class="key">${esc(K.label)}<small>held</small></span>`;
-  else if (K.mode && wT - K.t0 >= 0 && wT - K.t0 < .9) h = `<span class="key">${esc(K.label)}${K.mode === "release" ? "<small>released</small>" : K.again ? "<small>again</small>" : ""}</span>`;
+  else if (K.mode && wT - K.t0 >= 0 && wT - K.t0 < .9) h = `<span class="key">${esc(K.label)}${K.mode === "release" ? "<small>released</small>" : K.mode === "hide" ? "<small>ignored</small>" : K.busy ? "<small>busy · ignored</small>" : K.again ? "<small>again</small>" : ""}</span>`;
   if (h !== keysHtml) { $("keys").innerHTML = h; keysHtml = h; }
 }
 
@@ -1329,7 +1489,7 @@ function resetWorld(setup) {
   seed = 7; wT = 0; wq = [];
   ctx = Object.assign(BASE(), JSON.parse(JSON.stringify(setup || {})));
   ctx.baseStyle = ctx.style; ctx.style = styleFor(ctx.app);
-  st = "ready"; recT0 = 0; extraSec = 0; voiceOn = false; signal = true; hint = false; stopping = false; simHover = false; stream = null; doneCfg = null; timerTxt = ""; fpLive = false; liveRowW = 0; dipHold = 0; SC.k = SC_K; startMinW = 0;
+  st = "ready"; recT0 = 0; extraSec = 0; voiceOn = false; signal = true; hint = false; stopping = false; simHover = false; stream = null; doneCfg = null; timerTxt = ""; fpLive = false; liveRowW = 0; dipHold = 0; openHold = closeHold = ctlOut = 0; pendingMic = null; SC.k = SC_K; startMinW = 0;
   env = 0; bins.fill(0); peak.fill(0); peakT.fill(0); syl = []; nextSyl = 0; pauseUntil = 0; voiceT0 = 0;
   Object.assign(G, G0());
   lghosts.forEach(x => x.el.remove()); lghosts = []; WS.x = 0; freshT = 9;
@@ -1401,7 +1561,7 @@ function fpDictate() {
   if (fp.take === "short") later(7.6, fpStop);
 }
 function fpStop() {
-  if (!recording()) return;
+  if (!recording() || stopping) return; // one stop per recording: a second press during the post-roll is ignored
   wq = []; keyEvent("tap");
   if (wT - recT0 < .5) { voiceOn = false; go("too-short"); later(1.4, fpSettle); return; }
   if (st === "no-audio") go("listening");
@@ -1446,6 +1606,7 @@ island.addEventListener("click", e => {
   if (scn) return;
   const b = e.target.closest("button"); if (!b) return;
   const id = b.id, act = b.dataset.act;
+  if (stopping && (id === "stopBtn" || id === "cancelBtn" || id === "deadStop" || id === "deadCancel")) return; // a stop is in flight: a second click (a double-click on ■) is ignored, never a cancel
   if (id === "stopBtn" || id === "deadStop") fpStop();
   else if (id === "cancelBtn" || id === "deadCancel") fpCancel();
   else if (id === "skipBtn") fpPaste(true);
@@ -1469,7 +1630,7 @@ seg("polish", "p", freeAct(v => { fp.polish = ctx.polish = v === "on"; fillStart
 seg("preview", "v", freeAct(v => { fp.preview = ctx.preview = v === "on"; ctx.engine = fp.preview ? "Whisper Turbo" : "Parakeet"; fillStart(); }));
 seg("take", "v", freeAct(v => { fp.take = v; }));
 document.querySelectorAll("[data-fb]").forEach(b => { b.onclick = freeAct(() => fire(b.dataset.fb)); });
-document.querySelectorAll("[data-g]").forEach(b => { b.onclick = freeAct(() => { wq = []; voiceOn = false; hint = false; GALLERY[b.dataset.g](); }); });
+document.querySelectorAll("[data-g]").forEach(b => { b.onclick = freeAct(() => { wq = []; voiceOn = false; hint = false; stopping = false; GALLERY[b.dataset.g](); }); });
 seg("vPlat", "v", v => { view.platform = v; applyView(); });
 seg("vWall", "v", v => { view.wall = v; applyView(); });
 seg("vSpeed", "v", v => { view.speed = +v; });
@@ -1487,7 +1648,7 @@ document.addEventListener("keydown", e => {
   else if (e.key === "Escape" && !scn) fpEsc();
   else if (e.key === "ArrowRight" && scn) { e.preventDefault(); stepNext(); }
 });
-document.fonts && document.fonts.ready.then(() => { measureChip(true); retarget(); if (scn && !playing) { settle(); snapRender(); } });
+document.fonts && document.fonts.ready.then(() => { if (st === "start") startMinW = 0; measureChip(!playing); retarget(); if (scn && !playing) { settle(); snapRender(); } }); // a running scenario re-springs
 
 // ---------- loop ----------
 let last = performance.now();
@@ -1521,7 +1682,7 @@ const q = params.get("scenario");
 if (q && byId(q)) {
   load(q);
   if (params.has("t")) seek(+params.get("t"));
-  if (params.get("autoplay") === "1") play();
+  if (params.get("autoplay") === "1") (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => play()); // measured in Geist, not the fallback
 } else {
   view.wall = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   resetWorld(freeSetup()); applyView(); fire("update"); settle(); buildStrip(); snapRender();
