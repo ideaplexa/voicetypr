@@ -26147,8 +26147,8 @@
     {
       "type": "frame",
       "id": "BxQDe",
-      "x": 4040,
-      "y": 8166,
+      "x": 4106,
+      "y": 8142,
       "name": "Pill Lab — live motion (open in browser)",
       "width": 1240,
       "fill": "#0E0F11",
@@ -26174,6 +26174,2750 @@
           "width": 1200,
           "height": 1480,
           "url": "file:///Volumes/1tb-drive/developer/oss/worktrees/voicetypr-ui/design/prototypes/pill-lab.html",
+          "cornerRadius": 12
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "P0X6OS",
+      "x": 2460,
+      "y": 9722,
+      "name": "Pill — Morphing Island v2 (chosen)",
+      "width": 1500,
+      "fill": "#0E0F11",
+      "cornerRadius": 18,
+      "layout": "vertical",
+      "gap": 26,
+      "padding": 40,
+      "children": [
+        {
+          "type": "frame",
+          "id": "UktWb",
+          "name": "Header",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 6,
+          "children": [
+            {
+              "type": "text",
+              "id": "LEljJ",
+              "name": "Eyebrow",
+              "fill": "#8FD1A8",
+              "content": "CHOSEN DIRECTION · BETA.4",
+              "fontFamily": "Geist Mono",
+              "fontSize": 11,
+              "fontWeight": "600",
+              "letterSpacing": 1.2
+            },
+            {
+              "type": "text",
+              "id": "cz2gw",
+              "name": "Title",
+              "fill": "#F4F4F1",
+              "content": "Morphing Island — one living shape that knows where your words are going",
+              "fontFamily": "Geist",
+              "fontSize": 26,
+              "fontWeight": "600",
+              "letterSpacing": -0.5
+            },
+            {
+              "type": "text",
+              "id": "qBS3U",
+              "name": "Concept",
+              "fill": "#A3A3A0",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "It opens for a moment when you press the key to confirm the app, Polish style, mic and engine, then shrinks to a compact island while you talk. Every change is one interruptible spring — dot, island, card and back — so it never jumps.",
+              "lineHeight": 1.45,
+              "fontFamily": "Geist",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "YNMsn",
+              "name": "Motion",
+              "fill": "#8FD1A8",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "spring bounce 0.2 · response 0.42 s · start card holds 1.2 s then collapses · level attack 30 ms / release 180 ms, peak holds 300 ms · hover opens the controls · reduced motion: cross-fade only",
+              "fontFamily": "Geist Mono",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "ryNAn",
+          "name": "Row",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "YmGqg",
+              "name": "State Ready",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "J9OhF",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "lHE73",
+                      "name": "Dot",
+                      "fill": "#121316",
+                      "width": 12,
+                      "height": 12,
+                      "effect": {
+                        "type": "shadow",
+                        "shadowType": "outer",
+                        "color": "#00000040",
+                        "offset": {
+                          "x": 0,
+                          "y": 10
+                        },
+                        "blur": 28
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "c9Ehix",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Ready",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "AWPJC",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "A 12 px dot, barely there. Nothing moves until you press the key.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PHkJt",
+              "name": "State Start · context check (1.2 s)",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "VWsMl",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "a0chpg",
+                      "name": "Island",
+                      "width": 334,
+                      "fill": "#121316",
+                      "cornerRadius": 22,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "layout": "vertical",
+                      "gap": 10,
+                      "padding": [
+                        12,
+                        14
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "i9LgCS",
+                          "name": "Top",
+                          "width": "fill_container",
+                          "gap": 10,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "wqn4q",
+                              "name": "App icon",
+                              "width": 26,
+                              "height": 26,
+                              "fill": "#4A154B",
+                              "cornerRadius": 7,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "yLRFX",
+                                  "name": "Glyph",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "slack",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "SYyOM",
+                              "name": "Text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 1,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "g0lW3",
+                                  "name": "Eyebrow",
+                                  "fill": "#FFFFFF80",
+                                  "content": "Dictating into",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "pt4H2",
+                                  "name": "App",
+                                  "fill": "#FFFFFFE6",
+                                  "content": "Slack",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 14,
+                                  "fontWeight": "600"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "vAMhY",
+                              "name": "Wave",
+                              "height": 20,
+                              "gap": 2.5,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "ArWF1",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 3
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "higYV",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 5
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "d1yIZ",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 8
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "chLbC",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 5
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "vlLuD",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 3
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "h9MUH5",
+                          "name": "Context",
+                          "gap": 5,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "L6M3V3",
+                              "name": "Chip Message",
+                              "fill": "#FFFFFF0F",
+                              "cornerRadius": 8,
+                              "gap": 5,
+                              "padding": [
+                                4,
+                                8
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "tCrtH",
+                                  "name": "Icon",
+                                  "width": 12,
+                                  "height": 12,
+                                  "icon": "sparkles",
+                                  "library": "lucide",
+                                  "fill": "#8FD1A8"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "jvOCS",
+                                  "name": "Label",
+                                  "fill": "#FFFFFFB8",
+                                  "content": "Message",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11.5,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "bDRji",
+                              "name": "Chip MacBook Pro",
+                              "fill": "#FFFFFF0F",
+                              "cornerRadius": 8,
+                              "gap": 5,
+                              "padding": [
+                                4,
+                                8
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "DVY53",
+                                  "name": "Icon",
+                                  "width": 12,
+                                  "height": 12,
+                                  "icon": "mic",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF80"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "PH000",
+                                  "name": "Label",
+                                  "fill": "#FFFFFFB8",
+                                  "content": "MacBook Pro",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11.5,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "ellipse",
+                                  "id": "uZCy6",
+                                  "name": "Live dot",
+                                  "fill": "#8FD1A8",
+                                  "width": 6,
+                                  "height": 6
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "rAZmX",
+                              "name": "Chip Parakeet",
+                              "fill": "#FFFFFF0F",
+                              "cornerRadius": 8,
+                              "gap": 5,
+                              "padding": [
+                                4,
+                                8
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "UF1Ul",
+                                  "name": "Icon",
+                                  "width": 12,
+                                  "height": 12,
+                                  "icon": "cpu",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF80"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "mvh6r",
+                                  "name": "Label",
+                                  "fill": "#FFFFFFB8",
+                                  "content": "Parakeet",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11.5,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "a3RwGj",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Start · context check (1.2 s)",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "mWk68",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Opens wide the instant you press: where the words go, how they'll be cleaned, which mic, which engine. Then it springs back.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SLJz3",
+              "name": "State Listening",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "dos10",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "a5cjn",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 9,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "YbeJZ",
+                          "name": "App icon",
+                          "width": 16,
+                          "height": 16,
+                          "fill": "#4A154B",
+                          "cornerRadius": 4,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "lVUjr",
+                              "name": "Glyph",
+                              "width": 10,
+                              "height": 10,
+                              "icon": "slack",
+                              "library": "lucide",
+                              "fill": "#FFFFFF"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "nMUZd",
+                          "name": "Wave",
+                          "height": 20,
+                          "gap": 2.5,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "FMDg0",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 5
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "aZ0GU",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 9
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "Z17uK",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 15
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "kuufN",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 11
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "HBqHe",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 18
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "tK3hA",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 13
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "rUJja",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 16
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "x3AbZG",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 8
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "U8r9bJ",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 5
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "u4DIT",
+                          "name": "Timer",
+                          "fill": "#FFFFFF80",
+                          "content": "0:07",
+                          "fontFamily": "Geist Mono",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "fESl6",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Listening",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "xv9Sd",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Compact: the app you're talking to, your voice, the time. The app icon keeps the context without words.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "r4cC0x",
+              "name": "State Live words",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "M1K4U5",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZlmJL",
+                      "name": "Island",
+                      "width": 270,
+                      "fill": "#121316",
+                      "cornerRadius": 20,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "layout": "vertical",
+                      "gap": 7,
+                      "padding": [
+                        10,
+                        13
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "D3Aw8d",
+                          "name": "Words",
+                          "width": "fill_container",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "dUwx4",
+                              "name": "Committed",
+                              "fill": "#FFFFFFE6",
+                              "content": "…move the review to Thursday and",
+                              "fontFamily": "Geist",
+                              "fontSize": 12.5,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "I9eDCS",
+                              "name": "Tentative",
+                              "fill": "#FFFFFF6B",
+                              "content": "send",
+                              "fontFamily": "Geist",
+                              "fontSize": 12.5,
+                              "fontWeight": "normal",
+                              "fontStyle": "italic"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "C8FJS",
+                          "name": "Row",
+                          "width": "fill_container",
+                          "gap": 9,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "j3yy6F",
+                              "name": "App icon",
+                              "width": 16,
+                              "height": 16,
+                              "fill": "#4A154B",
+                              "cornerRadius": 4,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "sytgx",
+                                  "name": "Glyph",
+                                  "width": 10,
+                                  "height": 10,
+                                  "icon": "slack",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "nXXVe",
+                              "name": "Wave",
+                              "height": 20,
+                              "gap": 2.5,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "ECbSE",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 5
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "ubnB6",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 9
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "m8epB",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 15
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "YBbtl",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 11
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "j0Q2e",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 18
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "fzWdB",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 13
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "U84Aff",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 16
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "g7PbRy",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 8
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "wexAr",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 5
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "OhYAq",
+                              "name": "Spacer",
+                              "fill": "#FFFFFF80",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "fontFamily": "Geist",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "lTXaP",
+                              "name": "Polish on",
+                              "width": 13,
+                              "height": 13,
+                              "icon": "sparkles",
+                              "library": "lucide",
+                              "fill": "#8FD1A8"
+                            },
+                            {
+                              "type": "text",
+                              "id": "yS4BW",
+                              "name": "Timer",
+                              "fill": "#FFFFFF80",
+                              "content": "0:12",
+                              "fontFamily": "Geist Mono",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "MTBFa",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Live words",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "QniNi",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Grows upward into a card — words above, the same compact row below, so your eye never loses the wave.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "mqoN1",
+          "name": "Row",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "B8IWbI",
+              "name": "State Transcribing",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Jx0h4",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "L8nIbC",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 9,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "c3NqAg",
+                          "name": "App icon",
+                          "width": 16,
+                          "height": 16,
+                          "fill": "#4A154B",
+                          "cornerRadius": 4,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "XwOw6",
+                              "name": "Glyph",
+                              "width": 10,
+                              "height": 10,
+                              "icon": "slack",
+                              "library": "lucide",
+                              "fill": "#FFFFFF"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "GyQ5e",
+                          "name": "Arc",
+                          "width": 16,
+                          "height": 16,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "QlvRt",
+                              "x": 0,
+                              "y": 0,
+                              "name": "Track",
+                              "innerRadius": 0.78,
+                              "fill": "#FFFFFF1F",
+                              "width": 16,
+                              "height": 16
+                            },
+                            {
+                              "type": "ellipse",
+                              "id": "Ml8yZ",
+                              "x": 0,
+                              "y": 0,
+                              "name": "Progress",
+                              "innerRadius": 0.78,
+                              "startAngle": 90,
+                              "sweepAngle": -110,
+                              "fill": "#FFFFFFE6",
+                              "width": 16,
+                              "height": 16
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "W5i2or",
+                          "name": "Label",
+                          "fill": "#FFFFFFE6",
+                          "content": "Transcribing",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "Sgpuj",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Transcribing",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "dRUrz",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "The wave folds into a spinning arc. The app icon stays, so you know where it's headed.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "iMFWI",
+              "name": "State Polishing · Message",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "e84Jf",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "h7q564",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 9,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "z7UFlF",
+                          "name": "App icon",
+                          "width": 16,
+                          "height": 16,
+                          "fill": "#4A154B",
+                          "cornerRadius": 4,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "l7Qst",
+                              "name": "Glyph",
+                              "width": 10,
+                              "height": 10,
+                              "icon": "slack",
+                              "library": "lucide",
+                              "fill": "#FFFFFF"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "WCWmD",
+                          "name": "Spark",
+                          "width": 15,
+                          "height": 15,
+                          "icon": "sparkles",
+                          "library": "lucide",
+                          "fill": "#8FD1A8"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Y8rvzU",
+                          "name": "Label",
+                          "fill": "#FFFFFFE6",
+                          "content": "Polishing",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ZcTNy",
+                          "name": "Style",
+                          "fill": "#8FD1A8",
+                          "content": "· Message",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "FqQLj",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Polishing · Message",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "BdUja",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Names the style being applied, in sage — so you know the AI is shaping it, and how.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "UCk5B",
+              "name": "State Pasted",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "JO5iO",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "VjW2z",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 9,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Dzu6C",
+                          "name": "Check",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "circle-check",
+                          "library": "lucide",
+                          "fill": "#8FD1A8"
+                        },
+                        {
+                          "type": "text",
+                          "id": "YppI3",
+                          "name": "Label",
+                          "fill": "#FFFFFFE6",
+                          "content": "Pasted into Slack",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "SxQwV",
+                          "name": "Count",
+                          "fill": "#FFFFFF80",
+                          "content": "· 14 words",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "iBCHV",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Pasted",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "BvkVr",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Confirms the exact destination, then collapses back to the dot. A moment, not an alert.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "E0o97",
+              "name": "State Needs you · couldn't paste",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "BLewP",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "lN453",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#F2B35B",
+                      "strokeWidth": 1.5,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "layout": "vertical",
+                      "gap": 2,
+                      "padding": [
+                        9,
+                        14
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "s6y6u",
+                          "name": "Top",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "wMht8",
+                              "name": "Clip",
+                              "width": 15,
+                              "height": 15,
+                              "icon": "clipboard-check",
+                              "library": "lucide",
+                              "fill": "#F2B35B"
+                            },
+                            {
+                              "type": "text",
+                              "id": "EI9vH",
+                              "name": "Label",
+                              "fill": "#FFFFFFE6",
+                              "content": "Copied — press ⌘V",
+                              "fontFamily": "Geist",
+                              "fontSize": 12.5,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "mEfue",
+                          "name": "Why",
+                          "fill": "#FFFFFF80",
+                          "content": "Slack didn't accept typed text",
+                          "fontFamily": "Geist",
+                          "fontSize": 11.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "dtbqC",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Needs you · couldn't paste",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "nVFFI",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Stays open and still with an amber edge. Says what happened and exactly what to do.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "T98YTL",
+          "name": "Row",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "zJNZw",
+              "name": "State Start · Polish off",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "WJcnA",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "LddlS",
+                      "name": "Island",
+                      "width": 334,
+                      "fill": "#121316",
+                      "cornerRadius": 22,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "layout": "vertical",
+                      "gap": 10,
+                      "padding": [
+                        12,
+                        14
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Yvugq",
+                          "name": "Top",
+                          "width": "fill_container",
+                          "gap": 10,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "sQDSQ",
+                              "name": "App icon",
+                              "width": 26,
+                              "height": 26,
+                              "fill": "#1F6FEB",
+                              "cornerRadius": 7,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "lEFiv",
+                                  "name": "Glyph",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "code-xml",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "dLTLJ",
+                              "name": "Text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 1,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "x6M2Bz",
+                                  "name": "Eyebrow",
+                                  "fill": "#FFFFFF80",
+                                  "content": "Dictating into",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "s1Zuz",
+                                  "name": "App",
+                                  "fill": "#FFFFFFE6",
+                                  "content": "Cursor",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 14,
+                                  "fontWeight": "600"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "ii2py",
+                              "name": "Wave",
+                              "height": 20,
+                              "gap": 2.5,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "eY9XS",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 3
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "rRiin",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 5
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "Cjume",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 8
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "ChwJj",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 5
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 2,
+                                  "id": "JDE7A",
+                                  "name": "Bar",
+                                  "fill": "#FFFFFFE6",
+                                  "width": 2.5,
+                                  "height": 3
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "t97gN",
+                          "name": "Context",
+                          "gap": 5,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "djrP7",
+                              "name": "Chip Raw · no Polish",
+                              "fill": "#FFFFFF0F",
+                              "cornerRadius": 8,
+                              "gap": 5,
+                              "padding": [
+                                4,
+                                8
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "JAzGU",
+                                  "name": "Icon",
+                                  "width": 12,
+                                  "height": 12,
+                                  "icon": "type",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF59"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "F8ctG",
+                                  "name": "Label",
+                                  "fill": "#FFFFFFB8",
+                                  "content": "Raw · no Polish",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11.5,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "GuAtA",
+                              "name": "Chip AirPods Pro",
+                              "fill": "#FFFFFF0F",
+                              "cornerRadius": 8,
+                              "gap": 5,
+                              "padding": [
+                                4,
+                                8
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "IMSml",
+                                  "name": "Icon",
+                                  "width": 12,
+                                  "height": 12,
+                                  "icon": "mic",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF80"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "F5Kcx",
+                                  "name": "Label",
+                                  "fill": "#FFFFFFB8",
+                                  "content": "AirPods Pro",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11.5,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "ellipse",
+                                  "id": "oXDT5",
+                                  "name": "Live dot",
+                                  "fill": "#8FD1A8",
+                                  "width": 6,
+                                  "height": 6
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "rFgBy",
+                              "name": "Chip Soniox",
+                              "fill": "#FFFFFF0F",
+                              "cornerRadius": 8,
+                              "gap": 5,
+                              "padding": [
+                                4,
+                                8
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "PhxLY",
+                                  "name": "Icon",
+                                  "width": 12,
+                                  "height": 12,
+                                  "icon": "cloud",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF80"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "ySiwi",
+                                  "name": "Label",
+                                  "fill": "#FFFFFFB8",
+                                  "content": "Soniox",
+                                  "fontFamily": "Geist",
+                                  "fontSize": 11.5,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "kDgqp",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Start · Polish off",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "f6leA",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Same check, but the style chip says Raw — you know nothing will be rewritten.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Hk83l",
+              "name": "State Mic problem · before you speak",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NSKVb",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "mGEQh",
+                      "name": "Island",
+                      "fill": "#1D1214",
+                      "cornerRadius": 18,
+                      "stroke": "#F28B7A66",
+                      "strokeWidth": 1.5,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 10,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "w5hYVJ",
+                          "name": "Mic off",
+                          "width": 15,
+                          "height": 15,
+                          "icon": "mic-off",
+                          "library": "lucide",
+                          "fill": "#F28B7A"
+                        },
+                        {
+                          "type": "text",
+                          "id": "R63rKw",
+                          "name": "Label",
+                          "fill": "#FECACA",
+                          "content": "No microphone",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "waZf9",
+                          "name": "Action",
+                          "fill": "#FFFFFF14",
+                          "cornerRadius": 8,
+                          "padding": [
+                            4,
+                            9
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Q6tsO6",
+                              "name": "Label",
+                              "fill": "#FFFFFFE6",
+                              "content": "Choose mic",
+                              "fontFamily": "Geist",
+                              "fontSize": 12,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "g5QJJ",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Mic problem · before you speak",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "W4P2S",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Checked the moment you press the key, not after you've talked for a minute. One tap fixes it.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "VOEax",
+              "name": "State Hover · controls",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "M348e",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "mkSr5",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 9,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "qwokK",
+                          "name": "App icon",
+                          "width": 16,
+                          "height": 16,
+                          "fill": "#4A154B",
+                          "cornerRadius": 4,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "B1aST6",
+                              "name": "Glyph",
+                              "width": 10,
+                              "height": 10,
+                              "icon": "slack",
+                              "library": "lucide",
+                              "fill": "#FFFFFF"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "I3CbTc",
+                          "name": "Wave",
+                          "height": 20,
+                          "gap": 2.5,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "oTg5u",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 5
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "S0WqT",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 9
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "BchV6",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 15
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "fQXJn",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 11
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "PaiYr",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 18
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "dtLgr",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 13
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "pdll8",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 16
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "hdXC7",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 8
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 2,
+                              "id": "d0f3IT",
+                              "name": "Bar",
+                              "fill": "#FFFFFFE6",
+                              "width": 2.5,
+                              "height": 5
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "UvkLj",
+                          "name": "Timer",
+                          "fill": "#FFFFFF80",
+                          "content": "0:09",
+                          "fontFamily": "Geist Mono",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "davcN",
+                          "name": "Controls",
+                          "gap": 6,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "jk6q5",
+                              "name": "Btn square",
+                              "width": 22,
+                              "height": 22,
+                              "fill": "#FFFFFF14",
+                              "cornerRadius": 11,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "Kld1H",
+                                  "name": "Icon",
+                                  "width": 11,
+                                  "height": 11,
+                                  "icon": "square",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFFE6"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "MYeMa",
+                              "name": "Btn x",
+                              "width": 22,
+                              "height": 22,
+                              "fill": "#FFFFFF14",
+                              "cornerRadius": 11,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "bt1Lv",
+                                  "name": "Icon",
+                                  "width": 11,
+                                  "height": 11,
+                                  "icon": "x",
+                                  "library": "lucide",
+                                  "fill": "#FFFFFF80"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "qcFMw",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Hover · controls",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "SHy3x",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Point at it and it opens just enough for Stop and Cancel. Keyboard users never need it.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "xNhlk",
+              "name": "State Windows",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 9,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "s1G0p",
+                  "name": "Stage",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 190,
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 200,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#E9E5DD",
+                        "position": 0
+                      },
+                      {
+                        "color": "#D3D8E2",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": 14,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "H2bqV",
+                      "name": "Island",
+                      "fill": "#121316",
+                      "cornerRadius": 18,
+                      "stroke": "#FFFFFF1C",
+                      "strokeWidth": 1,
+                      "effect": [
+                        {
+                          "type": "shadow",
+                          "shadowType": "outer",
+                          "color": "#00000040",
+                          "offset": {
+                            "x": 0,
+                            "y": 10
+                          },
+                          "blur": 28
+                        },
+                        {
+                          "type": "shadow",
+                          "shadowType": "inner",
+                          "color": "#FFFFFF14",
+                          "offset": {
+                            "x": 0,
+                            "y": 1
+                          }
+                        }
+                      ],
+                      "gap": 9,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "bybJQ",
+                          "name": "Check",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "circle-check",
+                          "library": "lucide",
+                          "fill": "#8FD1A8"
+                        },
+                        {
+                          "type": "text",
+                          "id": "b95jO",
+                          "name": "Label",
+                          "fill": "#FFFFFFE6",
+                          "content": "Pasted into Outlook",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "egtrX",
+                          "name": "Count",
+                          "fill": "#FFFFFF80",
+                          "content": "· 22 words",
+                          "fontFamily": "Geist",
+                          "fontSize": 12.5,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "nyyZg",
+                  "name": "Label",
+                  "fill": "#F1F1EE",
+                  "content": "Windows",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "Pa5dM",
+                  "name": "Note",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Same island. Windows shortcuts and app icons, and it never takes focus from the app you're typing in.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Vp7mD",
+          "name": "Rules",
+          "width": "fill_container",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "vsx5f",
+              "name": "Rule",
+              "width": "fill_container",
+              "fill": "#FFFFFF08",
+              "cornerRadius": 12,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                12,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Q7cC1",
+                  "name": "H",
+                  "fill": "#F1F1EE",
+                  "content": "Context is captured at key press",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "gQWgK",
+                  "name": "B",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "App name and icon, Polish style (per-app rules included), mic and engine are read the moment you press — the island shows what WILL happen, not a guess.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "cls2X",
+              "name": "Rule",
+              "width": "fill_container",
+              "fill": "#FFFFFF08",
+              "cornerRadius": 12,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                12,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "CBPZP",
+                  "name": "H",
+                  "fill": "#F1F1EE",
+                  "content": "Private by design",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "MJUvX",
+                  "name": "B",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Only the app name and icon are shown, never window titles or text. Nothing is logged.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "fGoWq",
+              "name": "Rule",
+              "width": "fill_container",
+              "fill": "#FFFFFF08",
+              "cornerRadius": 12,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                12,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "CwlH0",
+                  "name": "H",
+                  "fill": "#F1F1EE",
+                  "content": "Problems surface first",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "OHWxN",
+                  "name": "B",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Missing mic, missing Polish key or an offline engine show on key press — before a word is lost.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Bhkuw",
+              "name": "Rule",
+              "width": "fill_container",
+              "fill": "#FFFFFF08",
+              "cornerRadius": 12,
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                12,
+                14
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "QMp4Q",
+                  "name": "H",
+                  "fill": "#F1F1EE",
+                  "content": "Never steals focus",
+                  "fontFamily": "Geist",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "Mz18X",
+                  "name": "B",
+                  "fill": "#A3A3A0",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "A non-activating panel on macOS and a no-activate window on Windows, so the text always lands in your app.",
+                  "lineHeight": 1.4,
+                  "fontFamily": "Geist",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "p9rwi",
+      "x": 4040,
+      "y": 9812,
+      "name": "Island Lab — live motion (click Dictate)",
+      "width": 1280,
+      "fill": "#0E0F11",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 10,
+      "padding": 20,
+      "children": [
+        {
+          "type": "text",
+          "id": "LuP3a",
+          "name": "Title",
+          "fill": "#F1F1EE",
+          "content": "Island Lab · live — press Dictate (or Space), hover while listening, fire feedback to see the stack",
+          "fontFamily": "Geist",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "browser",
+          "id": "EFMNz",
+          "name": "Island Lab",
+          "width": 1240,
+          "height": 1180,
+          "url": "file:///Volumes/1tb-drive/developer/oss/worktrees/voicetypr-ui/design/prototypes/island-lab.html",
           "cornerRadius": 12
         }
       ]
