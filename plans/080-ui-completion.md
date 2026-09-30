@@ -59,3 +59,17 @@ Process (founder cadence):
 - `pnpm ui:preview` on both platforms and themes.
 - E2E harness run before the PR.
 - No transcript or content in logs/events.
+
+## Product gaps found by the Island Lab scenario agents (2026-09-30)
+
+The scenario agents read the real code. These are real behaviours, not prototype issues:
+
+1. **A cloud failure loses the dictation.** When a cloud engine fails and `save_recordings` is off (the default), `finalize_in_flight_audio` deletes the temp WAV, so the words are gone. Keep the failed clip in temp until the user picks **Retry with <local engine>** or **Discard**. Offer that retry in the island through the existing `transcribe_audio_file` path. *(beta.4 island + backend)*
+2. **Esc semantics.** The real app cancels on Esc twice within 2 s (`recording/escape_handler.rs`) and shows a "Press ESC again" toast in a separate window. The island should show that hint inline, since the stack is tucked while dictating. *(beta.4)*
+3. **Dead listener.** `useAppEvents.ts` listens for `no-speech-detected`, but the backend never emits it. The real path is the pill toast from the speech-evidence gate. Wire one event, or remove the listener. *(beta.4)*
+4. **One toast at a time.** FeedbackToast shows only the latest message. The island stack replaces this: newest in front, FIFO for timed items, sticky blockers, ×N merge, and timers paused while tucked. *(beta.4)*
+5. **Toggle-mode copy.** "Too short — hold a bit longer" is wrong in toggle mode; use "talk a bit longer". *(beta.4)*
+6. **Focus steal.** license-required calls `focus_main_window`. Show a license island state with **Renew** instead of stealing focus. *(beta.4)*
+7. **Raw error strings.** For a missing mic, the pill flashes the raw `payload.error` string. Use the designed "No microphone · Choose mic" state. *(beta.4)*
+8. **Timing mismatch.** The native terminal hide (pasted 1.2 s) must be aligned with the island's done card (3.2 s, with Undo/Original/Retry) once focus safety lands (task 1). *(beta.4)*
+9. **Retry / Undo / Original need backend support.** There is no re-transcribe-and-replace-last-paste yet. Design "replace last paste" carefully: only do it if the target field still ends with our text, otherwise copy it. *(beta.5)*
