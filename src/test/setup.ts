@@ -103,6 +103,9 @@ const defaultIpcHandler = (cmd: string) => {
     case "cleanup_old_transcriptions":
       return true;
 
+    case "get_usage_stats":
+      return { first_use: null, total_words: 0, total_dictations: 0, total_audio_ms: 0, polished_dictations: 0, days: [], apps: [] };
+
     case "get_transcription_history":
       return [];
 

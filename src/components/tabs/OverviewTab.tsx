@@ -6,6 +6,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
 import { KeyCaps } from "@/components/KeyCaps";
+import { toShareCardStats } from "@/components/shareCardRenderer";
+import { useUsageStats } from "@/components/insights/useUsageStats";
 import { ShareStatsModal } from "@/components/ShareStatsModal";
 import { languages } from "@/components/languages";
 import { useReadiness } from "@/contexts/ReadinessContext";
@@ -24,7 +26,7 @@ import type { ScreenId, SettingsPane } from "@/components/navigation";
 import type { SourceFilter } from "@/components/sections/models/types";
 import { useTestDictation } from "./overview/useTestDictation";
 import { useActiveRemoteLabel } from "./overview/useActiveRemoteLabel";
-import { formatTimeSaved, formatWeekSavedTime, useOverviewStats } from "./overview/useOverviewStats";
+import { formatWeekSavedTime, useOverviewStats } from "./overview/useOverviewStats";
 
 
 function relativeTime(date: Date): string {
@@ -55,6 +57,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const [tryText, setTryText] = useState("");
   const { feedback: tryFeedback, contentChanged, reset: resetTryFeedback } = useTestDictation(tryOpen);
   const [shareOpen, setShareOpen] = useState(false);
+  const usage = useUsageStats("all", shareOpen);
   const { history, totalCount, isLoading, loadError, refreshHistory } = useTranscriptionHistory({ limit: 500, includeTotalCount: true });
   const stats = useOverviewStats(history, totalCount);
   const model = settings?.current_model ?? "";
@@ -103,11 +106,12 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
         <p className="text-xs text-muted-foreground">{stats.weekCount === 0 ? "nothing yet in the last 7 days" : stats.weekSavedMinutes === 0 ? "less than a minute estimated saved" : "estimated saved vs typing at 40 wpm"}</p>
         <div role="img" aria-label={`Dictations over the last seven days: ${stats.weekDays.map((day) => `${day.count} dictations on ${day.label}`).join(", ")}`} className="mt-4 flex h-[70px] items-end gap-1.5">{stats.weekDays.map((day) => <div key={day.key} className="flex h-full min-w-0 flex-1 flex-col justify-end gap-1"><div title={`${day.count} dictations on ${day.label}`} className={cn("min-h-1 rounded-sm", day.count === stats.weekMax && day.count > 0 ? "bg-sage" : "bg-sage-bg")} style={{ height: `${Math.max(6, Math.round(day.count / Math.max(1, stats.weekMax) * 70))}%` }} /><span className="text-center font-mono text-[10px] text-muted-foreground">{day.label.slice(0, 1)}</span></div>)}</div>
         <dl className="mt-5 grid grid-cols-2 gap-4"><div><dd className="font-mono text-base font-semibold text-foreground">{stats.weekWords.toLocaleString()}</dd><dt className="text-xs text-muted-foreground">words</dt></div><div><dd className="font-mono text-base font-semibold text-foreground">{stats.weekCount.toLocaleString()}</dd><dt className="text-xs text-muted-foreground">dictations</dt></div></dl>
-        <Button variant="ghost" size="sm" className="mt-4 -ml-2 text-xs" onClick={() => setShareOpen(true)}>Share stats</Button>
+        <div className="mt-4 flex flex-wrap items-center gap-1"><button type="button" className="text-xs text-sage hover:underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => onNavigate?.("insights")}>See insights →</button><Button variant="ghost" size="sm" className="text-xs" onClick={() => setShareOpen(true)}>Share stats</Button></div>
+        {shareOpen && !usage.stats && <p role="status" className="text-xs text-muted-foreground">{usage.error ? "Couldn’t load stats." : "Loading stats…"}{usage.error && <button className="ml-1 text-sage underline" onClick={() => void usage.refresh()}>Retry</button>}</p>}
       </SettingsCard>
     </div>
 
     <Dialog open={tryOpen} onOpenChange={(open) => { resetTryFeedback(); setTryOpen(open); }}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Try a test dictation</DialogTitle><DialogDescription>Place the cursor below, press <KeyCaps caps={caps} />, and speak. Your words will appear here.</DialogDescription></DialogHeader><Textarea autoFocus aria-label="Test dictation" placeholder="Dictate here…" value={tryText} onChange={(event) => { if (event.target.value !== tryText) contentChanged(); setTryText(event.target.value); }} className="min-h-32" /><p role="status" className="text-sm text-muted-foreground">{tryFeedback ?? (tryText.trim() ? `${tryText.trim().split(/\s+/).length} words` : "Waiting for your dictation…")}</p></DialogContent></Dialog>
-    <ShareStatsModal open={shareOpen} onOpenChange={setShareOpen} stats={{ totalTranscriptions: stats.totalTranscriptions, totalWords: stats.totalWords, timeSavedDisplay: formatTimeSaved(stats) }} />
+    {usage.stats && <ShareStatsModal open={shareOpen} onOpenChange={setShareOpen} stats={toShareCardStats(usage.stats)} />}
   </SettingsPage>;
 }

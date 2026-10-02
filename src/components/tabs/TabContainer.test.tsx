@@ -17,6 +17,7 @@ vi.mock("./RecordingsTab", () => ({
     </>
   ),
 }));
+vi.mock("./InsightsTab", () => ({ InsightsTab: () => <h1>Insights</h1> }));
 vi.mock("./RecordingTab", () => ({ RecordingTab: () => <h1>Recording screen</h1> }));
 vi.mock("./OverviewTab", () => ({
   OverviewTab: ({

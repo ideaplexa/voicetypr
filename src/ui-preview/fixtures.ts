@@ -1,3 +1,4 @@
+import { createUsageFixture } from "@/ui-preview/usageFixture";
 import type { AppSettings, LicenseStatus, ModelInfo, TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
 import type { ShortcutActionDefinition, ShortcutSettings } from "@/types/shortcuts";
@@ -368,6 +369,7 @@ export function createFixtures(options: PreviewOptions) {
       remote_available: false,
     },
     get_transcription_history: history,
+    get_usage_stats: createUsageFixture(null, options.empty),
     get_transcription_count: history.length,
     get_writing_settings: writing,
     update_writing_settings: null,

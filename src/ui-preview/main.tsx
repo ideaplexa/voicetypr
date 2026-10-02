@@ -1,3 +1,4 @@
+import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { installOnboardingPreview } from "@/components/onboarding/onboardingPreview";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
@@ -22,7 +23,11 @@ const fixtures = createFixtures(options);
 const unknown = new Set<string>();
 mockWindows("main");
 mockIPC(
-  (command) => {
+  (command, args) => {
+    if (command === "get_usage_stats") {
+      const since = args && typeof args === "object" && "since" in args && typeof args.since === "string" ? args.since : null;
+      return createUsageFixture(since, options.empty);
+    }
     if (command.startsWith("plugin:event|")) return null;
     if (Object.prototype.hasOwnProperty.call(fixtures, command)) return fixtures[command];
     if (!unknown.has(command)) {

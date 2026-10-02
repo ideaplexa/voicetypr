@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings, TranscriptionHistory } from "@/types";
+import { invoke } from "@tauri-apps/api/core";
+import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { OverviewTab } from "./OverviewTab";
 
 const mock = vi.hoisted(() => ({
@@ -22,9 +24,9 @@ vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () 
 vi.mock("@/contexts/ModelManagementContext", () => ({ useModelManagementContext: () => ({ downloadProgress: mock.downloadProgress }) }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_usage_stats" ? createUsageFixture() : command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => { mock.listeners[name] = handler; return () => { delete mock.listeners[name]; }; }) }));
-vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: () => null }));
+vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: ({ open }: { open: boolean }) => open ? <div>Share stats preview</div> : null }));
 
 beforeEach(() => {
   mock.settings = { hotkey: "Alt+Space", current_model: "parakeet-tdt-0.6b-v3", current_model_engine: "parakeet", speech_language: "en", recording_mode: "push_to_talk", transcription_mode: "live_preview" };
@@ -39,6 +41,19 @@ beforeEach(() => {
 });
 
 describe("Home", () => {
+  it("links the weekly card to Insights", async () => {
+    const onNavigate = vi.fn();
+    render(<OverviewTab onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "See insights →" }));
+    expect(onNavigate).toHaveBeenCalledWith("insights");
+  });
+  it("opens the share card using whole-history usage stats", async () => {
+    render(<OverviewTab />);
+    expect(invoke).not.toHaveBeenCalledWith("get_usage_stats", expect.anything());
+    await userEvent.click(screen.getByRole("button", { name: "Share stats" }));
+    expect(await screen.findByText("Share stats preview")).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("get_usage_stats", { since: null });
+  });
   it("shows the active local engine, key caps, recording mode and setup chips", async () => {
     const onNavigate = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} />);

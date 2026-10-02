@@ -99,7 +99,7 @@ try {
         const shouldCaptureScreen = (name) => shouldCapture(platform, theme, screenShotName(name));
         const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "insights", "recording", "settings-general", "help"].includes(id));
         const selectedPanes = panes;
-        const hasShot = screens.some(([, id]) => shouldCaptureScreen(id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) || shouldCaptureScreen("license");
+        const hasShot = screens.some(([, id]) => shouldCaptureScreen(id) || (id === "insights" && shouldCaptureScreen("share-card")) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) || shouldCaptureScreen("license");
         if (!hasShot) continue;
         const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
         page.on("pageerror", (error) => errors.push(`${platform}/${theme}: ${error.stack ?? error}`));
@@ -115,14 +115,27 @@ try {
         };
         for (const [label, id] of screens) {
           if (await page.getByRole("dialog").count()) await page.keyboard.press("Escape");
-          if (!shouldCaptureScreen(id) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) continue;
+          if (!shouldCaptureScreen(id) && !(id === "insights" && shouldCaptureScreen("share-card")) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) continue;
           if (id === "settings-general") {
             await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Home", exact: true }).click();
           }
           await page.getByRole("navigation", { name: label === "Settings" || label === "Help & feedback" ? "Support navigation" : "Main navigation" }).getByRole("button", { name: label, exact: true }).click();
           await page.waitForTimeout(180);
           await page.evaluate(() => document.fonts.ready);
+          if (id === "insights") {
+            await page.getByText("Words dictated", { exact: true }).waitFor();
+            await page.setViewportSize({ width: 1000, height: 722 });
+          }
           await capture(id);
+          if (id === "insights" && shouldCaptureScreen("share-card")) {
+            await page.getByRole("button", { name: "Share", exact: true }).click();
+            await page.getByRole("img", { name: /Share card showing/ }).waitFor();
+            await capture("share-card");
+            const image = await page.getByRole("img", { name: /Share card showing/ }).getAttribute("src");
+            if (image) await import("node:fs/promises").then(({ writeFile }) => writeFile(path.join(output, `${platform}-${theme}-${screenShotName("share-card-export")}.png`), Buffer.from(image.split(",")[1], "base64")));
+            await page.keyboard.press("Escape");
+          }
+          if (id === "insights") await page.setViewportSize({ width: 1000, height: 680 });
           if (sidebar === "rail" && ["home", "history", "insights"].includes(id)) {
             const tooltipName = `${id}-tooltip`;
             if (shouldCaptureScreen(tooltipName)) {
