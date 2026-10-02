@@ -54,7 +54,9 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const collapsed = state === "collapsed";
   const [version, setVersion] = useState("—");
   const license = licenseState(status, status?.trial_days_left ?? -1);
-  const current = resolveScreen(activeSection).screen;
+  const destination = resolveScreen(activeSection);
+  const current = destination.screen;
+  const licenseActive = destination.pane === "license";
   useEffect(() => {
     void getVersion()
       .then(setVersion)
@@ -140,11 +142,11 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
                 type="button"
                 onClick={() => onSectionChange("license")}
                 aria-label={`${license.label}. Open License`}
-                aria-current={current === "license" ? "page" : undefined}
+                aria-current={licenseActive ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-2 rounded-[8px] bg-card text-left ring-1 ring-inset ring-border",
                   collapsed ? "h-[34px] w-10 justify-center p-0" : "w-full px-[10px] py-2",
-                  current === "license" && "ring-1 ring-sage",
+                  licenseActive && "ring-1 ring-sage",
                 )}
               />
             }

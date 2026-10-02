@@ -41,3 +41,14 @@ await import("@/main");
 window.setTimeout(() => {
   void emit("download-progress", demoDownloadProgress);
 }, 1200);
+
+// Direct modal fixtures use the same app event path as tray/deep-link navigation.
+const shot = query.get("screen");
+if (shot === "license" || shot?.startsWith("settings-")) {
+  window.setTimeout(() => {
+    void emit(
+      "navigate-to-settings",
+      shot === "license" ? "license" : shot.slice("settings-".length),
+    );
+  }, 1200);
+}

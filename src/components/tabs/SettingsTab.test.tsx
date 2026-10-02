@@ -25,9 +25,10 @@ vi.mock("@/components/sections/AgentCliSection", () => ({
 
 it("opens General by default and checks for updates from About", async () => {
   const user = userEvent.setup();
-  render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+  const view = render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   expect(screen.getByText("Appearance and app behavior")).toBeInTheDocument();
+  view.rerender(<SettingsTab pane="about" onPaneChange={vi.fn()} />);
   expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Check for updates" }));
   expect(checkForUpdatesManually).toHaveBeenCalledOnce();
@@ -43,7 +44,7 @@ it("keeps every advanced pane reachable", async () => {
   const panes = screen.getByRole("navigation", { name: "Settings panes" });
   expect(screen.getByText("Shortcut controls")).toBeInTheDocument();
   expect(panes).toHaveTextContent("Advanced");
-  expect(screen.getByText("Advanced")).toHaveClass("text-muted-foreground");
+  expect(screen.getByText("Advanced")).toHaveClass("text-text-3");
   for (const [label, content] of [
     ["Network sharing", "Network sharing controls"],
     ["CLI & API", "CLI and API controls"],
@@ -53,4 +54,15 @@ it("keeps every advanced pane reachable", async () => {
     expect(screen.getByText(content)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
   }
+});
+
+it("opens the existing What's new dialog and routes Help & feedback from About", async () => {
+  const onNavigate = vi.fn();
+  render(<SettingsTab pane="about" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
+  await screen.findByText("Voicetypr 2.1.0");
+  await userEvent.click(screen.getByRole("button", { name: "What's new" }));
+  expect(screen.getByRole("dialog", { name: /Voicetypr Updated/ })).toHaveTextContent("2.1.0");
+  await userEvent.keyboard("{Escape}");
+  await userEvent.click(screen.getByRole("button", { name: "Help & feedback" }));
+  expect(onNavigate).toHaveBeenCalledWith("help");
 });

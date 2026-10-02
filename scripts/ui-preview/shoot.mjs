@@ -47,7 +47,7 @@ const macScreens = [
 ];
 const panes = [
   ["Shortcuts", "settings-shortcuts"], ["Privacy", "settings-privacy"], ["Storage", "settings-storage"], ["Network sharing", "settings-network"],
-  ["CLI & API", "settings-agent"], ["Troubleshooting", "settings-advanced"],
+  ["CLI & API", "settings-agent"], ["Troubleshooting", "settings-advanced"], ["About & updates", "settings-about"], ["License", "settings-license"],
 ];
 const shouldCapture = (platform, theme, name) => !only || `${platform}-${theme}-${name}.png`.includes(only);
 const errors = [];
@@ -114,7 +114,11 @@ try {
           shots.push(`${platform}-${theme}-${screenShotName(name)}.png`);
         };
         for (const [label, id] of screens) {
+          if (await page.getByRole("dialog").count()) await page.keyboard.press("Escape");
           if (!shouldCaptureScreen(id) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) continue;
+          if (id === "settings-general") {
+            await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+          }
           await page.getByRole("navigation", { name: label === "Settings" || label === "Help & feedback" ? "Support navigation" : "Main navigation" }).getByRole("button", { name: label, exact: true }).click();
           await page.waitForTimeout(180);
           await page.evaluate(() => document.fonts.ready);
@@ -157,6 +161,8 @@ try {
           }
         }
         if (shouldCaptureScreen("license")) {
+          if (await page.getByRole("dialog").count()) await page.keyboard.press("Escape");
+          await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Home", exact: true }).click();
           await page.getByRole("button", { name: /Pro\. Open License/ }).click();
           await page.waitForTimeout(180);
           await capture("license");

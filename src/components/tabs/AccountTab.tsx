@@ -1,5 +1,5 @@
-import { AccountSection } from "../sections/AccountSection";
+import { AccountSection } from "@/components/sections/AccountSection";
 
-export function AccountTab() {
-  return <AccountSection />;
+export function AccountTab({ embedded = false }: { embedded?: boolean } = {}) {
+  return <AccountSection embedded={embedded} />;
 }

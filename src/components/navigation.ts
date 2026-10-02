@@ -34,6 +34,9 @@ export type LegacyScreenId =
   | "network"
   | "agent"
   | "advanced"
+  | "privacy"
+  | "storage"
+  | "about"
   | "report-problem";
 export type ScreenId = MainScreenId | LegacyScreenId;
 export type SettingsPane =
@@ -43,7 +46,9 @@ export type SettingsPane =
   | "storage"
   | "network"
   | "agent"
-  | "advanced";
+  | "advanced"
+  | "license"
+  | "about";
 
 export interface ScreenDefinition {
   id: MainScreenId;
@@ -131,6 +136,9 @@ export const screenAliases: Record<
   network: { screen: "settings", pane: "network" },
   agent: { screen: "settings", pane: "agent" },
   advanced: { screen: "settings", pane: "advanced" },
+  privacy: { screen: "settings", pane: "privacy" },
+  storage: { screen: "settings", pane: "storage" },
+  about: { screen: "settings", pane: "about" },
   "report-problem": { screen: "help" },
 };
 
@@ -139,5 +147,6 @@ export function resolveScreen(id: ScreenId): {
   pane?: SettingsPane;
   openUpload?: boolean;
 } {
+  if (id === "license") return { screen: "settings", pane: "license" };
   return id in screenAliases ? screenAliases[id as LegacyScreenId] : { screen: id as MainScreenId };
 }

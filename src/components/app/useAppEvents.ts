@@ -82,6 +82,45 @@ export function useAppEvents({
           setActiveSection("home");
         });
 
+        await register<string | undefined>("navigate-to-settings", (pane) => {
+          const panes = [
+            "general",
+            "shortcuts",
+            "privacy",
+            "storage",
+            "network",
+            "agent",
+            "advanced",
+            "license",
+            "about",
+          ] as const;
+          setActiveSection(panes.find((id) => id === pane) ?? "settings");
+        });
+        await register<string>("navigate-to-section", (section) => {
+          const destinations = [
+            "home",
+            "history",
+            "insights",
+            "transcription",
+            "polish",
+            "dictionary",
+            "recording",
+            "help",
+            "settings",
+            "license",
+            "general",
+            "shortcuts",
+            "privacy",
+            "storage",
+            "network",
+            "agent",
+            "advanced",
+            "about",
+          ] as const;
+          const destination = destinations.find((id) => id === section);
+          if (destination) setActiveSection(destination);
+        });
+
         await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {
           log.error("Hotkey registration failed:", data);
           toast.error("Hotkey Registration Failed", {

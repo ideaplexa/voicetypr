@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { InsightsTab } from "@/components/tabs/InsightsTab";
-import { AccountTab } from "./AccountTab";
-import { EnhancementsTab } from "./EnhancementsTab";
+import { EnhancementsTab } from "@/components/tabs/EnhancementsTab";
 import { DictionarySection } from "@/components/sections/DictionarySection";
-import { ModelsTab } from "./ModelsTab";
-import { OverviewTab } from "./OverviewTab";
-import { RecordingsTab } from "./RecordingsTab";
-import { RecordingTab } from "./RecordingTab";
-import { SettingsTab } from "./SettingsTab";
+import { ModelsTab } from "@/components/tabs/ModelsTab";
+import { OverviewTab } from "@/components/tabs/OverviewTab";
+import { RecordingsTab } from "@/components/tabs/RecordingsTab";
+import { RecordingTab } from "@/components/tabs/RecordingTab";
+import { SettingsModal } from "@/components/SettingsModal";
+import { isMacOS } from "@/lib/platform";
 import { AudioUploadSection } from "@/components/sections/AudioUploadSection";
 import { ReportProblemSection } from "@/components/sections/ReportProblemSection";
 import {
@@ -24,6 +24,7 @@ interface TabContainerProps extends SourceFilterProps {
   activeSection: ScreenId;
   onNavigate?: (section: ScreenId) => void;
   settingsPane?: SettingsPane;
+  onSettingsClose?: () => void;
   onSettingsPaneChange?: (pane: SettingsPane) => void;
 }
 
@@ -32,18 +33,70 @@ export function TabContainer({
   onNavigate,
   settingsPane,
   onSettingsPaneChange,
+  onSettingsClose,
   ...sourceFilterProps
 }: TabContainerProps) {
-  const destination = resolveScreen(activeSection);
-  const [localSettingsPane, setLocalSettingsPane] = useState<SettingsPane>("general");
+  const incoming = resolveScreen(activeSection);
+  const [route, setRoute] = useState({
+    id: activeSection,
+    paneProp: settingsPane,
+    page: incoming.screen === "settings" ? ("home" as ScreenId) : activeSection,
+    pane:
+      incoming.screen === "settings" ? (incoming.pane ?? settingsPane ?? "general") : settingsPane,
+  });
+  if (route.id !== activeSection || route.paneProp !== settingsPane) {
+    setRoute({
+      id: activeSection,
+      paneProp: settingsPane,
+      page: incoming.screen === "settings" ? route.page : activeSection,
+      pane:
+        incoming.screen === "settings"
+          ? (incoming.pane ?? settingsPane ?? "general")
+          : settingsPane,
+    });
+  }
+  const destination = resolveScreen(route.page);
+  const openPane = (pane: SettingsPane) => {
+    setRoute((current) => ({ ...current, pane }));
+    onSettingsPaneChange?.(pane);
+  };
+  const closeSettings = () => {
+    setRoute((current) => ({ ...current, pane: undefined }));
+    onSettingsClose?.();
+  };
+  const navigate = (id: ScreenId) => {
+    const next = resolveScreen(id);
+    if (next.screen === "settings") openPane(next.pane ?? "general");
+    else {
+      closeSettings();
+      onNavigate?.(id);
+    }
+  };
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (
+        event.key !== "," ||
+        event.altKey ||
+        event.shiftKey ||
+        event.repeat ||
+        !document.hasFocus()
+      )
+        return;
+      if (isMacOS ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      openPane("general");
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
 
   let content;
   switch (destination.screen) {
     case "home":
       content = (
         <OverviewTab
-          onNavigate={onNavigate}
-          onNavigateSettingsPane={onSettingsPaneChange}
+          onNavigate={navigate}
+          onNavigateSettingsPane={openPane}
           onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
         />
       );
@@ -51,10 +104,10 @@ export function TabContainer({
     case "history":
       content = (
         <HistoryContent
-          key={activeSection}
-          initialUploadOpen={activeSection === "audio"}
-          onNavigate={onNavigate}
-          onNavigateSettingsPane={onSettingsPaneChange}
+          key={route.page}
+          initialUploadOpen={route.page === "audio"}
+          onNavigate={navigate}
+          onNavigateSettingsPane={openPane}
           onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
         />
       );
@@ -74,42 +127,29 @@ export function TabContainer({
     case "recording":
       content = <RecordingTab />;
       break;
-    case "settings":
-      content = (
-        <SettingsTab
-          pane={destination.pane ?? settingsPane ?? localSettingsPane}
-          onNavigate={onNavigate}
-          onPaneChange={(pane) => {
-            setLocalSettingsPane(pane);
-            onSettingsPaneChange?.(pane);
-          }}
-        />
-      );
-      break;
     case "help":
-      content = (
-        <ReportProblemSection
-          onNavigateSettingsPane={(pane) => {
-            setLocalSettingsPane(pane);
-            if (onSettingsPaneChange) onSettingsPaneChange(pane);
-            else onNavigate?.("settings");
-          }}
-        />
-      );
-      break;
-    case "license":
-      content = <AccountTab />;
+      content = <ReportProblemSection onNavigateSettingsPane={openPane} />;
       break;
     default:
       content = (
         <OverviewTab
-          onNavigate={onNavigate}
-          onNavigateSettingsPane={onSettingsPaneChange}
+          onNavigate={navigate}
+          onNavigateSettingsPane={openPane}
           onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
         />
       );
   }
-  return <div className="flex h-full min-h-0 flex-col">{content}</div>;
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {content}
+      <SettingsModal
+        pane={onSettingsClose ? settingsPane : route.pane}
+        onPaneChange={openPane}
+        onClose={closeSettings}
+        onNavigate={navigate}
+      />
+    </div>
+  );
 }
 
 function HistoryContent({

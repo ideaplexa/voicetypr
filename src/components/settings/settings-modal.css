@@ -1,0 +1,44 @@
+.settings-modal-scrim {
+  background: color-mix(in srgb, var(--foreground) 28%, transparent);
+  backdrop-filter: none;
+  animation-duration: 160ms;
+}
+.settings-modal {
+  position: fixed;
+  z-index: 50;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 800px;
+  height: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px #0003;
+  overflow: hidden;
+  transition:
+    opacity 160ms,
+    scale 160ms;
+}
+.settings-modal[data-starting-style],
+.settings-modal[data-ending-style] {
+  opacity: 0;
+  scale: 0.96;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-modal {
+    transition: opacity 160ms;
+  }
+  .settings-modal[data-starting-style],
+  .settings-modal[data-ending-style] {
+    scale: 1;
+  }
+}
+
+/* The reference uses bare General rows rather than an inset card. */
+.settings-modal-pane[data-settings-pane="general"] > div > div > section {
+  border: 0;
+  padding: 0;
+}

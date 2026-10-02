@@ -11,10 +11,10 @@ import { useLicense } from "@/contexts/LicenseContext";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { Crown } from "lucide-react";
 import { useState } from "react";
-import { ActivateLicenseCard } from "./ActivateLicenseCard";
-import { LicenseStatusCard } from "./LicenseStatusCard";
+import { ActivateLicenseCard } from "@/components/sections/ActivateLicenseCard";
+import { LicenseStatusCard } from "@/components/sections/LicenseStatusCard";
 
-export function AccountSection() {
+export function AccountSection({ embedded = false }: { embedded?: boolean } = {}) {
   const {
     status,
     isLoading,
@@ -57,8 +57,11 @@ export function AccountSection() {
       status.status === "trial");
 
   return (
-    <SettingsPage className="gap-[18px] [&_button[data-slot=button]]:rounded-[10px] [&_input]:rounded-[10px]">
+    <SettingsPage
+      className={`${embedded ? "!p-0" : ""} gap-[18px] [&_button[data-slot=button]]:rounded-[10px] [&_input]:rounded-[10px]`}
+    >
       <PageHeader
+        className={embedded ? "[&>div:first-child]:hidden justify-end" : undefined}
         title="License"
         description="Trial status, license activation, and purchase access."
         action={

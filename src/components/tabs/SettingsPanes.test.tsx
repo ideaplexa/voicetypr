@@ -66,7 +66,7 @@ describe("Settings pane controls", () => {
     await waitFor(() =>
       expect(updateSettings).toHaveBeenCalledWith({ check_updates_automatically: true }),
     );
-    expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
+    expect(screen.queryByText("Voicetypr 2.1.0")).not.toBeInTheDocument();
   });
 
   it("renders shortcut actions and opens Recording for the primary shortcut", async () => {
@@ -140,24 +140,43 @@ describe("Settings pane controls", () => {
     vi.mocked(invoke).mockImplementation((command: string) => {
       if (command === "stop_sharing") sharingEnabled = false;
       if (command === "start_sharing") sharingEnabled = true;
-      if (command === "get_sharing_status") return Promise.resolve({ ...(fixtures.get_sharing_status as Record<string, unknown>), enabled: sharingEnabled });
+      if (command === "get_sharing_status")
+        return Promise.resolve({
+          ...(fixtures.get_sharing_status as Record<string, unknown>),
+          enabled: sharingEnabled,
+        });
       return Promise.resolve(fixtures[command]);
     });
     render(<SettingsTab pane="network" onPaneChange={vi.fn()} />);
     const toggle = await screen.findByRole("switch", { name: "Share this Voicetypr" });
     await userEvent.click(screen.getByRole("button", { name: "Change" }));
-    fireEvent.change(screen.getByLabelText("Password (Optional)"), { target: { value: "cancelled-secret" } });
+    fireEvent.change(screen.getByLabelText("Password (Optional)"), {
+      target: { value: "cancelled-secret" },
+    });
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await userEvent.click(toggle);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_sharing"));
     await userEvent.click(toggle);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("start_sharing", expect.anything()));
-    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "start_sharing"))
-      .not.toEqual(expect.arrayContaining([["start_sharing", expect.objectContaining({ password: "cancelled-secret" })]]));
+    expect(
+      vi.mocked(invoke).mock.calls.filter(([command]) => command === "start_sharing"),
+    ).not.toEqual(
+      expect.arrayContaining([
+        ["start_sharing", expect.objectContaining({ password: "cancelled-secret" })],
+      ]),
+    );
   });
 
   it("gives every switch in each Settings pane an accessible name", async () => {
-    for (const pane of ["general", "shortcuts", "privacy", "storage", "network", "agent", "advanced"] as const) {
+    for (const pane of [
+      "general",
+      "shortcuts",
+      "privacy",
+      "storage",
+      "network",
+      "agent",
+      "advanced",
+    ] as const) {
       const view = render(<SettingsTab pane={pane} onPaneChange={vi.fn()} />);
       if (pane === "network") await screen.findByRole("switch", { name: "Share this Voicetypr" });
       for (const control of screen.queryAllByRole("switch")) {

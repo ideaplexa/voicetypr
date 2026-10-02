@@ -58,7 +58,7 @@ describe("AppShell tray recovery", () => {
       const toggle = screen.getByRole("button", { name: "Toggle Sidebar" });
       const position = toggle.parentElement?.className;
       expect(toggle.parentElement).toHaveClass(
-        os === "macos" ? "left-[80px]" : "left-0",
+        os === "macos" ? "left-[80px]" : "left-6",
         "top-[5px]",
       );
       expect(titleBar.querySelector(".lucide-panel-left-open")).toBeInTheDocument();

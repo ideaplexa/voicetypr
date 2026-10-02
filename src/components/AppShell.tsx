@@ -15,12 +15,13 @@ import { getTrayStatus, retryTrayCreation, type TrayStatus } from "@/lib/tray";
 
 const log = createLogger("app-shell");
 
-import type { SourceFilterProps } from "./sections/models/types";
+import type { SourceFilterProps } from "@/components/sections/models/types";
 
 interface AppShellProps extends SourceFilterProps {
   activeSection: ScreenId;
   onSectionChange: (section: ScreenId) => void;
   settingsPane?: SettingsPane;
+  onSettingsClose?: () => void;
   onSettingsPaneChange?: (pane: SettingsPane) => void;
 }
 
@@ -29,6 +30,7 @@ export function AppShell({
   onSectionChange,
   settingsPane,
   onSettingsPaneChange,
+  onSettingsClose,
   ...sourceFilterProps
 }: AppShellProps) {
   const [trayStatus, setTrayStatus] = useState<TrayStatus | null>(null);
@@ -107,6 +109,7 @@ export function AppShell({
             onNavigate={onSectionChange}
             settingsPane={settingsPane}
             onSettingsPaneChange={onSettingsPaneChange}
+            onSettingsClose={onSettingsClose}
             {...sourceFilterProps}
           />
         </div>
