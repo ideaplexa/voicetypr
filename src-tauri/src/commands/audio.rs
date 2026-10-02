@@ -2315,18 +2315,8 @@ fn build_translation_failed_history_metadata(target_language: &str) -> serde_jso
 }
 fn ai_failure_category(error: &AiProviderError) -> &'static str {
     match error {
-        AiProviderError::MissingApiKey => "missing_api_key",
-        AiProviderError::InvalidApiKey => "invalid_api_key",
-        AiProviderError::InvalidModel => "invalid_model",
-        AiProviderError::UnsupportedProvider => "unsupported_provider",
-        AiProviderError::Timeout => "timeout",
-        AiProviderError::Canceled => "canceled",
-        AiProviderError::RateLimited => "rate_limited",
-        AiProviderError::ServiceUnavailable => "service_unavailable",
-        AiProviderError::Network => "network",
-        AiProviderError::BadResponse => "bad_response",
-        AiProviderError::Internal => "internal",
         AiProviderError::AgentCli(_) => "cli_error",
+        _ => crate::ai::polish::error_category(error),
     }
 }
 
@@ -2343,6 +2333,7 @@ fn ai_failure_notice(error: &AiProviderError) -> &'static str {
         AiProviderError::Network => "Couldn't reach the AI service",
         AiProviderError::BadResponse => "AI service error",
         AiProviderError::Internal => "AI formatting failed",
+        AiProviderError::OutputGuard(_) => "Polish skipped — raw text pasted",
         AiProviderError::AgentCli(_) => "Polish failed",
     }
 }

@@ -1,8 +1,8 @@
 # Polish measurement corpus
 
 This is a hand-written, fictional raw speech-to-text corpus for plan 081 tasks
-1–3. It measures today's Polish pipeline; it does not add guards, change prompts,
-or predict speech-recognition accuracy. No provider baseline has been run here.
+1–5 and the first prompt correction in task 8. The synthetic Haiku baseline is
+committed for offline replay. This corpus does not predict speech-recognition accuracy.
 
 ## Privacy
 
@@ -29,6 +29,8 @@ One UTF-8 JSON object per line in `golden.jsonl`:
 optional, and all specified checks must pass:
 
 - `exact`: byte-identical output to this string.
+- `equivalent`: ignore casing of only the first letter and one terminal `.`, `!`
+  or `?`; all other characters remain exact (used only by short utterances).
 - `unchanged: true`: byte-identical output to the input, including whitespace.
 - `must_contain`, `must_not_contain`: case-sensitive substring checks.
 - `keeps`: each token must survive verbatim, using case-sensitive matching
@@ -97,15 +99,19 @@ vocabulary is included just as it is for desktop Polish. Concurrency defaults to
 
 Fixtures contain `{id, output}` per line; optional `provider`, `model`, `outcome`
 and `timings_ms` fields support replaying live recordings. Missing metadata groups
-under `fixture/recorded`. Fixtures are scored exactly as provided, without
-revalidating or repairing them. This lets deliberately bad responses test the
-scorer. Fixture mode runs before Tauri initialization, secure-store reads,
+under `fixture/recorded`. Fixture mode applies the production output guard to recorded outputs, returning
+raw input with `fallback_raw` and a content-free reason when rejected. It does not
+run the pre-call skip detector or invent new provider timing: recorded latency
+stays intact. It does not replay sanitation, retries or a new prompt. Fixture mode runs before Tauri initialization, secure-store reads,
 license checks or any network request, and rejects live-only options. Unknown
 ids and duplicate provider/model/id combinations fail. Partial fixtures are
 allowed: reports show evaluated/golden coverage rather than pretending all
 200 cases ran. Missing outcomes/latencies produce N/A, not invented zeroes.
 
-`sample.jsonl` has 20 synthetic responses: 10 pass, 10 intentionally fail.
+`sample.jsonl` has 20 synthetic responses, including intentionally bad responses.
+Its expectations reflect guard fallback as well as the scorer.
+`claude-haiku-baseline.jsonl` is an exact copy of the synthetic 200-case local
+recording, safe to commit.
 `sample-expectations.json` records the expected verdict per id. Rust unit and
 CLI integration tests assert every verdict and require no keys or network.
 
@@ -147,3 +153,26 @@ verdicts augment deterministic failures; meaning-change rates are N/A without a
 judge. The judge uses the same secure runtime configuration and existing executor;
 its latency is excluded from tested-provider latency. Recorded responses do not
 store judge verdicts, so fixture replay recomputes deterministic scores only.
+
+## Production guard and zero-wait gate
+
+The focused `ai/output_guard.rs` module returns only `meta_reply` or `answered`.
+New case-insensitive task/assistant phrases are checked after whitespace
+normalization; phrases present in the input are exempt. See `META_SIGNALS` for the
+small documented list. Questions and leading English imperatives require at
+least 0.50 input content-word overlap; any output longer than twice the input
+Unicode scalar count plus 24 is rejected. These are conservative heuristics,
+not semantic proof; answers that reuse question wording can still evade them.
+
+`ai/skip.rs` skips clean/message/notes only, at most 30 whitespace-delimited
+words, already capitalized and ending in `.`, `!` or `?`. Fillers, correction
+markers, repeated adjacent n-grams, multiline text and spacing repairs keep
+Polish running. Ambiguous `like` and `actually` always run. Writing/code and
+translation always run. CLI skips report `skipped` with zero request time;
+desktop returns unchanged text with zero model duration. No new island event is
+emitted; guard errors use the existing raw fallback notice path.
+
+CI tests replay all 200 baseline responses, reject the six cited meta replies
+and every baseline answered/obeyed result, require zero guard false positives on
+correct non-adversarial responses, and print/gate every golden skip id. Runtime
+island/paste acceptance remains `NEEDS-SMOKE` until a real app run.

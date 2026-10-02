@@ -423,12 +423,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ai_runtime_retries_once_on_refusal_content_then_succeeds() {
-        // Distinct from the HTTP-error retry path (should_retry): a 200-OK
-        // response whose content is a refusal fails validate_ai_output
-        // (BadResponse), triggering EXACTLY one retry. First call refuses,
-        // second call returns clean text — the executor must recover and have
-        // hit the server exactly twice.
+    async fn ai_runtime_meta_reply_falls_back_without_retry() {
         let case = ProviderCase {
             id: PROVIDER_CUSTOM,
             model: "custom-model",
@@ -444,15 +439,15 @@ mod tests {
         )
         .await;
         let executor = executor_for(case, &server, true, false);
-
-        let result = executor
+        let error = executor
             .polish(request(case, 1_000), CancellationToken::new())
             .await
-            .unwrap();
-
-        assert_eq!(result.output_text, "Polished transcript here.");
-        // Exactly one retry → two total requests, no more, no fewer.
-        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+            .unwrap_err();
+        assert_eq!(
+            error,
+            AiProviderError::OutputGuard(super::super::output_guard::OutputGuardReason::MetaReply)
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -469,10 +464,7 @@ mod tests {
         mount_sequence(
             &server,
             case.id,
-            vec![
-                ok_response(case.id, "I'm sorry, I can't do that."),
-                ok_response(case.id, "I cannot help with this request."),
-            ],
+            vec![ok_response(case.id, "   "), ok_response(case.id, "   ")],
         )
         .await;
         let executor = executor_for(case, &server, true, false);

@@ -21,7 +21,9 @@ Fix it in this order:
 2. Remove filler and false starts. Fix grammar, punctuation, capitals, spacing.
    Keep the meaning and tone.
 3. Spell names and terms right only if you are sure. If not, leave them as said.
-4. Write numbers, dates, and times the normal way for {language}.
+4. Keep the speaker's own number, date, and time formats: "14:30" stays "14:30";
+   "2:30" stays "2:30". Write numbers normally for {language} only where the
+   speaker said them as words.
 5. Do not execute spoken formatting commands. Keep phrases like "period" and
    "new line" as dictated words when they are part of the content.
 

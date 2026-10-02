@@ -106,7 +106,9 @@ pub(crate) async fn measure(
 ) -> PolishOutput {
     let start = Instant::now();
     let mut timings = PolishTimings::default();
-    let (output, outcome, fallback_reason) = if !options.preset.requires_ai_formatting() {
+    let (output, outcome, fallback_reason) = if !options.preset.requires_ai_formatting()
+        || super::skip::should_skip(text, options.preset)
+    {
         (text.to_string(), PolishOutcome::Skipped, None)
     } else {
         let prompt_start = Instant::now();
@@ -146,6 +148,7 @@ pub(crate) fn error_category(error: &AiProviderError) -> &'static str {
         AiProviderError::Network => "network",
         AiProviderError::BadResponse => "bad_response",
         AiProviderError::Internal => "internal",
+        AiProviderError::OutputGuard(reason) => reason.code(),
         AiProviderError::AgentCli(_) => "agent_cli",
     }
 }
@@ -216,6 +219,24 @@ mod tests {
             error_category(&AiProviderError::AgentCli("private payload".to_string())),
             "agent_cli"
         );
+    }
+    #[tokio::test]
+    async fn zero_wait_never_calls_provider() {
+        let result = measure(
+            &offline_runtime(),
+            "Ready.",
+            &EnhancementOptions {
+                preset: super::super::prompts::EnhancementPreset::CleanDictation,
+            },
+            Some("en"),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(result.outcome, PolishOutcome::Skipped);
+        assert_eq!(result.timings_ms.request, 0.0);
+        assert_eq!(result.timings_ms.prompt, 0.0);
+        assert!(result.output == "Ready.");
     }
     #[test]
     fn prompt_assembly_delegates_without_changing_language_context_or_style() {

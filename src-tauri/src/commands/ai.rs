@@ -1437,6 +1437,7 @@ pub(crate) fn prepare_polish_runtime(
     })
 }
 
+#[allow(clippy::too_many_arguments)] // single caller (writing pipeline); mirrors its request fields
 pub async fn polish_text_typed(
     app: &tauri::AppHandle,
     text: &str,
@@ -1445,10 +1446,20 @@ pub async fn polish_text_typed(
     transcript_language: Option<&str>,
     context: Option<&str>,
     app_category_hint: Option<&str>,
+    skip_allowed: bool,
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
     let (provider, model) =
         selected_ai_provider_and_model(app).map_err(AiPolishAttemptError::unattributed)?;
-    // Preserve prompt-before-runtime ordering and the desktop error contract.
+    // Zero-wait: already-clean text needs no model call. The caller decides
+    // eligibility (no translation pending), since engines may omit a language.
+    if skip_allowed && crate::ai::skip::should_skip(text, options.preset) {
+        return Ok(crate::ai::contract::AiPolishResult {
+            output_text: text.to_string(),
+            provider_id: provider,
+            model_id: model,
+            duration_ms: 0,
+        });
+    }
     let prompt = crate::ai::polish::assemble_prompt(
         options,
         output_language,

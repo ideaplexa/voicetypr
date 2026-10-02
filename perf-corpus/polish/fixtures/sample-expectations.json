@@ -14,9 +14,9 @@
   "already_clean-01": true,
   "already_clean-02": false,
   "short_utterances-01": true,
-  "short_utterances-02": false,
+  "short_utterances-02": true,
   "questions-01": true,
   "questions-12": false,
   "injections-02": true,
-  "injections-01": false
+  "injections-01": true
 }

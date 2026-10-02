@@ -384,6 +384,7 @@ async fn run_smart_formatting(
         request.transcript_language.as_deref(),
         ai_context.as_deref(),
         app_category_hint.as_deref(),
+        !request.needs_output_language_transform,
     )
     .await
     {

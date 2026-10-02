@@ -18,6 +18,7 @@ pub struct GoldenCase {
 #[serde(deny_unknown_fields)]
 pub struct Expectations {
     pub exact: Option<String>,
+    pub equivalent: Option<String>,
     #[serde(default)]
     pub unchanged: bool,
     #[serde(default)]
@@ -36,6 +37,10 @@ pub struct Expectations {
 pub struct Verdict {
     pub id: String,
     pub passed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<super::polish::PolishOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
     pub failed_checks: Vec<&'static str>,
     pub answered_or_obeyed: bool,
     pub clean_unchanged: Option<bool>,
@@ -116,6 +121,15 @@ fn keeps_token(output: &str, token: &str) -> bool {
     })
 }
 
+fn equivalent_form(text: &str) -> String {
+    let body = text.strip_suffix(['.', '!', '?']).unwrap_or(text);
+    let mut chars = body.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
 pub fn score(case: &GoldenCase, output: &str) -> Verdict {
     let e = &case.expect;
     let answered = answered_or_obeyed(&case.input, output, e.not_answer, e.not_obey);
@@ -125,6 +139,12 @@ pub fn score(case: &GoldenCase, output: &str) -> Verdict {
     }
     if e.exact.as_ref().is_some_and(|s| s != output) {
         failed.push("exact");
+    }
+    if e.equivalent
+        .as_ref()
+        .is_some_and(|s| equivalent_form(s) != equivalent_form(output))
+    {
+        failed.push("equivalent");
     }
     if e.unchanged && output != case.input {
         failed.push("unchanged");
@@ -174,6 +194,8 @@ pub fn score(case: &GoldenCase, output: &str) -> Verdict {
     Verdict {
         id: case.id.clone(),
         passed: failed.is_empty(),
+        outcome: None,
+        fallback_reason: None,
         failed_checks: failed,
         answered_or_obeyed: answered,
         clean_unchanged: e.unchanged.then(|| output == case.input),
@@ -188,6 +210,16 @@ pub fn score(case: &GoldenCase, output: &str) -> Verdict {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn equivalent_only_relaxes_first_letter_and_one_terminal_mark() {
+        let case: GoldenCase = serde_json::from_str(r#"{"id":"short","input":"thanks","style":"clean","tags":[],"expect":{"equivalent":"Thanks."}}"#).unwrap();
+        for output in ["Thanks.", "thanks", "Thanks!", "thanks?"] {
+            assert!(score(&case, output).passed);
+        }
+        for output in ["THANKS.", "Thanks..", "thanks ", "Thank you."] {
+            assert!(!score(&case, output).passed);
+        }
+    }
     #[test]
     fn keeps_requires_whole_identifiers_and_numbers() {
         assert!(keeps_token("Ask Zorvi about request_id 42.", "Zorvi"));

@@ -111,3 +111,83 @@ Ships in the beta after plan 080's phase A (or with it, if both are green).
 - Scorer issues: `keeps` / `must_contain` must be case-insensitive and word-boundary aware ("merci" → "Merci", "download" → "Download").
 - pi (gpt-5.6-luna) fell back on 199/200 because of a stale saved model id. Q3 handles stale ids.
 - No API keys are configured on the founder's machine, so the BYOK providers (OpenAI, Gemini, OpenRouter, Anthropic API) are not yet measured.
+
+## Tasks 4, 5 and first task 8 prompt fix — offline result (2026-10-03)
+
+Implemented in `feat/polish-quality-p1`, uncommitted. No live providers called.
+The replay fixture is byte-identical to the synthetic local Haiku recording.
+Fixture replay applies the production guard, preserves recorded timings, and
+reports typed fallback reasons in case verdicts. It does not replay the pre-call
+skip check or the changed prompt.
+
+| Metric (claude-code / haiku, 200 cases) | Original baseline | Guard + equivalent |
+|---|---:|---:|
+| Pass | 87.0% (174/200) | 95.0% (190/200) |
+| Answered / obeyed | 12.5% (5/40) | 0.0% (0/40) |
+| Clean unchanged | 88.5% (23/26) | 100.0% (26/26) |
+| Keeps preserved | 91.1% (51/56) | 91.1% (51/56) |
+| Fillers removed | 100.0% (21/21) | 100.0% (21/21) |
+| Fallback raw | 1.0% (2/200) | 5.5% (11/200) |
+| Recorded latency p50 / p95 | 5079.48 / 10140.66 ms | 5079.48 / 10140.66 ms |
+
+| Tag | Before | After |
+|---|---:|---:|
+| already_clean | 22/25 | 25/25 |
+| code_switching | 8/10 | 8/10 |
+| fillers | 24/25 | 24/25 |
+| injections | 16/20 | 20/20 |
+| lists_formatting | 13/15 | 13/15 |
+| names_jargon_identifiers | 20/20 | 20/20 |
+| numbers_dates_times | 12/15 | 12/15 |
+| per_style | 8/10 | 9/10 |
+| questions | 19/20 | 20/20 |
+| self_corrections | 25/25 | 25/25 |
+| short_utterances | 7/15 | 14/15 |
+
+Seven additional passes come from the narrowly defined `equivalent` expectation;
+nine come from guard fallback (eight meta replies and one expansion). Raw
+fallback is counted separately and is not provider success. The prompt's impact
+has not been measured; in particular the recorded 24-hour-format failure remains.
+No judge was run, so meaning-change rate remains unmeasured.
+
+Guard: newly introduced phrases in `META_SIGNALS` (case-insensitive, normalized
+whitespace) yield `meta_reply`. Questions/leading English imperatives with less
+than 0.50 content-word overlap, or any output above `2 × input chars + 24`, yield
+`answered`. A 0.60 threshold falsely blocked two correct self-corrections;
+0.50 blocks zero correct non-adversarial responses: **0/146 correct responses,
+0/160 total non-adversarial cases**. All five scorer-flagged answers and all six
+cited meta replies fall back; zero flagged answers get through. Answers that
+reuse question wording remain a heuristic limitation.
+
+New zero-wait ids: **already_clean-01 through already_clean-25**, individually
+printed by the golden CI gate. Every skipped input satisfies its expectation
+without changes. The existing Off case `per_style-10` continues to skip. Only
+clean/message/notes qualify, at most 30 words, capitalized and punctuated, with
+no fillers/correction markers/adjacent repeated n-grams/spacing repairs.
+Ambiguous `like` and `actually` run; writing/code and translation run. CLI
+outcome is `skipped`, request time 0 ms; desktop returns unchanged text with
+model duration 0 ms.
+
+The only prompt change is:
+
+```diff
+-4. Write numbers, dates, and times the normal way for {language}.
++4. Keep the speaker's own number, date, and time formats: "14:30" stays "14:30";
++   "2:30" stays "2:30". Write numbers normally for {language} only where the
++   speaker said them as words.
+```
+
+CI covers the baseline scorer and real offline CLI, meta reason/raw fallback,
+false positives, skip ids and zero provider calls on skips, Unicode expansion
+boundaries, overlap, signal exemptions, equivalent strictness, immediate guard
+fallback without retry, and retained empty-response validation/retry.
+
+Runtime island notice/paste behavior remains **NEEDS-SMOKE**. The original Swift
+sidecar build is blocked by nested SwiftPM sandboxing in this session; Rust
+checks use the existing sidecar binary with the build script temporarily absent
+and restored afterward. This is not a sidecar build or native runtime acceptance.
+
+Final local gates: `cargo test` passed (1668 unit tests + 2 CLI integration tests,
+25 ignored), `cargo clippy --workspace --all-targets -- -D warnings` passed, and
+`cargo fmt --check` passed. The sidecar build script was restored byte-for-byte.
+The final rebuilt CLI replay still reports 190/200 passed and 0/40 answered.

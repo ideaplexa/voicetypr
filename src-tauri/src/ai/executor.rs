@@ -120,7 +120,10 @@ impl AiExecutor {
                     timings.validate += super::polish::elapsed_ms(validate_start);
                     let validated = match validation {
                         Ok(output) => output,
-                        Err(error) if attempt == 0 => {
+                        Err(error)
+                            if attempt == 0
+                                && !matches!(error, AiProviderError::OutputGuard(_)) =>
+                        {
                             attempt += 1;
                             log::warn!(
                                 "AI cleanup response failed validation; retrying once category={:?}",
@@ -214,9 +217,12 @@ fn validate_ai_output(output: &str, input: &str) -> Result<String, AiProviderErr
     .trim()
     .to_string();
 
-    if cleaned.is_empty()
-        || starts_with_refusal_or_commentary(&cleaned)
-        || has_anomalous_cleanup_length(&cleaned, input)
+    if cleaned.is_empty() {
+        return Err(AiProviderError::BadResponse);
+    }
+    super::output_guard::check(input, &cleaned).map_err(AiProviderError::OutputGuard)?;
+
+    if starts_with_refusal_or_commentary(&cleaned) || has_anomalous_cleanup_length(&cleaned, input)
     {
         Err(AiProviderError::BadResponse)
     } else {
@@ -461,9 +467,20 @@ mod tests {
     }
 
     #[test]
+    fn empty_question_response_keeps_bad_response_validation() {
+        assert_eq!(
+            validate_ai_output("   ", "could you send the draft"),
+            Err(AiProviderError::BadResponse)
+        );
+    }
+
+    #[test]
     fn validate_rejects_refusal_commentary() {
         let error = validate_ai_output("I'm sorry, I can't do that.", "hello").unwrap_err();
-        assert!(matches!(error, AiProviderError::BadResponse));
+        assert!(matches!(
+            error,
+            AiProviderError::OutputGuard(super::super::output_guard::OutputGuardReason::MetaReply)
+        ));
     }
 
     #[test]

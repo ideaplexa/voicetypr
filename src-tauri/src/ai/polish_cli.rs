@@ -161,7 +161,9 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
             .map_err(|_| "Invalid saved Polish style")?,
     };
     let (provider, model) = selection(app, args.provider.as_deref(), args.model.as_deref())?;
-    let result = if !options.preset.requires_ai_formatting() {
+    let result = if !options.preset.requires_ai_formatting()
+        || super::skip::should_skip(&text, options.preset)
+    {
         PolishOutput {
             output: text,
             outcome: PolishOutcome::Skipped,

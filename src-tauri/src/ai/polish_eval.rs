@@ -48,6 +48,8 @@ struct Response {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     outcome: Option<PolishOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    fallback_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     timings_ms: Option<PolishTimings>,
 }
 #[derive(Serialize)]
@@ -195,9 +197,9 @@ fn fixture_cards(args: &EvalArgs, golden: &[GoldenCase]) -> EvalResult<Vec<Score
     let responses: Vec<Response> = read_jsonl(args.fixture.as_ref().ok_or("Fixture required")?)?;
     let mut groups: BTreeMap<(String, String), Vec<_>> = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    for response in responses {
-        let provider = response.provider.unwrap_or_else(|| "fixture".into());
-        let model = response.model.unwrap_or_else(|| "recorded".into());
+    for mut response in responses {
+        let provider = response.provider.take().unwrap_or_else(|| "fixture".into());
+        let model = response.model.take().unwrap_or_else(|| "recorded".into());
         if !safe_label(&provider)
             || (!model.is_empty() && !safe_label(&model))
             || !seen.insert((provider.clone(), model.clone(), response.id.clone()))
@@ -208,15 +210,18 @@ fn fixture_cards(args: &EvalArgs, golden: &[GoldenCase]) -> EvalResult<Vec<Score
             .iter()
             .find(|c| c.id == response.id)
             .ok_or("Fixture contains an unknown case id")?;
-        let timing = response.timings_ms.map(|t| t.total);
+        let timing = response.timings_ms.as_ref().map(|t| t.total);
         if timing.is_some_and(|t| !t.is_finite() || t < 0.0) {
             return Err("Invalid fixture timing".into());
         }
-        groups.entry((provider, model)).or_default().push((
-            polish_score::score(case, &response.output),
-            response.outcome,
-            timing,
-        ));
+        apply_fixture_guard(case, &mut response);
+        let mut verdict = polish_score::score(case, &response.output);
+        verdict.outcome = response.outcome;
+        verdict.fallback_reason = response.fallback_reason;
+        groups
+            .entry((provider, model))
+            .or_default()
+            .push((verdict, response.outcome, timing));
     }
     if groups.is_empty() {
         return Err("Fixture is empty".into());
@@ -226,6 +231,14 @@ fn fixture_cards(args: &EvalArgs, golden: &[GoldenCase]) -> EvalResult<Vec<Score
         .map(|((p, m), rows)| summarize(p, m, golden, rows, 0))
         .collect())
 }
+fn apply_fixture_guard(case: &GoldenCase, response: &mut Response) {
+    if let Err(reason) = super::output_guard::check(&case.input, &response.output) {
+        response.output = case.input.clone();
+        response.outcome = Some(PolishOutcome::FallbackRaw);
+        response.fallback_reason = Some(reason.code().to_string());
+    }
+}
+
 fn percent(rate: &Rate) -> String {
     rate.rate
         .map(|r| {
@@ -438,6 +451,8 @@ pub(crate) async fn run_live(app: &tauri::AppHandle, args: EvalArgs) -> EvalResu
                 )
                 .await;
                 let mut verdict = polish_score::score(case, &result.output);
+                verdict.outcome = Some(result.outcome);
+                verdict.fallback_reason = result.fallback_reason.clone();
                 let mut unavailable = false;
                 if let Some(judge_runtime) = judge_runtime {
                     if let Some(judgment) = judge(judge_runtime, case, &result.output).await {
@@ -476,6 +491,7 @@ pub(crate) async fn run_live(app: &tauri::AppHandle, args: EvalArgs) -> EvalResu
                         provider: Some(result.provider),
                         model: Some(result.model),
                         outcome: Some(result.outcome),
+                        fallback_reason: result.fallback_reason.clone(),
                         timings_ms: Some(result.timings_ms.clone()),
                     },
                 )
@@ -556,9 +572,10 @@ mod tests {
                 ("per_style", 10),
             ])
         );
-        assert_eq!(report[0]["pass_rate"]["numerator"], 10);
+        assert_eq!(report[0]["pass_rate"]["numerator"], 12);
         assert_eq!(report[0]["pass_rate"]["denominator"], 20);
-        assert_eq!(report[0]["fallback_rate"]["rate"], serde_json::Value::Null);
+        assert_eq!(report[0]["fallback_rate"]["numerator"], 2);
+        assert_eq!(report[0]["fallback_rate"]["denominator"], 2);
         assert_eq!(report[0]["latency_samples"], 0);
     }
     #[test]
@@ -615,3 +632,7 @@ mod tests {
         assert_eq!(percentile(&[1.0, 2.0, 3.0, 4.0], 0.5), Some(2.0));
     }
 }
+
+#[cfg(test)]
+#[path = "polish_regression_tests.rs"]
+mod regression_tests;

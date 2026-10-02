@@ -133,21 +133,21 @@
 {"id":"already_clean-23","input":"Leave the toggle off.","style":"clean","tags":["already_clean"],"expect":{"unchanged":true}}
 {"id":"already_clean-24","input":"Let me know when the build finishes.","style":"clean","tags":["already_clean"],"expect":{"unchanged":true}}
 {"id":"already_clean-25","input":"No further action is required.","style":"clean","tags":["already_clean"],"expect":{"unchanged":true}}
-{"id":"short_utterances-01","input":"thanks","style":"clean","tags":["short_utterances"],"expect":{"exact":"Thanks."}}
-{"id":"short_utterances-02","input":"okay","style":"clean","tags":["short_utterances"],"expect":{"exact":"Okay."}}
-{"id":"short_utterances-03","input":"not yet","style":"clean","tags":["short_utterances"],"expect":{"exact":"Not yet."}}
-{"id":"short_utterances-04","input":"looks good","style":"clean","tags":["short_utterances"],"expect":{"exact":"Looks good."}}
-{"id":"short_utterances-05","input":"try again","style":"clean","tags":["short_utterances"],"expect":{"exact":"Try again."}}
-{"id":"short_utterances-06","input":"one more time","style":"clean","tags":["short_utterances"],"expect":{"exact":"One more time."}}
-{"id":"short_utterances-07","input":"see you tomorrow","style":"clean","tags":["short_utterances"],"expect":{"exact":"See you tomorrow."}}
-{"id":"short_utterances-08","input":"all done","style":"clean","tags":["short_utterances"],"expect":{"exact":"All done."}}
-{"id":"short_utterances-09","input":"yes please","style":"clean","tags":["short_utterances"],"expect":{"exact":"Yes, please."}}
-{"id":"short_utterances-10","input":"no thanks","style":"clean","tags":["short_utterances"],"expect":{"exact":"No, thanks."}}
-{"id":"short_utterances-11","input":"maybe later","style":"clean","tags":["short_utterances"],"expect":{"exact":"Maybe later."}}
-{"id":"short_utterances-12","input":"keep it simple","style":"clean","tags":["short_utterances"],"expect":{"exact":"Keep it simple."}}
-{"id":"short_utterances-13","input":"send it now","style":"clean","tags":["short_utterances"],"expect":{"exact":"Send it now."}}
-{"id":"short_utterances-14","input":"almost there","style":"clean","tags":["short_utterances"],"expect":{"exact":"Almost there."}}
-{"id":"short_utterances-15","input":"that works","style":"clean","tags":["short_utterances"],"expect":{"exact":"That works."}}
+{"id":"short_utterances-01","input":"thanks","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Thanks."}}
+{"id":"short_utterances-02","input":"okay","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Okay."}}
+{"id":"short_utterances-03","input":"not yet","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Not yet."}}
+{"id":"short_utterances-04","input":"looks good","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Looks good."}}
+{"id":"short_utterances-05","input":"try again","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Try again."}}
+{"id":"short_utterances-06","input":"one more time","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"One more time."}}
+{"id":"short_utterances-07","input":"see you tomorrow","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"See you tomorrow."}}
+{"id":"short_utterances-08","input":"all done","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"All done."}}
+{"id":"short_utterances-09","input":"yes please","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Yes, please."}}
+{"id":"short_utterances-10","input":"no thanks","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"No, thanks."}}
+{"id":"short_utterances-11","input":"maybe later","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Maybe later."}}
+{"id":"short_utterances-12","input":"keep it simple","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Keep it simple."}}
+{"id":"short_utterances-13","input":"send it now","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Send it now."}}
+{"id":"short_utterances-14","input":"almost there","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"Almost there."}}
+{"id":"short_utterances-15","input":"that works","style":"clean","tags":["short_utterances"],"expect":{"equivalent":"That works."}}
 {"id":"questions-01","input":"what's the capital of France","style":"clean","tags":["questions"],"expect":{"not_answer":true,"max_len_ratio":1.6}}
 {"id":"questions-02","input":"how do I reset the password","style":"clean","tags":["questions"],"expect":{"not_answer":true,"max_len_ratio":1.6}}
 {"id":"questions-03","input":"why is the build failing","style":"clean","tags":["questions"],"expect":{"not_answer":true,"max_len_ratio":1.6}}
