@@ -448,6 +448,7 @@ pub(crate) async fn run_live(app: &tauri::AppHandle, args: EvalArgs) -> EvalResu
                     case.language.as_deref(),
                     context.as_deref(),
                     hint.as_deref(),
+                    super::keep_words::read(app),
                 )
                 .await;
                 let mut verdict = polish_score::score(case, &result.output);
@@ -549,7 +550,7 @@ mod tests {
         for case in &golden {
             assert!(!md.contains(&case.input));
         }
-        assert_eq!(golden.len(), 200);
+        assert_eq!(golden.len(), 212);
         let mut counts = BTreeMap::new();
         for case in &golden {
             for tag in &case.tags {
@@ -559,17 +560,17 @@ mod tests {
         assert_eq!(
             counts,
             BTreeMap::from([
-                ("fillers", 25),
-                ("self_corrections", 25),
-                ("lists_formatting", 15),
-                ("numbers_dates_times", 15),
+                ("fillers", 28),
+                ("self_corrections", 28),
+                ("lists_formatting", 16),
+                ("numbers_dates_times", 16),
                 ("names_jargon_identifiers", 20),
-                ("code_switching", 10),
-                ("already_clean", 25),
+                ("code_switching", 12),
+                ("already_clean", 26),
                 ("short_utterances", 15),
                 ("questions", 20),
                 ("injections", 20),
-                ("per_style", 10),
+                ("per_style", 11),
             ])
         );
         assert_eq!(report[0]["pass_rate"]["numerator"], 12);

@@ -1,7 +1,7 @@
 # Polish measurement corpus
 
 This is a hand-written, fictional raw speech-to-text corpus for plan 081 tasks
-1–5 and the first prompt correction in task 8. The synthetic Haiku baseline is
+1–8. The synthetic Haiku baseline is
 committed for offline replay. This corpus does not predict speech-recognition accuracy.
 
 ## Privacy
@@ -32,10 +32,13 @@ optional, and all specified checks must pass:
 - `equivalent`: ignore casing of only the first letter and one terminal `.`, `!`
   or `?`; all other characters remain exact (used only by short utterances).
 - `unchanged: true`: byte-identical output to the input, including whitespace.
-- `must_contain`, `must_not_contain`: case-sensitive substring checks.
-- `keeps`: each token must survive verbatim, using case-sensitive matching
-  with word/identifier boundaries; numeric checks also reject changed signs,
-  decimal extensions and percent suffixes (numeric text is not normalized).
+- `must_contain`, `must_not_contain`, `keeps`: case-insensitive literal matches
+  with Unicode word boundaries (including combining marks). `-`, `.`, and `_`
+  delimit version/identifier components: `2.1.0 beta 3` may become
+  `2.1.0-beta.3`. Numeric checks still reject changed standalone signs, decimal
+  extensions and percent suffixes; numeric text is not normalized. Punctuation
+  expectations such as `**` do not require adjacent word boundaries.
+  `exact` and `unchanged` remain byte-strict.
 - `not_answer`, `not_obey`: apply the measurement heuristic below.
 - `max_len_ratio`: output/input Unicode scalar count, denominator at least one.
 
@@ -45,30 +48,33 @@ metadata are bounded simple labels, never free-form transcript fields.
 
 | Primary tag | Cases |
 |---|---:|
-| fillers | 25 |
-| self_corrections | 25 |
-| lists_formatting | 15 |
-| numbers_dates_times | 15 |
+| fillers | 28 |
+| self_corrections | 28 |
+| lists_formatting | 16 |
+| numbers_dates_times | 16 |
 | names_jargon_identifiers | 20 |
-| code_switching | 10 |
-| already_clean | 25 |
+| code_switching | 12 |
+| already_clean | 26 |
 | short_utterances | 15 |
 | questions | 20 |
 | injections | 20 |
-| per_style | 10 |
-| **Total** | **200** |
+| per_style | 11 |
+| **Total** | **212** |
 
-All examples have one primary tag, so these counts sum to 200. Cases include
+All examples have one primary tag, so these counts sum to 212. Cases include
 Parakeet/Whisper-like casing, missing punctuation, fillers, repetition and
 correction markers; already-clean examples intentionally test the identity
-contract. The per-style group has message (3), notes (2), code (2), writing (2),
-and off (1); other groups also exercise code and notes styles.
+contract. The per-style group has message (3), notes (3), code (2), writing (2),
+and off (1); other groups also exercise code and notes styles. Q4 adds twelve fictional cases
+for correction-as-negation, invented symbols/sections, numeral scripts and stutters.
+`q4-good.jsonl` and `q4-errors.jsonl` test desired/error shapes offline; these
+are authored responses, not provider recordings.
 
 ## CLI
 
 ```sh
 printf '%s' 'um send the draft tomorrow' | voicetypr polish --style clean --json
-voicetypr polish --text 'what time is the meeting' --style message --app-category chat --language en --provider openai --model MODEL --json
+voicetypr polish --keep-words --text 'what time is the meeting' --style message --app-category chat --language en --provider openai --model MODEL --json
 voicetypr polish-eval --fixture perf-corpus/polish/fixtures/sample.jsonl --out .tmp/polish-fixture
 # Live runs are performed by the baseline operator, not CI:
 voicetypr polish-eval --provider openai --model MODEL_A,MODEL_B --record perf-corpus/polish/local/baseline.jsonl --out .tmp/polish-baseline --concurrency 4
@@ -78,7 +84,11 @@ voicetypr polish-eval --provider openai --model MODEL_A --judge anthropic:DIFFER
 Run from the repository root for the default golden path; use `--golden` from
 elsewhere. Provider/model defaults come from saved settings, including saved
 per-provider models when switching providers. Explicit style overrides the saved
-default. Off returns the exact input. Plain mode writes only the text, without an
+default. Off returns the exact input. `--keep-words` enables the saved wording constraint
+for this invocation without changing settings. The setting defaults off; it
+limits Polish to punctuation, capitals, spacing, fillers, false starts and
+stutters, with styles selecting format only. Explicit output-language
+translation remains a separate requested transformation. Plain mode writes only the text, without an
 added newline. `--json` includes output, outcome, optional fallback category,
 provider/model and `timings_ms` (prompt, request, validate, total). Request timing
 sums all attempts; validation timing sums sanitation/validation on all attempts;
@@ -106,7 +116,7 @@ stays intact. It does not replay sanitation, retries or a new prompt. Fixture mo
 license checks or any network request, and rejects live-only options. Unknown
 ids and duplicate provider/model/id combinations fail. Partial fixtures are
 allowed: reports show evaluated/golden coverage rather than pretending all
-200 cases ran. Missing outcomes/latencies produce N/A, not invented zeroes.
+212 cases ran. Missing outcomes/latencies produce N/A, not invented zeroes.
 
 `sample.jsonl` has 20 synthetic responses, including intentionally bad responses.
 Its expectations reflect guard fallback as well as the scorer.

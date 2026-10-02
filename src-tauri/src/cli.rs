@@ -946,6 +946,7 @@ mod tests {
             "polish",
             "--text",
             "private dictation",
+            "--keep-words",
             "--style",
             "message",
             "--app-category",
@@ -956,7 +957,8 @@ mod tests {
         ])
         .unwrap();
         assert!(!format!("{cli:?}").contains("private dictation"));
-        assert!(cli.command.unwrap().wants_json());
+        assert!(cli.command.as_ref().unwrap().wants_json());
+        assert!(matches!(cli.command, Some(CliCommand::Polish(args)) if args.keep_words));
         let cli = Cli::try_parse_from([
             "voicetypr",
             "polish-eval",

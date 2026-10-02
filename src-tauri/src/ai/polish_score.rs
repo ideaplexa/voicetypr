@@ -97,28 +97,57 @@ fn filler_words(text: &str) -> BTreeSet<String> {
         .filter(|w| ["um", "uh", "erm", "hmm"].contains(&w.as_str()))
         .collect()
 }
+// Unicode word characters include combining marks and join controls. Underscore
+// is deliberately excluded: _, - and . delimit version/identifier components.
+fn word_char(c: char) -> bool {
+    static WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^[\p{L}\p{M}\p{N}\p{Pc}\x{200C}\x{200D}]$").unwrap()
+    });
+    c != '_' && WORD.is_match(c.encode_utf8(&mut [0; 4]))
+}
+
 fn keeps_token(output: &str, token: &str) -> bool {
-    output.match_indices(token).any(|(offset, _)| {
-        let before = output[..offset].chars().next_back();
-        let suffix = &output[offset + token.len()..];
+    if token.is_empty() {
+        return true;
+    }
+    let pattern = regex::RegexBuilder::new(&regex::escape(token))
+        .case_insensitive(true)
+        .build()
+        .expect("escaped literal");
+    let found = pattern.find_iter(output).any(|matched| {
+        let prefix = &output[..matched.start()];
+        let suffix = &output[matched.end()..];
+        let before = prefix.chars().next_back();
         let after = suffix.chars().next();
         let numeric = token.chars().any(|c| c.is_ascii_digit())
             && token
                 .chars()
                 .all(|c| c.is_ascii_digit() || ".,-+:%/".contains(c));
-        let token_char = |c: char| c.is_alphanumeric() || c == '_';
-        let numeric_extension = |c: char| numeric && ".,:%/+-".contains(c);
-        !before.is_some_and(|c| token_char(c) || numeric_extension(c))
-            && !after.is_some_and(|c| {
-                token_char(c)
-                    || numeric_extension(c)
-                        && (c == '%'
-                            || suffix
-                                .chars()
-                                .nth(1)
-                                .is_some_and(|next| next.is_ascii_digit()))
-            })
-    })
+        let previous = prefix.chars().rev().nth(1);
+        // Preserve standalone numeric signs/decimals/percentages while allowing
+        // components such as beta.3 and beta-3 in version identifiers.
+        let changed_prefix = numeric
+            && before.is_some_and(|c| match c {
+                '-' | '+' => !previous.is_some_and(word_char),
+                '.' | ',' => previous.is_some_and(|p| p.is_ascii_digit()),
+                '%' => true,
+                _ => false,
+            });
+        let changed_suffix = numeric
+            && after.is_some_and(|c| {
+                c == '%'
+                    || ".,%+-".contains(c)
+                        && suffix
+                            .chars()
+                            .nth(1)
+                            .is_some_and(|next| next.is_ascii_digit())
+            });
+        let inside_word = token.chars().next().is_some_and(word_char)
+            && before.is_some_and(word_char)
+            || token.chars().next_back().is_some_and(word_char) && after.is_some_and(word_char);
+        !(inside_word || changed_prefix || changed_suffix)
+    });
+    found
 }
 
 fn equivalent_form(text: &str) -> String {
@@ -149,10 +178,10 @@ pub fn score(case: &GoldenCase, output: &str) -> Verdict {
     if e.unchanged && output != case.input {
         failed.push("unchanged");
     }
-    if e.must_contain.iter().any(|s| !output.contains(s)) {
+    if e.must_contain.iter().any(|s| !keeps_token(output, s)) {
         failed.push("must_contain");
     }
-    if e.must_not_contain.iter().any(|s| output.contains(s)) {
+    if e.must_not_contain.iter().any(|s| keeps_token(output, s)) {
         failed.push("must_not_contain");
     }
     if e.keeps.iter().any(|s| !keeps_token(output, s)) {
@@ -211,6 +240,38 @@ pub fn score(case: &GoldenCase, output: &str) -> Verdict {
 mod tests {
     use super::*;
     #[test]
+    fn containment_is_unicode_case_insensitive_and_boundary_aware() {
+        for (output, token) in [
+            ("Merci", "merci"),
+            ("Vamos", "vamos"),
+            ("Step 1: Download", "download"),
+            ("16:9", "16"),
+            ("16:9", "9"),
+            ("ÉLAN", "élan"),
+            ("2.1.0-beta.3", "2.1.0"),
+            ("2.1.0-beta.3", "beta"),
+            ("2.1.0-beta.3", "3"),
+            ("build_request_id", "request_id"),
+        ] {
+            assert!(keeps_token(output, token));
+        }
+        for (output, token) in [
+            ("merciful", "merci"),
+            ("prémerci", "merci"),
+            ("a\u{301}", "a"),
+            ("শব্দ", "শ"),
+            ("下載完成", "下載"),
+            ("x42", "42"),
+        ] {
+            assert!(!keeps_token(output, token));
+        }
+        let case: GoldenCase = serde_json::from_str(r#"{"id":"boundaries","input":"ready","style":"clean","tags":[],"expect":{"must_contain":["merci"],"must_not_contain":["um"],"keeps":["vamos"]}}"#).unwrap();
+        assert!(score(&case, "Merci Vamos drum").passed);
+        assert!(!score(&case, "Merci Vamos UM").passed);
+        assert!(!score(&case, "merciful Vamos").passed);
+    }
+
+    #[test]
     fn equivalent_only_relaxes_first_letter_and_one_terminal_mark() {
         let case: GoldenCase = serde_json::from_str(r#"{"id":"short","input":"thanks","style":"clean","tags":[],"expect":{"equivalent":"Thanks."}}"#).unwrap();
         for output in ["Thanks.", "thanks", "Thanks!", "thanks?"] {
@@ -224,7 +285,7 @@ mod tests {
     fn keeps_requires_whole_identifiers_and_numbers() {
         assert!(keeps_token("Ask Zorvi about request_id 42.", "Zorvi"));
         assert!(keeps_token("Ask Zorvi about request_id 42.", "request_id"));
-        assert!(!keeps_token("request_id_old", "request_id"));
+        assert!(keeps_token("request_id_old", "request_id"));
         assert!(!keeps_token("Zorvian", "Zorvi"));
         assert!(!keeps_token("142", "42"));
         assert!(!keeps_token("17.5", "17"));

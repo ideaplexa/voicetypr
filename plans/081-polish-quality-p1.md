@@ -191,3 +191,69 @@ Final local gates: `cargo test` passed (1668 unit tests + 2 CLI integration test
 25 ignored), `cargo clippy --workspace --all-targets -- -D warnings` passed, and
 `cargo fmt --check` passed. The sidecar build script was restored byte-for-byte.
 The final rebuilt CLI replay still reports 190/200 passed and 0/40 answered.
+
+## Q4 — prompt fixes, Keep my words, Show original and scorer accuracy (2026-10-03)
+
+Implemented locally, uncommitted; no live providers called. The base prompt now
+explicitly treats “X no Y” as replacement, forbids invented content/symbols,
+preserves scripts and digits, and removes stutters. Notes instructions were
+narrowly aligned with that rule: plain dictated-item bullets, dictated headings
+only, no added sections or summaries. Other style transforms are unchanged.
+Prompt efficacy remains unmeasured until Claude's live Opus 5.5 run.
+
+`keeps`, `must_contain` and `must_not_contain` now share case-insensitive literal
+matching with Unicode word boundaries, including combining marks. Hyphens,
+periods and underscores delimit version/identifier components. Numeric sign,
+decimal-extension and percentage safeguards remain; ratio components such as
+`16:9` match independently. `exact`, `unchanged` and `equivalent` are unchanged.
+
+Offline replay uses the same Q3 production guard on both sides of this comparison:
+
+| Fixture | Old scorer | Q4 scorer | Keeps, old → Q4 | Answered/obeyed | Fallback raw |
+|---|---:|---:|---:|---:|---:|
+| Sonnet | 189/200 (94.5%) | 193/200 (96.5%) | 51/56 → 54/56 | 0/40 | 2/200 |
+| Fable | 186/200 (93.0%) | 189/200 (94.5%) | 54/56 → 56/56 | 0/40 | 12/200 |
+
+No case verdict regressed. Sonnet gains: `code_switching-03`,
+`code_switching-08`, `lists_formatting-09`, `numbers_dates_times-08`.
+Fable gains: `code_switching-03`, `code_switching-08`, `lists_formatting-13`.
+The earlier Fable live baseline (92.5%) differs from the old-scorer replay
+(93.0%) because this comparison already applies Q3's guard. Recorded latency is
+unchanged. Both local recordings cover only the original 200 of the now 212
+cases. Fixture mode cannot replay prompt changes or the pre-call skip check.
+
+Twelve fictional cases were appended: three corrections, two invented
+currency/unit additions, two notes/list additions, two numeral-script changes,
+and three stutters. Authored `q4-good.jsonl` / `q4-errors.jsonl` fixtures require
+all twelve desired outputs to pass and all twelve error shapes to fail. They
+are scorer tests, not provider evidence.
+
+`polish_keep_words` defaults false in Rust and TypeScript. The SettingsContext
+row below the Polish master switch persists it using the existing settings kit.
+Desktop and CLI use the same constrained prompt builder after per-app preset
+selection: formatting only, with no rewording/reordering/summarising/restyling.
+The setting suppresses Polish spelling-context substitutions. Explicitly selected
+output-language translation remains a separate requested transformation.
+`voicetypr polish --keep-words` enables the constraint for that invocation without
+changing saved settings. Skip checks and output guards still apply. Tray and
+island UI are deferred to plan 080.
+
+`copy_last_original` reads the newest history entry, prefers
+`writing.original_text`, falls back to `text`, and uses the existing
+`copy_text_to_clipboard` path. It returns only `copied` / `nothing`; clipboard
+errors are content-free and no text is logged. An empty newest entry returns
+`nothing` without copying an older entry.
+
+Tests cover Unicode/casing/version boundaries, numeric safeguards, all twelve
+synthetic error shapes through the real offline CLI, settings default and serde
+compatibility, CLI flag parsing, constrained formats, translation coexistence,
+zero-wait with the constraint enabled, the switch callback, original/final
+selection, no-history/empty-latest behavior, and sanitized clipboard failures.
+Native clipboard, rendered settings UI and live prompt behavior remain
+**NEEDS-SMOKE**. The native sidecar was not rebuilt for these checks; the existing
+Cargo build cache reports its earlier sidecar-build skip warning.
+
+Final local gates passed: `cargo test` (1,682 unit tests, 3 CLI integration tests,
+25 ignored), `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo fmt --check`, `pnpm typecheck`, `pnpm lint`, `pnpm exec vitest run`
+(85 files, 950 tests), and `pnpm build`. No commit, push or live call was made.

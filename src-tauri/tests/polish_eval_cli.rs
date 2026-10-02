@@ -73,3 +73,30 @@ fn recorded_baseline_cli_applies_guard_before_scoring() {
         assert_eq!(row["fallback_reason"], "meta_reply");
     }
 }
+
+#[test]
+fn q4_synthetic_fixtures_accept_desired_outputs_and_reject_observed_error_shapes() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    for (fixture, expected) in [("q4-good", true), ("q4-errors", false)] {
+        let out = tempfile::tempdir().unwrap();
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_voicetypr"))
+            .current_dir(repo)
+            .args(["polish-eval", "--fixture"])
+            .arg(format!("perf-corpus/polish/fixtures/{fixture}.jsonl"))
+            .arg("--out")
+            .arg(out.path())
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        let cards: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(out.path().join("scorecard.json")).unwrap())
+                .unwrap();
+        let cases = cards[0]["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 12);
+        for case in cases {
+            assert_eq!(case["passed"], expected, "{}", case["id"]);
+        }
+    }
+}

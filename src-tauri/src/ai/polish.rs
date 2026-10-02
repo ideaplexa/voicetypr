@@ -37,13 +37,15 @@ pub(crate) fn assemble_prompt(
     transcript_language: Option<&str>,
     context: Option<&str>,
     app_category_hint: Option<&str>,
+    keep_words: bool,
 ) -> String {
-    super::prompts::build_enhancement_prompt_for_transcript_language(
+    super::prompts::build_prompt_with_wording(
         context,
         options,
         output_language,
         transcript_language,
         app_category_hint,
+        keep_words,
     )
 }
 
@@ -103,6 +105,7 @@ pub(crate) async fn measure(
     language: Option<&str>,
     context: Option<&str>,
     category_hint: Option<&str>,
+    keep_words: bool,
 ) -> PolishOutput {
     let start = Instant::now();
     let mut timings = PolishTimings::default();
@@ -112,7 +115,14 @@ pub(crate) async fn measure(
         (text.to_string(), PolishOutcome::Skipped, None)
     } else {
         let prompt_start = Instant::now();
-        let prompt = assemble_prompt(options, language, language, context, category_hint);
+        let prompt = assemble_prompt(
+            options,
+            language,
+            language,
+            context,
+            category_hint,
+            keep_words,
+        );
         timings.prompt = elapsed_ms(prompt_start);
         match execute_prompt(runtime, text, prompt, &mut timings).await {
             Ok(result) => (result.output_text, PolishOutcome::Polished, None),
@@ -184,6 +194,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .await;
         assert!(off.output == text, "off changed the input");
@@ -198,6 +209,7 @@ mod tests {
             Some("en"),
             None,
             None,
+            false,
         )
         .await;
         assert!(
@@ -222,21 +234,24 @@ mod tests {
     }
     #[tokio::test]
     async fn zero_wait_never_calls_provider() {
-        let result = measure(
-            &offline_runtime(),
-            "Ready.",
-            &EnhancementOptions {
-                preset: super::super::prompts::EnhancementPreset::CleanDictation,
-            },
-            Some("en"),
-            None,
-            None,
-        )
-        .await;
-        assert_eq!(result.outcome, PolishOutcome::Skipped);
-        assert_eq!(result.timings_ms.request, 0.0);
-        assert_eq!(result.timings_ms.prompt, 0.0);
-        assert!(result.output == "Ready.");
+        for keep_words in [false, true] {
+            let result = measure(
+                &offline_runtime(),
+                "Ready.",
+                &EnhancementOptions {
+                    preset: super::super::prompts::EnhancementPreset::CleanDictation,
+                },
+                Some("en"),
+                None,
+                None,
+                keep_words,
+            )
+            .await;
+            assert_eq!(result.outcome, PolishOutcome::Skipped);
+            assert_eq!(result.timings_ms.request, 0.0);
+            assert_eq!(result.timings_ms.prompt, 0.0);
+            assert!(result.output == "Ready.");
+        }
     }
     #[test]
     fn prompt_assembly_delegates_without_changing_language_context_or_style() {
@@ -249,7 +264,8 @@ mod tests {
                 Some("fr"),
                 Some("en"),
                 Some("Zorvi"),
-                Some("notes hint")
+                Some("notes hint"),
+                false
             ) == super::super::prompts::build_enhancement_prompt_for_transcript_language(
                 Some("Zorvi"),
                 &options,

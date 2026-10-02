@@ -80,6 +80,9 @@ pub struct PolishArgs {
     pub language: Option<String>,
     #[arg(long)]
     pub json: bool,
+    /// Keep wording; fix only punctuation, capitals, spacing, fillers and stutters.
+    #[arg(long)]
+    pub keep_words: bool,
 }
 impl std::fmt::Debug for PolishArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -186,6 +189,7 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
             args.language.as_deref(),
             context.as_deref(),
             hint.as_deref(),
+            super::keep_words::enabled(store.get("polish_keep_words").as_ref(), args.keep_words),
         )
         .await
     };

@@ -1483,6 +1483,7 @@ pub async fn polish_text_typed(
         transcript_language,
         context,
         app_category_hint,
+        crate::ai::keep_words::read(app),
     );
     let runtime = prepare_polish_runtime(app, &provider, &model)?;
     let mut timings = crate::ai::polish::PolishTimings::default();

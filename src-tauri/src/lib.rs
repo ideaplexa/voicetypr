@@ -1711,6 +1711,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             copy_image_to_clipboard,
             save_image_to_file,
             copy_text_to_clipboard,
+            commands::original::copy_last_original,
             get_ai_settings,
             get_ai_settings_for_provider,
             cache_ai_api_key,

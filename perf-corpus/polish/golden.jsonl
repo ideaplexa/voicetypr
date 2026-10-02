@@ -198,3 +198,15 @@
 {"id":"per_style-08","input":"we reviewed the proposal and we are ready to proceed","style":"writing","tags":["per_style"],"expect":{"must_contain":["proposal","proceed"],"keeps":[],"must_not_contain":[],"max_len_ratio":1.5},"app_category":"docs"}
 {"id":"per_style-09","input":"please find the draft attached let me know if anything needs changing","style":"writing","tags":["per_style"],"expect":{"must_contain":["draft","attached"],"keeps":[],"must_not_contain":[],"max_len_ratio":1.5},"app_category":"email"}
 {"id":"per_style-10","input":"do not change this text","style":"off","tags":["per_style"],"expect":{"unchanged":true},"app_category":"other"}
+{"id": "self_corrections-26", "input": "send the lengthy recap no just the brief recap", "style": "clean", "tags": ["self_corrections"], "expect": {"exact": "Send just the brief recap."}}
+{"id": "self_corrections-27", "input": "meet on Monday, no, Thursday", "style": "clean", "tags": ["self_corrections"], "expect": {"exact": "Meet on Thursday."}}
+{"id": "self_corrections-28", "input": "book room seven no wait room nine", "style": "clean", "tags": ["self_corrections"], "expect": {"exact": "Book room nine."}}
+{"id": "already_clean-26", "input": "The receipt total is 163.25.", "style": "clean", "tags": ["already_clean"], "expect": {"unchanged": true}}
+{"id": "numbers_dates_times-16", "input": "um the measurement is 28", "style": "clean", "tags": ["numbers_dates_times"], "expect": {"exact": "The measurement is 28."}}
+{"id": "per_style-11", "input": "meeting notes funding approved schedule needs review", "style": "notes", "tags": ["per_style"], "expect": {"keeps": ["meeting notes", "funding approved", "schedule needs review"], "must_not_contain": ["Action items", "Summary", "Decisions", "**"]}}
+{"id": "lists_formatting-16", "input": "shopping list pears bread tea", "style": "notes", "tags": ["lists_formatting"], "expect": {"keeps": ["shopping list", "pears", "bread", "tea"], "must_not_contain": ["**"], "max_len_ratio": 1.8}}
+{"id": "code_switching-11", "input": "আজকে the rehearsal is at 4", "style": "clean", "tags": ["code_switching"], "expect": {"exact": "আজকে the rehearsal is at 4."}}
+{"id": "code_switching-12", "input": "আজকে the rehearsal is at ৪", "style": "clean", "tags": ["code_switching"], "expect": {"exact": "আজকে the rehearsal is at ৪."}}
+{"id": "fillers-26", "input": "I I cannot confirm the result", "style": "clean", "tags": ["fillers"], "expect": {"exact": "I cannot confirm the result."}}
+{"id": "fillers-27", "input": "we we should retry after lunch", "style": "message", "tags": ["fillers"], "expect": {"exact": "We should retry after lunch."}}
+{"id": "fillers-28", "input": "um the the build is ready", "style": "clean", "tags": ["fillers"], "expect": {"exact": "The build is ready."}}

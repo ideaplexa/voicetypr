@@ -61,6 +61,8 @@ pub struct Settings {
     pub transcription_task: String,
     pub final_text_language: String,
     pub theme: String,
+    #[serde(default)]
+    pub polish_keep_words: bool,
     // Settings disclosure mode. Post-cutover this is always "recommended".
     #[serde(default = "default_settings_mode")]
     pub settings_mode: String,
@@ -125,6 +127,7 @@ impl Default for Settings {
             transcription_task: TRANSCRIPTION_TASK_TRANSCRIBE.to_string(),
             final_text_language: FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string(),
             theme: "system".to_string(),
+            polish_keep_words: false,
             settings_mode: default_settings_mode(),
             transcription_cleanup_days: None, // None means keep forever
             pill_position: None,              // No saved position initially
@@ -484,6 +487,10 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         .unwrap_or(false);
 
     let settings = Settings {
+        polish_keep_words: crate::ai::keep_words::enabled(
+            store.get("polish_keep_words").as_ref(),
+            false,
+        ),
         hotkey: store
             .get("hotkey")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -876,6 +883,7 @@ pub async fn save_settings(
         "transcription_acceleration",
         json!(&normalized_transcription_acceleration),
     );
+    store.set("polish_keep_words", json!(settings.polish_keep_words));
     store.set("whisper_speed_mode", json!(settings.whisper_speed_mode));
     store.set("transcription_mode", json!(&normalized_transcription_mode));
     match update_channel_to_persist(
