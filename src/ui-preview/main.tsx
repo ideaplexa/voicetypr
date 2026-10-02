@@ -13,8 +13,10 @@ const options: PreviewOptions = {
   theme: query.get("theme") === "dark" ? "dark" : "light",
   platform: query.get("platform") === "windows" ? "windows" : "macos",
   empty: query.get("empty") === "1",
+  sidebar: query.get("sidebar") === "rail" ? "rail" : "expanded",
   onboarding: onboardingPhase,
 };
+document.cookie = `sidebar_state=${options.sidebar !== "rail"}; path=/`;
 installPreviewPlatform(options.platform);
 const fixtures = createFixtures(options);
 const unknown = new Set<string>();

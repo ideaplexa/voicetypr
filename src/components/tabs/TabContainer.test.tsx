@@ -63,6 +63,7 @@ describe("TabContainer destinations", () => {
   it.each<[ScreenId, string]>([
     ["home", "Home screen"],
     ["history", "History screen"],
+    ["insights", "Insights"],
     ["transcription", "Transcription screen"],
     ["polish", "Polish screen"],
     ["dictionary", "Dictionary screen"],

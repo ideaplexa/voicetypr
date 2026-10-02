@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   AudioLines,
   BadgeCheck,
+  ChartNoAxesColumnIncreasing,
   BookA,
   History,
   House,
@@ -14,6 +15,7 @@ import {
 export type MainScreenId =
   | "home"
   | "history"
+  | "insights"
   | "transcription"
   | "polish"
   | "dictionary"
@@ -34,7 +36,14 @@ export type LegacyScreenId =
   | "advanced"
   | "report-problem";
 export type ScreenId = MainScreenId | LegacyScreenId;
-export type SettingsPane = "general" | "shortcuts" | "privacy" | "storage" | "network" | "agent" | "advanced";
+export type SettingsPane =
+  | "general"
+  | "shortcuts"
+  | "privacy"
+  | "storage"
+  | "network"
+  | "agent"
+  | "advanced";
 
 export interface ScreenDefinition {
   id: MainScreenId;
@@ -51,9 +60,15 @@ export const mainNavScreens: ScreenDefinition[] = [
     icon: History,
     description: "Past transcriptions and file transcription.",
   },
+  {
+    id: "insights",
+    label: "Insights",
+    icon: ChartNoAxesColumnIncreasing,
+    description: "Your dictation activity and progress.",
+  },
 ];
 
-export const setupNavScreens: ScreenDefinition[] = [
+export const tuningNavScreens: ScreenDefinition[] = [
   {
     id: "transcription",
     label: "Transcription",

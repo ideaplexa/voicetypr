@@ -41,7 +41,7 @@ async function waitForServer() {
 }
 
 const macScreens = [
-  ["Home", "home"], ["History", "history"], ["Transcription", "transcription"],
+  ["Home", "home"], ["History", "history"], ["Insights", "insights"], ["Transcription", "transcription"],
   ["Polish", "polish"], ["Dictionary", "dictionary"], ["Recording", "recording"], ["Settings", "settings-general"],
   ["Help & feedback", "help"],
 ];
@@ -94,61 +94,75 @@ try {
   }
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
-      const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "recording", "settings-general", "help"].includes(id));
-      const selectedPanes = panes;
-      const hasShot = screens.some(([, id]) => shouldCapture(platform, theme, id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCapture(platform, theme, shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCapture(platform, theme, paneId)))) || shouldCapture(platform, theme, "license");
-      if (!hasShot) continue;
-      const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
-      page.on("pageerror", (error) => errors.push(`${platform}/${theme}: ${error.stack ?? error}`));
-      page.on("console", (message) => {
-        const line = message.text();
-        if (line.startsWith("[ui-preview] unknown command:")) unknown.add(line);
-      });
-      await page.goto(`${baseUrl}/ui-preview.html?platform=${platform}&theme=${theme}`, { waitUntil: "networkidle" });
-      const capture = async (name) => {
-        if (!shouldCapture(platform, theme, name)) return;
-        await page.screenshot({ path: path.join(output, `${platform}-${theme}-${name}.png`), animations: "disabled" });
-        shots.push(`${platform}-${theme}-${name}.png`);
-      };
-      for (const [label, id] of screens) {
-        if (!shouldCapture(platform, theme, id) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCapture(platform, theme, shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCapture(platform, theme, paneId)))) continue;
-        await page.getByRole("navigation", { name: label === "Settings" || label === "Help & feedback" ? "Support navigation" : "Main navigation" }).getByRole("button", { name: label, exact: true }).click();
-        await page.waitForTimeout(180);
-        await capture(id);
-        if (id === "history") {
-          await capture("history-detail");
-          if (shouldCapture(platform, theme, "history-empty")) {
-            const emptyPage = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
-            emptyPage.on("pageerror", (error) => errors.push(`${platform}/${theme}/empty: ${error.stack ?? error}`));
-            await emptyPage.goto(`${baseUrl}/ui-preview.html?platform=${platform}&theme=${theme}&empty=1`, { waitUntil: "networkidle" });
-            await emptyPage.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "History", exact: true }).click();
-            await emptyPage.waitForTimeout(180);
-            await emptyPage.screenshot({ path: path.join(output, `${platform}-${theme}-history-empty.png`), animations: "disabled" });
-            shots.push(`${platform}-${theme}-history-empty.png`);
-            await emptyPage.close();
+      for (const sidebar of ["expanded", "rail"]) {
+        const screenShotName = (name) => sidebar === "rail" ? `${name}-rail` : name;
+        const shouldCaptureScreen = (name) => shouldCapture(platform, theme, screenShotName(name));
+        const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "insights", "recording", "settings-general", "help"].includes(id));
+        const selectedPanes = panes;
+        const hasShot = screens.some(([, id]) => shouldCaptureScreen(id) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) || shouldCaptureScreen("license");
+        if (!hasShot) continue;
+        const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
+        page.on("pageerror", (error) => errors.push(`${platform}/${theme}: ${error.stack ?? error}`));
+        page.on("console", (message) => {
+          const line = message.text();
+          if (line.startsWith("[ui-preview] unknown command:")) unknown.add(line);
+        });
+        await page.goto(`${baseUrl}/ui-preview.html?platform=${platform}&theme=${theme}&sidebar=${sidebar}`, { waitUntil: "networkidle" });
+        const capture = async (name) => {
+          if (!shouldCaptureScreen(name)) return;
+          await page.screenshot({ path: path.join(output, `${platform}-${theme}-${screenShotName(name)}.png`), animations: "disabled" });
+          shots.push(`${platform}-${theme}-${screenShotName(name)}.png`);
+        };
+        for (const [label, id] of screens) {
+          if (!shouldCaptureScreen(id) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) continue;
+          await page.getByRole("navigation", { name: label === "Settings" || label === "Help & feedback" ? "Support navigation" : "Main navigation" }).getByRole("button", { name: label, exact: true }).click();
+          await page.waitForTimeout(180);
+          await page.evaluate(() => document.fonts.ready);
+          await capture(id);
+          if (sidebar === "rail" && ["home", "history", "insights"].includes(id)) {
+            const tooltipName = `${id}-tooltip`;
+            if (shouldCaptureScreen(tooltipName)) {
+              await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "History", exact: true }).hover();
+              await page.getByRole("tooltip").waitFor();
+              await capture(tooltipName);
+              await page.mouse.move(500, 500);
+            }
+          }
+          if (id === "history") {
+            await capture("history-detail");
+            if (shouldCaptureScreen("history-empty")) {
+              const emptyPage = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
+              emptyPage.on("pageerror", (error) => errors.push(`${platform}/${theme}/empty: ${error.stack ?? error}`));
+              await emptyPage.goto(`${baseUrl}/ui-preview.html?platform=${platform}&theme=${theme}&empty=1&sidebar=${sidebar}`, { waitUntil: "networkidle" });
+              await emptyPage.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "History", exact: true }).click();
+              await emptyPage.waitForTimeout(180);
+              await emptyPage.screenshot({ path: path.join(output, `${platform}-${theme}-${screenShotName("history-empty")}.png`), animations: "disabled" });
+              shots.push(`${platform}-${theme}-${screenShotName("history-empty")}.png`);
+              await emptyPage.close();
+            }
+          }
+          if (id === "history" && shouldCaptureScreen("history-transcribe-file")) {
+            await page.getByRole("button", { name: "Transcribe a file…" }).click();
+            await page.getByRole("dialog", { name: "Transcribe a file…" }).waitFor();
+            await capture("history-transcribe-file");
+            await page.keyboard.press("Escape");
+          }
+          if (id === "settings-general") {
+            for (const [paneLabel, paneId] of selectedPanes) {
+              if (!shouldCaptureScreen(paneId)) continue;
+              await page.getByRole("navigation", { name: "Settings panes" }).getByRole("button", { name: paneLabel, exact: true }).click();
+              await page.waitForTimeout(180);
+              await capture(paneId);
+            }
           }
         }
-        if (id === "history" && shouldCapture(platform, theme, "history-transcribe-file")) {
-          await page.getByRole("button", { name: "Transcribe a file…" }).click();
-          await page.getByRole("dialog", { name: "Transcribe a file…" }).waitFor();
-          await capture("history-transcribe-file");
-          await page.keyboard.press("Escape");
+        if (shouldCaptureScreen("license")) {
+          await page.getByRole("button", { name: /Pro\. Open License/ }).click();
+          await page.waitForTimeout(180);
+          await capture("license");
         }
-        if (id === "settings-general") {
-          for (const [paneLabel, paneId] of selectedPanes) {
-            if (!shouldCapture(platform, theme, paneId)) continue;
-            await page.getByRole("navigation", { name: "Settings panes" }).getByRole("button", { name: paneLabel, exact: true }).click();
-            await page.waitForTimeout(180);
-            await capture(paneId);
-          }
-        }
+        await page.close();
       }
-      if (shouldCapture(platform, theme, "license")) {
-        await page.getByRole("button", { name: /Pro\. Open License/ }).click();
-        await page.waitForTimeout(180);
-        await capture("license");
-      }
-      await page.close();
     }
   }
 } catch (error) {

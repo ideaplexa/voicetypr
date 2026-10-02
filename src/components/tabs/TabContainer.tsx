@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { InsightsTab } from "@/components/tabs/InsightsTab";
 import { AccountTab } from "./AccountTab";
 import { EnhancementsTab } from "./EnhancementsTab";
 import { DictionarySection } from "@/components/sections/DictionarySection";
@@ -57,6 +58,9 @@ export function TabContainer({
           onSourceFilterChange={sourceFilterProps.onSourceFilterChange}
         />
       );
+      break;
+    case "insights":
+      content = <InsightsTab />;
       break;
     case "transcription":
       content = <ModelsTab {...sourceFilterProps} />;

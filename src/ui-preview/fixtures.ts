@@ -12,6 +12,7 @@ export type PreviewOptions = {
   theme: "light" | "dark";
   platform: "macos" | "windows";
   empty: boolean;
+  sidebar?: "expanded" | "rail";
   onboarding?: 1 | 2 | 3;
 };
 
