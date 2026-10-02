@@ -166,16 +166,20 @@ The scenario agents read the real code. These are real behaviours, not prototype
       - Fix it in `Sidebar.tsx` with `data-[active=true]:` overrides (`bg-card`, `text-foreground`, `font-semibold`). Never edit `ui/*`.
     - **Drop the "Setup" label.** A hairline divider separates Home / History / Insights from Transcription / Polish / Dictionary / Recording.
     - **Add Insights** after History.
-    - **Remove sidebar collapsing** (founder screenshot 2026-10-02).
-      - Problem: the `SidebarTrigger` in `AppShell.tsx` and ⌘B collapse the sidebar into a 48 px icon rail. The macOS traffic lights (about 12–80 px) then straddle the rail's border, and the toggle floats over the page title. On Windows the toggle sits top-right.
-      - Why removal is safe: the design has a fixed 212 px sidebar, and the window's minimum width is 1000 px, so collapsing buys nothing.
-      - Fix:
-        - `collapsible="none"` on the sidebar
-        - delete the trigger header
-        - the ⌘B handler goes with it (the provider stays, for layout)
-        - drop the `group-data-[collapsible=icon]` classes in `Sidebar.tsx`
-        - keep the drag region: a 36 px `data-tauri-drag-region` strip over the top of the window so it can still be moved
-      - Gate: `pnpm ui:preview` on mac shows the traffic lights fully inside the sidebar at 1000×680 and at full screen.
+    - **Collapsed sidebar = a 76 px icon rail** (founder chose option A, 2026-10-02; canvas: "Sidebar — collapsed A: icon rail", next to "Sidebar — expanded").
+      - Today's 48 px icon mode lets the macOS traffic lights (about 12–80 px) straddle the rail's border, and the toggle floats over the page title.
+      - Rail (macOS), top to bottom:
+        - 44 px for the traffic lights
+        - the brand mark
+        - 40×34 icon buttons for Home / History / Insights, a hairline, then Transcription / Polish / Dictionary / Recording, a spacer, Settings / Help, and the license badge
+        - active = white with a sage icon, the same as expanded
+        - each item shows a tooltip with its name on hover
+      - Windows: the same rail with no traffic-light inset.
+      - **The toggle never moves.** It sits in the 36 px title strip at x≈80 (right of the traffic lights) in both states. Its icon is `panel-left-close` when expanded and `panel-left-open` when collapsed. ⌘B / Ctrl+B still toggles, and the state persists.
+      - Implement by composition in `Sidebar.tsx` / `AppShell.tsx`: set `--sidebar-width-icon: 76px` on the provider and restyle the icon-mode items. Never edit `ui/*`.
+      - Keep the `data-tauri-drag-region` strip.
+      - Gate: `pnpm ui:preview` in both states on mac and Windows. The traffic lights sit fully inside the sidebar or rail, and nothing overlaps the page title.
+
 12. **Insights page** (`design/specs/insights.html`, `design/exports/insights.png`). This is the gamified "what you've done" page.
     - Header: Week / Month / All time, plus **Share**.
     - Hero:
