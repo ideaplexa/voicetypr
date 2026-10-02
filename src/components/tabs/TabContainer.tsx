@@ -175,7 +175,7 @@ function HistoryContent({
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
         <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden bg-card p-0 text-card-foreground sm:max-w-3xl">
           <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-14">
-            <DialogTitle>Transcribe a file…</DialogTitle>
+            <DialogTitle>Transcribe a file</DialogTitle>
             <DialogDescription>
               Choose an audio file to transcribe with your selected source.
             </DialogDescription>

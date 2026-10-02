@@ -40,7 +40,7 @@ export function InsightsHero({ overview }: { overview: ReturnType<typeof compute
         </p>
         <p
           data-pencil-name="Value"
-          className="font-mono text-[36px] leading-[normal] font-semibold tracking-[-1.2px]"
+          className="font-sans tabular-nums text-[36px] leading-[normal] font-semibold tracking-[-1.2px]"
         >
           {overview.words.toLocaleString()}
         </p>
@@ -66,7 +66,7 @@ export function InsightsHero({ overview }: { overview: ReturnType<typeof compute
             {name}
           </p>
           <p data-pencil-name="Value" className="flex items-baseline gap-1">
-            <strong className="font-mono text-[22px] leading-[normal] font-semibold tracking-[-0.6px]">
+            <strong className="font-sans tabular-nums text-[22px] leading-[normal] font-semibold tracking-[-0.6px]">
               {value}
             </strong>
             <span className="text-[12.5px] text-muted-foreground">{unit}</span>

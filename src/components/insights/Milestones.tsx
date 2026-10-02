@@ -77,7 +77,7 @@ export function Milestones({ stats }: { stats: UsageStats }) {
               </span>
               {!unlocked && (
                 <span data-pencil-name="Progress" className="font-mono text-[10.5px] text-text-3">
-                  {Math.min(badge.value, badge.target).toLocaleString()}/
+                  {badge.label === "30-day streak" ? "Best " : ""}{Math.min(badge.value, badge.target).toLocaleString()}/
                   {badge.target.toLocaleString()}
                 </span>
               )}

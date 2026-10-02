@@ -1,6 +1,8 @@
 import type { UsageApp } from "@/types/usage";
 
 export function WhereYouTalk({ apps, loading }: { apps: UsageApp[]; loading: boolean }) {
+  const topWords = Math.max(0, ...apps.map((app) => app.words));
+  const palette = ["#4B6787", "#705989", "#86603C", "#386E5A", "#884F61"];
   const total = apps.reduce((sum, app) => sum + app.words, 0);
   return (
     <section
@@ -30,12 +32,13 @@ export function WhereYouTalk({ apps, loading }: { apps: UsageApp[]; loading: boo
                   aria-hidden
                   className="flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-sage-bg text-[11px] font-semibold text-sage"
                   style={{
-                    background: `color-mix(in srgb, var(--sage) ${20 + i * 10}%, var(--card))`,
+                    background: palette[Array.from(app.name).reduce((hash, char) => hash + char.charCodeAt(0), 0) % palette.length],
+                    color: "#fff",
                   }}
                 >
                   {app.name.slice(0, 1).toUpperCase()}
                 </span>
-                <span className="w-[64px] shrink-0 truncate text-[12.5px]" title={app.name}>
+                <span className="w-[128px] shrink-0 truncate text-[12.5px]" title={app.name}>
                   {app.name}
                 </span>
                 <div
@@ -45,7 +48,7 @@ export function WhereYouTalk({ apps, loading }: { apps: UsageApp[]; loading: boo
                   <div
                     data-pencil-name="Bar"
                     className="h-full rounded bg-sage"
-                    style={{ width: `${(app.words / total) * 100}%`, opacity: i === 0 ? 1 : 0.45 }}
+                    style={{ width: `${(app.words / topWords) * 100}%`, opacity: i === 0 ? 1 : 0.45 }}
                   />
                 </div>
                 <span className="w-[30px] text-right font-mono text-[11.5px] text-muted-foreground">

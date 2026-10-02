@@ -1,15 +1,7 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { InfoButton, PageHeader, SettingsPage } from "@/components/settings/settings-ui";
+import { PageHeader, SettingsPage } from "@/components/settings/settings-ui";
 import { useLicense } from "@/contexts/LicenseContext";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { Crown } from "lucide-react";
+
 import { useState } from "react";
 import { ActivateLicenseCard } from "@/components/sections/ActivateLicenseCard";
 import { LicenseStatusCard } from "@/components/sections/LicenseStatusCard";
@@ -60,42 +52,9 @@ export function AccountSection({ embedded = false }: { embedded?: boolean } = {}
     <SettingsPage
       className={`${embedded ? "!p-0" : ""} gap-[18px] [&_button[data-slot=button]]:rounded-[10px] [&_input]:rounded-[10px]`}
     >
-      <PageHeader
-        className={embedded ? "[&>div:first-child]:hidden justify-end" : undefined}
-        title="License"
-        description="Trial status, license activation, and purchase access."
-        action={
-          <>
-            {status?.status === "licensed" ? (
-              <div className="flex items-center gap-2 rounded-lg bg-sage-bg px-3 py-1.5">
-                <Crown className="size-4 text-sage" />
-                <span className="text-sm font-medium text-sage">Pro Licensed</span>
-              </div>
-            ) : null}
-            <Dialog>
-              <DialogTrigger render={<InfoButton label="License guide" />} />
-              <DialogContent className="sm:max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>License guide</DialogTitle>
-                  <DialogDescription>
-                    Manage your trial and activate or remove a Pro license.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 text-sm leading-6 text-muted-foreground">
-                  <p>Trial shows the remaining trial state when no Pro license is active.</p>
-                  <p>
-                    License activation validates the key and stores only what the app needs to
-                    confirm status.
-                  </p>
-                  <p>
-                    Purchase opens the checkout flow when you need to upgrade from trial or free.
-                  </p>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </>
-        }
-      />
+      {!embedded && (
+        <PageHeader title="License" description="Trial status and lifetime Pro license." />
+      )}
 
       <LicenseStatusCard
         status={status}

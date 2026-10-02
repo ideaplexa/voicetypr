@@ -5,6 +5,7 @@ import { Button } from "@/components/settings/SettingsButton";
 import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
 import { updateService } from "@/services/updateService";
+import { AppBehaviorCard } from "@/components/sections/general/AppBehaviorCard";
 import { GeneralSettings } from "@/components/sections/GeneralSettings";
 import { ShortcutsSection } from "@/components/sections/ShortcutsSection";
 import { TelemetrySection } from "@/components/sections/TelemetrySection";
@@ -47,9 +48,9 @@ export const settingsPanes = [
 ] as const;
 
 const paneDescriptions: Record<SettingsPane, string> = {
-  general: "Appearance, startup and updates",
+  general: "Appearance and startup",
   shortcuts: "Extra shortcuts for app actions. Your dictation shortcut lives in Recording.",
-  privacy: `Everything you dictate stays on this ${isMacOS ? "Mac" : "PC"} unless you choose a cloud engine or AI provider.`,
+  privacy: `What stays on this ${isMacOS ? "Mac" : "PC"} and what's sent`,
   storage: "Where your history and recordings live, and how long they stay.",
   network: "Let your other computers use this Voicetypr to transcribe. Local network only.",
   agent: "Use Voicetypr from the terminal and from your AI agents.",
@@ -83,7 +84,7 @@ export function SettingsTab({
             return (
               <div key={entry.id}>
                 {index === 4 || index === 7 ? (
-                  <p className="px-2.5 pt-[14px] pb-1 text-[10.5px] leading-[13px] font-semibold uppercase tracking-[0.6px] text-text-3">
+                  <p className="px-2.5 pt-[14px] pb-1 text-[10.5px] leading-[13px] font-semibold uppercase tracking-[0.6px] text-muted-foreground">
                     {index === 4 ? "Advanced" : "Account"}
                   </p>
                 ) : null}
@@ -93,9 +94,10 @@ export function SettingsTab({
                   onClick={() => onPaneChange(entry.id)}
                   aria-current={pane === entry.id ? "page" : undefined}
                   className={cn(
-                    "flex w-full items-center gap-[9px] rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-[17px] font-medium text-muted-foreground hover:bg-muted",
-                    pane === entry.id &&
-                      "bg-card font-semibold text-foreground shadow-[0_1px_2px_#0000000f]",
+                    "flex w-full items-center gap-[9px] rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-[17px] font-medium text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    pane === entry.id
+                      ? "bg-card hover:bg-card font-semibold text-foreground shadow-[0_1px_2px_#0000000f] dark:bg-[#2A2A2D] dark:hover:bg-[#2A2A2D] dark:shadow-[inset_0_0_0_1px_#FFFFFF0F]"
+                      : "hover:bg-black/[0.04] dark:hover:bg-white/[0.05]",
                   )}
                 >
                   <Icon
@@ -113,10 +115,7 @@ export function SettingsTab({
         data-pencil-name="Content"
         className="flex min-w-0 flex-1 flex-col gap-[14px] pt-[18px] pr-[18px] pb-6 pl-7"
       >
-        <header
-          data-pencil-name="Head"
-          className="flex shrink-0 items-center justify-between gap-3"
-        >
+        <header data-pencil-name="Head" className="flex shrink-0 items-start justify-between gap-3">
           <div className="pt-1">
             <h2
               id="settings-pane-title"
@@ -138,9 +137,9 @@ export function SettingsTab({
               </kbd>
               <DialogClose
                 aria-label="Close Settings"
-                className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground hover:text-foreground"
+                className="flex size-7 items-center justify-center rounded-[8px] bg-muted text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                <X className="size-[18px]" />
+                <X className="size-[15px]" />
               </DialogClose>
             </div>
           ) : null}
@@ -243,6 +242,7 @@ function StorageFilesCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => v
 }
 
 function AboutCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) {
+  const { settings, updateSettings } = useSettings();
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [version, setVersion] = useState("—");
   const [checking, setChecking] = useState(false);
@@ -273,7 +273,7 @@ function AboutCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) 
               onClick={() => void checkUpdates()}
               disabled={checking}
             >
-              Check for updates
+              Check now
             </Button>
           }
         />
@@ -287,7 +287,7 @@ function AboutCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) 
               disabled={version === "—"}
               onClick={() => setWhatsNewOpen(true)}
             >
-              What's new
+              View
             </Button>
           }
         />
@@ -296,9 +296,20 @@ function AboutCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) 
           description="Get help or report a problem."
           control={
             <Button variant="outline" size="sm" onClick={() => onNavigate?.("help")}>
-              Help & feedback
+              Open
             </Button>
           }
+        />
+        <AppBehaviorCard
+          pane
+          rows="updates"
+          updateChannel={settings?.update_channel}
+          checkUpdatesAutomatically={settings?.check_updates_automatically}
+          onUpdateChannelChange={(channel) => updateSettings({ update_channel: channel })}
+          onCheckUpdatesAutomaticallyChange={(checked) =>
+            void updateSettings({ check_updates_automatically: checked })
+          }
+          onLaunchAtStartupResolved={() => {}}
         />
       </SettingsPaneCard>
       <UpdateAnnouncementDialog

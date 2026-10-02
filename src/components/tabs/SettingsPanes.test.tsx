@@ -51,29 +51,30 @@ describe("Settings pane controls", () => {
   });
 
   it("renders General's real appearance, startup, update and tray controls", async () => {
-    render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+    const view = render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByText("Open at login")).toBeInTheDocument();
-    expect(screen.getByText("Updates")).toBeInTheDocument();
-    expect(await screen.findByText("Update channel")).toBeInTheDocument();
-    expect(screen.getByText("Menu bar icon")).toBeInTheDocument();
+    expect(screen.queryByText("Updates")).not.toBeInTheDocument();
+    expect(screen.queryByText("Menu bar icon")).not.toBeInTheDocument();
     screen.getByRole("button", { name: "Dark" }).focus();
     await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ theme: "dark" }));
     fireEvent.click(screen.getByRole("switch", { name: "Open at login" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_autostart", { enabled: true }));
+    view.rerender(<SettingsTab pane="about" onPaneChange={vi.fn()} />);
+    expect(await screen.findByText("Update channel")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Updates" }));
     await waitFor(() =>
       expect(updateSettings).toHaveBeenCalledWith({ check_updates_automatically: true }),
     );
-    expect(screen.queryByText("Voicetypr 2.1.0")).not.toBeInTheDocument();
+    expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
   });
 
   it("renders shortcut actions and opens Recording for the primary shortcut", async () => {
     const onNavigate = vi.fn();
     render(<SettingsTab pane="shortcuts" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
-    expect(await screen.findByText("Cancel Recording")).toBeInTheDocument();
-    expect(screen.getByText("Copy Last Transcription")).toBeInTheDocument();
+    expect(await screen.findByText("Cancel dictation")).toBeInTheDocument();
+    expect(screen.getByText("Copy last transcript")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Manage in Recording" }));
     expect(onNavigate).toHaveBeenCalledWith("recording");
   });

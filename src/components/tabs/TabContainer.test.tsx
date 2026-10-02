@@ -153,12 +153,12 @@ describe("TabContainer destinations", () => {
     const view = render(<TabContainer activeSection="history" />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Transcribe a file…" }));
-    expect(screen.getByRole("dialog", { name: "Transcribe a file…" })).toHaveTextContent(
+    expect(screen.getByRole("dialog", { name: "Transcribe a file" })).toHaveTextContent(
       "Choose audio file",
     );
-    expect(screen.getAllByRole("heading", { name: "Transcribe a file…" })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { name: "Transcribe a file" })).toHaveLength(1);
     view.rerender(<TabContainer activeSection="audio" />);
-    expect(screen.getByRole("dialog", { name: "Transcribe a file…" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Transcribe a file" })).toBeInTheDocument();
   });
   it.each([
     ["Troubleshooting", "Troubleshooting controls"],

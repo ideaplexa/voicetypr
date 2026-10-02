@@ -59,8 +59,7 @@ describe("Home", () => {
     render(<OverviewTab onNavigate={onNavigate} />);
     expect(screen.getByText("Ready · Parakeet v3 runs on this Mac")).toHaveClass("text-sage");
     expect(screen.getByRole("heading", { name: /Press.*and start talking/ })).toBeInTheDocument();
-    expect(screen.getByText("⌥")).toBeInTheDocument();
-    expect(screen.getByText("Space")).toBeInTheDocument();
+    expect(screen.getByText("⌥ Space").tagName).toBe("KBD");
     expect(screen.getByText(/Hold to talk, release to paste/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /PolishClean/ })).toBeInTheDocument());
     const user = userEvent.setup();
@@ -76,7 +75,7 @@ describe("Home", () => {
     mock.settings = { ...mock.settings, hotkey: "Control+Alt+Space", current_model: "soniox", current_model_engine: "soniox", recording_mode: "toggle" };
     render(<OverviewTab />);
     expect(screen.getByText("Ready · Soniox (cloud)")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl + Alt + Space")).toBeInTheDocument();
     expect(screen.getByText(/Press once to start, again to paste/)).toBeInTheDocument();
   });
 
@@ -99,9 +98,7 @@ describe("Home", () => {
       mock.settings = { ...mock.settings, hotkey: "", recording_mode: "toggle" };
       mock.shortcutBindings = bindings;
       render(<OverviewTab />);
-      expect(await screen.findByText("⌘")).toBeInTheDocument();
-      expect(screen.getByText("⇧")).toBeInTheDocument();
-      expect(screen.getByText("Space")).toBeInTheDocument();
+      expect((await screen.findByText("⌘ ⇧ Space")).tagName).toBe("KBD");
     },
   );
 
@@ -114,7 +111,7 @@ describe("Home", () => {
     const onNavigate = vi.fn(); const onNavigateSettingsPane = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onNavigateSettingsPane} />);
     const warning = screen.getByRole("button", { name: new RegExp(label) });
-    expect(warning).toHaveClass("text-foreground");
+    expect(warning).toHaveClass("text-warn");
     await userEvent.setup().click(warning);
     if (pane) expect(onNavigateSettingsPane).toHaveBeenCalledWith(pane);
     else expect(onNavigate).toHaveBeenCalledWith(screenId);
@@ -176,7 +173,7 @@ describe("Home", () => {
   it("shows an empty Recent state and the last four dictations with app and time", async () => {
     const { rerender } = render(<OverviewTab />);
     expect(screen.getByText("Your dictations will show up here.")).toBeInTheDocument();
-    expect(screen.getByText("nothing yet in the last 7 days")).toBeInTheDocument();
+    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     mock.history = Array.from({ length: 5 }, (_, index) => ({ id: String(index), text: `Dictation number ${index}`, timestamp: new Date(Date.now() - index * 60_000), model: "parakeet", writing: { context_hint: { app_name: "Notes" }, audio_duration_ms: 3000 } }));
     rerender(<OverviewTab />);
@@ -184,7 +181,7 @@ describe("Home", () => {
     expect(screen.queryByText("Dictation number 4")).not.toBeInTheDocument();
     expect(screen.getAllByText("Notes")).toHaveLength(4);
     expect(screen.getByText("2m")).toBeInTheDocument();
-    expect(screen.queryByText("nothing yet in the last 7 days")).not.toBeInTheDocument();
+    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /dictations on/ })).toHaveAccessibleName(/5 dictations on/);
     expect(screen.getAllByText("Notes")[0]).toHaveClass("text-muted-foreground");
     const onNavigate = vi.fn();
@@ -196,8 +193,8 @@ describe("Home", () => {
   it("describes a short dictation without treating zero rounded savings as empty", () => {
     mock.history = [{ id: "short", text: "hello", timestamp: new Date(), model: "parakeet", writing: { audio_duration_ms: 1000 } }];
     render(<OverviewTab />);
-    expect(screen.getByText("less than a minute estimated saved")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Last 7 days" })).toBeInTheDocument();
+    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "This week" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /1 dictations on/ })).toBeInTheDocument();
   });
 

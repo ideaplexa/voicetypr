@@ -56,13 +56,16 @@ describe("ShareStatsModal", () => {
   it("opens the X intent with numbers only through the opener plugin", async () => {
     await openModal();
     await userEvent.click(screen.getByRole("button", { name: "Post on X" }));
-    await waitFor(() => expect(invoke).toHaveBeenCalled());
-    const [command, args] = vi.mocked(invoke).mock.calls[0];
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", expect.anything()),
+    );
+    expect(vi.mocked(invoke).mock.calls[0]).toEqual(["copy_image_to_clipboard", { imageDataUrl }]);
+    const [command, args] = vi.mocked(invoke).mock.calls[1];
     expect(command).toBe("plugin:opener|open_url");
     const url = new URL(String(args && "url" in args ? args.url : ""));
     expect(url.origin + url.pathname).toBe("https://x.com/intent/post");
     expect(url.searchParams.get("text")).toBe(
-      `I've dictated ${stats.totalWords.toLocaleString()} words with @voicetypr`,
+      `I've dictated ${stats.totalWords.toLocaleString()} words with @voicetypr and skipped ${stats.timeSavedDisplay.replace(" h", "")} h of typing`,
     );
     expect(url.searchParams.get("url")).toBe("https://voicetypr.com");
     expect(args && "with" in args ? args.with : undefined).toBeNull();
@@ -85,4 +88,12 @@ describe("ShareStatsModal", () => {
     await waitFor(() => expect(click).toHaveBeenCalled());
     click.mockRestore();
   });
+});
+
+it("does not open X when copying the image fails", async () => {
+  await openModal();
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("clipboard unavailable"));
+  await userEvent.click(screen.getByRole("button", { name: "Post on X" }));
+  expect(invoke).toHaveBeenCalledWith("copy_image_to_clipboard", { imageDataUrl });
+  expect(invoke).not.toHaveBeenCalledWith("plugin:opener|open_url", expect.anything());
 });

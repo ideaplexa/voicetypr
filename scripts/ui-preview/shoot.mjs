@@ -97,9 +97,9 @@ try {
       for (const sidebar of ["expanded", "rail"]) {
         const screenShotName = (name) => sidebar === "rail" ? `${name}-rail` : name;
         const shouldCaptureScreen = (name) => shouldCapture(platform, theme, screenShotName(name));
-        const screens = platform === "macos" ? macScreens : macScreens.filter(([, id]) => ["home", "history", "insights", "recording", "settings-general", "help"].includes(id));
+        const screens = macScreens;
         const selectedPanes = panes;
-        const hasShot = screens.some(([, id]) => shouldCaptureScreen(id) || (id === "insights" && shouldCaptureScreen("share-card")) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) || shouldCaptureScreen("license");
+        const hasShot = screens.some(([, id]) => shouldCaptureScreen(id) || (id === "insights" && ["share-card", "insights-week", "insights-month", "insights-empty"].some((shot) => shouldCaptureScreen(shot))) || (id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) || (id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) || shouldCaptureScreen("license");
         if (!hasShot) continue;
         const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });
         page.on("pageerror", (error) => errors.push(`${platform}/${theme}: ${error.stack ?? error}`));
@@ -115,7 +115,7 @@ try {
         };
         for (const [label, id] of screens) {
           if (await page.getByRole("dialog").count()) await page.keyboard.press("Escape");
-          if (!shouldCaptureScreen(id) && !(id === "insights" && shouldCaptureScreen("share-card")) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) continue;
+          if (!shouldCaptureScreen(id) && !(id === "insights" && ["share-card", "insights-week", "insights-month", "insights-empty"].some((shot) => shouldCaptureScreen(shot))) && !(id === "history" && ["history-detail", "history-empty", "history-transcribe-file"].some((shot) => shouldCaptureScreen(shot))) && !(id === "settings-general" && selectedPanes.some(([, paneId]) => shouldCaptureScreen(paneId)))) continue;
           if (id === "settings-general") {
             await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Home", exact: true }).click();
           }
@@ -134,6 +134,25 @@ try {
             const image = await page.getByRole("img", { name: /Share card showing/ }).getAttribute("src");
             if (image) await import("node:fs/promises").then(({ writeFile }) => writeFile(path.join(output, `${platform}-${theme}-${screenShotName("share-card-export")}.png`), Buffer.from(image.split(",")[1], "base64")));
             await page.keyboard.press("Escape");
+          }
+          if (id === "insights") {
+            for (const [label, name] of [["Week", "insights-week"], ["Month", "insights-month"]]) {
+              if (!shouldCaptureScreen(name)) continue;
+              await page.getByRole("button", { name: label, exact: true }).click();
+              await page.waitForTimeout(180);
+              await capture(name);
+            }
+            if (shouldCaptureScreen("insights-empty")) {
+              const emptyPage = await browser.newPage({ viewport: { width: 1000, height: 722 }, deviceScaleFactor: 2 });
+              emptyPage.on("pageerror", (error) => errors.push(`${platform}/${theme}/insights-empty: ${error.stack ?? error}`));
+              await emptyPage.goto(`${baseUrl}/ui-preview.html?platform=${platform}&theme=${theme}&empty=1&sidebar=${sidebar}`, { waitUntil: "networkidle" });
+              await emptyPage.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Insights", exact: true }).click();
+              await emptyPage.getByText("Your stats appear after your first dictation").waitFor();
+              await emptyPage.evaluate(() => document.fonts.ready);
+              await emptyPage.screenshot({ path: path.join(output, `${platform}-${theme}-${screenShotName("insights-empty")}.png`), animations: "disabled" });
+              shots.push(`${platform}-${theme}-${screenShotName("insights-empty")}.png`);
+              await emptyPage.close();
+            }
           }
           if (id === "insights") await page.setViewportSize({ width: 1000, height: 680 });
           if (sidebar === "rail" && id === "home") {
@@ -160,7 +179,7 @@ try {
           }
           if (id === "history" && shouldCaptureScreen("history-transcribe-file")) {
             await page.getByRole("button", { name: "Transcribe a file…" }).click();
-            await page.getByRole("dialog", { name: "Transcribe a file…" }).waitFor();
+            await page.getByRole("dialog", { name: "Transcribe a file" }).waitFor();
             await capture("history-transcribe-file");
             await page.keyboard.press("Escape");
           }

@@ -30,8 +30,8 @@
   --sage-foreground: #ffffff;
   --sage-bg: #E3EFE7;
   /* Text below 14px uses muted-foreground (text-2, >=4.5:1 in both themes); text-3 is for icons, placeholders, and decorative separators only. */
-  --text-3: #9A9A95;
-  --warn: #B26A00;
+  --text-3: #71716C;
+  --warn: #8F5400;
   --warn-bg: #FFF0D9;
   --chart-1: #3F7D5C;
   --chart-2: oklch(0.64 0.09 155);
@@ -42,7 +42,7 @@
   --sidebar-foreground: #18181A;
   --sidebar-primary: #18181A;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0efec;
+  --sidebar-accent: #E6E6E3;
   --sidebar-accent-foreground: #18181A;
   --sidebar-border: #E4E4E0;
   --sidebar-ring: #3F7D5C;
@@ -86,7 +86,7 @@
   --sage: #8FD1A8;
   --sage-foreground: #141415;
   --sage-bg: #1F3328;
-  --text-3: #6E6E6B;
+  --text-3: #8E8E8A;
   --warn: #F2B35B;
   --warn-bg: #3A2B18;
   --chart-1: #8FD1A8;
@@ -324,3 +324,16 @@ html body.bg-transparent {
     animation: none !important;
   }
 }
+
+/* Shared, unblurred dialog scrim, composed outside the UI primitives. */
+:root { --dialog-scrim: rgb(24 24 26 / .28); --ready-text: #33684C; }
+.dark { --dialog-scrim: rgb(0 0 0 / .55); --ready-text: var(--sage); }
+[data-slot="dialog-overlay"], .settings-modal-scrim {
+  background: var(--dialog-scrim);
+  backdrop-filter: none;
+}
+[data-slot="dialog-content"] button:focus-visible, [data-slot="dialog-close"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+}
+input::placeholder, textarea::placeholder { color: var(--text-3) !important; }

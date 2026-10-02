@@ -80,7 +80,7 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
                 onClick={() => onSectionChange("home")}
                 aria-label="Voicetypr Home"
                 className={cn(
-                  "flex items-center gap-2 rounded-[8px] p-0 text-left hover:bg-sidebar-accent",
+                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex items-center gap-2 rounded-[8px] p-0 text-left hover:bg-sidebar-accent",
                   collapsed ? "size-9 justify-center" : "w-full",
                 )}
               />
@@ -144,14 +144,14 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
                 aria-label={`${license.label}. Open License`}
                 aria-current={licenseActive ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2 rounded-[8px] bg-card text-left ring-1 ring-inset ring-border",
+                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex items-center gap-2 rounded-[8px] bg-card text-left ring-1 ring-inset ring-border",
                   collapsed ? "h-[34px] w-10 justify-center p-0" : "w-full px-[10px] py-2",
                   licenseActive && "ring-1 ring-sage",
                 )}
               />
             }
           >
-            <licenseScreen.icon className={cn("size-4 shrink-0", license.color)} />
+            <licenseScreen.icon className={cn("size-4 shrink-0", collapsed && "size-[17px]", license.color)} />
             <span
               className={
                 collapsed
@@ -161,7 +161,7 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
             >
               {license.label}
             </span>
-            <span className={collapsed ? "sr-only" : "text-[11.5px] leading-[normal] text-text-3"}>
+            <span className={collapsed ? "sr-only" : "text-[11.5px] leading-[normal] text-muted-foreground"}>
               {version}
             </span>
           </TooltipTrigger>
@@ -233,9 +233,9 @@ function SidebarNavItem({
         aria-current={active ? "page" : undefined}
         onClick={() => onSelect(item.id)}
         className={cn(
-          "group-data-[collapsible=icon]:size-[40px]! group-data-[collapsible=icon]:h-[34px]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 h-auto gap-[10px] rounded-[8px] px-[10px] py-[7px] text-[13px] leading-[normal] font-medium [&>svg]:size-4 text-muted-foreground transition-colors [&>svg]:text-muted-foreground",
+          "group-data-[collapsible=icon]:size-[40px]! group-data-[collapsible=icon]:h-[34px]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 h-auto gap-[10px] rounded-[8px] px-[10px] py-[7px] text-[13px] leading-[normal] font-medium [&>svg]:size-4 group-data-[collapsible=icon]:[&>svg]:size-[17px] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 text-muted-foreground transition-colors [&>svg]:text-muted-foreground",
           active
-            ? "data-active:bg-card data-active:font-semibold data-active:text-foreground data-active:shadow-[0_1px_2px_#0000000f] data-active:hover:bg-card data-active:[&>svg]:text-sage"
+            ? "data-active:bg-card data-active:font-semibold data-active:text-foreground data-active:shadow-[0_1px_2px_#0000000f] data-active:hover:bg-card dark:data-active:bg-[#2A2A2D] dark:data-active:hover:bg-[#2A2A2D] dark:data-active:shadow-[inset_0_0_0_1px_#FFFFFF0F] data-active:[&>svg]:text-sage"
             : "hover:bg-sidebar-accent hover:text-foreground",
         )}
       >

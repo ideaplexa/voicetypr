@@ -1,3 +1,4 @@
+import { isMacOS } from "@/lib/platform";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -94,26 +95,33 @@ export function ShareStatsModal({ open, onOpenChange, stats }: ShareStatsModalPr
     }
   };
   const postOnX = async () => {
+    if (!imageDataUrl || isCopying) return;
+    setIsCopying(true);
     const url = new URL("https://x.com/intent/post");
     url.searchParams.set(
       "text",
-      `I've dictated ${stats.totalWords.toLocaleString()} words with @voicetypr`,
+      `I've dictated ${stats.totalWords.toLocaleString()} words with @voicetypr and skipped ${stats.timeSavedDisplay.endsWith(" h") ? stats.timeSavedDisplay.replace(" h", "") : (parseFloat(stats.timeSavedDisplay) / 60).toFixed(1)} h of typing`,
     );
     url.searchParams.set("url", "https://voicetypr.com");
     try {
+      await invoke("copy_image_to_clipboard", { imageDataUrl });
+      setCopied(true);
       await invoke("plugin:opener|open_url", { url: url.toString(), with: null });
+      toast.success(`Image copied — paste it into your post (${isMacOS ? "⌘V" : "Ctrl+V"})`);
     } catch {
-      toast.error("Could not open X. Please try again.");
+      toast.error("Could not copy the image or open X. Please try again.");
+    } finally {
+      setIsCopying(false);
     }
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="gap-0 overflow-hidden p-0"
+        className="gap-0 overflow-hidden rounded-[14px] p-0"
         style={{ width: "calc(100% - 2rem)", maxWidth: "40rem" }}
       >
         <DialogHeader className="border-b border-border px-5 py-3 pr-12 text-left">
-          <DialogTitle className="text-base">Share your stats</DialogTitle>
+          <DialogTitle className="text-[18px] font-semibold">Share your stats</DialogTitle>
           <DialogDescription>
             A picture of the typing you skipped. Transcript text is never included.
           </DialogDescription>

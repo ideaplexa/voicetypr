@@ -53,16 +53,14 @@ describe("AccountSection license verification", () => {
   it("keeps Pro active and offers revalidation instead of showing Trial Expired", () => {
     render(<AccountSection />);
 
-    expect(screen.getByText("Pro Licensed")).toBeInTheDocument();
-    expect(screen.getByText("License verification still unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Voicetypr Pro · lifetime")).toBeInTheDocument();
+    expect(screen.getByText("Couldn’t verify your license. Connect to the internet, then recheck.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "License" })).toBeInTheDocument();
     expect(screen.queryByText("Reset app / start over")).not.toBeInTheDocument();
-    expect(
-      screen.getByText("Offline access remains available. Your paid license has not expired."),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("pro", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("Trial Expired")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Revalidate now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recheck" }));
     expect(revalidateLicense).toHaveBeenCalledTimes(1);
   });
 
@@ -85,7 +83,7 @@ describe("AccountSection license verification", () => {
 
     render(<AccountSection />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Revalidate License" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recheck" }));
     expect(revalidateLicense).toHaveBeenCalledTimes(1);
   });
   it("activates a trimmed license key and retains purchase access", async () => {
@@ -110,7 +108,8 @@ describe("AccountSection license verification", () => {
     expect(openPurchasePage).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the existing license management portal", async () => {
+  it("opens the existing license management portal from an unlicensed state", async () => {
+    mockUseLicense.mockReturnValue({ ...mockUseLicense(), status: { status: "none" } });
     render(<AccountSection />);
     fireEvent.click(screen.getByRole("button", { name: "Manage License" }));
     await waitFor(() => expect(open).toHaveBeenCalledWith("https://polar.sh/ideaplexa/portal"));
@@ -121,10 +120,10 @@ describe("AccountSection license verification", () => {
     mockUseLicense.mockReturnValue({ ...mockUseLicense(), deactivateLicense });
     vi.mocked(ask).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     render(<AccountSection />);
-    fireEvent.click(screen.getByRole("button", { name: "Deactivate License" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate on this Mac" }));
     await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
     expect(deactivateLicense).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Deactivate License" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate on this Mac" }));
     await waitFor(() => expect(deactivateLicense).toHaveBeenCalledTimes(1));
     expect(ask).toHaveBeenLastCalledWith(
       "Deactivating your license will make the app unusable.",
@@ -132,14 +131,14 @@ describe("AccountSection license verification", () => {
     );
   });
 
-  it("shows known plan and expiry and retries status collection", () => {
+  it("shows a lifetime plan without expiry and retries status collection", () => {
     const checkStatus = vi.fn();
     const view = render(<AccountSection />);
-    expect(screen.getByText("pro", { exact: true })).toBeInTheDocument();
-    expect(screen.getByText("89 days offline remaining")).toBeInTheDocument();
+    expect(screen.getByText("Voicetypr Pro · lifetime")).toBeInTheDocument();
+    expect(screen.queryByText("89 days offline remaining")).not.toBeInTheDocument();
     mockUseLicense.mockReturnValue({ ...mockUseLicense(), status: null, checkStatus });
     view.rerender(<AccountSection />);
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recheck" }));
     expect(checkStatus).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { cn } from "@/lib/utils";
 import { Check, Copy, Download, Loader2, ExternalLink } from "lucide-react";
 import type { ShareCardStats } from "@/components/shareCardRenderer";
@@ -73,7 +73,7 @@ function ShareStatsActions({
         <Download />
         Save image…
       </Button>
-      <Button onClick={onPost} variant="outline" disabled={!imageDataUrl}>
+      <Button onClick={onPost} variant="outline" disabled={isCopying || !imageDataUrl}>
         <ExternalLink />
         Post on X
       </Button>

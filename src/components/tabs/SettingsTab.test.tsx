@@ -4,6 +4,13 @@ import { useState } from "react";
 import { expect, it, vi } from "vitest";
 import { SettingsTab } from "./SettingsTab";
 
+vi.mock("@/contexts/SettingsContext", () => ({
+  useSettings: () => ({ settings: {}, updateSettings: vi.fn().mockResolvedValue(undefined) }),
+}));
+vi.mock("@/components/sections/general/AppBehaviorCard", () => ({
+  AppBehaviorCard: () => <p>Update preferences</p>,
+}));
+
 const checkForUpdatesManually = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
 vi.mock("@/services/updateService", () => ({ updateService: { checkForUpdatesManually } }));
@@ -30,7 +37,7 @@ it("opens General by default and checks for updates from About", async () => {
   expect(screen.getByText("Appearance and app behavior")).toBeInTheDocument();
   view.rerender(<SettingsTab pane="about" onPaneChange={vi.fn()} />);
   expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Check for updates" }));
+  await user.click(screen.getByRole("button", { name: "Check now" }));
   expect(checkForUpdatesManually).toHaveBeenCalledOnce();
 });
 
@@ -44,7 +51,7 @@ it("keeps every advanced pane reachable", async () => {
   const panes = screen.getByRole("navigation", { name: "Settings panes" });
   expect(screen.getByText("Shortcut controls")).toBeInTheDocument();
   expect(panes).toHaveTextContent("Advanced");
-  expect(screen.getByText("Advanced")).toHaveClass("text-text-3");
+  expect(screen.getByText("Advanced")).toHaveClass("text-muted-foreground");
   for (const [label, content] of [
     ["Network sharing", "Network sharing controls"],
     ["CLI & API", "CLI and API controls"],
@@ -60,9 +67,31 @@ it("opens the existing What's new dialog and routes Help & feedback from About",
   const onNavigate = vi.fn();
   render(<SettingsTab pane="about" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
   await screen.findByText("Voicetypr 2.1.0");
-  await userEvent.click(screen.getByRole("button", { name: "What's new" }));
+  await userEvent.click(screen.getByRole("button", { name: "View" }));
   expect(screen.getByRole("dialog", { name: /Voicetypr Updated/ })).toHaveTextContent("2.1.0");
   await userEvent.keyboard("{Escape}");
-  await userEvent.click(screen.getByRole("button", { name: "Help & feedback" }));
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(onNavigate).toHaveBeenCalledWith("help");
+});
+
+it("keeps the selected pane card-colored while the pointer rests on it", async () => {
+  const Harness = () => {
+    const [pane, setPane] = useState<"general" | "shortcuts">("general");
+    return (
+      <SettingsTab
+        pane={pane}
+        onPaneChange={(next) => {
+          if (next === "general" || next === "shortcuts") setPane(next);
+        }}
+      />
+    );
+  };
+  render(<Harness />);
+  const shortcuts = screen.getByRole("button", { name: "Shortcuts" });
+  await userEvent.click(shortcuts);
+  await userEvent.hover(shortcuts);
+  expect(shortcuts).toHaveAttribute("aria-current", "page");
+  expect(shortcuts).toHaveClass("bg-card", "hover:bg-card", "dark:bg-[#2A2A2D]");
+  expect(shortcuts).not.toHaveClass("hover:bg-muted", "hover:bg-black/[0.04]");
+  expect(screen.getByRole("button", { name: "General" })).toHaveClass("hover:bg-black/[0.04]");
 });
