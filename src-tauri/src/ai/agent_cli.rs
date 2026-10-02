@@ -151,8 +151,8 @@ const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
         "--no-session-persistence",
     ],
     required_capability_flags: &["--no-session-persistence"],
-    // Founder decision 2026-10-03: Opus 5.5 is the Claude Code Polish default.
-    default_model: Some("opus"),
+    // Sonnet 5.5: best measured Polish quality and lowest latency (plan 081 baseline, 2026-10-03).
+    default_model: Some("sonnet"),
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::ClaudeEffortLowIfSupported,
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
@@ -3127,7 +3127,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_cold_argv_uses_opus_when_model_is_empty() {
+    fn claude_code_cold_argv_uses_sonnet_when_model_is_empty() {
         let argv = cold_argv(&CLAUDE_CODE_SPEC, "my system prompt");
         assert_eq!(
             argv,
@@ -3136,7 +3136,7 @@ mod tests {
                 "--setting-sources",
                 "",
                 "--model",
-                "opus",
+                "sonnet",
                 "--tools",
                 "",
                 "--strict-mcp-config",
@@ -3150,7 +3150,7 @@ mod tests {
         );
         assert!(argv
             .windows(2)
-            .any(|pair| pair[0] == "--model" && pair[1] == "opus"));
+            .any(|pair| pair[0] == "--model" && pair[1] == "sonnet"));
         assert!(!argv.contains(&"--bare".to_string()));
     }
 
@@ -3505,7 +3505,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_help_fallback_uses_setting_sources_and_opus() {
+    fn claude_help_fallback_uses_setting_sources_and_sonnet() {
         let argv = cold_argv_for_model(
             &CLAUDE_CODE_SPEC,
             "prompt",
@@ -3517,7 +3517,7 @@ mod tests {
             .any(|pair| pair[0] == "--setting-sources" && pair[1].is_empty()));
         assert!(argv
             .windows(2)
-            .any(|pair| pair[0] == "--model" && pair[1] == "opus"));
+            .any(|pair| pair[0] == "--model" && pair[1] == "sonnet"));
         assert!(!argv.contains(&"--safe-mode".to_string()));
         assert!(!argv.contains(&"--effort".to_string()));
     }

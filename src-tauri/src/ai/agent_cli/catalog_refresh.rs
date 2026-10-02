@@ -160,12 +160,12 @@ mod tests {
     }
 
     #[test]
-    fn claude_default_is_opus_and_saved_haiku_remains_accepted() {
+    fn claude_default_is_sonnet_and_saved_haiku_remains_accepted() {
         let capabilities = ClaudeCapabilities {
             safe_mode: true,
             effort: true,
         };
-        for (selected, expected) in [("", "opus"), ("haiku", "haiku"), ("fable", "fable")] {
+        for (selected, expected) in [("", "sonnet"), ("haiku", "haiku"), ("fable", "fable")] {
             let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", selected, capabilities);
             assert!(argv
                 .windows(2)
