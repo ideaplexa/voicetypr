@@ -224,3 +224,80 @@ The scenario agents read the real code. These are real behaviours, not prototype
   - 6 transcription dialogs
   - 8 What's new / crash / privacy
   - 10 Windows pass
+
+## Opus 5.5 design reviews, 2026-10-03 (island + main window)
+
+**Founder decision on the start card:** it becomes a user setting in Recording → Island: "Show details when you start dictating: Always · When something changes (default) · Never".
+- "When something changes" means the per-app Polish style, mic, engine or key status differs from the previous dictation, plus the first 5 dictations.
+- The card shows for 0.8 s, not 1.2 s.
+- With Never, the dot goes straight to the slim row; the ✦ badge still shows the Polish state.
+
+**Island review: accepted, folded into Island Lab v3.2 and P2/P3.**
+
+P0:
+- The peek's record button sits exactly on the dot's anchor (chips row on top, record row at the bottom), and clicking the empty panel dictates.
+- Windows positioning uses `monitor.work_area()` of the foreground window's or cursor's monitor. Today it uses the full monitor, so the island lands on the taskbar.
+- "No speech heard" offers [Transcribe anyway], with the clip kept for 30 s (gap 13).
+
+P1:
+- The width holds at 236 px from listening through polishing.
+- No dip when opening from the dot; the spring starts on frame 1 (response 0.34, bounce 0.22).
+- The wave draws elapsed bars only, with no fake silence strip.
+- The pasted card: neutral buttons, Retry only when a second engine exists, actions on hover.
+- Pick lists open with the ✓ row over the chip, with a 250 ms click guard.
+- Dot hover intent: 450 ms dwell with a slow pointer; ignore clicks within 120 ms of entry; a 20 px target that extends upward.
+- AI badge: 12 px disc, 7 px SVG star, "!" for amber.
+- The style chip opens the same list everywhere.
+- The peek's 4th chip becomes **Language** instead of Mode.
+- Copy rules:
+  - "Retry with X"
+  - × = dismiss, nothing lost
+  - Discard = audio deleted
+  - "Choose mic"
+  - "· not polished"
+  - "Open System Settings" on macOS, "Open Privacy settings" on Windows
+- The cloud-key card gains Discard.
+- Polish skipped reads "Pasted unpolished · Polish timed out" with [Undo] [Polish now].
+- A failed translation auto-pastes the original.
+- Starting up reads "Getting ready…" while already capturing; auto-stop says what happened to the audio.
+- A press while finishing shows "Finishing…" (600 ms). Starting a new recording instead stays a later backend change.
+- The island morphs into a stack card in place.
+- Top anchors grow downward.
+- Double hairline border (inset rgba(255,255,255,.16) plus outer rgba(0,0,0,.45)).
+- Every outcome is announced once.
+
+P2:
+- 26 px targets.
+- Tentative alpha .52.
+- One SVG glyph set.
+- Mic busy is red.
+- Short engine names; generic mic prefixes stripped.
+- Peek hint "Hold ⌥ Space to talk".
+- A stationary meter under reduced motion.
+
+**Main-window review: accepted, slice M4.**
+- Settings nav beige hover override (P0).
+- Dark scrim lightening the page (P0).
+- Shortcuts pane layout and sentence-case labels (P0).
+- Contrast tokens.
+- One bare-row pane style.
+- License: "Voicetypr Pro · lifetime", Recheck, Deactivate.
+- About gets the update rows.
+- Insights bars normalised to the top app, 128 px names.
+- Post on X copies the image first.
+- Focus rings.
+- History "…" menu.
+- Home single keycap.
+- Share modal shell.
+
+**Tray (task 3) additions from the review:**
+- a Language ▸ submenu
+- Transcribe a file…
+- Paste last transcript
+- Start / Stop Dictation toggles, with the status line "Recording · 0:07"
+- Engine ▸ grouped under disabled "On this Mac/PC / Cloud / Network" headers
+- spec text as "Polish: Clean"
+- the Windows mock uses Ctrl+Alt+Space (Alt+Space is the system window menu)
+- Recent ▸ shows about 40 characters plus the time
+
+**Open question for the founder:** onboarding's crash/analytics consent is pre-ticked checkboxes below the CTA. GDPR needs unticked boxes. Proposal: unticked switches above the CTA.
