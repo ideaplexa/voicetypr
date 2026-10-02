@@ -36,10 +36,24 @@ Process (founder cadence):
      - Draw only while active.
      - Stays vanilla DOM + canvas (AGENTS.md invariant 8).
    - Research sources are cited in the lab page.
-3. **Tray / menu-bar menu.**
-   - Relabel and regroup to the new IA: Open Voicetypr, then engine (current + switch), mode (Hold / Press), Polish on/off, microphone, then Copy last transcript, then Check for updates, Help & feedback, Quit.
-   - Drop the "Dashboard" wording.
-   - Same structure on Windows, where platform-appropriate.
+3. **Tray / menu-bar menu** (`design/exports/tray-menu-mac.png`, `tray-menu-win.png`). It stays a native Tauri menu (`menu/tray.rs`, `CheckMenuItem`/`Submenu`). The founder wants power users to be able to drive everything from it. Order:
+   - **Status line** (disabled):
+     - "● Ready · <engine> · on this Mac/PC"
+     - amber + "Fix…" when the mic, model, license or permission blocks recording
+   - **Start Dictation**, showing the user's effective shortcut.
+   - **Quick settings:**
+     - Polish ▸ Off / Clean / Writing / Notes / Message / Code / Per-app styles…
+     - Engine ▸ downloaded local models, cloud engines, network servers, Download more models…
+     - Microphone ▸ System default + devices
+     - Mode ▸ Hold to talk / Press to start-stop
+     - Live Preview ✓
+     - Each shows its current value next to the label.
+   - **History:** Copy Last Transcript, Recent ▸.
+   - **App:** Open Voicetypr, Insights, Settings… (⌘, / Ctrl+,), Check for Updates…, Help & Feedback.
+   - **Quit Voicetypr.**
+   - Windows uses the same order, with Windows 11 menu metrics and leading icons.
+   - Drop "Dashboard" and "Remote Voicetypr" headers. Network servers live inside Engine ▸.
+   - The island peek's quick settings and this menu write the same settings through the same commands.
 4. **Menu-bar icon + app icon.** Menu-bar template icon states (idle / recording / processing) and a refreshed app icon, designed in Pencil and exported to all the required sizes.
 5. **Polish dialogs:** ProviderSetupDialog and AgentModelPickerDialog on the kit (provider cards, key field, model picker, test result).
 6. **Transcription dialogs:** cloud ApiKeyModal (finish), OpenAICompatConfigModal, AddServerModal.
