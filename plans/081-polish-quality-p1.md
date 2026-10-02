@@ -90,3 +90,24 @@ Answer: Polish works, but it isn't measured and its safety net is thin. The mast
 1 → 2 → 3, then baseline. After that, 4 and 5 in parallel, then 6, 7, 8.
 
 Ships in the beta after plan 080's phase A (or with it, if both are green).
+
+## Baseline, 2026-10-03
+
+200-case golden set, prompt unchanged, Claude Code provider, run locally by Claude:
+
+| Model | Pass | Answered/obeyed (of 40) | Clean unchanged | p50 | p95 |
+|---|---:|---:|---:|---:|---:|
+| Haiku 4.5 | 87.0 % | 5 (12.5 %) | 88.5 % | 5.1 s | 10.1 s |
+| **Sonnet 5.5** | **94.5 %** | **0** | 96.2 % | **2.9 s** | **4.5 s** |
+| Fable 5.1 | 92.5 % | 0 | 96.2 % | 3.9 s | 17.8 s (6 % fallback) |
+
+- Haiku's failure mode is meta replies ("I'm here to clean up voice dictation… please provide the text") that would get pasted. Sonnet 5.5 is better *and* faster, so it becomes the Claude Code default (Q3).
+- Sonnet's real errors, to target next:
+  - "X no just Y" read as "not just" (a meaning flip)
+  - an invented "$"
+  - an invented "Action items" section and a stray "**Shopping list**" heading
+  - Latin digits turned into Bengali numerals inside a code-switched sentence
+  - a stutter ("I I") left in
+- Scorer issues: `keeps` / `must_contain` must be case-insensitive and word-boundary aware ("merci" → "Merci", "download" → "Download").
+- pi (gpt-5.6-luna) fell back on 199/200 because of a stale saved model id. Q3 handles stale ids.
+- No API keys are configured on the founder's machine, so the BYOK providers (OpenAI, Gemini, OpenRouter, Anthropic API) are not yet measured.
