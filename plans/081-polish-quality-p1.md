@@ -257,3 +257,19 @@ Final local gates passed: `cargo test` (1,682 unit tests, 3 CLI integration test
 25 ignored), `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo fmt --check`, `pnpm typecheck`, `pnpm lint`, `pnpm exec vitest run`
 (85 files, 950 tests), and `pnpm build`. No commit, push or live call was made.
+
+## Live check after Q2–Q5, 2026-10-03 (Sonnet 5.5 via Claude Code, 212 cases)
+
+| | Baseline | After fixes |
+|---|---:|---:|
+| Pass | 94.5 % | **96.7 %** |
+| Clean unchanged | 96.2 % | 100 % |
+| Keeps preserved | 91.1 % | 100 % |
+| Fillers removed | 100 % | 100 % |
+| p50 / p95 | 2.9 / 4.5 s | 2.3 / 4.9 s |
+
+- The meaning flip, the invented symbols and sections, and the numeral-script swap are gone.
+- **Bug found (pre-existing):** `validate_ai_output`'s refusal check rejects legitimate dictations that START with "I cannot / I can't" ("I I cannot reproduce it…" → `bad_response` → raw pasted). Fix it in the review fix round: exempt the refusal prefix when the input itself starts with it, after collapsing stutters.
+- Remaining scorer strictness, not a product bug:
+  - "summarise this" → "Summarize this." counted as obeyed
+  - "I thought it was X, actually it was Y" is a statement, not a correction
