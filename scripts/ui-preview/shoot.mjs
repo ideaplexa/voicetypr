@@ -136,7 +136,7 @@ try {
             await page.keyboard.press("Escape");
           }
           if (id === "insights") await page.setViewportSize({ width: 1000, height: 680 });
-          if (sidebar === "rail" && ["home", "history", "insights"].includes(id)) {
+          if (sidebar === "rail" && id === "home") {
             const tooltipName = `${id}-tooltip`;
             if (shouldCaptureScreen(tooltipName)) {
               await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "History", exact: true }).hover();
