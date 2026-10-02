@@ -16,7 +16,6 @@ CATALOG_PATH = ROOT / "catalog.generated.json"
 FULL_API_PATH = ROOT / ".cache" / "models.dev.api.full.json"
 
 STATUS_ORDER = {"production": 0, "experimental": 1, "hidden": 2}
-REASONING_ADAPTERS = {"OpenAI", "Anthropic", "Gemini"}
 PROVIDER_FIELDS = ("id", "name", "env", "npm", "doc", "api")
 MODEL_FIELDS = (
     "id",
@@ -24,6 +23,8 @@ MODEL_FIELDS = (
     "family",
     "reasoning",
     "reasoning_options",
+    "temperature",
+    "status",
     "tool_call",
     "structured_output",
     "modalities",
@@ -64,6 +65,15 @@ def sorted_models(models: Any) -> list[dict[str, Any]]:
     )
 
 
+def eligible_model(model: dict[str, Any]) -> bool:
+    modalities = model.get("modalities", {})
+    return (
+        "text" in modalities.get("input", [])
+        and modalities.get("output") == ["text"]
+        and model.get("status") not in {"deprecated", "retired"}
+    )
+
+
 def project_model(model: dict[str, Any], recommended_ids: set[str]) -> dict[str, Any]:
     model_id = str(model.get("id") or model["model_id"])
     projected: dict[str, Any] = {
@@ -72,6 +82,14 @@ def project_model(model: dict[str, Any], recommended_ids: set[str]) -> dict[str,
         "recommended": model_id in recommended_ids,
         "reasoning": bool(model.get("reasoning", False)),
     }
+
+    projected["temperature"] = bool(model.get("temperature", True))
+    projected["reasoning_efforts"] = [
+        value
+        for option in model.get("reasoning_options", [])
+        if option.get("type") == "effort"
+        for value in option.get("values", [])
+    ]
 
     limit = model.get("limit")
     if isinstance(limit, dict):
@@ -106,8 +124,13 @@ def build_catalog() -> dict[str, Any]:
         recommended_ids = set(config.get("recommended", []))
         adapter = config.get("adapter")
         source_models = inline_models if inline_models is not None or snapshot_id is None else provider.get("models")
-        models = [project_model(model, recommended_ids) for model in sorted_models(source_models)]
-        models.sort(key=lambda model: (not model["recommended"], model["model_id"]))
+        models = [project_model(model, recommended_ids) for model in sorted_models(source_models)
+                  if eligible_model(model)]
+        missing = recommended_ids - {model["model_id"] for model in models}
+        if missing:
+            raise ValueError(f"{provider_id}: missing recommended models {sorted(missing)}")
+        recommendation_order = {model_id: index for index, model_id in enumerate(config.get("recommended", []))}
+        models.sort(key=lambda model: (recommendation_order.get(model["model_id"], len(recommendation_order)), model["model_id"]))
         runtime = str(config.get("runtime", "genai_adapter"))
 
         providers.append(
@@ -120,7 +143,7 @@ def build_catalog() -> dict[str, Any]:
                 "namespace": config.get("namespace"),
                 "requires_api_key": True,
                 "supports_base_url": False,
-                "supports_reasoning": False if inline_models is not None or snapshot_id is None else adapter in REASONING_ADAPTERS,
+                "supports_reasoning": any(model["reasoning"] for model in models),
                 "docs_url": provider.get("doc"),
                 "models": models,
             }
@@ -151,6 +174,10 @@ def project_snapshot() -> None:
         projected_models: dict[str, Any] = {}
         for model in sorted_models(source_models):
             model_id = str(model["id"])
+            if not eligible_model(model):
+                continue
+            if "model_ids" in config and model_id not in config["model_ids"]:
+                continue
             projected_models[model_id] = {
                 key: model[key] for key in MODEL_FIELDS if key in model
             }

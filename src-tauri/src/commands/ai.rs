@@ -405,7 +405,14 @@ pub async fn get_ai_settings(app: tauri::AppHandle) -> Result<AISettings, String
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "".to_string()); // Empty by default
 
-    let models_by_provider = load_models_by_provider(&store, &provider, &model);
+    let model = catalog::resolve_model(&provider, &model).unwrap_or(model);
+    let models_by_provider = load_models_by_provider(&store, &provider, &model)
+        .into_iter()
+        .map(|(provider, model)| {
+            let model = catalog::resolve_model(&provider, &model).unwrap_or(model);
+            (provider, model)
+        })
+        .collect();
     let reasoning_by_provider = load_agent_cli_reasoning(&store);
     let fast_mode_by_provider = load_agent_cli_fast_mode(&store);
 
@@ -456,7 +463,13 @@ pub async fn get_ai_settings_for_provider(
         .get("ai_model")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "".to_string()); // Empty by default
-    let models_by_provider = load_models_by_provider(&store, &current_provider, &current_model);
+    let models_by_provider = load_models_by_provider(&store, &current_provider, &current_model)
+        .into_iter()
+        .map(|(provider, model)| {
+            let model = catalog::resolve_model(&provider, &model).unwrap_or(model);
+            (provider, model)
+        })
+        .collect::<HashMap<_, _>>();
     let reasoning_by_provider = load_agent_cli_reasoning(&store);
     let fast_mode_by_provider = load_agent_cli_fast_mode(&store);
     let model = models_by_provider
@@ -588,7 +601,7 @@ fn configured_custom_model(app: &tauri::AppHandle) -> Option<String> {
 ///
 /// Prefer the explicit `model` arg, else the user's previously-configured
 /// custom model. The custom provider has no catalog models, so this NEVER
-/// falls back to `gpt-5-nano` (which would 404 against a local endpoint).
+/// falls back to `gpt-6-luna` (which would 404 against a local endpoint).
 fn resolve_custom_validation_model(
     explicit: Option<&str>,
     configured: Option<&str>,
@@ -633,19 +646,19 @@ pub async fn validate_ai_api_key(
     let validation_model = if provider == PROVIDER_CUSTOM {
         // The custom provider has no catalog models, so a model must be
         // supplied explicitly or already configured in settings. Never fall
-        // back to gpt-5-nano — that would 404 against a local endpoint.
+        // back to gpt-6-luna — that would 404 against a local endpoint.
         let configured = configured_custom_model(&app);
         resolve_custom_validation_model(model.as_deref(), configured.as_deref())?
     } else {
         model
             .filter(|candidate| !candidate.trim().is_empty())
             .or_else(|| {
-                catalog::recommended_models(&provider)
+                crate::ai::providers::recommended_models(&provider)
                     .into_iter()
                     .find(|candidate| candidate.recommended)
                     .map(|candidate| candidate.model_id)
             })
-            .unwrap_or_else(|| "gpt-5-nano".to_string())
+            .ok_or_else(|| user_facing_message(&AiProviderError::InvalidModel).to_string())?
     };
     let custom_base_url = if provider == PROVIDER_CUSTOM {
         base_url
@@ -1399,6 +1412,10 @@ pub(crate) fn prepare_polish_runtime(
     provider: &str,
     model: &str,
 ) -> Result<crate::ai::polish::PolishRuntime, AiPolishAttemptError> {
+    let resolved_model = catalog::resolve_model(provider, model).ok_or_else(|| {
+        AiPolishAttemptError::for_provider(AiProviderError::InvalidModel, provider)
+    })?;
+    let model = resolved_model.as_str();
     let (executor, runtime_provider) = executor_for_provider(app, provider)
         .map_err(|error| error.with_model(model.to_string()))?;
     // The subprocess runtime owns provider-specific local-agent budgets; reuse
@@ -1726,10 +1743,10 @@ mod tests {
         assert!(!selection_meets_model_requirement("gemini", ""));
         assert!(selection_meets_model_requirement(
             "gemini",
-            "gemini-2.5-flash"
+            "gemini-3.8-flash"
         ));
         assert!(!selection_meets_model_requirement("openai", ""));
-        assert!(selection_meets_model_requirement("openai", "gpt-5-nano"));
+        assert!(selection_meets_model_requirement("openai", "gpt-6-luna"));
         assert!(!selection_meets_model_requirement("unknown-provider", ""));
     }
 
@@ -1871,20 +1888,20 @@ mod tests {
     fn test_provider_models_are_contract_backed() {
         let openai_models = provider_models("openai");
         assert!(openai_models.len() >= 2);
-        assert!(openai_models.iter().any(|m| m.id == "gpt-5-nano"));
-        assert!(openai_models.iter().any(|m| m.id == "gpt-5-mini"));
+        assert!(openai_models.iter().any(|m| m.id == "gpt-6-luna"));
+        assert!(openai_models.iter().any(|m| m.id == "gpt-6.1-sol"));
 
         let gemini_models = provider_models("gemini");
         assert!(!gemini_models.is_empty());
-        assert!(gemini_models.iter().any(|m| m.id == "gemini-2.5-flash"));
+        assert!(gemini_models.iter().any(|m| m.id == "gemini-3.8-flash"));
         assert!(gemini_models
             .iter()
-            .any(|m| m.id == "gemini-2.5-flash-lite"));
+            .any(|m| m.id == "gemini-3.5-flash-lite"));
 
         let anthropic_models = provider_models("anthropic");
         assert!(!anthropic_models.is_empty());
-        assert!(anthropic_models.iter().any(|m| m.id == "claude-haiku-4-5"));
-        assert!(anthropic_models.iter().any(|m| m.id == "claude-sonnet-4-5"));
+        assert!(anthropic_models.iter().any(|m| m.id == "claude-sonnet-5-5"));
+        assert!(anthropic_models.iter().any(|m| m.id == "claude-opus-5-5"));
 
         assert!(provider_models("custom").is_empty());
         assert!(provider_models("unknown").is_empty());
@@ -1941,12 +1958,12 @@ mod tests {
     fn remember_provider_model_preserves_explicit_cli_default_selection() {
         let mut models = HashMap::from([
             ("claude-code".to_string(), "sonnet".to_string()),
-            ("openai".to_string(), "gpt-5-nano".to_string()),
+            ("openai".to_string(), "gpt-6-luna".to_string()),
         ]);
 
         remember_provider_model(&mut models, "claude-code", "");
         assert_eq!(models.get("claude-code"), Some(&String::new()));
-        assert_eq!(models.get("openai"), Some(&"gpt-5-nano".to_string()));
+        assert_eq!(models.get("openai"), Some(&"gpt-6-luna".to_string()));
 
         remember_provider_model(&mut models, "openai", "");
         assert!(!models.contains_key("openai"));
@@ -1962,7 +1979,7 @@ mod tests {
     fn valid_cli_default_selection_clears_model_reselection() {
         assert!(selection_clears_model_reselection("pi", ""));
         assert!(selection_clears_model_reselection("omp", ""));
-        assert!(selection_clears_model_reselection("openai", "gpt-5-mini"));
+        assert!(selection_clears_model_reselection("openai", "gpt-6.1-sol"));
         assert!(!selection_clears_model_reselection("openai", ""));
     }
 
@@ -2158,7 +2175,7 @@ mod tests {
         // No explicit model and no configured model -> clear error, never a probe.
         let err = resolve_custom_validation_model(None, None).unwrap_err();
         assert!(err.contains("Select a model"), "got: {}", err);
-        assert!(!err.to_lowercase().contains("gpt-5-nano"));
+        assert!(!err.to_lowercase().contains("gpt-6-luna"));
 
         // Explicit model wins.
         assert_eq!(

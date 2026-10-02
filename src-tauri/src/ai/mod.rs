@@ -1,4 +1,5 @@
 pub mod agent_cli;
+mod anthropic_current;
 pub mod catalog;
 pub mod contract;
 pub mod error;
@@ -23,3 +24,6 @@ pub mod polish_score;
 
 pub mod output_guard;
 pub mod skip;
+
+#[cfg(test)]
+mod catalog_migration_tests;

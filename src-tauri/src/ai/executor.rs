@@ -1,4 +1,5 @@
 use super::agent_cli::AgentCliRuntime;
+use super::catalog;
 use super::contract::{AiPolishRequest, AiPolishResult};
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::genai_runtime::{AiKeyResolver, GenaiRuntime};
@@ -92,6 +93,9 @@ impl AiExecutor {
         cancellation_token: CancellationToken,
         timings: &mut super::polish::PolishTimings,
     ) -> Result<AiPolishResult, AiProviderError> {
+        let mut request = request;
+        request.model_id = catalog::resolve_model(&request.provider_id, &request.model_id)
+            .ok_or(AiProviderError::UnsupportedProvider)?;
         let start = Instant::now();
         let budget = Duration::from_millis(request.timeout_ms);
         let deadline = start + budget;

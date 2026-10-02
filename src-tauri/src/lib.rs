@@ -1988,10 +1988,10 @@ fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::V
 }
 
 fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {
-    if provider == "custom" {
+    if provider == "custom" || crate::ai::catalog::runtime_kind(provider) == Some("agent_cli") {
         return !model.trim().is_empty();
     }
-    crate::ai::providers::recommended_models(provider)
+    crate::ai::catalog::all_provider_models(provider)
         .iter()
         .any(|candidate| candidate.model_id == model)
 }

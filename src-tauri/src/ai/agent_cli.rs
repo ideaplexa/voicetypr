@@ -29,6 +29,12 @@
 //! NEVER `sh -c`. Isolation flags are provider policy in `AgentCliSpec`; the
 //! child also runs from an EMPTY temp cwd so it discovers no project config.
 
+mod catalog_refresh;
+use catalog_refresh::{
+    apply_claude_effort_env, curated_claude_models, parse_omp_default_model,
+    parse_pi_default_model, validate_discovered_selection,
+};
+
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::providers::{
@@ -145,7 +151,8 @@ const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
         "--no-session-persistence",
     ],
     required_capability_flags: &["--no-session-persistence"],
-    default_model: None,
+    // Founder decision 2026-10-03: Opus 5.5 is the Claude Code Polish default.
+    default_model: Some("opus"),
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::ClaudeEffortLowIfSupported,
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
@@ -535,10 +542,8 @@ fn cold_argv_for_model_with_options(
             ]);
         }
         ReasoningPolicy::ClaudeEffortLowIfSupported if capabilities.effort => {
-            let level = valid_level.unwrap_or("low");
-            if level != "off" {
-                argv.extend(["--effort".to_string(), level.to_string()]);
-            }
+            let level = valid_level.filter(|level| *level != "off").unwrap_or("low");
+            argv.extend(["--effort".to_string(), level.to_string()]);
         }
         ReasoningPolicy::ClaudeEffortLowIfSupported => {}
     }
@@ -596,6 +601,16 @@ impl AgentCliRuntime {
     pub async fn polish(&self, request: &AiPolishRequest) -> Result<String, MappedAiProviderError> {
         let spec = spec_for(&request.provider_id)
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
+
+        // pi/omp own their catalogs; never pass a removed saved selector or
+        // delegate to an unavailable CLI default. Discovery also lets the
+        // chooser offer valid models when the external default has gone stale.
+        if matches!(request.provider_id.as_str(), PROVIDER_PI | PROVIDER_OMP) {
+            validate_discovered_selection(
+                &list_models(&request.provider_id).await?,
+                &request.model_id,
+            )?;
+        }
 
         let binary_path = resolve_binary(spec.binary)
             .await
@@ -1134,6 +1149,7 @@ async fn cold_spawn_and_collect(
     for (name, value) in spec.static_env {
         command.env(name, value);
     }
+    apply_claude_effort_env(&mut command, spec, argv);
     apply_no_window(&mut command);
 
     let capture = run_isolated_command(
@@ -1905,24 +1921,6 @@ fn named_cli_default(
     cli_default_model("Default", source_provider)
 }
 
-fn curated_claude_models() -> Vec<AgentCliModel> {
-    let mut models = vec![named_cli_default("Claude", None, None)];
-    models.extend(
-        [("haiku", "Haiku"), ("sonnet", "Sonnet"), ("opus", "Opus")]
-            .into_iter()
-            .map(|(id, name)| AgentCliModel {
-                id: id.to_string(),
-                name: name.to_string(),
-                recommended: false,
-                reasoning: false,
-                context_window: None,
-                source_provider: None,
-                cli_default: false,
-            }),
-    );
-    models
-}
-
 fn find_pi_response(stdout: &[u8], response_id: &str) -> Option<Value> {
     let text = String::from_utf8_lossy(stdout);
     for raw_line in text.lines() {
@@ -1948,32 +1946,6 @@ fn parse_pi_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProvider
     let value = find_pi_response(stdout, PI_MODELS_RESPONSE_ID)
         .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
     parse_pi_models_response(&value)
-}
-
-fn parse_pi_default_model(stdout: &[u8]) -> Result<AgentCliModel, MappedAiProviderError> {
-    let value = find_pi_response(stdout, PI_STATE_RESPONSE_ID)
-        .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let model = value
-        .get("data")
-        .and_then(|data| data.get("model"))
-        .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let model_id = model
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| !id.trim().is_empty())
-        .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let name = model
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| humanize_cli_model_id(model_id));
-    let source_provider = model
-        .get("provider")
-        .and_then(Value::as_str)
-        .filter(|provider| !provider.trim().is_empty())
-        .map(str::to_string);
-    Ok(named_cli_default("Pi", Some(&name), source_provider))
 }
 
 fn parse_pi_models_response(value: &Value) -> Result<Vec<AgentCliModel>, MappedAiProviderError> {
@@ -2063,35 +2035,6 @@ fn parse_omp_model(value: &Value) -> Result<AgentCliModel, MappedAiProviderError
         source_provider,
         cli_default: false,
     })
-}
-
-fn parse_omp_default_model(
-    stdout: &[u8],
-    models: &[AgentCliModel],
-) -> Result<AgentCliModel, MappedAiProviderError> {
-    let text = String::from_utf8_lossy(stdout);
-    let payload = extract_json_payload(&text).unwrap_or(text.trim());
-    let value: Value = serde_json::from_str(payload)
-        .map_err(|_| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let configured = value
-        .get("value")
-        .and_then(|roles| roles.get("default"))
-        .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let selector = strip_reasoning_suffix(configured);
-    let matched = models.iter().find(|model| model.id == selector);
-    let name = matched
-        .map(|model| model.name.clone())
-        .unwrap_or_else(|| humanize_cli_model_id(selector));
-    let source_provider = matched
-        .and_then(|model| model.source_provider.clone())
-        .or_else(|| {
-            selector
-                .split_once('/')
-                .map(|(provider, _)| provider.to_string())
-        });
-    Ok(named_cli_default("oh-my-pi", Some(&name), source_provider))
 }
 
 fn strip_reasoning_suffix(selector: &str) -> &str {
@@ -2369,8 +2312,10 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
         PROVIDER_CLAUDE_CODE => Ok(curated_claude_models()),
         PROVIDER_PI => {
             let payload = run_pi_model_listing(&model_binary(&PI_SPEC).await?).await?;
-            let mut models = vec![parse_pi_default_model(&payload)?];
-            models.extend(parse_pi_models(&payload)?);
+            let mut models = parse_pi_models(&payload)?;
+            if let Ok(default) = parse_pi_default_model(&payload) {
+                models.insert(0, default);
+            }
             Ok(models)
         }
         PROVIDER_OMP => {
@@ -2378,8 +2323,10 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             let models_payload = run_model_list_command(&binary, OMP_MODEL_LIST_ARGV).await?;
             let models = parse_omp_models(&models_payload)?;
             let default_payload = run_model_list_command(&binary, OMP_DEFAULT_MODEL_ARGV).await?;
-            let mut result = vec![parse_omp_default_model(&default_payload, &models)?];
-            result.extend(models);
+            let mut result = models;
+            if let Ok(default) = parse_omp_default_model(&default_payload, &result) {
+                result.insert(0, default);
+            }
             Ok(result)
         }
         PROVIDER_CODEX => {
@@ -3000,7 +2947,7 @@ mod tests {
                 .iter()
                 .map(|model| model.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["", "haiku", "sonnet", "opus"]
+            vec!["", "fable", "opus", "sonnet"]
         );
         assert_eq!(models[0].name, "Default");
         assert!(models[0].recommended);
@@ -3010,7 +2957,7 @@ mod tests {
 
     #[test]
     fn cli_default_model_is_explicit_empty_selection() {
-        let model = named_cli_default("Codex", Some("GPT-5.6 Sol"), Some("openai".to_string()));
+        let model = named_cli_default("Codex", Some("GPT-6.1 Sol"), Some("openai".to_string()));
         assert_eq!(model.id, "");
         assert_eq!(model.name, "Default");
         assert!(model.recommended);
@@ -3124,22 +3071,22 @@ mod tests {
 
     #[test]
     fn discovery_parsers_preserve_defaults_and_selectable_models() {
-        let pi = br#"{"id":"voicetypr-state","data":{"model":{"provider":"openai-codex","id":"gpt-5.6-sol","name":"GPT-5.6 Sol"}}}"#;
+        let pi = br#"{"id":"voicetypr-state","data":{"model":{"provider":"openai-codex","id":"gpt-6.1-sol","name":"GPT-6.1 Sol"}}}"#;
         assert_eq!(parse_pi_default_model(pi).unwrap().name, "Default");
 
         let omp_models = parse_omp_models(
-            br#"{"models":[{"provider":"openai-codex","selector":"openai-codex/gpt-5.6-sol","name":"GPT-5.6 Sol"}]}"#,
+            br#"{"models":[{"provider":"openai-codex","selector":"openai-codex/gpt-6.1-sol","name":"GPT-6.1 Sol"}]}"#,
         )
         .unwrap();
         let omp_default = parse_omp_default_model(
-            br#"{"value":{"default":"openai-codex/gpt-5.6-sol:high"}}"#,
+            br#"{"value":{"default":"openai-codex/gpt-6.1-sol:high"}}"#,
             &omp_models,
         )
         .unwrap();
         assert_eq!(omp_default.name, "Default");
 
         let codex = parse_codex_default_model(
-            br#"{"checks":{"config.load":{"details":{"model":"gpt-5.6-sol","model_provider":"openai"}}}}"#,
+            br#"{"checks":{"config.load":{"details":{"model":"gpt-6.1-sol","model_provider":"openai"}}}}"#,
         )
         .unwrap();
         assert_eq!(codex.name, "Default");
@@ -3165,8 +3112,8 @@ mod tests {
         assert_eq!(grok_models[0].id, "grok-4.5");
 
         let selectors =
-            parse_selector_models(b"openai/gpt-5.6-sol\nanthropic/claude-sonnet-5\n").unwrap();
-        assert_eq!(selectors[0].name, "GPT 5.6 Sol");
+            parse_selector_models(b"openai/gpt-6.1-sol\nanthropic/claude-sonnet-5\n").unwrap();
+        assert_eq!(selectors[0].name, "GPT 6.1 Sol");
         assert_eq!(selectors[0].source_provider.as_deref(), Some("openai"));
     }
 
@@ -3180,7 +3127,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_cold_argv_uses_cli_default_when_model_is_empty() {
+    fn claude_code_cold_argv_uses_opus_when_model_is_empty() {
         let argv = cold_argv(&CLAUDE_CODE_SPEC, "my system prompt");
         assert_eq!(
             argv,
@@ -3188,6 +3135,8 @@ mod tests {
                 "-p",
                 "--setting-sources",
                 "",
+                "--model",
+                "opus",
                 "--tools",
                 "",
                 "--strict-mcp-config",
@@ -3199,7 +3148,9 @@ mod tests {
                 "json",
             ]
         );
-        assert!(!argv.iter().any(|arg| arg == "--model"));
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "opus"));
         assert!(!argv.contains(&"--bare".to_string()));
     }
 
@@ -3211,7 +3162,7 @@ mod tests {
         let argv = cold_argv(&CLAUDE_CODE_SPEC, "polish this");
         assert!(!argv.contains(&dangerous_input.to_string()));
         assert!(argv.iter().all(|arg| !arg.contains("sh -c")));
-        assert_eq!(argv.len(), 12);
+        assert_eq!(argv.len(), 14);
     }
 
     #[test]
@@ -3476,7 +3427,7 @@ mod tests {
         let argv = cold_argv_for_model_with_reasoning(
             &PI_SPEC,
             "prompt",
-            "openai/gpt-5.4",
+            "openai/gpt-6.1-sol",
             ClaudeCapabilities::default(),
             Some("minimal"),
         );
@@ -3554,7 +3505,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_help_fallback_uses_setting_sources_and_cli_default() {
+    fn claude_help_fallback_uses_setting_sources_and_opus() {
         let argv = cold_argv_for_model(
             &CLAUDE_CODE_SPEC,
             "prompt",
@@ -3564,7 +3515,9 @@ mod tests {
         assert!(argv
             .windows(2)
             .any(|pair| pair[0] == "--setting-sources" && pair[1].is_empty()));
-        assert!(!argv.iter().any(|arg| arg == "--model"));
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "opus"));
         assert!(!argv.contains(&"--safe-mode".to_string()));
         assert!(!argv.contains(&"--effort".to_string()));
     }

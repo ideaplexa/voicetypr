@@ -308,15 +308,15 @@ export function createFixtures(options: PreviewOptions) {
   const aiSettings: AISettings = {
     enabled: true,
     provider: "openai",
-    model: "gpt-4.1-mini",
+    model: "gpt-6-luna",
     hasApiKey: true,
-    modelsByProvider: { openai: "gpt-4.1-mini" },
+    modelsByProvider: { openai: "gpt-6-luna" },
     reasoningByProvider: {},
     fastModeByProvider: {},
   };
   const enhancement: EnhancementOptions = { preset: "CleanDictation" };
   const providerModels: AIProviderModel[] = [
-    { id: "gpt-4.1-mini", name: "GPT-4.1 mini", recommended: true },
+    { id: "gpt-6-luna", name: "GPT-6 Luna", recommended: true },
   ];
   const acceleration: AccelerationStatus = {
     mode: "auto",

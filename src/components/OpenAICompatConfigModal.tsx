@@ -142,7 +142,7 @@ export function OpenAICompatConfigModal({
               <Label htmlFor="model">Model ID</Label>
               <Input
                 id="model"
-                placeholder="e.g. gpt-5-nano, gpt-5-mini"
+                placeholder="e.g. gpt-6-luna, gpt-6.1-sol"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />

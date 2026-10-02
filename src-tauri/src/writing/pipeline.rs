@@ -743,7 +743,7 @@ mod tests {
         crate::commands::ai::AiPolishAttemptError {
             error,
             provider_id: "openai".to_string(),
-            model_id: "gpt-4.1-mini".to_string(),
+            model_id: "gpt-6-luna".to_string(),
         }
     }
 
@@ -823,7 +823,7 @@ mod tests {
             outcome.execution,
             Some(AiExecutionMetadata {
                 provider_id: "openai".to_string(),
-                model_id: "gpt-4.1-mini".to_string(),
+                model_id: "gpt-6-luna".to_string(),
             })
         );
         assert_eq!(warnings.len(), 1);
