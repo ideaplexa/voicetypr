@@ -12,7 +12,7 @@ describe("RecordingPill CSS hidden guards", () => {
 
     for (const selector of [
       ".pill-surface[hidden]",
-      ".pill-dots[hidden]",
+      ".pill-rest-dot[hidden]",
       ".pill-bars[hidden]",
       ".pill-status[hidden]",
       ".pill-preview[hidden]",

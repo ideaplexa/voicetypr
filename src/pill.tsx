@@ -7,6 +7,8 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import { createPillIcon as createIcon } from "@/pill-icons";
 import "./pill.css";
+import { DEFAULT_PILL_INDICATOR_MODE } from "@/types";
+import { applyPillGeometry, reportPillHitRegions, type PillGeometry } from "@/pill-geometry";
 
 type BackendRecordingState =
   | "idle"
@@ -49,7 +51,7 @@ interface TauriEvent<T> {
 
 type UnlistenFn = () => void;
 type ListenFn = <T>(event: string, handler: (event: TauriEvent<T>) => void) => Promise<UnlistenFn>;
-type InvokeFn = <T = unknown>(command: string) => Promise<T>;
+type InvokeFn = <T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type TimeoutHandle = number | ReturnType<typeof setTimeout>;
 type TimeoutFn = (handler: () => void, timeout: number) => TimeoutHandle;
 type ClearTimeoutFn = (timeout: TimeoutHandle) => void;
@@ -107,7 +109,7 @@ function normalizeMode(mode: SettingsPayload["pill_indicator_mode"]): PillIndica
   if (mode === "never" || mode === "always" || mode === "when_recording") {
     return mode;
   }
-  return "when_recording";
+  return DEFAULT_PILL_INDICATOR_MODE;
 }
 
 function formatElapsed(seconds: number) {
@@ -166,10 +168,9 @@ function createPillDom(rootElement: HTMLElement): PillDom {
   const root = createEl("div", "pill-root");
   const surface = createEl("div", "pill-surface");
 
-  const idle = createEl("div", "pill-dots");
+  const idle = createEl("div", "pill-rest-dot");
   idle.setAttribute("aria-label", "Recording idle");
-  idle.dataset.testid = "pill-dots";
-  idle.append(createEl("span"), createEl("span"), createEl("span"));
+  idle.dataset.testid = "pill-rest-dot";
 
   const bars = createEl("div", "pill-bars");
   bars.dataset.testid = "pill-bars";
@@ -291,7 +292,7 @@ export function createRecordingPill(
   const cancelTimeout = deps.clearTimeout ?? clearTimeout;
   const dom = createPillDom(rootElement);
 
-  let mode: PillIndicatorMode = "when_recording";
+  let mode: PillIndicatorMode = DEFAULT_PILL_INDICATOR_MODE;
   let style: PillIndicatorStyle = "compact";
   let position: PillIndicatorPosition = "bottom-center";
   let streamingPreviewEnabled = false;
@@ -319,6 +320,9 @@ export function createRecordingPill(
   let demoRunId = 0;
   let demoTimeouts: TimeoutHandle[] = [];
   const unlisteners: UnlistenFn[] = [];
+  const stopHitRegions = typeof ResizeObserver === "undefined" ? () => {} : reportPillHitRegions(dom.surface, (rects) => {
+    void tauriInvoke("pill_set_hit_regions", { rects }).catch(() => {});
+  });
 
   const visibleState = (): VisibleState =>
     terminalOutcome
@@ -694,7 +698,7 @@ export function createRecordingPill(
       streamingPreviewDemo = settings.streaming_preview_demo === true;
     } catch {
       if (isDestroyed) return;
-      mode = "when_recording";
+      mode = DEFAULT_PILL_INDICATOR_MODE;
       style = "compact";
       position = "bottom-center";
       streamingPreviewEnabled = false;
@@ -733,6 +737,22 @@ export function createRecordingPill(
       }
     });
   };
+
+  subscribe<PillGeometry>("pill-geometry", ({ payload }) => {
+    position = payload.anchor;
+    applyPillGeometry(dom.root, payload);
+    render();
+  });
+  void tauriInvoke<PillGeometry>("pill_get_geometry").then((geometry) => {
+    if (!isDestroyed && typeof geometry.anchor === "string") {
+      position = geometry.anchor;
+      applyPillGeometry(dom.root, geometry);
+      render();
+    }
+  }).catch(() => {});
+  subscribe<{ inside: boolean }>("pill-pointer", ({ payload }) => {
+    dom.root.dataset.pointerInside = String(payload.inside);
+  });
 
   dom.cancel.addEventListener("click", () => {
     if (isCancelling) return;
@@ -821,6 +841,7 @@ export function createRecordingPill(
   return {
     destroy: () => {
       isDestroyed = true;
+      stopHitRegions();
       clearFeedback();
       stopTimer();
       stopAudioListener();

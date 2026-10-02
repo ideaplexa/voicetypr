@@ -1,4 +1,4 @@
-import type { AppSettings, LicenseStatus, ModelInfo, TranscriptionHistory } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type LicenseStatus, type ModelInfo, type TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
 import type { ShortcutActionDefinition, ShortcutSettings } from "@/types/shortcuts";
 import type { AiProvider, AIProviderModel } from "@/types/providers";
@@ -251,7 +251,7 @@ export function createFixtures(options: PreviewOptions) {
     keep_transcription_in_clipboard: false,
     play_sound_on_recording: true,
     play_sound_on_transcription_complete: true,
-    pill_indicator_mode: "when_recording",
+    pill_indicator_mode: DEFAULT_PILL_INDICATOR_MODE,
     pill_indicator_style: "full",
     pill_indicator_position: "bottom-center",
     transcription_mode: "live_preview",

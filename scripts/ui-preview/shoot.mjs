@@ -81,7 +81,7 @@ try {
       for (const state of ["idle", "listening", "preview", "transcribing", "formatting", "pasted", "copied", "no_permission", "error", "too_short"]) {
         const name = `pill-${state}`;
         if (!shouldCapture(platform, theme, name)) continue;
-        const page = await browser.newPage({ viewport: { width: 760, height: 180 }, deviceScaleFactor: 2 });
+        const page = await browser.newPage({ viewport: { width: 440, height: 420 }, deviceScaleFactor: 2 });
         page.on("pageerror", (error) => errors.push(`${platform}/${theme}/${name}: ${error.stack ?? error}`));
         await page.goto(`${baseUrl}/pill-preview.html?platform=${platform}&theme=${theme}&state=${state}`, { waitUntil: "networkidle" });
         await page.waitForSelector('html[data-pill-preview-ready="true"]');

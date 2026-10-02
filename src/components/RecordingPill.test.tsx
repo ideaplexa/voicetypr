@@ -110,12 +110,12 @@ describe("RecordingPill", () => {
     expect(pillSurface()).not.toBeVisible();
   });
 
-  it("shows idle dots when the indicator mode is always", async () => {
+  it("shows resting dot when the indicator mode is always", async () => {
     pillIndicatorMode = "always";
     createTestPill();
 
     await waitFor(() => {
-      expect(getByTestId(root, "pill-dots")).toBeVisible();
+      expect(getByTestId(root, "pill-rest-dot")).toBeVisible();
     });
     expect(pillRoot()).toHaveAttribute("data-state", "idle");
   });
@@ -131,7 +131,7 @@ describe("RecordingPill", () => {
     emitMockEvent("settings-changed");
 
     await waitFor(() => {
-      expect(getByTestId(root, "pill-dots")).toBeVisible();
+      expect(getByTestId(root, "pill-rest-dot")).toBeVisible();
     });
   });
 
@@ -400,14 +400,14 @@ describe("RecordingPill", () => {
     }
   });
 
-  it("returns to ready dots after feedback in always mode", async () => {
+  it("returns to resting dot after feedback in always mode", async () => {
     vi.useFakeTimers();
     pillIndicatorMode = "always";
     createTestPill();
     await vi.advanceTimersByTimeAsync(0);
     emitMockEvent("paste-outcome", { outcome: "pasted", words: 2 });
     vi.advanceTimersByTime(1200);
-    expect(getByTestId(root, "pill-dots")).toBeVisible();
+    expect(getByTestId(root, "pill-rest-dot")).toBeVisible();
   });
 
   it("uses Ctrl+V for Windows copied feedback", async () => {

@@ -11,10 +11,7 @@ use super::settings::{resolve_pill_indicator_mode, Settings};
 static PENDING_HIDE: Mutex<Option<u64>> = Mutex::new(None);
 
 fn pill_focus_safe() -> bool {
-    // Neither platform is proven safe yet (plans/079): the pinned macOS
-    // NSPanel can become key; Windows applies NOACTIVATE without checking it.
-    // Keep the historical hide-before-insertion order until that is resolved.
-    false
+    cfg!(any(target_os = "macos", target_os = "windows"))
 }
 
 fn pill_mode(app: &AppHandle) -> String {
@@ -75,6 +72,7 @@ pub(crate) fn schedule_terminal_hide(app: &AppHandle, generation: u64, outcome: 
                 *pending = None;
                 if keep_visible_for_terminal(&hide_app) {
                     if let Some(window) = hide_app.get_webview_window("pill") {
+                        crate::pill::hit_test::stop(&hide_app);
                         if let Err(error) = window.hide() {
                             log::error!("Failed to hide terminal pill window: {}", error);
                         }

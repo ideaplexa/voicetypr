@@ -1359,7 +1359,7 @@ fn emit_pill_toast<R: Runtime>(
     let id = next_toast_id();
 
     if let Some(toast_window) = app.get_webview_window("toast") {
-        let _ = toast_window.show();
+        let _ = crate::pill::native::show(&toast_window);
 
         if !persistent {
             let app_clone = app.clone();
@@ -1385,7 +1385,7 @@ fn emit_pill_toast<R: Runtime>(
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if let Some(toast_window) = app_clone.get_webview_window("toast") {
-                let _ = toast_window.show();
+                let _ = crate::pill::native::show(&toast_window);
                 if !persistent {
                     tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
                     if TOAST_ID_COUNTER.load(AtomicOrdering::SeqCst) == id {
@@ -5979,7 +5979,7 @@ pub async fn start_recording(
 
                 if last_emit.elapsed() >= emit_interval && level_changed {
                     // Only emit to pill window - main window doesn't need audio levels
-                    let _ = emit_to_window(&app_for_levels, "pill", "audio-level", level);
+                    let _ = app_for_levels.emit_to("pill", "audio-level", level);
                     last_emit = std::time::Instant::now();
                     last_emitted_level = level;
                 }

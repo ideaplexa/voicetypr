@@ -139,7 +139,7 @@ impl Default for Settings {
             play_sound_on_recording: true,
             play_sound_on_transcription_complete: true,
             play_sound_on_paste_success: true,
-            pill_indicator_mode: "when_recording".to_string(), // Default to showing only when recording
+            pill_indicator_mode: "always".to_string(), // New installs keep the resting dot visible
             pill_indicator_style: default_pill_indicator_style(),
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
@@ -1040,7 +1040,9 @@ pub async fn save_settings(
     }
 
     // Handle pill window visibility when pill_indicator_mode setting changes
-    if old_pill_indicator_mode != settings.pill_indicator_mode {
+    if old_pill_indicator_mode != settings.pill_indicator_mode
+        || (!old_onboarding_completed && settings.onboarding_completed)
+    {
         let app_state = app.state::<crate::AppState>();
         let current_state = app_state.get_current_state();
         let is_idle = matches!(current_state, crate::RecordingState::Idle);
@@ -1054,7 +1056,7 @@ pub async fn save_settings(
         // Determine if pill should be visible based on new mode and current state
         let should_show = match settings.pill_indicator_mode.as_str() {
             "never" => false,
-            "always" => true,
+            "always" => settings.onboarding_completed,
             "when_recording" => !is_idle, // Show only when recording
             _ => !is_idle,                // Default to when_recording behavior
         };
@@ -1084,7 +1086,7 @@ pub async fn save_settings(
         // Check if pill should be visible based on current mode
         let should_show = match settings.pill_indicator_mode.as_str() {
             "never" => false,
-            "always" => true,
+            "always" => settings.onboarding_completed,
             "when_recording" => {
                 let app_state = app.state::<crate::AppState>();
                 let current_state = app_state.get_current_state();
@@ -1751,9 +1753,17 @@ mod tests {
 
     #[test]
     fn resolve_pill_indicator_mode_uses_default() {
-        let resolved = resolve_pill_indicator_mode(None, None, "when_recording".to_string());
-
-        assert_eq!(resolved, "when_recording");
+        let resolved =
+            resolve_pill_indicator_mode(None, None, super::Settings::default().pill_indicator_mode);
+        assert_eq!(resolved, "always");
+        assert_eq!(
+            resolve_pill_indicator_mode(
+                Some("when_recording".into()),
+                None,
+                super::Settings::default().pill_indicator_mode
+            ),
+            "when_recording"
+        );
     }
 
     #[test]

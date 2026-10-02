@@ -20,6 +20,7 @@ mod license;
 mod media;
 mod menu;
 mod parakeet;
+mod pill;
 mod product_analytics;
 pub mod provider_capabilities;
 mod recognition;
@@ -958,6 +959,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Initialize unified application state
             app.manage(AppState::new());
+            app.manage(crate::pill::hit_test::PointerState::default());
             log::info!("🧠 App state managed and ready");
 
             // Initialize window manager after app state is managed
@@ -1019,7 +1021,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 // Only show pill on startup if mode is "always"
-                if pill_mode == "always" {
+                if pill_mode == "always" && app_handle_for_pill.store("settings").ok().and_then(|store| store.get("onboarding_completed")).and_then(|v| v.as_bool()).unwrap_or(false) {
                     log::info!("Startup: Showing pill because mode is 'always'");
                     if let Err(e) = crate::commands::window::show_pill_widget(app_handle_for_pill).await {
                         log::warn!("Failed to show pill on startup: {}", e);
@@ -1464,10 +1466,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         })
                         .flatten()
                         .unwrap_or((1440.0, 900.0));
-                    let pill_x = (screen_width - crate::window_manager::PILL_WIDTH) / 2.0;
-                    let pill_y = screen_height - crate::window_manager::PILL_HEIGHT - 10.0;
+                    let pill_x = (screen_width - crate::pill::geometry::LEGACY_WIDTH) / 2.0;
+                    let pill_y = screen_height - crate::pill::geometry::LEGACY_HEIGHT - 10.0;
                     let toast_x = pill_x
-                        + (crate::window_manager::PILL_WIDTH
+                        + (crate::pill::geometry::LEGACY_WIDTH
                             - crate::window_manager::TOAST_WIDTH)
                             / 2.0;
                     let toast_y = pill_y
@@ -1475,54 +1477,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         - crate::window_manager::FLOATING_WINDOW_GAP;
                     ((pill_x, pill_y), (toast_x, toast_y))
                 };
-
-                // macOS: create pill window and convert to NSPanel
-                #[cfg(target_os = "macos")]
-                {
-                    // Properties aligned with window_manager.rs for consistency.
-                    let pill_builder = WebviewWindowBuilder::new(app, "pill", WebviewUrl::App("pill".into()))
-                        .title("Recording")
-                        .resizable(false)
-                        .maximizable(false)
-                        .minimizable(false)
-                        .decorations(false)
-                        .always_on_top(true)
-                        .visible_on_all_workspaces(true)
-                        .content_protected(true)
-                        .skip_taskbar(true)
-                        .transparent(true)
-                        .shadow(false)  // Prevent window shadow on macOS
-                        .inner_size(crate::window_manager::PILL_WIDTH, crate::window_manager::PILL_HEIGHT)
-                        .accept_first_mouse(true)
-                        .position(pos_x, pos_y)
-                        .visible(true)  // Always visible (controlled by show_pill_indicator setting)
-                        .focused(false);  // Don't steal focus
-
-                    // Disable context menu only in production builds
-                    #[cfg(not(debug_assertions))]
-                    let pill_builder = pill_builder.initialization_script("document.addEventListener('contextmenu', e => e.preventDefault());");
-
-                    #[cfg(debug_assertions)]
-                    let pill_builder = pill_builder;
-
-                    let pill_window = pill_builder.build()?;
-                    if let Err(error) = pill_window.set_ignore_cursor_events(true) {
-                        log::warn!("Failed to make pill window click-through: {}", error);
-                    }
-
-                    // Convert to NSPanel to prevent focus stealing
-                    use tauri_nspanel::WebviewWindowExt;
-                    pill_window.to_panel().map_err(|e| format!("Failed to convert to NSPanel: {:?}", e))?;
-
-                    // Store the pill window reference in WindowManager
-                    let app_state = app.state::<AppState>();
-                    if let Some(window_manager) = app_state.get_window_manager() {
-                        window_manager.set_pill_window(pill_window);
-                        log::info!("Created pill window as NSPanel and stored in WindowManager");
-                    } else {
-                        log::warn!("Could not store pill window reference - WindowManager not available");
-                    }
-                }
 
                 // Create toast window for feedback messages - all platforms
                 log::info!(
@@ -1546,6 +1500,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         crate::window_manager::TOAST_HEIGHT,
                     )
                     .position(toast_x, toast_y)
+                    .focusable(false)
+                    .focused(false)
                     .visible(false); // Starts hidden
 
                 #[cfg(not(debug_assertions))]
@@ -1557,12 +1513,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
                 let toast_window = toast_builder.build()?;
 
-                // macOS: Convert toast to NSPanel to match pill behavior
-                #[cfg(target_os = "macos")]
-                {
-                    use tauri_nspanel::WebviewWindowExt;
-                    toast_window.to_panel().map_err(|e| format!("Failed to convert toast to NSPanel: {:?}", e))?;
-                }
+                crate::pill::native::configure(&toast_window)?;
 
                 log::info!("Created toast window for feedback");
             }
@@ -1687,6 +1638,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             export_transcriptions,
             save_transcript_file,
             get_application_icon,
+            crate::pill::hit_test::pill_set_hit_regions,
+            crate::pill::pill_get_geometry,
             show_pill_widget,
             hide_pill_widget,
             close_pill_widget,

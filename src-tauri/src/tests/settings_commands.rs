@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn test_pill_indicator_mode_default() {
         let settings = Settings::default();
-        assert_eq!(settings.pill_indicator_mode, "when_recording");
+        assert_eq!(settings.pill_indicator_mode, "always");
     }
 
     #[test]

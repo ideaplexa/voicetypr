@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/contexts/SettingsContext";
-import type { PillIndicatorMode, PillIndicatorPosition, PillIndicatorStyle } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type PillIndicatorMode, type PillIndicatorPosition, type PillIndicatorStyle } from "@/types";
 
 export function RecordingIndicatorCard() {
   const { settings, updateSettings } = useSettings();
@@ -41,7 +41,7 @@ export function RecordingIndicatorCard() {
                   { value: "always", label: "Always" },
                   { value: "when_recording", label: "While recording" },
                 ]}
-                value={settings.pill_indicator_mode ?? "when_recording"}
+                value={settings.pill_indicator_mode ?? DEFAULT_PILL_INDICATOR_MODE}
                 onValueChange={(value) => {
                   if (value != null)
                     void updateSettings({ pill_indicator_mode: value as PillIndicatorMode });

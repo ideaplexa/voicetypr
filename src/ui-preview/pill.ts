@@ -20,8 +20,11 @@ if (root) {
               pill_indicator_mode: "always",
               pill_indicator_style: params.get("style") ?? "full",
               transcription_mode: "live_preview",
+              pill_indicator_position: params.get("position") ?? "bottom-center",
             }
-          : { state: "idle", error: null };
+          : command === "pill_get_geometry"
+            ? { anchor: params.get("position") ?? "bottom-center", anchorX: params.get("position")?.endsWith("-left") ? 0 : params.get("position")?.endsWith("-right") ? 440 : 220, anchorY: params.get("position")?.startsWith("top-") ? 6 : 414 }
+            : { state: "idle", error: null };
       return value as T;
     },
     listen: async <T>(event: string, handler: (event: { payload: T }) => void) => {

@@ -5,8 +5,8 @@ use crate::utils::logger::*;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-pub(crate) const PILL_WIDTH: f64 = 260.0;
-pub(crate) const PILL_HEIGHT: f64 = 64.0;
+pub(crate) const PILL_WIDTH: f64 = crate::pill::geometry::CANVAS_WIDTH;
+pub(crate) const PILL_HEIGHT: f64 = crate::pill::geometry::CANVAS_HEIGHT;
 pub(crate) const TOAST_WIDTH: f64 = 400.0;
 pub(crate) const TOAST_HEIGHT: f64 = 80.0;
 pub(crate) const FLOATING_WINDOW_GAP: f64 = 8.0;
@@ -35,6 +35,7 @@ pub struct WindowManager {
     app_handle: AppHandle,
     main_window: Arc<Mutex<Option<WebviewWindow>>>,
     pill_window: Arc<Mutex<Option<WebviewWindow>>>,
+    pill_creation: Arc<tokio::sync::Mutex<()>>,
 }
 
 fn calculate_pill_position(
@@ -42,8 +43,8 @@ fn calculate_pill_position(
     desktop_area: DesktopArea,
     edge_offset: f64,
 ) -> (f64, f64) {
-    let pill_width = PILL_WIDTH;
-    let pill_height = PILL_HEIGHT;
+    let pill_width = crate::pill::geometry::LEGACY_WIDTH;
+    let pill_height = crate::pill::geometry::LEGACY_HEIGHT;
 
     // Horizontal position: left, center, or right
     let x = if position.ends_with("-left") {
@@ -104,9 +105,9 @@ fn logical_desktop_area(
 }
 
 fn calculate_toast_position(position: &str, pill_x: f64, pill_y: f64) -> (f64, f64) {
-    let x = pill_x + (PILL_WIDTH - TOAST_WIDTH) / 2.0;
+    let x = pill_x + (crate::pill::geometry::LEGACY_WIDTH - TOAST_WIDTH) / 2.0;
     let y = if position.starts_with("top-") {
-        pill_y + PILL_HEIGHT + FLOATING_WINDOW_GAP
+        pill_y + crate::pill::geometry::LEGACY_HEIGHT + FLOATING_WINDOW_GAP
     } else {
         pill_y - TOAST_HEIGHT - FLOATING_WINDOW_GAP
     };
@@ -139,6 +140,7 @@ impl WindowManager {
             app_handle,
             main_window: Arc::new(Mutex::new(main_window)),
             pill_window: Arc::new(Mutex::new(None)),
+            pill_creation: Arc::new(tokio::sync::Mutex::new(())),
         };
 
         log_with_context(
@@ -244,49 +246,17 @@ impl WindowManager {
 
     /// Internal implementation of show_pill_window
     async fn show_pill_window_internal(&self) -> Result<(), String> {
-        // First, check if we have a valid existing window (hold lock briefly)
-        {
-            let mut pill_guard = match self.pill_window.lock() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    let msg = format!("Pill window mutex is poisoned: {}", e);
-                    log::error!("{}", msg);
-                    return Err(msg);
-                }
-            };
-
-            // Check if we have an existing valid pill window
-            let existing_valid = if let Some(ref existing_window) = *pill_guard {
-                existing_window.is_closable().is_ok()
-            } else if let Some(existing_window) = self.app_handle.get_webview_window("pill") {
-                if existing_window.is_closable().is_ok() {
-                    *pill_guard = Some(existing_window);
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if existing_valid {
-                if let Some(ref existing_window) = *pill_guard {
-                    // Window exists and is valid - just show it and reposition
-                    existing_window.show().map_err(|e| e.to_string())?;
-
-                    // Always position at center-bottom
-                    use tauri::LogicalPosition;
-                    let (x, y) = self.calculate_center_position();
-                    let _ = existing_window.set_position(LogicalPosition::new(x, y));
-
-                    log::debug!("Showing existing pill window");
-                    return Ok(());
-                }
-            }
-
-            // Clear stale reference if any
-            *pill_guard = None;
-            // Guard is dropped here at end of block
+        let _creation = self.pill_creation.lock().await;
+        // Serialize creation, and drop the cache lock before dispatching UI work.
+        if let Some(window) = self.get_pill_window() {
+            let (x, y) = self.calculate_center_position();
+            window
+                .set_position(tauri::LogicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+            self.emit_pill_geometry(&window);
+            crate::pill::native::show(&window)?;
+            crate::pill::hit_test::start(&window);
+            return Ok(());
         }
 
         // Close any orphaned pill window that might exist in Tauri but not in our cache
@@ -328,7 +298,8 @@ impl WindowManager {
         .inner_size(PILL_WIDTH, PILL_HEIGHT)
         .accept_first_mouse(true)
         .position(position_x, position_y)
-        .visible(true) // Start visible
+        .visible(false) // Configure native safety before the first show
+        .focusable(false)
         .focused(false); // Don't steal focus
 
         // Disable context menu only in production builds
@@ -345,68 +316,10 @@ impl WindowManager {
             log::warn!("Failed to make pill window click-through: {}", error);
         }
 
-        // Convert to NSPanel on macOS
-        #[cfg(target_os = "macos")]
-        {
-            use tauri_nspanel::WebviewWindowExt;
-
-            pill_window
-                .to_panel()
-                .map_err(|e| format!("Failed to convert to NSPanel: {:?}", e))?;
-
-            log::info!("Converted pill window to NSPanel");
-        }
-
-        // Apply Windows-specific window flags to prevent focus stealing
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::Foundation::HWND;
-            use windows::Win32::UI::WindowsAndMessaging::*;
-
-            if let Ok(hwnd) = pill_window.hwnd() {
-                unsafe {
-                    // windows crate 0.62+: HWND wraps *mut c_void instead of isize
-                    let hwnd = HWND(hwnd.0);
-
-                    // Validate HWND before using it
-                    if IsWindow(Some(hwnd)).as_bool() {
-                        // Get current window style
-                        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-
-                        // Add tool window and no-activate flags, remove from Alt-Tab
-                        // WINDOW_EX_STYLE.0 gives the underlying u32 value
-                        let new_style =
-                            (style | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize)
-                                & !(WS_EX_APPWINDOW.0 as isize);
-
-                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-
-                        // Force window to update with new styles
-                        let _ = SetWindowPos(
-                            hwnd,
-                            Some(HWND_TOPMOST),
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED,
-                        );
-
-                        log::info!("Applied Windows-specific window flags for pill");
-                    } else {
-                        log::warn!("Invalid HWND received from Tauri window");
-                    }
-                }
-            }
-        }
-
-        // Show the window after NSPanel conversion
-        pill_window.show().map_err(|e| e.to_string())?;
-
-        // Set always on top again to ensure it's visible
-        pill_window
-            .set_always_on_top(true)
-            .map_err(|e| e.to_string())?;
+        crate::pill::native::configure(&pill_window)?;
+        self.emit_pill_geometry(&pill_window);
+        crate::pill::native::show(&pill_window)?;
+        crate::pill::hit_test::start(&pill_window);
 
         // Emit current recording state to the pill window
         let app_state = pill_window.app_handle().state::<crate::AppState>();
@@ -426,17 +339,7 @@ impl WindowManager {
             }),
         );
 
-        // Store the window reference (re-acquire lock)
-        {
-            match self.pill_window.lock() {
-                Ok(mut pill_guard) => {
-                    *pill_guard = Some(pill_window);
-                }
-                Err(e) => {
-                    log::error!("Pill window mutex poisoned while storing window: {}", e);
-                }
-            }
-        }
+        self.set_pill_window(pill_window);
 
         log::info!(
             "Pill window created and shown at ({}, {})",
@@ -455,6 +358,7 @@ impl WindowManager {
 
     /// Hide the pill window (don't close it) with retry logic
     pub async fn hide_pill_window(&self) -> Result<(), String> {
+        crate::pill::hit_test::stop(&self.app_handle);
         const MAX_RETRIES: u32 = 3;
         const RETRY_DELAY_MS: u64 = 50;
 
@@ -524,6 +428,7 @@ impl WindowManager {
 
     /// Close the pill window (actually destroy it)
     pub async fn close_pill_window(&self) -> Result<(), String> {
+        crate::pill::hit_test::stop(&self.app_handle);
         // Take the window out of the mutex
         let window = {
             match self.pill_window.lock() {
@@ -691,8 +596,14 @@ impl WindowManager {
         let pill_position = calculate_pill_position(position, desktop_area, edge_offset);
 
         #[cfg(target_os = "macos")]
-        let pill_position =
-            constrain_window_position(pill_position, (PILL_WIDTH, PILL_HEIGHT), desktop_area);
+        let pill_position = constrain_window_position(
+            pill_position,
+            (
+                crate::pill::geometry::LEGACY_WIDTH,
+                crate::pill::geometry::LEGACY_HEIGHT,
+            ),
+            desktop_area,
+        );
 
         let toast_position = calculate_toast_position(position, pill_position.0, pill_position.1);
 
@@ -716,7 +627,10 @@ impl WindowManager {
             desktop_area.height,
             edge_offset
         );
-        (pill_position, toast_position)
+        (
+            crate::pill::geometry::Geometry::new(position).canvas_origin(pill_position),
+            toast_position,
+        )
     }
 
     /// Get the logical positioning area. macOS uses the monitor work area,
@@ -778,6 +692,14 @@ impl WindowManager {
         DesktopArea::new(0.0, 0.0, 1920.0, 1080.0)
     }
 
+    fn emit_pill_geometry(&self, window: &WebviewWindow) {
+        let _ = self.app_handle.emit_to(
+            window.label(),
+            "pill-geometry",
+            crate::pill::geometry::Geometry::new(&self.get_pill_position_setting()),
+        );
+    }
+
     fn calculate_center_position(&self) -> (f64, f64) {
         let position = self.get_pill_position_setting();
         self.calculate_floating_window_positions_for(&position).0
@@ -800,6 +722,7 @@ impl WindowManager {
 
         // Reposition pill window
         if let Some(pill) = self.get_pill_window() {
+            self.emit_pill_geometry(&pill);
             if let Err(e) = pill.set_position(LogicalPosition::new(pill_x, pill_y)) {
                 log::warn!("Failed to reposition pill window: {}", e);
             } else {
@@ -827,6 +750,7 @@ impl WindowManager {
 
         // Reposition pill window
         if let Some(pill) = self.get_pill_window() {
+            self.emit_pill_geometry(&pill);
             if let Err(e) = pill.set_position(LogicalPosition::new(pill_x, pill_y)) {
                 log::warn!("Failed to reposition pill window: {}", e);
             } else {

@@ -69,6 +69,7 @@ export const isCloudModel = (model: ModelInfo): model is CloudModelInfo => model
 export const isLocalModel = (model: ModelInfo): model is LocalModelInfo => model.kind === "local";
 
 export type RecordingMode = "toggle" | "push_to_talk";
+export const DEFAULT_PILL_INDICATOR_MODE = "always" as const;
 export type PillIndicatorMode = "never" | "always" | "when_recording";
 export type PillIndicatorStyle = "compact" | "full";
 export type PillIndicatorPosition =
