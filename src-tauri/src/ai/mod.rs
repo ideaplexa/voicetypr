@@ -14,3 +14,9 @@ pub use prompts::EnhancementOptions;
 mod runtime_tests;
 #[cfg(test)]
 mod tests;
+
+pub mod polish;
+pub mod polish_cli;
+pub mod polish_eval;
+
+pub mod polish_score;

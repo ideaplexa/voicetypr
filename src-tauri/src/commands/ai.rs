@@ -1394,15 +1394,13 @@ fn executor_for_provider(
     ))
 }
 
-async fn polish_text_with_prompt_result_typed(
+pub(crate) fn prepare_polish_runtime(
     app: &tauri::AppHandle,
-    text: &str,
-    model: String,
-    provider: String,
-    prompt: String,
-) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
-    let (executor, runtime_provider) =
-        executor_for_provider(app, &provider).map_err(|error| error.with_model(model.clone()))?;
+    provider: &str,
+    model: &str,
+) -> Result<crate::ai::polish::PolishRuntime, AiPolishAttemptError> {
+    let (executor, runtime_provider) = executor_for_provider(app, provider)
+        .map_err(|error| error.with_model(model.to_string()))?;
     // The subprocess runtime owns provider-specific local-agent budgets; reuse
     // that value here so the executor cannot cancel a healthy child first.
     let timeout_ms = if catalog::runtime_kind(&runtime_provider) == Some("agent_cli") {
@@ -1414,7 +1412,7 @@ async fn polish_text_with_prompt_result_typed(
     let (reasoning_level, fast_mode) = if is_agent_cli {
         let store = app.store("settings").map_err(|_| {
             AiPolishAttemptError::for_provider(AiProviderError::Internal, runtime_provider.clone())
-                .with_model(model.clone())
+                .with_model(model.to_string())
         })?;
         (
             Some(
@@ -1429,31 +1427,14 @@ async fn polish_text_with_prompt_result_typed(
     } else {
         (None, false)
     };
-    let request = AiPolishRequest {
-        provider_id: runtime_provider.clone(),
-        model_id: model.clone(),
+    Ok(crate::ai::polish::PolishRuntime {
+        executor,
+        provider: runtime_provider,
+        model: model.to_string(),
         reasoning_level,
         fast_mode,
-        input_text: text.to_string(),
-        prompt,
         timeout_ms,
-    };
-    let result = executor
-        .polish(request, tokio_util::sync::CancellationToken::new())
-        .await
-        .map_err(|error| AiPolishAttemptError {
-            error,
-            provider_id: runtime_provider,
-            model_id: model,
-        })?;
-    log::info!(
-        "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
-        result.provider_id,
-        text.len(),
-        result.output_text.len(),
-        result.duration_ms
-    );
-    Ok(result)
+    })
 }
 
 pub async fn polish_text_typed(
@@ -1467,14 +1448,31 @@ pub async fn polish_text_typed(
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
     let (provider, model) =
         selected_ai_provider_and_model(app).map_err(AiPolishAttemptError::unattributed)?;
-    let prompt = crate::ai::prompts::build_enhancement_prompt_for_transcript_language(
-        context,
+    // Preserve prompt-before-runtime ordering and the desktop error contract.
+    let prompt = crate::ai::polish::assemble_prompt(
         options,
         output_language,
         transcript_language,
+        context,
         app_category_hint,
     );
-    polish_text_with_prompt_result_typed(app, text, model, provider, prompt).await
+    let runtime = prepare_polish_runtime(app, &provider, &model)?;
+    let mut timings = crate::ai::polish::PolishTimings::default();
+    let result = crate::ai::polish::execute_prompt(&runtime, text, prompt, &mut timings)
+        .await
+        .map_err(|error| AiPolishAttemptError {
+            error,
+            provider_id: runtime.provider,
+            model_id: model,
+        })?;
+    log::info!(
+        "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
+        result.provider_id,
+        text.len(),
+        result.output_text.len(),
+        result.duration_ms
+    );
+    Ok(result)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

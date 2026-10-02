@@ -78,6 +78,20 @@ impl AiExecutor {
         request: AiPolishRequest,
         cancellation_token: CancellationToken,
     ) -> Result<AiPolishResult, AiProviderError> {
+        self.polish_with_timings(
+            request,
+            cancellation_token,
+            &mut super::polish::PolishTimings::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn polish_with_timings(
+        &self,
+        request: AiPolishRequest,
+        cancellation_token: CancellationToken,
+        timings: &mut super::polish::PolishTimings,
+    ) -> Result<AiPolishResult, AiProviderError> {
         let start = Instant::now();
         let budget = Duration::from_millis(request.timeout_ms);
         let deadline = start + budget;
@@ -87,12 +101,15 @@ impl AiExecutor {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
                 .ok_or(AiProviderError::Timeout)?;
+            let request_start = Instant::now();
             let result = self
                 .run_with_budget(&request, cancellation_token.clone(), remaining)
                 .await;
+            timings.request += super::polish::elapsed_ms(request_start);
 
             match result {
                 Ok(output_text) => {
+                    let validate_start = Instant::now();
                     let (cleaned, truncated) =
                         sanitize_ai_output(&output_text, request.input_text.len());
                     let validation = if truncated {
@@ -100,6 +117,7 @@ impl AiExecutor {
                     } else {
                         validate_ai_output(&cleaned, &request.input_text)
                     };
+                    timings.validate += super::polish::elapsed_ms(validate_start);
                     let validated = match validation {
                         Ok(output) => output,
                         Err(error) if attempt == 0 => {

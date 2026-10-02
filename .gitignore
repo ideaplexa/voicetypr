@@ -74,3 +74,6 @@ pi-session-*.html
 sidecar/whisper-vulkan/target/
 .pi/extensions/emdash-hook.ts
 .tmp/
+
+# Private Polish recordings; never commit real dictations or provider outputs.
+/perf-corpus/polish/local/

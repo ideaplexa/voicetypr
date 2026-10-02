@@ -480,7 +480,7 @@ fn resolve_smart_formatting_outcome(
             });
 
             Ok(SmartFormattingOutcome {
-                text: library_text.to_string(),
+                text: crate::ai::polish::raw_fallback(library_text),
                 error: Some(error.error),
                 duration_ms: None,
                 execution,
