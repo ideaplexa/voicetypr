@@ -32,7 +32,9 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
-Plan 080 — SPEC — Claude 2026-09-30: UI completion for 2.1.0-beta.4 — pill focus safety + alive/techy pill redesign (directions D/E/F in design/voicetypr-2.1.pen, motion in design/prototypes/pill-lab.html), tray menu, icons, all dialogs, toast window, Windows visual pass; one phase, one review. See `080-ui-completion.md`.
+Plan 080 — SPEC — Claude 2026-09-30, updated 2026-10-02: UI completion for 2.1.0-beta.4, in two phases. Phase A: focus-safe Morphing Island v3.1 (motion spec `design/prototypes/island-lab.html`), the island stack replacing toasts, tray menu, sidebar fixes, Insights, share card, Settings as a modal. Phase B: icons, dialogs, Windows pass. Also lists 20 product gaps from the Island Lab agents and the pill-coverage audit. See `080-ui-completion.md`.
+
+Plan 081 — SPEC — Claude 2026-10-02: Polish quality P1, a parallel track: `voicetypr polish` CLI, a golden set and scorecard, the never-answer guard, a zero-wait skip check, the "Keep my words" switch and Show original. See `081-polish-quality-p1.md`.
 
 Plan 079 — SPEC — Claude 2026-09-29: 2.1 UI redesign — 8-item IA (Home, History · SETUP: Transcription, Polish, Dictionary, Recording · Settings w/ Advanced, Help & feedback), one header/card/row kit, retuned tokens, pill Pasted/Copied states, onboarding; slices S0–S9 on `feat/2.1-ui`. Design: `design/voicetypr-2.1.pen`. See `079-ui-redesign-2-1.md`.
 
