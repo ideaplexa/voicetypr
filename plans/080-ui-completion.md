@@ -69,7 +69,80 @@ The scenario agents read the real code. These are real behaviours, not prototype
 3. **Dead listener.** `useAppEvents.ts` listens for `no-speech-detected`, but the backend never emits it. The real path is the pill toast from the speech-evidence gate. Wire one event, or remove the listener. *(beta.4)*
 4. **One toast at a time.** FeedbackToast shows only the latest message. The island stack replaces this: newest in front, FIFO for timed items, sticky blockers, ×N merge, and timers paused while tucked. *(beta.4)*
 5. **Toggle-mode copy.** "Too short — hold a bit longer" is wrong in toggle mode; use "talk a bit longer". *(beta.4)*
-6. **Focus steal.** license-required calls `focus_main_window`. Show a license island state with **Renew** instead of stealing focus. *(beta.4)*
+6. **Focus steal.** license-required calls `focus_main_window`. Show a license island state instead of stealing focus. Licenses are lifetime, so nothing expires and there is no "Renew". The real blockers are `RecordingLicenseState::VerificationRequired` / `CheckFailed` (`commands/audio.rs`): "Couldn't verify your license · Connect to the internet, then recheck" with **Recheck** (revalidate). *(beta.4)*
 7. **Raw error strings.** For a missing mic, the pill flashes the raw `payload.error` string. Use the designed "No microphone · Choose mic" state. *(beta.4)*
 8. **Timing mismatch.** The native terminal hide (pasted 1.2 s) must be aligned with the island's done card (3.2 s, with Undo/Original/Retry) once focus safety lands (task 1). *(beta.4)*
 9. **Retry / Undo / Original need backend support.** There is no re-transcribe-and-replace-last-paste yet. Design "replace last paste" carefully: only do it if the target field still ends with our text, otherwise copy it. *(beta.5)*
+
+## Founder feedback, 2026-10-02 (Island Lab review + using beta.3)
+
+### Island v3 (supersedes the v2 listening layout; `design/prototypes/island-lab.html` is the motion spec)
+
+- **The rest dot is not dead.**
+  - At rest it breathes subtly. This must be a compositor-only CSS opacity animation on one element: no JS or canvas loop, and off under reduced motion. This amends task 2's "no idle loops" rule for the rest state only.
+  - Hover opens a one-row *peek*:
+    - left: a ready mark (sage), amber when the mic is missing
+    - center: the shortcut hint with key caps
+    - right: today's word count
+  - Clicking the peek starts a dictation. The panel is non-activating, so the caret stays in the target app.
+  - A mic problem turns the peek into "No microphone · Fix".
+- **Three zones, the full width.**
+  - Listening and live share one layout: app icon bottom-left, waveform in the center (it flexes to fill), timer bottom-right.
+  - Live words span the full width above that row.
+  - Rule for every state: left = identity, center = main content, right = meta or action. Fixed-width states never leave an empty side.
+- **WhatsApp-style scrolling waveform.**
+  - A new bar is born at the right about every 70 ms, sized to that slice's peak level. The strip slides left continuously, older bars dim, and silence shows dot-bars.
+  - It replaces the 9 static bars.
+  - On stop it still converges into the progress arc (one shared element).
+
+### Main window
+
+11. **Sidebar fixes** (`design/specs/sidebar.html`, `design/exports/sidebar.png`).
+    - **Active item is white.** Today `data-active:bg-sidebar-accent` in `components/ui/sidebar.tsx` outranks our `bg-card`, so the selected item renders beige.
+      - Fix it in `Sidebar.tsx` with `data-[active=true]:` overrides (`bg-card`, `text-foreground`, `font-semibold`). Never edit `ui/*`.
+    - **Drop the "Setup" label.** A hairline divider separates Home / History / Insights from Transcription / Polish / Dictionary / Recording.
+    - **Add Insights** after History.
+12. **Insights page** (`design/specs/insights.html`, `design/exports/insights.png`). This is the gamified "what you've done" page.
+    - Header: Week / Month / All time, plus **Share**.
+    - Hero:
+      - words dictated
+      - time saved vs typing at 40 wpm
+      - streak (current and best)
+      - speaking pace in wpm (words ÷ `audio_duration_ms`)
+      - dictations and average length
+    - A 43-week activity calendar.
+    - "Where you talk": top apps by words, from `writing.context_hint.app_name`. Only the app name, never window titles.
+    - Milestones: word, streak and dictation thresholds and first Polish, plus a "Next" progress bar.
+    - Data rules:
+      - Extend `computeOverviewStats`. Every number is derived from local history, and no transcript text leaves the device.
+      - Check first whether history is paged or pruned. If all-time totals can't come from the loaded rows, add one Rust aggregate command.
+    - Home keeps its small weekly card and links to Insights.
+13. **Share card** (replaces task 7's scope; `design/specs/share-card.html`, `design/exports/share-card.png`).
+    - A 1200×630 dark card: total words, time saved, streak, pace, a 14-week mini calendar, voicetypr.com.
+    - Rendered by `shareCardRenderer.ts`; ShareStatsModal previews it with Copy image / Save / Share to X.
+    - Numbers only.
+14. **Settings as a modal** (`design/specs/settings-modal.html`, `design/exports/settings-modal.png`). The founder's idea, Notion-style.
+    - Settings opens over the current page from the sidebar's Settings item and ⌘, / Ctrl+,.
+    - Left list: General, Shortcuts, Privacy, Storage | Advanced: Network sharing, CLI & API, Troubleshooting | Account: License, About & updates.
+    - Esc or ✕ closes it.
+    - Existing deep links (`resolveScreen` panes, the home status chip, the license chip) open the modal at that pane.
+    - Below a 760 px window width it becomes a full-window sheet.
+    - The Settings screen route goes away. Transcription, Polish, Dictionary and Recording stay as pages because people tune them often.
+
+### Phasing (founder cadence: a phase of about 8–10 tasks, then one review)
+
+- **Phase A (beta.4):**
+  - 1 focus safety
+  - 2 Island v3, with gaps 1–8
+  - 9 toast → island stack
+  - 3 tray
+  - 11 sidebar
+  - 12 Insights
+  - 13 share card
+  - 14 Settings modal
+- **Phase B (beta.4, second review):**
+  - 4 icons
+  - 5 Polish dialogs
+  - 6 transcription dialogs
+  - 8 What's new / crash / privacy
+  - 10 Windows pass
