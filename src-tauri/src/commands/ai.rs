@@ -40,6 +40,8 @@ const AGENT_CLI_FAST_MODE_KEY: &str = "ai_agent_cli_fast_mode_by_provider";
 fn default_agent_cli_reasoning(provider: &str) -> &'static str {
     if matches!(provider, "pi" | "omp") {
         "off"
+    } else if provider == "codex" {
+        "medium"
     } else {
         "low"
     }
@@ -95,10 +97,16 @@ fn load_agent_cli_fast_mode<R: tauri::Runtime>(
         .get(AGENT_CLI_FAST_MODE_KEY)
         .and_then(|value| serde_json::from_value::<HashMap<String, bool>>(value.clone()).ok())
         .unwrap_or_default();
-    for provider in AGENT_CLI_PROVIDER_IDS {
-        values.entry(provider.to_string()).or_insert(false);
-    }
+    apply_agent_cli_fast_mode_defaults(&mut values);
     values
+}
+
+fn apply_agent_cli_fast_mode_defaults(values: &mut HashMap<String, bool>) {
+    for provider in AGENT_CLI_PROVIDER_IDS {
+        values
+            .entry(provider.to_string())
+            .or_insert(*provider == "codex");
+    }
 }
 
 // One pooled reqwest::Client shared across the LLM enhancement path so the connection pool stays hot across calls.
@@ -1767,7 +1775,7 @@ mod tests {
         assert!(validate_agent_cli_reasoning("opencode", "low").is_ok());
         assert_eq!(default_agent_cli_reasoning("pi"), "off");
         assert_eq!(default_agent_cli_reasoning("omp"), "off");
-        assert_eq!(default_agent_cli_reasoning("codex"), "low");
+        assert_eq!(default_agent_cli_reasoning("codex"), "medium");
         assert!(validate_agent_cli_reasoning("pi", "medium").is_ok());
         assert!(validate_agent_cli_reasoning("pi", "high").is_err());
         assert_eq!(normalize_agent_cli_reasoning("pi", "high"), "medium");
@@ -2192,3 +2200,7 @@ mod tests {
         assert!(resolve_custom_validation_model(Some("   "), Some("  ")).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "ai_defaults_tests.rs"]
+mod defaults_tests;

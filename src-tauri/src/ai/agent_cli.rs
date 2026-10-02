@@ -105,7 +105,9 @@ enum ReasoningPolicy {
         default: &'static str,
         omit_off: bool,
     },
-    CodexConfig,
+    CodexConfig {
+        default: &'static str,
+    },
     ClaudeEffortLowIfSupported,
 }
 
@@ -279,9 +281,9 @@ const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
         "--sandbox",
         "--json",
     ],
-    default_model: None,
+    default_model: Some("gpt-6-luna"),
     model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::CodexConfig,
+    reasoning: ReasoningPolicy::CodexConfig { default: "medium" },
     system_prompt: SystemPromptPolicy::CodexConfig,
     input_mode: InputMode::Stdin,
     output: OutputParser::CodexJsonl,
@@ -534,8 +536,10 @@ fn cold_argv_for_model_with_options(
                 argv.extend([flag.to_string(), level.to_string()]);
             }
         }
-        ReasoningPolicy::CodexConfig => {
-            let level = valid_level.filter(|level| *level != "off").unwrap_or("low");
+        ReasoningPolicy::CodexConfig { default } => {
+            let level = valid_level
+                .filter(|level| *level != "off")
+                .unwrap_or(default);
             argv.extend([
                 "-c".to_string(),
                 format!("model_reasoning_effort=\"{level}\""),
@@ -2051,7 +2055,7 @@ fn strip_reasoning_suffix(selector: &str) -> &str {
     }
 }
 
-fn parse_codex_default_model(stdout: &[u8]) -> Result<AgentCliModel, MappedAiProviderError> {
+fn parse_codex_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProviderError> {
     let text = String::from_utf8_lossy(stdout);
     let payload = extract_json_payload(&text).unwrap_or(text.trim());
     let value: Value = serde_json::from_str(payload)
@@ -2071,11 +2075,18 @@ fn parse_codex_default_model(stdout: &[u8]) -> Result<AgentCliModel, MappedAiPro
         .and_then(Value::as_str)
         .filter(|provider| !provider.trim().is_empty())
         .map(str::to_string);
-    Ok(named_cli_default(
-        "Codex",
-        Some(&humanize_cli_model_id(model)),
-        provider,
-    ))
+    Ok(vec![
+        named_cli_default("Codex", Some(&humanize_cli_model_id(model)), provider),
+        AgentCliModel {
+            id: CODEX_SPEC.default_model.unwrap().to_string(),
+            name: "GPT-6 Luna".to_string(),
+            recommended: true,
+            reasoning: true,
+            context_window: None,
+            source_provider: None,
+            cli_default: false,
+        },
+    ])
 }
 
 fn parse_droid_models(
@@ -2333,7 +2344,7 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             let payload =
                 run_model_list_command(&model_binary(&CODEX_SPEC).await?, CODEX_DEFAULT_MODEL_ARGV)
                     .await?;
-            Ok(vec![parse_codex_default_model(&payload)?])
+            parse_codex_models(&payload)
         }
         PROVIDER_DROID => {
             let payload =
@@ -3085,11 +3096,11 @@ mod tests {
         .unwrap();
         assert_eq!(omp_default.name, "Default");
 
-        let codex = parse_codex_default_model(
+        let codex = parse_codex_models(
             br#"{"checks":{"config.load":{"details":{"model":"gpt-6.1-sol","model_provider":"openai"}}}}"#,
         )
         .unwrap();
-        assert_eq!(codex.name, "Default");
+        assert_eq!(codex[0].name, "Default");
 
         let (droid_default, droid_models) = parse_droid_models(
             b"Available Models:\n  auto  Auto Model\n  claude-opus-5  Opus 5 (default)\nCustom Models:\n  custom:glm  GLM\nModel details:\n",
@@ -3120,7 +3131,7 @@ mod tests {
     #[test]
     fn discovery_parsers_reject_missing_model_contracts() {
         assert!(parse_pi_default_model(b"{}").is_err());
-        assert!(parse_codex_default_model(b"{}").is_err());
+        assert!(parse_codex_models(b"{}").is_err());
         assert!(parse_droid_models(b"Available Models:\n").is_err());
         assert!(parse_grok_models(b"Available models:\n").is_err());
         assert!(parse_selector_models(b"not-a-selector\n").is_err());
@@ -3312,7 +3323,7 @@ mod tests {
         }
         assert!(codex
             .windows(2)
-            .any(|pair| pair[0] == "-c" && pair[1] == "model_reasoning_effort=\"low\""));
+            .any(|pair| pair[0] == "-c" && pair[1] == "model_reasoning_effort=\"medium\""));
         assert!(codex.windows(2).any(|pair| {
             pair[0] == "-c" && pair[1].starts_with("developer_instructions=\"system\"")
         }));
@@ -4308,3 +4319,7 @@ not a json line\n";
         println!("droid polished output: {polished}");
     }
 }
+
+#[cfg(test)]
+#[path = "agent_cli_defaults_tests.rs"]
+mod defaults_tests;
