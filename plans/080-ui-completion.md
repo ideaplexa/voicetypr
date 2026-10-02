@@ -166,6 +166,16 @@ The scenario agents read the real code. These are real behaviours, not prototype
       - Fix it in `Sidebar.tsx` with `data-[active=true]:` overrides (`bg-card`, `text-foreground`, `font-semibold`). Never edit `ui/*`.
     - **Drop the "Setup" label.** A hairline divider separates Home / History / Insights from Transcription / Polish / Dictionary / Recording.
     - **Add Insights** after History.
+    - **Remove sidebar collapsing** (founder screenshot 2026-10-02).
+      - Problem: the `SidebarTrigger` in `AppShell.tsx` and ⌘B collapse the sidebar into a 48 px icon rail. The macOS traffic lights (about 12–80 px) then straddle the rail's border, and the toggle floats over the page title. On Windows the toggle sits top-right.
+      - Why removal is safe: the design has a fixed 212 px sidebar, and the window's minimum width is 1000 px, so collapsing buys nothing.
+      - Fix:
+        - `collapsible="none"` on the sidebar
+        - delete the trigger header
+        - the ⌘B handler goes with it (the provider stays, for layout)
+        - drop the `group-data-[collapsible=icon]` classes in `Sidebar.tsx`
+        - keep the drag region: a 36 px `data-tauri-drag-region` strip over the top of the window so it can still be moved
+      - Gate: `pnpm ui:preview` on mac shows the traffic lights fully inside the sidebar at 1000×680 and at full screen.
 12. **Insights page** (`design/specs/insights.html`, `design/exports/insights.png`). This is the gamified "what you've done" page.
     - Header: Week / Month / All time, plus **Share**.
     - Hero:
