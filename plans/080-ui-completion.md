@@ -88,6 +88,56 @@ The scenario agents read the real code. These are real behaviours, not prototype
 8. **Timing mismatch.** The native terminal hide (pasted 1.2 s) must be aligned with the island's done card (3.2 s, with Undo/Original/Retry) once focus safety lands (task 1). *(beta.4)*
 9. **Retry / Undo / Original need backend support.** There is no re-transcribe-and-replace-last-paste yet. Design "replace last paste" carefully: only do it if the target field still ends with our text, otherwise copy it. *(beta.5)*
 
+### More gaps from the pill-coverage audit (2026-10-02, read-only, cites real code)
+
+**Focus stealing during dictation (beta.4, with task 1):**
+
+10. `focus_main_window` runs from dictation paths. Every case below becomes an island card instead:
+    - `commands/audio.rs`: 4711 (remote/model missing at stop), 4884 (no engine), 4906/4920 (license check), 4935 (trial)
+    - `cloud_stt/soniox.rs:1136` (storage limit)
+    - `useAppEvents.ts:211` focuses the window a second time for license
+11. The toast window is built without `.focused(false)` (`lib.rs:1536-1549`), and only the pill gets `WS_EX_NOACTIVATE` (`window_manager.rs:379`). The toast can appear before the paste. The toast window goes away with the island stack (gap 4); until then, make it non-activating. NEEDS-SMOKE on Windows.
+
+**Words lost (beta.4 backend; nothing the user said may be silently deleted):**
+
+12. Audio is deleted when:
+    - the network PC or the local model is missing at stop (`audio.rs:4701`)
+    - the integrity check fails (6218)
+    - the stop doesn't finalize (6243-6255)
+
+    Keep the clip, and offer **Use <local engine>** / **Discard** (same mechanism as gap 1).
+13. The pre-engine speech gate is live and deletes audio (`audio.rs:6373`, 6398). AGENTS.md says "failing to detect speech is not proof of silence". Either put it back into shadow mode or keep the clip for Retry. Pure-zero input (6395-6410) shows nothing today; show "Your mic sent silence — is it muted?".
+14. A failed translation pastes nothing (`audio.rs:7397-7409`). Paste or copy the original and say so.
+15. Pressing Esc twice while *transcribing* throws away a finished recording (`recording/escape_handler.rs:31-37`). Show the inline hint in the transcribing state too, and say "discard" rather than "cancel".
+16. A dropped mic mid-recording (6209-6256) is silent or deletes the audio. Transcribe what was captured and say so ("Mic disconnected · using the 0:42 we got").
+
+**Dead or missing wiring (beta.4):**
+
+17. Events that are emitted or listened for with no partner:
+    - `recording-too-short`: the pill listens (`pill.tsx:790`) but the backend never emits it
+    - `model-fallback` (`audio.rs:6626`): no pill listener
+    - `license-loading` (4952): no listener
+    - `pill-widget-error` (6012): no listener
+18. The "copied" toast says "Grant Accessibility…" even when the permission is granted, and lasts 1.5 s. Use the island's sticky "Copied — press ⌘V". The no-permission case gets its own sticky card, "Allow Accessibility to paste automatically" [Open Settings].
+
+**New island states:**
+
+19. The lab covers these as of v3.1:
+    - trial ended [Activate]
+    - mic busy in another app
+    - mic access off [Open Settings]
+    - no voice engine set up [Set up]
+    - cloud key rejected [Fix key]
+    - GPU → CPU
+    - still listening after a long pause
+    - auto-stop after 5 min of silence
+    - starting up
+    - Polish skipped
+    - network PC offline (recording kept)
+
+    Each needs a content-free backend event the pill can render.
+20. Hotkey pressed while the previous dictation is finishing: today it's ignored silently (`hotkeys.rs:99`), while the lab shows a new dictation starting. Decide in task 2: start the new one (preferred, back-to-back), or show "Finishing the last one…".
+
 ## Founder feedback, 2026-10-02 (Island Lab review + using beta.3)
 
 ### Island v3 (supersedes the v2 listening layout; `design/prototypes/island-lab.html` is the motion spec)
