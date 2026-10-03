@@ -62,10 +62,9 @@ pub struct Snapshot {
     cloud_model: Option<String>,
     details: String,
 }
-/// Called once audio flows. The app is the one the writing pipeline pinned at
+/// Called once audio flows. `hint` is the app the writing pipeline pinned at
 /// start, so foreground changes cannot make the card disagree with the take.
-pub fn capture(app: &AppHandle) -> Option<Snapshot> {
-    use tauri::Manager;
+pub fn capture(app: &AppHandle, hint: Option<crate::writing::ContextHint>) -> Option<Snapshot> {
     let store = app.store("settings").ok()?;
     let text = |key: &str, default: &str| {
         store
@@ -73,14 +72,7 @@ pub fn capture(app: &AppHandle) -> Option<Snapshot> {
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| default.to_owned())
     };
-    let hint = app
-        .state::<crate::AppState>()
-        .recording_app_context
-        .lock()
-        .ok()
-        .and_then(|context| context.clone())
-        .or_else(crate::writing::capture_active_app_context)
-        .unwrap_or_default();
+    let hint = hint.unwrap_or_default();
     let name = hint.app_name.clone().unwrap_or_default();
     let icon_key = hint
         .process_path

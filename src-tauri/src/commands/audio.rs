@@ -4955,6 +4955,13 @@ fn spawn_island_context(
     source: crate::recording::start_source::StartSource,
     generation: u64,
 ) {
+    // Read the pinned app now, before Recording: transcription consumes it later.
+    let hint = app
+        .state::<AppState>()
+        .recording_app_context
+        .lock()
+        .ok()
+        .and_then(|context| context.clone());
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let capture_app = app.clone();
@@ -4965,7 +4972,7 @@ fn spawn_island_context(
                     crate::pill::positioning::snapshot(&capture_app),
                 );
             }
-            crate::pill::context::capture(&capture_app)
+            crate::pill::context::capture(&capture_app, hint)
         })
         .await
         .ok()
