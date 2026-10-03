@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,7 +21,9 @@ function isPolishWorkflowUpdate(version: string | null): boolean {
 }
 
 export function UpdateAnnouncementDialog({ version, onClose }: UpdateAnnouncementDialogProps) {
+  const [notesVersion, setNotesVersion] = useState<string | null>(null);
   return (
+    <>
     <Dialog open={Boolean(version)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -44,9 +48,12 @@ export function UpdateAnnouncementDialog({ version, onClose }: UpdateAnnouncemen
           </div>
         )}
         <DialogFooter>
+          <Button variant="outline" onClick={() => { setNotesVersion(version); onClose(); }}>See what's new</Button>
           <Button onClick={onClose}>Dismiss</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <WhatsNewDialog version={notesVersion} onClose={() => setNotesVersion(null)} />
+    </>
   );
 }

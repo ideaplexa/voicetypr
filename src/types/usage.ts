@@ -6,6 +6,7 @@ export interface UsageDay {
   audio_ms: number;
 }
 export interface UsageApp {
+  icon_key?: string | null;
   name: string;
   words: number;
 }

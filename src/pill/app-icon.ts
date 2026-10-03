@@ -9,6 +9,7 @@ export function appColour(name: string) {
 
 export class AppIcon {
   private generation = 0;
+  private colour = appColour("");
   private readonly image: HTMLImageElement;
   private readonly letter: HTMLElement;
   constructor(private readonly tile: HTMLElement) {
@@ -19,6 +20,7 @@ export class AppIcon {
   set(name: string, key: string | null, load: (key: string) => Promise<unknown>) {
     const generation = ++this.generation;
     this.image.onload = this.image.onerror = null;
+    this.colour = appColour(name);
     this.fallback();
     this.letter.textContent = Array.from(name.trim())[0]?.toUpperCase() ?? 'V';
     this.tile.style.backgroundColor = appColour(name);
@@ -29,6 +31,8 @@ export class AppIcon {
         if (generation !== this.generation) return;
         if (!this.image.naturalWidth) { this.fallback(); return; }
         this.image.hidden = false; this.letter.hidden = true;
+        this.tile.style.backgroundColor = "transparent";
+        this.tile.classList.add("has-image");
       };
       this.image.onerror = () => { if (generation === this.generation) this.fallback(); };
       // Keep the fallback visible until decoding has succeeded, including cached images.
@@ -36,6 +40,8 @@ export class AppIcon {
     }).catch(() => {});
   }
   private fallback() {
+    this.tile.style.backgroundColor = this.colour;
+    this.tile.classList.remove("has-image");
     this.image.hidden = true;
     this.image.removeAttribute('src');
     this.letter.hidden = false;

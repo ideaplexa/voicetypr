@@ -58,7 +58,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const [tryText, setTryText] = useState("");
   const { feedback: tryFeedback, contentChanged, reset: resetTryFeedback } = useTestDictation(tryOpen);
   const [shareOpen, setShareOpen] = useState(false);
-  const usage = useUsageStats("all", shareOpen);
+  const usage = useUsageStats("all");
   const { history, totalCount, isLoading, loadError, refreshHistory } = useTranscriptionHistory({ limit: 500, includeTotalCount: true });
   const stats = useOverviewStats(history, totalCount);
   const model = settings?.current_model ?? "";
@@ -90,7 +90,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
     <section data-pencil-name="Hero" className="flex flex-col gap-[14px] rounded-[16px] border border-border bg-card px-7 py-[26px]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium text-sage" style={{ color: "var(--ready-text)" }}><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-warn focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
-        <Button variant="outline" size="sm" onClick={() => { setTryText(""); resetTryFeedback(); setTryOpen(true); }}>Try a test dictation</Button>
+        {!isLoading && !loadError && (!usage.stats || usage.stats.total_words === 0) && !history.some(item => (!item.status || item.status === "completed") && item.text.trim().length > 0) && <Button variant="outline" size="sm" onClick={() => { setTryText(""); resetTryFeedback(); setTryOpen(true); }}>Try a test dictation</Button>}
       </div>
       <h1 className="flex flex-wrap items-center gap-x-[10px] gap-y-1 text-[30px] font-semibold leading-[normal] tracking-[-0.6px] text-foreground">Press <KeyCaps caps={caps.length ? [caps.join(isMacOS ? " " : " + ")] : []} size="lg" /> and start talking</h1>
       <p className="text-[14px] leading-[normal] text-muted-foreground">{trigger.mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>

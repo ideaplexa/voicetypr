@@ -57,3 +57,13 @@
   letter-spacing: .6px;
   color: var(--muted-foreground);
 }
+
+.settings-modal-pane > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.settings-modal-pane [data-slot="select-trigger"],
+.settings-modal-pane [data-slot="input"] {
+  min-width: 0;
+  max-width: 100%;
+}

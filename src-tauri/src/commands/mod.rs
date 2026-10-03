@@ -30,3 +30,5 @@ pub mod window;
 pub mod original;
 
 pub(crate) mod island_notice;
+
+pub mod release_notes;

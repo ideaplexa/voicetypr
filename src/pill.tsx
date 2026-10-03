@@ -125,6 +125,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   subscribe<DictationBlocked>('dictation-blocked', value => island.blocked(value));
   subscribe<DictationRecovery>('dictation-recovery', value => island.recovery(value));
   subscribe<DictationNote>('dictation-note', value => island.note(value));
+  subscribe<{generation:number;kind:'mic_silent_live'}>('dictation-note-withdraw', value => island.withdrawNote(value));
   subscribe<EscapeHint>('escape-hint', value => { if(island.machine.observeGeneration(value.generation)) island.escapeHint(); });
   subscribe<IslandNotice>('island-notice', value => island.notice(value));
   subscribe<{id:string}>('kept-dictation-expired', value => island.expired(value.id));

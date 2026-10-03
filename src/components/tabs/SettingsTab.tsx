@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { AccountTab } from "@/components/tabs/AccountTab";
-import { UpdateAnnouncementDialog } from "@/components/UpdateAnnouncementDialog";
+import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { DialogClose } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -148,7 +148,7 @@ export function SettingsTab({
           key={pane}
           data-pencil-name="Pane content"
           data-settings-pane={pane}
-          className="settings-modal-pane flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto [&_[data-slot=select-trigger]]:rounded-[10px] [&_[data-slot=input]]:rounded-[10px]"
+          className="settings-modal-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto [&_[data-slot=select-trigger]]:rounded-[10px] [&_[data-slot=input]]:rounded-[10px]"
         >
           {pane === "general" ? (
             <>
@@ -312,7 +312,7 @@ function AboutCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) 
           onLaunchAtStartupResolved={() => {}}
         />
       </SettingsPaneCard>
-      <UpdateAnnouncementDialog
+      <WhatsNewDialog
         version={whatsNewOpen ? version : null}
         onClose={() => setWhatsNewOpen(false)}
       />

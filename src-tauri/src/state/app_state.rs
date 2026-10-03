@@ -124,6 +124,12 @@ impl AppState {
             *guard = Some(hint);
         }
     }
+    pub fn capture_recording_app_context(&self, capture: impl FnOnce() -> Option<ContextHint>) {
+        let _ = self.take_recording_app_context();
+        if let Some(hint) = capture() {
+            self.set_recording_app_context(hint);
+        }
+    }
     pub fn take_recording_app_context(&self) -> Option<ContextHint> {
         self.recording_app_context
             .lock()
@@ -318,5 +324,25 @@ pub async fn flush_pill_event_queue(app: &tauri::AppHandle) {
                 e
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod app_context_tests {
+    use super::*;
+    #[test]
+    fn clear_before_failed_capture_cannot_reuse_previous_app() {
+        let state = AppState::new();
+        state.set_recording_app_context(ContextHint {
+            app_name: Some("Previous".into()),
+            window_title: None,
+            process_path: None,
+            category: None,
+        });
+        state.capture_recording_app_context(|| {
+            assert!(state.take_recording_app_context().is_none());
+            None
+        });
+        assert!(state.take_recording_app_context().is_none());
     }
 }

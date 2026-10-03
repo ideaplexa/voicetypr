@@ -34,6 +34,7 @@ struct UsageDay {
 struct UsageApp {
     name: String,
     words: u64,
+    icon_key: Option<String>,
 }
 
 const CACHE_TTL: Duration = Duration::from_secs(5);
@@ -116,9 +117,12 @@ pub async fn get_usage_stats(app: AppHandle, since: Option<String>) -> Result<Us
         for key in store.keys() {
             if let Some(value) = store.get(&key) {
                 aggregate.add(&value, history_day(&key, &Local), since);
+                aggregate.remember_icon(&value, &key);
             }
         }
-        let stats = aggregate.finish();
+        let stats = aggregate.finish_with_icons(|path| {
+            crate::pill::icons::register(&app, std::path::Path::new(path))
+        });
         cache.0.lock().insert(generation, since, stats.clone());
         Ok(stats)
     })
@@ -151,6 +155,7 @@ struct UsageAggregate {
     stats: UsageStats,
     days: BTreeMap<NaiveDate, UsageDay>,
     apps: HashMap<String, u64>,
+    icon_paths: HashMap<String, (chrono::DateTime<chrono::FixedOffset>, String)>,
 }
 
 impl UsageAggregate {
@@ -208,7 +213,40 @@ impl UsageAggregate {
         }
     }
 
-    fn finish(mut self) -> UsageStats {
+    fn remember_icon(&mut self, value: &Value, timestamp: &str) {
+        if value
+            .get("status")
+            .is_some_and(|s| s.as_str() != Some("completed"))
+        {
+            return;
+        }
+        let Some(hint) = value.get("writing").and_then(|w| w.get("context_hint")) else {
+            return;
+        };
+        let (Some(name), Some(path), Ok(timestamp)) = (
+            hint.get("app_name").and_then(Value::as_str),
+            hint.get("process_path").and_then(Value::as_str),
+            chrono::DateTime::parse_from_rfc3339(timestamp),
+        ) else {
+            return;
+        };
+        if path.is_empty() {
+            return;
+        }
+        if self
+            .icon_paths
+            .get(name)
+            .is_none_or(|(latest, _)| timestamp > *latest)
+        {
+            self.icon_paths
+                .insert(name.to_string(), (timestamp, path.to_string()));
+        }
+    }
+    #[cfg(test)]
+    fn finish(self) -> UsageStats {
+        self.finish_with_icons(|_| None)
+    }
+    fn finish_with_icons(mut self, register: impl Fn(&str) -> Option<String>) -> UsageStats {
         self.stats.first_use = self
             .days
             .first_key_value()
@@ -217,7 +255,11 @@ impl UsageAggregate {
         let mut apps: Vec<_> = self
             .apps
             .into_iter()
-            .map(|(name, words)| UsageApp { name, words })
+            .map(|(name, words)| UsageApp {
+                name,
+                words,
+                icon_key: None,
+            })
             .collect();
         apps.sort_unstable_by(|a, b| b.words.cmp(&a.words).then_with(|| a.name.cmp(&b.name)));
         if apps.len() > 8 {
@@ -228,8 +270,15 @@ impl UsageAggregate {
                 apps.push(UsageApp {
                     name: "Other".to_string(),
                     words,
+                    icon_key: None,
                 });
             }
+        }
+        for app in &mut apps {
+            app.icon_key = self
+                .icon_paths
+                .get(&app.name)
+                .and_then(|(_, path)| register(path));
         }
         self.stats.apps = apps;
         self.stats
@@ -312,7 +361,8 @@ mod tests {
             stats.apps[8],
             UsageApp {
                 name: "Other".into(),
-                words: 3
+                words: 3,
+                icon_key: None
             }
         );
         assert!(!serde_json::to_string(&stats).unwrap().contains("private"));
@@ -344,6 +394,26 @@ mod tests {
     }
 
     #[test]
+    fn latest_app_path_produces_only_an_opaque_icon_key() {
+        let mut aggregate = UsageAggregate::default();
+        for (stamp, path) in [
+            ("2026-10-03T11:00:00Z", "/latest"),
+            ("2026-10-03T10:00:00Z", "/older"),
+        ] {
+            let value = json!({"text":"word", "writing":{"context_hint":{"app_name":"Editor","process_path":path}}});
+            aggregate.add(&value, day("2026-10-03"), None);
+            aggregate.remember_icon(&value, stamp);
+        }
+        let stats = aggregate.finish_with_icons(|path| {
+            assert_eq!(path, "/latest");
+            Some("opaque".into())
+        });
+        assert_eq!(stats.apps[0].icon_key.as_deref(), Some("opaque"));
+        let serialized = serde_json::to_string(&stats).unwrap();
+        assert!(!serialized.contains("/latest"));
+        assert!(!serialized.contains("process_path"));
+    }
+    #[test]
     fn empty_history() {
         assert_eq!(UsageAggregate::default().finish(), UsageStats::default());
     }
@@ -368,7 +438,8 @@ mod tests {
             stats.apps,
             vec![UsageApp {
                 name: "Editor".into(),
-                words: 150_000
+                words: 150_000,
+                icon_key: None
             }]
         );
     }
@@ -386,7 +457,8 @@ mod tests {
             stats.apps[0],
             UsageApp {
                 name: "Other".into(),
-                words: 23
+                words: 23,
+                icon_key: None
             }
         );
         assert_eq!(stats.apps.iter().map(|app| app.words).sum::<u64>(), 65);

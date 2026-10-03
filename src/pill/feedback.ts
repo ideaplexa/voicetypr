@@ -3,7 +3,7 @@ import type { IslandIcon } from '@/pill/icons';
 import { elapsed } from '@/pill/copy';
 export type CardCommand = { command: 'island_action'; action: IslandAction } | { command: 'retry_kept_dictation'; id: string; engine: string } | { command: 'transcribe_anyway' | 'discard_kept_dictation'; id: string };
 export interface CardAction { label: string; call: CardCommand }
-export interface FeedbackCard { key: string; title: string; sub: string; tone: 'neutral' | 'amber' | 'red'; duration: number | null; expiresAt?: number; glyph?: IslandIcon; actions: CardAction[] }
+export interface FeedbackCard { key: string; title: string; sub: string; tone: 'neutral' | 'amber' | 'red'; duration: number | null; expiresAt?: number; liveGeneration?: number; glyph?: IslandIcon; actions: CardAction[] }
 const action = (label: string, value: IslandAction): CardAction => ({label, call: {command:'island_action',action:value}});
 const card = (key: string, title: string, sub = '', duration: number | null = 3500, tone: FeedbackCard['tone'] = 'neutral', actions: CardAction[] = []): FeedbackCard => ({key,title,sub,duration,tone,actions});
 export function blockedCard(e: DictationBlocked, mac: boolean): FeedbackCard {
@@ -43,6 +43,7 @@ export function noteCard(e: DictationNote): FeedbackCard {
   switch(e.kind) {
     case 'mic_dropped': return card(e.kind,`Mic disconnected · using the ${elapsed(Math.floor(e.captured_ms/1000))} we got`);
     case 'storage_failed': return card(e.kind,"Couldn't keep the recording",'',5000,'amber');
+    case 'mic_silent_live': return {...card(`mic_silent_live:${e.generation}`,'Your mic sent silence — is it muted?','',null,'amber',[action('Choose mic','choose_mic')]),liveGeneration:e.generation};
     case 'mic_silent': return card(e.kind,'Your mic sent silence — is it muted?','',5000,'amber',[action('Choose mic','choose_mic')]);
     case 'translate_failed': return card(e.kind,'Pasted untranslated · translation failed');
     case 'model_fallback': return card(e.kind,`Using ${e.alt_engine_short} · ${e.engine_short} isn't downloaded`);

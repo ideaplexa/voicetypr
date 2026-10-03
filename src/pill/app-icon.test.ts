@@ -25,7 +25,10 @@ describe('app icon fallback', () => {
     vi.spyOn(image, 'naturalWidth', 'get').mockReturnValue(64);
     image.dispatchEvent(new Event('load'));
     expect(image.hidden).toBe(false); expect(letter.hidden).toBe(true);
+    expect(tile.style.backgroundColor).toBe("transparent");
+    expect(tile.classList.contains("has-image")).toBe(true);
     image.dispatchEvent(new Event('error'));
+    expect(tile.style.backgroundColor).not.toBe("transparent");
     expect(image.hidden).toBe(true); expect(letter.hidden).toBe(false);
     expect(image.hasAttribute('src')).toBe(false);
   });

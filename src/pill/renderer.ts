@@ -22,6 +22,7 @@ import type { TranscriptionStreamEvent } from '@/types/streaming';
 import { applyPillGeometry, type PillGeometry } from '@/pill-geometry';
 
 export interface RendererDeps {
+  staticPreview?: boolean;
   actions: IslandActions;
   mac: boolean;
   icon: (key: string) => Promise<unknown>;
@@ -52,7 +53,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const POFF = new Spring(0);
   const springs = [W, H, R, IX, IY, IS, GX, GY, GW, HC, ITOP, GTOP, POFF];
   const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let reduced = media.matches, mode: PillSettings['pill_indicator_mode'] = 'when_recording';
+  let reduced = deps.staticPreview || media.matches, mode: PillSettings['pill_indicator_mode'] = 'when_recording';
   let destroyed = false, frame: number | undefined, last = 0, hovering = false, top = false;
   let finishing = false, finishingTimer: number | undefined;
   let copiedTimer: number | undefined, pickTimer: number | undefined;
@@ -83,7 +84,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const signature=JSON.stringify(rects);
     if(signature!==regionSignature){regionSignature=signature;deps.hitRegions(rects);}
   };
-  const wake = () => { if (!destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
+  const wake = () => { if (!deps.staticPreview && !destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
   const syncTime = (now: number) => {
     if (machine.recording) waveSeconds = Math.max(0, (now - machine.startedAt) / 1000);
     const seconds = Math.floor(machine.recording ? waveSeconds : machine.frozenSeconds);
@@ -144,9 +145,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (shapeMoving) place(); glyph.draw(waveSeconds, Math.max(0, GW.x), reduced);
     const landed = machine.state === 'rest' && W.x < 12.5 && H.x < 12.5;
     stack.tuck(mode === 'never' || !landed);
-    moving = stack.step(dt,reduced,landed) || moving;
+    stack.setGeometry(machine.recording ? {...geometry,anchorY:geometry.anchorY+(top ? 1 : -1)*Math.max(0,H.x-12)} : geometry);
+    moving = stack.step(dt,reduced,landed,mode !== "never") || moving;
     hit();
-    if (moving || (!dom.surface.hidden && machine.recording && !reduced)) frame = requestAnimationFrame(tick);
+    if (!deps.staticPreview && (moving || (!dom.surface.hidden && machine.recording && !reduced))) frame = requestAnimationFrame(tick);
     else dom.surface.style.willChange = 'auto';
   }
   const sync = () => {
@@ -272,14 +274,17 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
 
   };
   const foldStart = () => { if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = deps.setTimeout(() => { startTimer = undefined; if (!pick) machine.foldStart(); sync(); }, 800); };
-  const rest = () => { pick = undefined; timers(); machine.rest(); cancelPending = stopPending = false; sync(); };
+  const rest = () => { stack.dropLive(); pick = undefined; timers(); machine.rest(); cancelPending = stopPending = false; sync(); };
   const flash = (kind: 'too_short' | 'nospeech' | 'error', message = '') => {
+    stack.dropLive();
     if (machine.state === kind && machine.error === message) return;
     timers(); machine.clearStream(); machine.hint = false; machine.state = kind; machine.error = message;
     announce(kind === 'too_short' ? shortCopy(machine.context) : kind === 'nospeech' ? 'No speech heard' : message);
     feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, kind === 'error' ? 1500 : kind === 'too_short' ? 1400 : 30000); sync();
   };
   const start = () => {
+    if (machine.recording) return;
+    stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
       const permission=machine.state==='no_permission';
       stack.push({key:machine.state,title:permission ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac),sub:permission ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : `${machine.context.app.name || 'The app'} didn't accept the paste`,tone:'amber',glyph:'clipboard',duration:null,actions:permission ? [{label:deps.mac ? 'Open System Settings' : 'Open Privacy settings',call:{command:'island_action',action:'open_accessibility'}}] : []},undefined,false);
@@ -385,7 +390,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   dom.get<HTMLButtonElement>('.pick-back').onclick = e => { e.stopPropagation(); closePick(); };
   dom.get<HTMLButtonElement>('.peek-gear').onclick = e => { e.stopPropagation(); void deps.actions.openSettings?.().catch(() => {}); };
   const keydown = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (pick) closePick(); else if (machine.state === 'peek') rest(); } };
-  window.addEventListener('keydown', keydown, { passive: true });
+  if (!deps.staticPreview) window.addEventListener('keydown', keydown, { passive: true });
   dom.get<HTMLButtonElement>('.cancel').onclick = () => {
     if (cancelPending) return; cancelPending = true; sync();
     void deps.actions.cancel().catch(() => { if (!destroyed) { cancelPending = false; sync(); } });
@@ -421,10 +426,16 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     void deps.actions.start().catch(() => { if (!destroyed) stack.push(noticeCard({kind:'recording_failed'})); sync(); }).finally(() => { clickPending = false; });
   };
   const motionChanged = () => { reduced = media.matches; sync(); };
-  media.addEventListener('change', motionChanged);
+  if (!deps.staticPreview) media.addEventListener('change', motionChanged);
   applyPillGeometry(dom.root, geometry); contextText(); sync();
   return {
     machine,
+    renderStatic() {
+      if (!deps.staticPreview) return;
+      const now = performance.now();
+      for (let i = 0; i < 20; i++) tick(now + i * 50);
+      place();
+    },
     quickOptions(value: QuickOptions) { if (!value?.polish || !value.engine || !value.shortcut_caps) return; quick = value;
       if (machine.recording && value.polish_context?.generation === machine.context.generation) {
         machine.context.polish.style = value.polish_context.style;
@@ -441,13 +452,15 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     },
     blocked(value: DictationBlocked) { if (machine.observeGeneration(value.generation)) this.feedback(blockedCard(value,deps.mac),value.kind !== 'starting_up',!(value.kind==='accessibility_off' && machine.state==='no_permission')); },
     recovery(value: DictationRecovery) { if (machine.observeGeneration(value.generation)) this.feedback(recoveryCard(value,performance.now())); },
-    note(value: DictationNote) { if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
+    withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },
+    note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.generation)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
     tooShort(value: RecordingTooShort) { if (machine.observeGeneration(value.generation)) this.feedback(shortCard(value)); },
     notice(value: IslandNotice) {
+      if (value.kind === "long_silence" && !machine.recording) return;
       if(value.kind==='finishing' && machine.processing) {
         finishing=true;if(finishingTimer!==undefined)deps.clearTimeout(finishingTimer);
         finishingTimer=deps.setTimeout(()=>{finishingTimer=undefined;finishing=false;sync();},600);sync();
-      } else this.feedback(noticeCard(value),false);
+      } else this.feedback(value.kind === "long_silence" && machine.recording ? {...noticeCard(value),liveGeneration:machine.generation} : noticeCard(value),false);
     },
     expired(id: string) { stack.remove(`recovery:${id}`); },
     clearNotice(kind: IslandNotice['kind']) { stack.remove(`notice:${kind}`); },
@@ -459,8 +472,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (reduced) { glyph.wave.advance((performance.now() - machine.startedAt) / 1000, 1 / 60); syncTime(performance.now()); glyph.draw(waveSeconds, GW.x, true); }
     },
     stream(value: TranscriptionStreamEvent) { if (enabledStream && machine.stream(value)) sync(); },
-    work(state: 'transcribing' | 'polishing') { pick = undefined; if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined; machine.work(state, performance.now()); sync(); },
+    work(state: 'transcribing' | 'polishing') { stack.dropLive(); pick = undefined; if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined; machine.work(state, performance.now()); sync(); },
     outcome(value: PasteOutcomePayload) {
+      stack.dropLive();
       pick = undefined;
       if (machine.terminal && machine.state === value.outcome && machine.words === value.words) return;
       if (!machine.outcome(value)) return;

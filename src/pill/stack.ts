@@ -24,6 +24,8 @@ export class FeedbackStack {
     else this.items.push({...card,serial:++this.serial,count:1,left:card.duration ?? 0});
   }
   remove(key: string) { this.items=this.items.filter(i=>i.key!==key); }
+  dropLive() { this.items = this.items.filter(i => i.liveGeneration === undefined); }
+  get displayed() { return this.items.filter(i => !this.tucked || i.liveGeneration !== undefined); }
   get visible() { return this.items.slice(-3).reverse(); }
   get more() { return Math.max(0,this.items.length-3); }
   get nextDelay() {

@@ -60,7 +60,7 @@ describe('feedback transport and actions',()=>{
   it('tucks feedback throughout dictation, then resumes its clock',async()=>{const h=await mount();h.emit('island-notice',{kind:'polish_on'});await h.settle(1000);h.emit('recording-started');await h.settle(10000);expect(h.get('.feedback-stack').inert).toBe(true);expect(h.get('.card-title').textContent).toBe('Polish on');h.emit('recording-state-changed',{state:'idle',error:null});await h.settle(1600);expect(h.get('.feedback-stack').inert).toBe(false);await h.settle(5000);expect(h.root.querySelector('.feedback-card')).toBeNull();});
   it('reports card rectangles with the island and puts top stacks below it',async()=>{const h=await mount();h.emit('pill-geometry',{anchor:'top-center',anchorX:220,anchorY:6});h.emit('dictation-blocked',{generation:1,kind:'trial_ended',action:'open_license'});await h.settle(1500);expect(h.get('.feedback-stack').style.top).toBe('30px');expect(h.get('.feedback-stack').dataset.anchor).toBe('top-center');const calls=h.invoke.mock.calls.filter(([cmd])=>cmd==='pill_set_hit_regions') as unknown as Array<[string,{rects:unknown[]}]>;expect(calls[calls.length-1]?.[1].rects).toHaveLength(2);});
   it('keeps the live shape during the first frame of an island-to-card handoff',async()=>{const h=await mount();h.emit('transcription-started');await h.settle(1000);h.emit('dictation-recovery',{generation:1,id:'clip',kind:'cloud_failed',engine_short:'Soniox',alt_engine_short:'Parakeet',alt_engine_id:'parakeet-tdt-0.6b-v3',expires_in_ms:10000});expect(h.get('.pill-surface').style.width).toBe('236px');expect(h.get('.card-title').textContent).toBe('Soniox unreachable · Recording kept');await h.settle(2000);expect(h.get('.pill-surface').style.width).toBe('12px');expect(h.get('.feedback-stack').style.opacity).toBe('1');});
-  it('merges repeats and shows three cards plus overflow',async()=>{const h=await mount();for(const kind of ['polish_on','polish_off','shortcuts_retired','long_silence','long_silence'])h.emit('island-notice',{kind});await h.settle(1000);expect(h.get('.stack-more').textContent).toBe('+1');expect(h.get('.card-count').textContent).toBe('×2');expect([...h.root.querySelectorAll<HTMLElement>('.feedback-card')].filter(e=>!e.hidden)).toHaveLength(3);});
+  it('merges repeats and shows three cards plus overflow',async()=>{const h=await mount();for(const kind of ['polish_on','polish_off','shortcuts_retired','polish_setup','polish_setup'])h.emit('island-notice',{kind});await h.settle(1000);expect(h.get('.stack-more').textContent).toBe('+1');expect(h.get('.card-count').textContent).toBe('×2');expect([...h.root.querySelectorAll<HTMLElement>('.feedback-card')].filter(e=>!e.hidden)).toHaveLength(3);});
   it('announces one condition once when a repeat merges',async()=>{const h=await mount();h.emit('island-notice',{kind:'polish_on'});const announcement=h.get('.pill-announcement');const spy=vi.spyOn(announcement,'textContent','set');h.emit('island-notice',{kind:'polish_on'});expect(spy).not.toHaveBeenCalled();});
   it('keeps blockers sticky through idle/error until dismissed and releases native ownership',async()=>{const h=await mount();h.emit('dictation-blocked',{generation:1,kind:'mic_busy',action:'choose_mic'});h.emit('recording-state-changed',{state:'error',error:'private detail'});await h.settle(20000);expect(h.get('.card-title').textContent).toBe('Mic in use by another app');expect(h.root.textContent).not.toContain('private detail');fireEvent.click(h.get('.card-dismiss'));await h.settle(500);expect(h.invoke).toHaveBeenCalledWith('pill_feedback_visible',{visible:false});});
   it('Original is hover-only, pauses the pasted clock and copies using the real command',async()=>{const h=await mount();h.invoke.mockImplementation(async(cmd:string):Promise<unknown>=>cmd==='copy_last_original'?'copied':null);h.emit('paste-outcome',{outcome:'pasted',words:38,polished:true});expect(h.get('.done-actions').hidden).toBe(true);await h.settle(1000);h.emit('pill-pointer',{inside:true});await h.settle(5000);expect(h.get('.done-actions').hidden).toBe(false);expect(h.get('.pill-root').dataset.state).toBe('pasted');fireEvent.click(h.get('.original'));await h.settle(0);expect(h.invoke).toHaveBeenCalledWith('copy_last_original');expect(h.get('.done-label').textContent).toBe('Original copied');expect(h.root.querySelector('.undo')).toBeNull();expect(h.root.querySelector('.retry')).toBeNull();h.emit('pill-pointer',{inside:false});await h.settle(1500);expect(h.get('.pill-root').dataset.state).toBe('idle');});
@@ -95,7 +95,7 @@ describe('feedback card layout',()=>{
   it.each([
     ['dictation-note',{generation:1,kind:'mic_dropped',captured_ms:42000}],
     ['dictation-note',{generation:1,kind:'polish_skipped',reason:'timeout'}],
-    ['island-notice',{kind:'long_silence'}],
+    ['island-notice',{kind:'polish_setup'}],
   ])('places simple %s feedback and dismiss on one row',async(event,payload)=>{
     const h=await mount();h.emit(event as string,payload);await h.settle(1000);
     const card=h.get('.feedback-card');expect(card.classList.contains('single-row')).toBe(true);
@@ -122,4 +122,46 @@ describe('feedback card layout',()=>{
     expect(h.get('.pill-surface').style.width).toBe('360px');expect(h.get('.pill-surface').style.height).toBe('104px');
     expect(h.get('.notice-title').title).toBe('Allow Accessibility to paste automatically');
   });
+});
+
+describe('live recording warnings', () => {
+  it('shows live warnings while other cards are tucked and drops only live warnings', () => {
+    const stack = new FeedbackStack();
+    stack.push(noteCard({ generation: 1, kind: 'mic_silent' }), 0);
+    stack.push(noteCard({ generation: 1, kind: 'mic_silent_live' }), 0);
+    expect(stack.displayed.map(item => item.key)).toEqual(['mic_silent_live:1']);
+    stack.dropLive();
+    stack.tuck(false, 1);
+    expect(stack.visible.map(item => item.key)).toEqual(['mic_silent']);
+  });
+  it('withdraws only the warning from the matching take when speech arrives', async () => {
+    const h = pillHarness();
+    await h.settle(); h.context(); h.emit('recording-started'); await h.settle(1000);
+    h.emit('dictation-note', { generation: 1, kind: 'mic_silent_live' }); await h.settle();
+    expect(h.get('.feedback-card').hidden).toBe(false);
+    h.emit('dictation-note-withdraw', { generation: 0, kind: 'mic_silent_live' }); await h.settle();
+    expect(h.get('.feedback-card')).not.toBeNull();
+    h.emit('dictation-note-withdraw', { generation: 1, kind: 'mic_silent_live' }); await h.settle();
+    expect(h.get('.feedback-card')).toBeNull(); h.destroy();
+  });
+  for (const end of ['stop', 'cancel', 'paste'] as const) it(`drops live warnings on ${end}, retaining post-take digital-zero feedback`, async () => {
+    const h = pillHarness(); await h.settle(); h.context(); h.emit('recording-started'); await h.settle(1000);
+    h.emit('dictation-note', { generation: 1, kind: 'mic_silent_live' }); await h.settle();
+    if (end === 'stop') h.emit('recording-state-changed', { state: 'stopping', error: null });
+    if (end === 'cancel') h.emit('recording-state-changed', { state: 'idle', error: null });
+    if (end === 'paste') h.emit('paste-outcome', { outcome: 'pasted', words: 12, polished: false });
+    await h.settle(); expect(h.get('[data-key="mic_silent_live:1"]')).toBeNull();
+    h.emit('dictation-note', { generation: 1, kind: 'mic_silent' });
+    await h.settle(3000); expect(h.get('[data-key="mic_silent"]')).not.toBeNull(); h.destroy();
+  });
+});
+
+it('drops long-silence feedback when recording ends and ignores late live warnings', async () => {
+  const h = pillHarness(); await h.settle(); h.context(); h.emit('recording-started'); await h.settle(1000);
+  h.emit('island-notice', { kind: 'long_silence' }); await h.settle();
+  expect(h.get('[data-key="notice:long_silence"]').hidden).toBe(false);
+  h.emit('recording-state-changed', {state:'idle',error:null}); await h.settle();
+  h.emit('island-notice', { kind: 'long_silence' });
+  h.emit('dictation-note', {generation:1,kind:'mic_silent_live'}); await h.settle();
+  expect(h.get('.feedback-card')).toBeNull(); h.destroy();
 });

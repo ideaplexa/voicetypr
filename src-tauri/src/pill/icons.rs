@@ -6,7 +6,7 @@ use tauri::{Manager, WebviewWindow};
 pub struct IconCache(Mutex<HashMap<String, IconEntry>>);
 struct IconEntry {
     path: String,
-    image: Option<Option<String>>,
+    image: Option<String>,
 }
 
 pub fn register(app: &tauri::AppHandle, path: &std::path::Path) -> Option<String> {
@@ -32,14 +32,30 @@ pub fn register(app: &tauri::AppHandle, path: &std::path::Path) -> Option<String
     if entries.len() >= 256 && !entries.contains_key(&key) {
         entries.clear();
     }
-    entries
-        .entry(key.clone())
-        .or_insert(IconEntry { path, image: None });
+    let entry = entries.entry(key.clone()).or_insert_with(|| IconEntry {
+        path: path.clone(),
+        image: None,
+    });
+    entry.update_path(path);
     Some(key)
 }
+impl IconEntry {
+    fn update_path(&mut self, path: String) {
+        if self.path != path {
+            self.path = path;
+            self.image = None;
+        }
+    }
+    fn cache_image(&mut self, path: &str, image: Option<String>) {
+        if self.path == path {
+            self.image = image;
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn pill_app_icon(window: WebviewWindow, icon_key: String) -> Option<String> {
-    if window.label() != "pill" {
+    if !matches!(window.label(), "pill" | "main") {
         return None;
     }
     let app = window.app_handle().clone();
@@ -48,23 +64,25 @@ pub async fn pill_app_icon(window: WebviewWindow, icon_key: String) -> Option<St
         let entries = cache.0.lock().unwrap();
         let entry = entries.get(&icon_key)?;
         if let Some(image) = &entry.image {
-            return image.clone();
+            return Some(image.clone());
         }
         entry.path.clone()
     };
     #[cfg(target_os = "macos")]
-    let image = crate::commands::utils::get_application_icon(app.clone(), path)
+    let image = crate::commands::utils::get_application_icon(app.clone(), path.clone())
         .await
         .ok()
         .flatten();
     #[cfg(target_os = "windows")]
-    let image = tauri::async_runtime::spawn_blocking(move || windows_icon(&path))
+    let lookup_path = path.clone();
+    #[cfg(target_os = "windows")]
+    let image = tauri::async_runtime::spawn_blocking(move || windows_icon(&lookup_path))
         .await
         .ok()
         .flatten();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let image = {
-        let _ = path;
+        let _ = &path;
         None
     };
     if let Some(entry) = app
@@ -74,7 +92,7 @@ pub async fn pill_app_icon(window: WebviewWindow, icon_key: String) -> Option<St
         .unwrap()
         .get_mut(&icon_key)
     {
-        entry.image = Some(image.clone());
+        entry.cache_image(&path, image.clone());
     }
     image
 }
@@ -164,5 +182,26 @@ fn windows_icon(path: &str) -> Option<String> {
         })();
         let _ = DestroyIcon(info.hIcon);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_lookup_can_retry_and_reregistered_path_invalidates_image() {
+        let mut entry = IconEntry {
+            path: "/old".into(),
+            image: None,
+        };
+        entry.cache_image("/old", None);
+        assert!(entry.image.is_none());
+        entry.cache_image("/old", Some("image".into()));
+        assert_eq!(entry.image.as_deref(), Some("image"));
+        entry.update_path("/new".into());
+        assert_eq!(entry.path, "/new");
+        assert!(entry.image.is_none());
+        entry.cache_image("/old", Some("stale".into()));
+        assert!(entry.image.is_none());
     }
 }

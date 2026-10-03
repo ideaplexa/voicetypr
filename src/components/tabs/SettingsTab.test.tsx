@@ -68,7 +68,7 @@ it("opens the existing What's new dialog and routes Help & feedback from About",
   render(<SettingsTab pane="about" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
   await screen.findByText("Voicetypr 2.1.0");
   await userEvent.click(screen.getByRole("button", { name: "View" }));
-  expect(screen.getByRole("dialog", { name: /Voicetypr Updated/ })).toHaveTextContent("2.1.0");
+  expect(screen.getByRole("dialog", { name: /What's new/ })).toHaveTextContent("2.1.0");
   await userEvent.keyboard("{Escape}");
   await userEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(onNavigate).toHaveBeenCalledWith("help");

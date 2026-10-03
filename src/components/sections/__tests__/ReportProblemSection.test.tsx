@@ -115,8 +115,8 @@ describe("ReportProblemSection", () => {
     render(<ReportProblemSection />);
     expect(await screen.findByText("See what changed in 2.1.0-beta.2.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "What's new" }));
-    expect(screen.getByRole("dialog", { name: "Voicetypr Updated" })).toBeInTheDocument();
-    expect(screen.getByText("Successfully updated to version 2.1.0-beta.2")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "What's new" })).toBeInTheDocument();
+    expect(screen.getByText("Voicetypr 2.1.0-beta.2")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });

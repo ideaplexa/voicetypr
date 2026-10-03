@@ -36,6 +36,7 @@ export class StackView {
     this.schedule();this.deps.changed();this.deps.wake();
   }
   remove(key:string) { this.stack.remove(key);this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
+  dropLive() { this.stack.dropLive();this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
   tuck(tucked:boolean) { if(tucked===this.stack.tucked)return; this.stack.tuck(tucked,performance.now());this.sync();this.schedule();this.deps.wake(); }
   private schedule() {
     if(this.timer!==undefined)this.deps.clearTimeout(this.timer);
@@ -72,13 +73,13 @@ export class StackView {
     }
     this.more.textContent=`+${this.stack.more}`;this.more.hidden=!this.stack.more;
   }
-  step(dt:number,reduced:boolean,landed:boolean) {
+  step(dt:number,reduced:boolean,landed:boolean,enabled=true) {
     if(this.handoff && landed) this.handoff=undefined;
-    const target=this.stack.tucked && !this.handoff ? 0 : 1;
+    const target=enabled && (this.stack.displayed.length || this.handoff) ? 1 : 0;
     this.alpha += Math.sign(target-this.alpha)*Math.min(Math.abs(target-this.alpha),dt/(target ? .18 : .12));
     let moving=this.alpha!==target;
     const wasPresent=this.present;
-    const front=this.stack.visible[0];
+    const front=this.stack.displayed.slice(-1)[0];
     const frontView=front && this.views.get(front.key);
     // Measure once per content change, not on every animation frame.
     if(frontView && frontView.el.dataset.measured!==this.snapshot) {
@@ -94,14 +95,14 @@ export class StackView {
     const width=Number(frontView?.el.dataset.naturalWidth ?? 300),height=Number(frontView?.el.dataset.naturalHeight ?? 54);
     const top=this.geometry.anchor.startsWith('top-'), direction=top ? 1 : -1;
     for(const [key,v] of this.views) {
-      const index=this.stack.items.findIndex(i=>i.key===key);
-      const alive=index>=0, depth=alive ? this.stack.items.length-1-index : 0;
-      v.targetAlpha=alive && depth<3 ? 1 : 0;
+      const index=this.stack.displayed.findIndex(i=>i.key===key);
+      const alive=this.stack.items.some(i=>i.key===key), displayed=index>=0, depth=displayed ? this.stack.displayed.length-1-index : 0;
+      v.targetAlpha=displayed && depth<3 ? 1 : 0;
       v.w.to=width;v.h.to=height;v.y.to=direction*Math.min(2,depth)*19;v.scale.to=1-Math.min(2,depth)*.05;
       for(const s of [v.w,v.h,v.y,v.scale]) moving=s.step(dt,reduced)||moving;
       v.alpha+=Math.sign(v.targetAlpha-v.alpha)*Math.min(Math.abs(v.targetAlpha-v.alpha),dt/(alive ? .2 : .08));
       moving=v.alpha!==v.targetAlpha||moving;
-      v.el.hidden=depth>2 || v.alpha===0;v.el.inert=this.stack.tucked && !this.handoff || depth!==0;
+      v.el.hidden=depth>2 || v.alpha===0;v.el.inert=!displayed || depth!==0;
       v.el.classList.toggle('back',depth>0);v.el.style.zIndex=String(alive ? 3-depth : 4);
       v.el.style.width=`${Math.max(12,v.w.x)}px`;v.el.style.height=`${Math.max(12,v.h.x)}px`;
       v.el.style.opacity=String(v.alpha);v.el.style.transform=`translateY(${v.y.x}px) scale(${v.scale.x})`;
@@ -111,6 +112,7 @@ export class StackView {
     this.container.style.left=`${this.geometry.anchorX}px`;this.container.style.top=`${this.geometry.anchorY+direction*24}px`;
     this.container.dataset.anchor=this.geometry.anchor;
     this.container.style.opacity=String(clamp(this.alpha));this.container.inert=target===0;
+    this.more.textContent=`+${Math.max(0,this.stack.displayed.length-3)}`;this.more.hidden=this.stack.displayed.length<=3;
     this.more.style[top?'top':'bottom']=`${height+44}px`;
     if(wasPresent && !this.present) this.deps.changed();
     return moving;

@@ -22,17 +22,19 @@ export interface DictationBlocked { generation: number; kind: BlockedKind; actio
 export type PolishSkippedReason = "timeout" | "rate_limited" | "network" | "guard" | "error";
 export type DictationNote = { generation: number } & (
   | { kind: "mic_dropped"; captured_ms: number }
-  | { kind: "mic_silent" | "translate_failed" | "storage_failed" }
+  | { kind: "mic_silent" | "mic_silent_live" | "translate_failed" | "storage_failed" }
   | { kind: "model_fallback"; engine_short: string; alt_engine_short: string }
   | { kind: "gpu_fallback"; engine_short: string }
   | { kind: "polish_skipped"; reason: PolishSkippedReason }
 );
+export interface DictationNoteWithdraw { generation: number; kind: "mic_silent_live" }
 export interface RecordingTooShort { generation: number; mode: "hold" | "toggle" }
 export interface EscapeHint { generation: number; phase: "recording" | "transcribing" }
 export interface IslandProblemEvents {
   "dictation-recovery": DictationRecovery;
   "dictation-blocked": DictationBlocked;
   "dictation-note": DictationNote;
+  "dictation-note-withdraw": DictationNoteWithdraw;
   "recording-too-short": RecordingTooShort;
   "escape-hint": EscapeHint;
 }

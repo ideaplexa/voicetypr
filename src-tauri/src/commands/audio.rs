@@ -4857,11 +4857,12 @@ fn spawn_silence_event_listener(
 
             match event {
                 SilenceDetectorEvent::Clear => {
+                    island::withdraw_live_mic_silent(&app, generation);
                     clear_active_silence_notice(&app, &mut active_silence_notice);
                 }
                 SilenceDetectorEvent::DeadMicWarn => {
                     clear_active_silence_notice(&app, &mut active_silence_notice);
-                    island::note(&app, generation, Note::MicSilent);
+                    island::note(&app, generation, Note::MicSilentLive);
                 }
                 SilenceDetectorEvent::LongSilenceWarn => {
                     clear_active_silence_notice(&app, &mut active_silence_notice);
@@ -5139,9 +5140,7 @@ pub async fn start_recording(
         clear_pending_stop_after_start(&app_state);
     }
     if let Some(app_state) = app.try_state::<AppState>() {
-        if let Some(hint) = crate::writing::capture_active_app_context() {
-            app_state.set_recording_app_context(hint);
-        }
+        app_state.capture_recording_app_context(crate::writing::capture_active_app_context);
     }
     update_recording_state(&app, RecordingState::Starting, None);
     // Ensure transition actually happened; if blocked, abort early

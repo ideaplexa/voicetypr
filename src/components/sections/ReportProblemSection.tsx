@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/settings/SettingsButton";
 import { FieldError } from "@/components/ui/field";
 import { getVersion } from "@tauri-apps/api/app";
-import { UpdateAnnouncementDialog } from "@/components/UpdateAnnouncementDialog";
+import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import type { SettingsPane } from "@/components/navigation";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -309,7 +309,7 @@ export function ReportProblemSection({
           </div>
         </form>
       </SettingsCard>
-      <UpdateAnnouncementDialog
+      <WhatsNewDialog
         version={announcementOpen ? version : null}
         onClose={() => setAnnouncementOpen(false)}
       />

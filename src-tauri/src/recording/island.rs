@@ -73,6 +73,7 @@ pub enum Note {
         captured_ms: u64,
     },
     MicSilent,
+    MicSilentLive,
     StorageFailed,
     TranslateFailed,
     ModelFallback {
@@ -98,6 +99,14 @@ struct BlockedEvent {
     generation: u64,
     kind: BlockedKind,
     action: IslandAction,
+}
+/// Enumerated withdrawal, scoped to the take. Never contains capture context.
+pub fn withdraw_live_mic_silent(app: &AppHandle, generation: u64) {
+    crate::commands::pill_feedback::send(
+        app,
+        "dictation-note-withdraw",
+        serde_json::json!({"generation": generation, "kind": "mic_silent_live"}),
+    );
 }
 pub fn note(app: &AppHandle, generation: u64, note: Note) {
     if matches!(&note, Note::MicDropped { .. }) {

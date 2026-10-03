@@ -64,7 +64,6 @@ export function DictionarySection() {
     !editing ||
     editing.source === null ||
     list(editing.kind)[editing.sourceIndex] === editing.source;
-  if (!sourcePresent && editing) setEditing(null);
   const activeEditor = sourcePresent && editing?.kind === tab ? editing : null;
   const changeTab = (next: DictionaryTab) => {
     setTab(next);
@@ -221,7 +220,7 @@ export function DictionarySection() {
                       {column}
                     </th>
                   ))}
-                  <th scope="col" className="w-24 px-4 py-[11px] font-medium">
+                  <th scope="col" className="w-24 px-4 py-[9px] font-medium">
                     Actions
                   </th>
                 </tr>

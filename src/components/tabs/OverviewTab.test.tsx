@@ -12,6 +12,7 @@ const mock = vi.hoisted(() => ({
   downloadProgress: {} as Record<string, number>,
   shortcutBindings: [] as Array<{ id: string; action: string; shortcut: string; trigger: string; enabled: boolean; allow_risky_combo: boolean; trigger_kind: string; modifier: { modifier: string; side: string } }>,
   history: [] as TranscriptionHistory[],
+  usageWords: 0,
   isLoading: false,
   loadError: null as string | null,
   mac: true,
@@ -24,7 +25,7 @@ vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () 
 vi.mock("@/contexts/ModelManagementContext", () => ({ useModelManagementContext: () => ({ downloadProgress: mock.downloadProgress }) }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_usage_stats" ? createUsageFixture() : command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_usage_stats" ? {...createUsageFixture(), total_words: mock.usageWords} : command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => { mock.listeners[name] = handler; return () => { delete mock.listeners[name]; }; }) }));
 vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: ({ open }: { open: boolean }) => open ? <div>Share stats preview</div> : null }));
 
@@ -34,6 +35,7 @@ beforeEach(() => {
   mock.downloadProgress = {};
   mock.shortcutBindings = [];
   mock.history = [];
+  mock.usageWords = 0;
   mock.isLoading = false;
   mock.loadError = null;
   mock.mac = true;
@@ -49,7 +51,7 @@ describe("Home", () => {
   });
   it("opens the share card using whole-history usage stats", async () => {
     render(<OverviewTab />);
-    expect(invoke).not.toHaveBeenCalledWith("get_usage_stats", expect.anything());
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_usage_stats", { since: null }));
     await userEvent.click(screen.getByRole("button", { name: "Share stats" }));
     expect(await screen.findByText("Share stats preview")).toBeInTheDocument();
     expect(invoke).toHaveBeenCalledWith("get_usage_stats", { since: null });
@@ -260,4 +262,19 @@ describe("Home", () => {
     expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
   });
 
+});
+
+it("hides test dictation after a completed take and keeps it for failed takes", () => {
+  mock.history = [{id:"failed",text:"",status:"failed",timestamp:new Date(),model:"parakeet"}];
+  const {rerender} = render(<OverviewTab />);
+  expect(screen.getByRole("button", {name:"Try a test dictation"})).toBeInTheDocument();
+  mock.history = [{id:"success",text:"A good take",status:"completed",timestamp:new Date(),model:"parakeet"}];
+  rerender(<OverviewTab />);
+  expect(screen.queryByRole("button", {name:"Try a test dictation"})).toBeNull();
+});
+
+it("hides test dictation for a successful take outside the loaded history page", async () => {
+  mock.usageWords = 12;
+  render(<OverviewTab />);
+  await waitFor(() => expect(screen.queryByRole("button", {name:"Try a test dictation"})).toBeNull());
 });

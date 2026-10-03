@@ -1366,6 +1366,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             show_in_folder,
             get_transcription_history,
             get_usage_stats,
+            commands::release_notes::get_release_notes,
             get_transcription_count,
             delete_transcription_entry,
             clear_all_transcriptions,
