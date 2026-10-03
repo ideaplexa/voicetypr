@@ -52,6 +52,15 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
    - Research the pros and cons of each before changing anything (bootstrapper vs offline; Windows 10 without WebView2; offline and corporate installs).
    - Also look at macOS for safe savings.
    - Founder: reliability beats size.
+   - Research result (2026-10-03, estimated shares): WebView2 offline ~176 MB (~64%), VC++ ~18 MB, Vulkan runtime ~13 MB, app plus sidecar plus PDB ~70 MB.
+   - **Plan:**
+     - Keep the WebView2 offline installer: it's the only mode that installs offline, on LTSC/Server, behind a proxy and in the Store, and the NSIS step skips it when WebView2 is already present.
+     - Replace `vc_redist.x64.exe` with app-local CRT and `vcomp140.dll`, as the MSIX script already does (about −17 MB, and one fewer failure-prone hook).
+     - Drop `VulkanRT-Installer.exe` (about −13 MB): GPU drivers ship `vulkan-1.dll`, and the app already falls back to CPU with a clear diagnostic.
+     - Keep the sidecar and the PDB (the PDB is needed for in-process symbolication).
+     - Test on fresh Windows 10/11 VMs, offline, without VC++, and with a standard user.
+     - Optional later: a second "slim" installer using `embedBootstrapper`.
+   - macOS is already lean (main binary 60 MB, Parakeet sidecar 18 MB); no change.
 
 ## C. Design (Opus 5.5 in Pencil, founder approves before building)
 
@@ -90,3 +99,13 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
    - Its output, using the same models, has better spacing, paragraph breaks and punctuation.
    - Compare our pipeline (normalizer, `transcript-text` crate, insertion spacing) on **real speech**: Parakeet V2/V3 and Whisper.
    - The founder uses Parakeet V2.
+   - Research result (2026-10-03, from public docs only):
+     - With Polish off, we paste almost raw engine text.
+     - VoiceInk documents a post-transcription formatting stage: paragraph formatting for long transcripts, filler-word removal, an add-space option, and an on-device "Refine" cleanup model.
+   - Our gaps, by likely impact:
+     1. No local deterministic cleanup: sentence-start capitals, standalone "i", fillers, stutters.
+     2. No paragraph breaks: we discard Parakeet token timings and Whisper segment times, which could drive pause-based paragraphs on long takes.
+     3. No leading space from the cursor context: we only add a trailing space.
+     4. The Whisper prompt carries vocabulary only, with no punctuated style hint.
+     5. The `transcript-text` normaliser skips multi-line text entirely.
+   - **Plan:** measure first with a blind A/B on the same real clips (our output vs VoiceInk with its options noted). Then build 1 and 2 in shadow mode, 3 with real-app tests, and 4 behind measurement.
