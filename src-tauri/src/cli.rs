@@ -42,6 +42,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum CliCommand {
+    /// Polish stdin or --text using the desktop Polish pipeline.
+    Polish(crate::ai::polish_cli::PolishArgs),
+    #[command(hide = true, name = "polish-eval")]
+    PolishEval(crate::ai::polish_eval::EvalArgs),
     /// Show version, the selected model/engine, language, and which engines are available.
     Status(StatusArgs),
     /// List speech models and whether each one is downloaded.
@@ -60,6 +64,8 @@ impl CliCommand {
     /// as a parseable error object too.
     fn wants_json(&self) -> bool {
         match self {
+            CliCommand::Polish(a) => a.json,
+            CliCommand::PolishEval(_) => false,
             CliCommand::Status(a) => a.json,
             CliCommand::Models(a) => a.json,
             CliCommand::Transcribe(a) => a.json,
@@ -176,7 +182,13 @@ pub fn maybe_run_from_env_with_context(
     if !is_help_or_version
         && !matches!(
             first_arg,
-            "status" | "models" | "transcribe" | "record" | "stream-bench"
+            "status"
+                | "models"
+                | "transcribe"
+                | "record"
+                | "stream-bench"
+                | "polish"
+                | "polish-eval"
         )
     {
         return Ok(false);
@@ -204,6 +216,16 @@ pub fn maybe_run_from_env_with_context(
             }
             // A real usage error: in --json mode emit a parseable object so agents can read
             // why parsing failed; otherwise use clap's human-readable usage output.
+            if matches!(first_arg, "polish" | "polish-eval") {
+                eprintln!(
+                    "{}",
+                    format_cli_error(
+                        "Invalid Polish CLI arguments; use --help",
+                        env::args().skip(1).any(|a| a == "--json")
+                    )
+                );
+                std::process::exit(2);
+            }
             if env::args().skip(1).any(|a| a == "--json") {
                 eprintln!("{}", format_cli_error(&e.to_string(), true));
                 std::process::exit(2);
@@ -215,15 +237,32 @@ pub fn maybe_run_from_env_with_context(
         return Ok(false);
     };
 
+    // Fixtures run before Tauri setup, secure-store reads, license checks or HTTP.
+    if let CliCommand::PolishEval(args) = &command {
+        if args.fixture.is_some() {
+            if let Err(error) = crate::ai::polish_eval::run_fixture(args) {
+                emit_cli_error(&*error, false);
+                std::process::exit(1);
+            }
+            return Ok(true);
+        }
+    }
+    let measurement = matches!(command, CliCommand::Polish(_) | CliCommand::PolishEval(_));
     let wants_json = command.wants_json();
     let result = tauri::async_runtime::block_on(async move {
         let app = build_cli_app(context).await?;
         let app_handle = app.handle().clone();
         warm_ai_key_cache(&app_handle).await?;
-        let _ = check_license_status(app_handle.clone()).await;
+        if !measurement {
+            let _ = check_license_status(app_handle.clone()).await;
+        }
 
         let outcome: Result<(), Box<dyn Error>> = async {
             match command {
+                CliCommand::Polish(args) => crate::ai::polish_cli::run(&app_handle, args).await?,
+                CliCommand::PolishEval(args) => {
+                    crate::ai::polish_eval::run_live(&app_handle, args).await?
+                }
                 CliCommand::Status(args) => run_status(&app_handle, args).await?,
                 CliCommand::Models(args) => run_models(&app_handle, args).await?,
                 CliCommand::Transcribe(args) => run_transcribe(&app_handle, args).await?,
@@ -900,6 +939,39 @@ fn format_availability(snap: &crate::RecognitionAvailabilitySnapshot) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measurement_commands_parse_without_exposing_text_in_debug() {
+        let cli = Cli::try_parse_from([
+            "voicetypr",
+            "polish",
+            "--text",
+            "private dictation",
+            "--keep-words",
+            "--style",
+            "message",
+            "--app-category",
+            "chat",
+            "--language",
+            "en",
+            "--json",
+        ])
+        .unwrap();
+        assert!(!format!("{cli:?}").contains("private dictation"));
+        assert!(cli.command.as_ref().unwrap().wants_json());
+        assert!(matches!(cli.command, Some(CliCommand::Polish(args)) if args.keep_words));
+        let cli = Cli::try_parse_from([
+            "voicetypr",
+            "polish-eval",
+            "--fixture",
+            "sample.jsonl",
+            "--concurrency",
+            "2",
+            "--out",
+            ".tmp/eval",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Some(CliCommand::PolishEval(_))));
+    }
     #[test]
     fn stream_bench_auto_selects_native_model_engines() {
         assert_eq!(

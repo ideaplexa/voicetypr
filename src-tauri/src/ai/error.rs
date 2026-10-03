@@ -26,6 +26,8 @@ pub enum AiProviderError {
     BadResponse,
     #[error("internal error")]
     Internal,
+    #[error("{0}")]
+    OutputGuard(super::output_guard::OutputGuardReason),
     /// A local agent-CLI (e.g. Claude Code, pi, omp) reported a fatal outcome
     /// carrying its OWN message (e.g. "Not logged in · Please run /login").
     /// Surfaced verbatim to the user so the exact fix comes from the CLI itself,
@@ -63,6 +65,7 @@ pub fn user_facing_message(error: &AiProviderError) -> Cow<'static, str> {
         AiProviderError::Network => Cow::Borrowed("network error"),
         AiProviderError::BadResponse => Cow::Borrowed("bad response"),
         AiProviderError::Internal => Cow::Borrowed("internal error"),
+        AiProviderError::OutputGuard(reason) => Cow::Borrowed(reason.code()),
         // Surface the CLI's OWN message verbatim so the user learns the exact
         // fix from the CLI itself (claude/pi/omp each print their own guidance).
         AiProviderError::AgentCli(message) => Cow::Owned(message.clone()),

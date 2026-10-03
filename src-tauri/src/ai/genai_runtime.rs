@@ -13,6 +13,7 @@ pub type AiKeyResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 #[derive(Clone)]
 pub struct GenaiRuntime {
     client: Client,
+    anthropic_current: super::anthropic_current::AnthropicCurrentRuntime,
 }
 
 impl GenaiRuntime {
@@ -21,6 +22,14 @@ impl GenaiRuntime {
         key_resolver: AiKeyResolver,
         endpoint_overrides: HashMap<String, String>,
     ) -> Self {
+        let anthropic_current = super::anthropic_current::AnthropicCurrentRuntime {
+            client: reqwest_client.clone(),
+            key_resolver: key_resolver.clone(),
+            base_url: endpoint_overrides
+                .get("anthropic")
+                .cloned()
+                .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string()),
+        };
         let endpoint_overrides = Arc::new(endpoint_overrides);
         let auth_resolver = key_resolver.clone();
         let endpoint_resolver = endpoint_overrides.clone();
@@ -39,10 +48,28 @@ impl GenaiRuntime {
                 Ok(target)
             })
             .build();
-        Self { client }
+        Self {
+            client,
+            anthropic_current,
+        }
     }
 
     pub async fn polish(&self, request: &AiPolishRequest) -> Result<String, MappedAiProviderError> {
+        if request.provider_id == "anthropic"
+            && matches!(
+                request.model_id.as_str(),
+                "claude-sonnet-5-5"
+                    | "claude-opus-5-5"
+                    | "claude-sonnet-5"
+                    | "claude-opus-5"
+                    | "claude-fable-5"
+                    | "claude-fable-5-1"
+                    | "claude-opus-4-7"
+                    | "claude-opus-4-8"
+            )
+        {
+            return self.anthropic_current.polish(request).await;
+        }
         let adapter_kind = adapter_kind_for_provider(&request.provider_id)
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
         let model_str = namespaced_model(&request.provider_id, &request.model_id);
@@ -50,32 +77,7 @@ impl GenaiRuntime {
         let chat_request =
             ChatRequest::from_user(request.input_text.clone()).with_system(request.prompt.clone());
 
-        // Inline formatting is latency- and cost-sensitive, so for reasoning-capable
-        // models we ask for the cheapest reasoning effort the provider allows. Each
-        // native adapter translates `ReasoningEffort::Minimal` into its own low knob:
-        //   - OpenAI (gpt-5):  request body `reasoning_effort: "minimal"`
-        //   - Gemini (2.5):    `thinkingConfig.thinkingBudget = 1000` (LOW; the genai
-        //                      crate maps Minimal->LOW since a zero budget is rejected
-        //                      by 2.5 Pro)
-        //   - Anthropic (4.x): adaptive thinking, effort "low" / 1024 budget tokens
-        // Non-reasoning models still receive sampling options, but never a
-        // reasoning parameter a provider would reject (e.g. gpt-4o,
-        // gemini-2.0-flash).
-        let max_tokens = output_token_cap_for_input(request.input_text.len());
-        let chat_options = if model_supports_reasoning(&request.provider_id, &request.model_id) {
-            Some(
-                ChatOptions::default()
-                    .with_temperature(0.2)
-                    .with_max_tokens(max_tokens)
-                    .with_reasoning_effort(ReasoningEffort::Minimal),
-            )
-        } else {
-            Some(
-                ChatOptions::default()
-                    .with_temperature(0.2)
-                    .with_max_tokens(max_tokens),
-            )
-        };
+        let chat_options = chat_options(request);
 
         let response = self
             .client
@@ -87,6 +89,40 @@ impl GenaiRuntime {
             .into_first_text()
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))
     }
+}
+
+fn chat_options(request: &AiPolishRequest) -> Option<ChatOptions> {
+    let max_tokens = output_token_cap_for_input(request.input_text.len());
+    let mut options = ChatOptions::default();
+    let model = catalog::all_provider_models(&request.provider_id)
+        .into_iter()
+        .find(|model| model.model_id == request.model_id);
+    if model.is_none_or(|model| model.temperature) {
+        options = options.with_temperature(0.2);
+    }
+    // genai 0.6's token-name table only knows GPT-5 and o-series.
+    if request.provider_id == "openai" && request.model_id.starts_with("gpt-6") {
+        options = options.with_extra_body(serde_json::json!({"max_completion_tokens": max_tokens}));
+    } else {
+        options = options.with_max_tokens(max_tokens);
+    }
+    if let Some(effort) = catalog::reasoning_effort(
+        &request.provider_id,
+        &request.model_id,
+        request.reasoning_level.as_deref(),
+    ) {
+        let effort = match effort.as_str() {
+            "none" => ReasoningEffort::None,
+            "low" => ReasoningEffort::Low,
+            "medium" => ReasoningEffort::Medium,
+            "high" => ReasoningEffort::High,
+            "xhigh" => ReasoningEffort::XHigh,
+            "max" => ReasoningEffort::Max,
+            _ => ReasoningEffort::Minimal,
+        };
+        options = options.with_reasoning_effort(effort);
+    }
+    Some(options)
 }
 
 fn adapter_kind_for_provider(provider_id: &str) -> Option<AdapterKind> {
@@ -115,15 +151,6 @@ fn namespaced_model(provider_id: &str, model_id: &str) -> String {
     }
 }
 
-/// Whether the embedded catalog flags `(provider_id, model_id)` as a reasoning
-/// model. Unknown providers/models resolve to `false` so a reasoning effort is
-/// only ever attached to calls that can accept it.
-fn model_supports_reasoning(provider_id: &str, model_id: &str) -> bool {
-    catalog::all_provider_models(provider_id)
-        .into_iter()
-        .any(|model| model.model_id == model_id && model.reasoning)
-}
-
 fn ensure_trailing_slash(base_url: &str) -> String {
     if base_url.ends_with('/') {
         base_url.to_string()
@@ -138,14 +165,14 @@ mod tests {
 
     #[test]
     fn namespaced_model_leaves_native_adapters_clean() {
-        assert_eq!(namespaced_model("openai", "gpt-5-mini"), "gpt-5-mini");
+        assert_eq!(namespaced_model("openai", "gpt-6.1-sol"), "gpt-6.1-sol");
         assert_eq!(
-            namespaced_model("anthropic", "claude-haiku-4-5"),
-            "claude-haiku-4-5"
+            namespaced_model("anthropic", "claude-sonnet-5-5"),
+            "claude-sonnet-5-5"
         );
         assert_eq!(
-            namespaced_model("gemini", "gemini-2.5-flash"),
-            "gemini-2.5-flash"
+            namespaced_model("gemini", "gemini-3.8-flash"),
+            "gemini-3.8-flash"
         );
     }
 
@@ -175,16 +202,16 @@ mod tests {
     #[test]
     fn reasoning_effort_targets_only_reasoning_models() {
         // Recommended reasoning models should be gated in for minimal effort.
-        assert!(model_supports_reasoning("openai", "gpt-5-mini"));
-        assert!(model_supports_reasoning("gemini", "gemini-2.5-flash"));
-        assert!(model_supports_reasoning("anthropic", "claude-haiku-4-5"));
+        assert!(catalog::reasoning_effort("openai", "gpt-6.1-sol", None).is_some());
+        assert!(catalog::reasoning_effort("gemini", "gemini-3.8-flash", None).is_some());
+        assert!(catalog::reasoning_effort("anthropic", "claude-sonnet-5-5", None).is_some());
 
         // Non-reasoning models must be excluded so no reasoning param is sent.
-        assert!(!model_supports_reasoning("openai", "gpt-4o"));
-        assert!(!model_supports_reasoning("gemini", "gemini-2.0-flash"));
+        assert!(catalog::reasoning_effort("openai", "gpt-4o", None).is_none());
+        assert!(catalog::reasoning_effort("gemini", "gemini-2.0-flash", None).is_none());
 
         // Unknown provider/model resolves to false (safe default).
-        assert!(!model_supports_reasoning("openai", "does-not-exist"));
-        assert!(!model_supports_reasoning("custom", "anything"));
+        assert!(catalog::reasoning_effort("openai", "does-not-exist", None).is_none());
+        assert!(catalog::reasoning_effort("custom", "anything", None).is_none());
     }
 }

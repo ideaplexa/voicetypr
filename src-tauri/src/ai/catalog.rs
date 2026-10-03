@@ -28,12 +28,20 @@ pub struct CatalogModel {
     pub label: String,
     pub recommended: bool,
     pub reasoning: bool,
+    #[serde(default)]
+    pub reasoning_efforts: Vec<String>,
+    #[serde(default = "default_temperature")]
+    pub temperature: bool,
     pub context: Option<u64>,
     pub cost_input: Option<f64>,
     pub cost_output: Option<f64>,
 }
 
 type Catalog = CatalogFile;
+
+fn default_temperature() -> bool {
+    true
+}
 
 fn default_runtime() -> String {
     "genai_adapter".to_string()
@@ -151,6 +159,51 @@ pub fn all_provider_models(provider_id: &str) -> Vec<&'static CatalogModel> {
         .unwrap_or_default()
 }
 
+/// Resolve removed catalog selections to the provider's primary recommendation.
+/// Custom endpoints and local agents own their model namespaces.
+pub fn resolve_model(provider_id: &str, selected: &str) -> Option<String> {
+    let provider = provider(provider_id)?;
+    if provider.models.is_empty()
+        || selected.is_empty()
+        || provider
+            .models
+            .iter()
+            .any(|model| model.model_id == selected)
+    {
+        return Some(selected.to_string());
+    }
+    recommended_models(provider_id)
+        .first()
+        .map(|model| model.model_id.clone())
+}
+
+pub fn reasoning_effort(
+    provider_id: &str,
+    model_id: &str,
+    selected: Option<&str>,
+) -> Option<String> {
+    let model = all_provider_models(provider_id)
+        .into_iter()
+        .find(|model| model.model_id == model_id)?;
+    if !model.reasoning {
+        return None;
+    }
+    let levels = &model.reasoning_efforts;
+    let selected = selected.map(|level| if level == "off" { "none" } else { level });
+    if let Some(level) = selected.filter(|level| levels.iter().any(|value| value == level)) {
+        return Some(level.to_string());
+    }
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+        .into_iter()
+        .find(|level| levels.iter().any(|value| value == level))
+        .or(Some(if provider_id == "anthropic" {
+            "none"
+        } else {
+            "minimal"
+        }))
+        .map(str::to_string)
+}
+
 pub fn is_native_provider(provider_id: &str) -> bool {
     provider(provider_id)
         .is_some_and(|provider| provider.runtime == "genai_adapter" && provider.adapter.is_some())
@@ -180,6 +233,31 @@ pub fn provider_for_adapter(adapter_name: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn removed_saved_models_resolve_without_using_dead_ids() {
+        assert_eq!(
+            resolve_model("openai", "gpt-4.1-nano").as_deref(),
+            Some("gpt-6-luna")
+        );
+        assert_eq!(
+            resolve_model("openrouter", "google/gemini-2.5-flash-lite").as_deref(),
+            Some("openai/gpt-6-luna")
+        );
+        // Upstream still supports these models: preserve existing selections.
+        assert_eq!(
+            resolve_model("anthropic", "claude-haiku-4-5").as_deref(),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(
+            resolve_model("gemini", "gemini-2.5-flash-lite").as_deref(),
+            Some("gemini-2.5-flash-lite")
+        );
+        assert_eq!(
+            resolve_model("custom", "private-model").as_deref(),
+            Some("private-model")
+        );
+    }
 
     #[test]
     fn catalog_has_expected_shape() {

@@ -131,7 +131,7 @@ export const shortModelName = (modelId: string, fallbackName?: string) => {
 };
 
 export const defaultAgentCliReasoning = (providerId: string) =>
-  providerId === "pi" || providerId === "omp" ? "off" : "low";
+  providerId === "pi" || providerId === "omp" ? "off" : providerId === "codex" ? "medium" : "low";
 
 export const formatAgentCliReasoning = (providerId: string, reasoning: string) =>
   providerId === "claude-code" ? `Effort ${reasoning}` : `Thinking ${reasoning}`;

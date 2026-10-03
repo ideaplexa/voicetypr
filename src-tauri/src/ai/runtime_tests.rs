@@ -28,21 +28,123 @@ mod tests {
     const PROVIDERS: &[ProviderCase] = &[
         ProviderCase {
             id: PROVIDER_OPENAI,
-            model: "gpt-5-nano",
+            model: "gpt-6-luna",
         },
         ProviderCase {
             id: PROVIDER_ANTHROPIC,
-            model: "claude-sonnet-4-6",
+            model: "claude-sonnet-5-5",
         },
         ProviderCase {
             id: PROVIDER_GEMINI,
-            model: "gemini-3-flash-preview",
+            model: "gemini-3.8-flash",
         },
         ProviderCase {
             id: PROVIDER_CUSTOM,
             model: "custom-model",
         },
     ];
+
+    #[tokio::test]
+    async fn recommended_models_send_their_lowest_supported_reasoning_and_honor_overrides() {
+        for provider in ["openai", "anthropic", "gemini", "openrouter"] {
+            for model in super::super::catalog::recommended_models(provider) {
+                for selected in [None, Some("medium")] {
+                    let server = MockServer::start().await;
+                    mount_sequence(&server, provider, vec![ok_response(provider, "polished")])
+                        .await;
+                    let key_resolver: AiKeyResolver = Arc::new(|_| Some("test-key".to_string()));
+                    let executor = AiExecutor::with_native_endpoint_overrides(
+                        reqwest::Client::new(),
+                        key_resolver,
+                        OpenAiCompatibleConfig {
+                            base_url: server.uri(),
+                            no_auth: false,
+                            key_provider_id: provider.to_string(),
+                            extra_headers: vec![],
+                        },
+                        HashMap::from([(provider.to_string(), server.uri())]),
+                    );
+                    let request = AiPolishRequest {
+                        provider_id: provider.to_string(),
+                        model_id: model.model_id.clone(),
+                        reasoning_level: selected.map(str::to_string),
+                        fast_mode: false,
+                        input_text: "raw transcript".to_string(),
+                        needs_output_language_transform: false,
+                        prompt: "polish".to_string(),
+                        timeout_ms: 1_000,
+                    };
+                    executor
+                        .polish(request, CancellationToken::new())
+                        .await
+                        .unwrap();
+                    let received = server.received_requests().await.unwrap();
+                    let payload: serde_json::Value =
+                        serde_json::from_slice(&received[0].body).unwrap();
+                    let minimum = match model.model_id.as_str() {
+                        "gpt-6-luna" | "openai/gpt-6-luna" => "none",
+                        "gemini-3.5-flash-lite" | "google/gemini-3.5-flash-lite" => "minimal",
+                        _ => "low",
+                    };
+                    let expected = selected.unwrap_or(minimum);
+                    match provider {
+                        "openai" => {
+                            assert_eq!(payload["reasoning_effort"], expected);
+                            assert_eq!(payload["max_completion_tokens"], 1024);
+                            assert!(payload.get("max_tokens").is_none());
+                            assert!(payload.get("temperature").is_none());
+                        }
+                        "anthropic" => {
+                            assert_eq!(payload["output_config"]["effort"], expected);
+                            assert_eq!(
+                                payload["thinking"]["type"],
+                                if selected.is_none() && model.model_id == "claude-sonnet-5-5" {
+                                    "between_tools"
+                                } else {
+                                    "adaptive"
+                                }
+                            );
+                            assert!(payload["thinking"].get("budget_tokens").is_none());
+                            assert!(payload.get("temperature").is_none());
+                        }
+                        "gemini" => {
+                            assert_eq!(
+                                payload["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+                                expected.to_uppercase()
+                            );
+                            assert!(payload["generationConfig"]["thinkingConfig"]
+                                .get("thinkingBudget")
+                                .is_none());
+                        }
+                        "openrouter" => {
+                            assert_eq!(payload["reasoning"]["effort"], expected);
+                            assert_eq!(payload["reasoning"]["exclude"], true);
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn removed_saved_openai_model_uses_primary_in_actual_request() {
+        let server = MockServer::start().await;
+        mount_sequence(&server, "openai", vec![ok_response("openai", "polished")]).await;
+        let case = ProviderCase {
+            id: "openai",
+            model: "gpt-4.1-nano",
+        };
+        let result = executor_for(case, &server, true, false)
+            .polish(request(case, 1_000), CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.model_id, "gpt-6-luna");
+        let received = server.received_requests().await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&received[0].body).unwrap();
+        assert_eq!(payload["model"], "gpt-6-luna");
+        assert_eq!(payload["reasoning_effort"], "none");
+    }
 
     #[tokio::test]
     async fn ai_runtime_success_round_trip_for_all_providers() {
@@ -294,10 +396,11 @@ mod tests {
             .polish(
                 AiPolishRequest {
                     provider_id: PROVIDER_OPENROUTER.to_string(),
-                    model_id: "google/gemini-2.5-flash-lite".to_string(),
+                    model_id: "google/gemini-3.5-flash-lite".to_string(),
                     reasoning_level: None,
                     fast_mode: false,
                     input_text: "raw transcript".to_string(),
+                    needs_output_language_transform: false,
                     prompt: "polish the transcript".to_string(),
                     timeout_ms: 1_000,
                 },
@@ -337,7 +440,7 @@ mod tests {
     async fn ai_runtime_maps_gemini_api_key_invalid_400_to_invalid_api_key() {
         let case = ProviderCase {
             id: PROVIDER_GEMINI,
-            model: "gemini-3-flash-preview",
+            model: "gemini-3.8-flash",
         };
         let server = MockServer::start().await;
         mount_sequence(
@@ -423,12 +526,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ai_runtime_retries_once_on_refusal_content_then_succeeds() {
-        // Distinct from the HTTP-error retry path (should_retry): a 200-OK
-        // response whose content is a refusal fails validate_ai_output
-        // (BadResponse), triggering EXACTLY one retry. First call refuses,
-        // second call returns clean text — the executor must recover and have
-        // hit the server exactly twice.
+    async fn ai_runtime_meta_reply_falls_back_without_retry() {
         let case = ProviderCase {
             id: PROVIDER_CUSTOM,
             model: "custom-model",
@@ -444,15 +542,15 @@ mod tests {
         )
         .await;
         let executor = executor_for(case, &server, true, false);
-
-        let result = executor
+        let error = executor
             .polish(request(case, 1_000), CancellationToken::new())
             .await
-            .unwrap();
-
-        assert_eq!(result.output_text, "Polished transcript here.");
-        // Exactly one retry → two total requests, no more, no fewer.
-        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+            .unwrap_err();
+        assert_eq!(
+            error,
+            AiProviderError::OutputGuard(super::super::output_guard::OutputGuardReason::MetaReply)
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -469,10 +567,7 @@ mod tests {
         mount_sequence(
             &server,
             case.id,
-            vec![
-                ok_response(case.id, "I'm sorry, I can't do that."),
-                ok_response(case.id, "I cannot help with this request."),
-            ],
+            vec![ok_response(case.id, "   "), ok_response(case.id, "   ")],
         )
         .await;
         let executor = executor_for(case, &server, true, false);
@@ -720,6 +815,7 @@ mod tests {
             reasoning_level: None,
             fast_mode: false,
             input_text: "raw transcript".to_string(),
+            needs_output_language_transform: false,
             prompt: "polish the transcript".to_string(),
             timeout_ms,
         }
@@ -728,7 +824,7 @@ mod tests {
     fn ok_response(provider_id: &str, content: &str) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(match provider_id {
             PROVIDER_ANTHROPIC => json!({
-                "model": "claude-sonnet-4-6",
+                "model": "claude-sonnet-5-5",
                 "content": [{ "type": "text", "text": content }],
                 "stop_reason": "end_turn"
             }),
@@ -742,7 +838,7 @@ mod tests {
                 }]
             }),
             _ => json!({
-                "model": "gpt-5-nano",
+                "model": "gpt-6-luna",
                 "choices": [{
                     "message": { "role": "assistant", "content": content },
                     "finish_reason": "stop"
@@ -828,6 +924,7 @@ mod tests {
             reasoning_level: Some("low".to_string()),
             fast_mode: false,
             input_text: "raw transcript".to_string(),
+            needs_output_language_transform: false,
             prompt: "polish the transcript".to_string(),
             timeout_ms: 2_000,
         };

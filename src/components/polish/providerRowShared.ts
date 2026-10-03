@@ -184,7 +184,7 @@ export function buildProviderRowViewModel(props: ProviderRowProps): ProviderRowV
     statusCopy,
     reasoning: aiSettings.reasoningByProvider[provider.id] ?? defaultAgentCliReasoning(provider.id),
     reasoningLevels: agentProbe?.reasoningLevels ?? [],
-    fastModeEnabled: aiSettings.fastModeByProvider[provider.id] ?? false,
+    fastModeEnabled: aiSettings.fastModeByProvider[provider.id] ?? (provider.id === "codex"),
   };
 }
 

@@ -35,7 +35,7 @@ impl OpenAiCompatibleRuntime {
 
     pub async fn polish(&self, request: &AiPolishRequest) -> Result<String, MappedAiProviderError> {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let payload = json!({
+        let mut payload = json!({
             "model": request.model_id,
             "messages": [
                 { "role": "system", "content": request.prompt },
@@ -45,6 +45,24 @@ impl OpenAiCompatibleRuntime {
             "max_tokens": output_token_cap_for_input(request.input_text.len()),
             "stream": false
         });
+        if request.provider_id == "openrouter" {
+            if let Some(effort) = super::catalog::reasoning_effort(
+                "openrouter",
+                &request.model_id,
+                request.reasoning_level.as_deref(),
+            ) {
+                payload["reasoning"] = json!({"effort": effort, "exclude": true});
+            }
+            if super::catalog::all_provider_models("openrouter")
+                .into_iter()
+                .any(|model| model.model_id == request.model_id && !model.temperature)
+            {
+                payload
+                    .as_object_mut()
+                    .expect("payload object")
+                    .remove("temperature");
+            }
+        }
         let mut builder = self.client.post(url).json(&payload);
         if !self.no_auth {
             let key = (self.key_resolver)(&self.key_provider_id)

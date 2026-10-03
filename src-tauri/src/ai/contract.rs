@@ -25,6 +25,7 @@ pub struct AiPolishRequest {
     pub reasoning_level: Option<String>,
     pub fast_mode: bool,
     pub input_text: String,
+    pub needs_output_language_transform: bool,
     pub prompt: String,
     pub timeout_ms: u64,
 }

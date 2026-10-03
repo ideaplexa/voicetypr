@@ -10,15 +10,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const mockModels = [
   {
-    id: "gpt-5-nano",
-    name: "GPT-5 Nano",
+    id: "gpt-6-luna",
+    name: "GPT-6 Luna",
     recommended: true,
     reasoning: true,
-    contextWindow: 400000,
-    costInput: 0.05,
-    costOutput: 0.4,
+    contextWindow: 1050000,
+    costInput: 0.1,
+    costOutput: 0.5,
   },
-  { id: "gpt-5-mini", name: "GPT-5 Mini", recommended: true },
+  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", recommended: true },
 ];
 
 describe("useProviderModels", () => {
@@ -134,7 +134,7 @@ describe("useAllProviderModels", () => {
   });
 
   it("manages models for multiple providers", async () => {
-    const geminiModels = [{ id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", recommended: true }];
+    const geminiModels = [{ id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", recommended: true }];
 
     (invoke as ReturnType<typeof vi.fn>).mockImplementation((_cmd, args) => {
       if ((args as { provider: string })?.provider === "openai") return Promise.resolve(mockModels);
