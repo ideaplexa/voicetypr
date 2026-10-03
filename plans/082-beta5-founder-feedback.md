@@ -157,3 +157,8 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
 1. **Timed-card countdown:** replace the right-to-left line with the island's own border draining, or refilling its ring colour, as the timer.
 2. **Transcribing and Polish states:** a richer, purposeful animation instead of the plain spinner and sparkle. Explore agent-era patterns (shimmer text, flowing gradients), staying compositor-only and calm.
 3. **Pasted card:** centre the content. The text currently hugs the app icon and leaves the right side empty. Balance it within the island's three zones.
+4. **The Escape hint moves out of the island.**
+   - "Press Esc again to cancel" or "discard" shows as a small live card just above the island, as in the beta.3 behaviour the founder expects.
+   - The island keeps its waveform and timer; the hint never replaces the island content.
+   - This is the same live-card path as the recording-time mic warnings (A1).
+   - It keeps the 2 s countdown, and the drain animation lives on the card.
