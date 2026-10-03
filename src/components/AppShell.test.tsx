@@ -1,9 +1,15 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrayStatus } from "@/lib/tray";
 import { AppShell } from "./AppShell";
+
+const platform = vi.hoisted(() => ({ current: "macos" }));
+vi.mock("@/lib/platform", () => ({
+  get isMacOS() {
+    return platform.current === "macos";
+  },
+}));
 
 const getTrayStatusMock = vi.fn<() => Promise<TrayStatus>>();
 const retryTrayCreationMock = vi.fn<() => Promise<TrayStatus>>();
@@ -30,26 +36,38 @@ vi.mock("@/components/Sidebar", () => ({
 }));
 
 vi.mock("@/components/tabs/TabContainer", () => ({
-  TabContainer: ({ activeSection }: { activeSection: string }) => <main>{activeSection}</main>,
-}));
-
-vi.mock("@/components/ui/sidebar", () => ({
-  SidebarProvider: ({ children, style }: { children: ReactNode; style?: React.CSSProperties }) => <div data-testid="sidebar-provider" style={style}>{children}</div>,
-  SidebarInset: ({ children, className }: { children: ReactNode; className?: string }) => (
-    <section className={className}>{children}</section>
-  ),
-  SidebarTrigger: ({ className }: { className?: string }) => (
-    <button type="button" className={className}>
-      Toggle Sidebar
-    </button>
-  ),
+  TabContainer: ({ activeSection }: { activeSection: string }) => <div>{activeSection}</div>,
 }));
 
 describe("AppShell tray recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    platform.current = "macos";
     trayStatusListener = undefined;
+    document.cookie = "sidebar_state=true; path=/";
   });
+
+  it.each(["macos", "windows"])(
+    "restores the saved rail and keeps the %s toggle in place while switching icons",
+    async (os) => {
+      platform.current = os;
+      getTrayStatusMock.mockResolvedValue({ available: true, attempts: 0, lastError: null });
+      document.cookie = "sidebar_state=false; path=/";
+      render(<AppShell activeSection="home" onSectionChange={vi.fn()} />);
+      const titleBar = screen.getByRole("banner");
+      const toggle = screen.getByRole("button", { name: "Toggle Sidebar" });
+      const position = toggle.parentElement?.className;
+      expect(toggle.parentElement).toHaveClass(
+        os === "macos" ? "left-[80px]" : "left-6",
+        "top-[5px]",
+      );
+      expect(titleBar.querySelector(".lucide-panel-left-open")).toBeInTheDocument();
+      await userEvent.click(toggle);
+      expect(titleBar.querySelector(".lucide-panel-left-close")).toBeInTheDocument();
+      expect(toggle.parentElement?.className).toBe(position);
+      expect(document.cookie).toContain("sidebar_state=true");
+    },
+  );
 
   it("keeps recovery help visible until a manual retry restores the tray", async () => {
     const user = userEvent.setup();
@@ -109,7 +127,16 @@ describe("AppShell tray recovery", () => {
     render(<AppShell activeSection="home" onSectionChange={onSectionChange} />);
 
     const titleBar = screen.getByRole("banner");
-    expect(screen.getByTestId("sidebar-provider").style.getPropertyValue("--sidebar")).toBe("");
+    expect(
+      (
+        document.querySelector('[data-slot="sidebar-wrapper"]') as HTMLElement
+      ).style.getPropertyValue("--sidebar-width"),
+    ).toBe("212px");
+    expect(
+      (
+        document.querySelector('[data-slot="sidebar-wrapper"]') as HTMLElement
+      ).style.getPropertyValue("--sidebar-width-icon"),
+    ).toBe("76px");
     expect(titleBar).toHaveAttribute("data-tauri-drag-region");
     expect(screen.getByRole("button", { name: "Toggle Sidebar" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveTextContent("home");

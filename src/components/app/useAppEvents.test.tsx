@@ -76,22 +76,151 @@ describe("useAppEvents registration lifecycle", () => {
   it("routes tray and island events to main while the island is active", async () => {
     const options = {
       checkModels: vi.fn(async () => ({ hasModels: true })),
-      setActiveSection: vi.fn(), setSourceFilter: vi.fn(), openSettingsPane: vi.fn(),
-      setForceShowOnboarding: vi.fn(), forceOnboardingNeedsFreshAvailabilityRef: { current: false },
+      setActiveSection: vi.fn(),
+      setSourceFilter: vi.fn(),
+      openSettingsPane: vi.fn(),
+      setForceShowOnboarding: vi.fn(),
+      forceOnboardingNeedsFreshAvailabilityRef: { current: false },
     };
     const mounted = renderHook(() => useAppEvents(options));
     await act(async () => pendingOverview[0]());
     await waitFor(() => expect(listeners.get("island-navigate")?.size).toBe(1));
     eventCoordinator.setActiveWindow("pill");
     act(() => {
-      for (const handler of listeners.get("main-navigate") ?? []) handler({ payload: { screen: "settings", pane: "shortcuts" } } as Event<unknown>);
-      for (const handler of listeners.get("island-navigate") ?? []) handler({ payload: "open_cloud_keys" } as Event<unknown>);
+      for (const handler of listeners.get("main-navigate") ?? [])
+        handler({ payload: { screen: "settings", pane: "shortcuts" } } as Event<unknown>);
+      for (const handler of listeners.get("island-navigate") ?? [])
+        handler({ payload: "open_cloud_keys" } as Event<unknown>);
     });
     expect(options.openSettingsPane).toHaveBeenCalledWith("shortcuts");
     expect(options.setSourceFilter).toHaveBeenCalledWith("cloud");
     expect(options.setActiveSection).toHaveBeenCalledWith("transcription");
     mounted.unmount();
   });
+
+  it("routes backend Settings pane events and accepts only known section ids", async () => {
+    const setActiveSection = vi.fn();
+    renderHook(() =>
+      useAppEvents({
+        checkModels: vi.fn(async () => ({ hasModels: true })),
+        setActiveSection,
+        setSourceFilter: vi.fn(),
+        setForceShowOnboarding: vi.fn(),
+        forceOnboardingNeedsFreshAvailabilityRef: { current: false },
+      }),
+    );
+    await act(async () => pendingOverview[0]());
+    await waitFor(() => expect(listeners.get("navigate-to-section")?.size).toBe(1));
+    for (const pane of [
+      "general",
+      "shortcuts",
+      "privacy",
+      "storage",
+      "network",
+      "agent",
+      "advanced",
+      "license",
+      "about",
+    ]) {
+      act(() => {
+        for (const handler of listeners.get("navigate-to-settings") ?? [])
+          handler({ payload: pane } as Event<unknown>);
+      });
+      expect(setActiveSection).toHaveBeenLastCalledWith(pane);
+    }
+    act(() => {
+      for (const handler of listeners.get("navigate-to-settings") ?? [])
+        handler({ payload: undefined } as Event<unknown>);
+    });
+    expect(setActiveSection).toHaveBeenLastCalledWith("settings");
+    act(() => {
+      for (const handler of listeners.get("navigate-to-section") ?? [])
+        handler({ payload: "network" } as Event<unknown>);
+    });
+    expect(setActiveSection).toHaveBeenLastCalledWith("network");
+    setActiveSection.mockClear();
+    act(() => {
+      for (const handler of listeners.get("navigate-to-section") ?? [])
+        handler({ payload: "unknown" } as Event<unknown>);
+    });
+    expect(setActiveSection).not.toHaveBeenCalled();
+  });
+
+  it.each(["main-navigate", "navigate-to-section", "navigate-to-settings"] as const)(
+    "%s opens every Settings pane without replacing the page",
+    async (eventName) => {
+      const options = {
+        checkModels: vi.fn(async () => ({ hasModels: true })),
+        setActiveSection: vi.fn(),
+        setSourceFilter: vi.fn(),
+        openSettingsPane: vi.fn(),
+        setForceShowOnboarding: vi.fn(),
+        forceOnboardingNeedsFreshAvailabilityRef: { current: false },
+      };
+      const mounted = renderHook(() => useAppEvents(options));
+      await act(async () => pendingOverview[0]());
+      await waitFor(() => expect(listeners.get("navigate-to-section")?.size).toBe(1));
+      for (const pane of [
+        "general",
+        "shortcuts",
+        "privacy",
+        "storage",
+        "network",
+        "agent",
+        "advanced",
+        "license",
+        "about",
+      ]) {
+        act(() => {
+          for (const handler of listeners.get(eventName) ?? [])
+            handler({
+              payload: eventName === "main-navigate" ? { screen: "settings", pane } : pane,
+            } as Event<unknown>);
+        });
+        expect(options.openSettingsPane).toHaveBeenLastCalledWith(pane);
+      }
+      expect(options.setActiveSection).not.toHaveBeenCalled();
+      mounted.unmount();
+    },
+  );
+
+  it.each(["main-navigate", "navigate-to-section"] as const)(
+    "%s opens all page destinations including Insights",
+    async (eventName) => {
+      const options = {
+        checkModels: vi.fn(async () => ({ hasModels: true })),
+        setActiveSection: vi.fn(),
+        setSourceFilter: vi.fn(),
+        openSettingsPane: vi.fn(),
+        setForceShowOnboarding: vi.fn(),
+        forceOnboardingNeedsFreshAvailabilityRef: { current: false },
+      };
+      const mounted = renderHook(() => useAppEvents(options));
+      await act(async () => pendingOverview[0]());
+      await waitFor(() => expect(listeners.get("navigate-to-section")?.size).toBe(1));
+      for (const screen of [
+        "home",
+        "history",
+        "insights",
+        "models",
+        "transcription",
+        "polish",
+        "recording",
+        "dictionary",
+        "help",
+      ]) {
+        act(() => {
+          for (const handler of listeners.get(eventName) ?? [])
+            handler({
+              payload: eventName === "main-navigate" ? { screen } : screen,
+            } as Event<unknown>);
+        });
+        expect(options.setActiveSection).toHaveBeenLastCalledWith(screen);
+      }
+      expect(options.openSettingsPane).not.toHaveBeenCalled();
+      mounted.unmount();
+    },
+  );
 
   it("an older cleanup cannot remove a replacement registration", async () => {
     const first = await eventCoordinator.register("main", "test-cleanup", vi.fn());

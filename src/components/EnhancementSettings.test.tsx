@@ -42,7 +42,7 @@ it("retains app editing, style selection, enable and delete behavior", async () 
   fireEvent.change(screen.getByRole("textbox", { name: "App name 1" }), { target: { value: "Mail" } });
   expect(change).toHaveBeenLastCalledWith({ app_formatting_rules: [{ ...rules[0], app_name: "Mail" }, rules[1]] });
   await user.click(screen.getByRole("combobox", { name: "Style for Slack" }));
-  await user.click(screen.getByRole("option", { name: "Writing" }));
+  await user.click(await screen.findByRole("option", { name: "Writing" }));
   expect(change).toHaveBeenLastCalledWith({ app_formatting_rules: [{ ...rules[0], preset: "Writing" }, rules[1]] });
   await user.click(screen.getByRole("switch", { name: "Enable Slack style" }));
   expect(change).toHaveBeenLastCalledWith({ app_formatting_rules: [{ ...rules[0], enabled: false }, rules[1]] });

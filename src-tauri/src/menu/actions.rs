@@ -54,7 +54,8 @@ struct MainNavigate {
 }
 fn destination(id: &str) -> Option<MainNavigate> {
     let (screen, pane, source) = match id {
-        "nav_home" | "nav_insights" => ("home", None, None),
+        "nav_home" => ("home", None, None),
+        "nav_insights" => ("insights", None, None),
         "nav_settings" => ("settings", Some("general"), None),
         "nav_polish" => ("polish", None, None),
         "nav_models" => ("transcription", None, Some("local")),
@@ -215,6 +216,8 @@ mod tests {
     #[test]
     fn navigation_destinations_match_existing_screens() {
         assert_eq!(destination("nav_file").unwrap().screen, "audio");
+        assert_eq!(destination("nav_insights").unwrap().screen, "insights");
+        assert_eq!(destination("nav_settings").unwrap().screen, "settings");
         assert_eq!(destination("nav_models").unwrap().source, Some("local"));
         assert_eq!(destination("nav_settings").unwrap().pane, Some("general"));
         assert_eq!(destination("nav_polish").unwrap().screen, "polish");

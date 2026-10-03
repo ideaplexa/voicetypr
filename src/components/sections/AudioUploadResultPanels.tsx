@@ -137,7 +137,6 @@ export function AudioUploadResultPanels({
         <ul className="mt-3 grid gap-2 text-sm leading-relaxed text-muted-foreground sm:grid-cols-2">
           <li>WAV, MP3, M4A, FLAC, OGG, MP4, and WebM are supported.</li>
           <li>Video audio is extracted before transcription.</li>
-          <li>Non-WAV media is converted to 16 kHz mono WAV.</li>
           <li>Long media takes more time and memory to process.</li>
         </ul>
         <p className="mt-3 text-xs text-muted-foreground">

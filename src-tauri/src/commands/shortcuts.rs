@@ -1043,7 +1043,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::CancelRecording,
-            label: "Cancel recording",
+            label: "Cancel dictation",
             description: "Cancel the current recording.",
             section: "Recording",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1051,7 +1051,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::CopyLastTranscription,
-            label: "Copy last transcription",
+            label: "Copy last transcript",
             description: "Copy the latest finished transcription to the clipboard.",
             section: "History",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1059,7 +1059,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::PasteLastTranscription,
-            label: "Paste last transcription",
+            label: "Paste last transcript",
             description: "Paste the latest finished transcription into the active app.",
             section: "History",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1067,7 +1067,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::ToggleAiFormatting,
-            label: "Toggle Polish",
+            label: "Polish on / off",
             description: "Turn Polish on or off.",
             section: "Polish",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1076,8 +1076,8 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         ShortcutActionDefinition {
             action: ShortcutAction::OpenDashboard,
             label: "Open Voicetypr",
-            description: "Focus the Voicetypr main window.",
-            section: "Voicetypr",
+            description: "Open the Voicetypr main window.",
+            section: "App",
             recommended_trigger: ShortcutTrigger::Pressed,
             allows_single_key: true,
         },

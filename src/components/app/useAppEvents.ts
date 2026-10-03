@@ -12,7 +12,12 @@ import {
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
-import { islandDestination, routeMainNavigation, type MainNavigate, type IslandNavigate } from "@/components/app/mainNavigation";
+import {
+  islandDestination,
+  routeMainNavigation,
+  type MainNavigate,
+  type IslandNavigate,
+} from "@/components/app/mainNavigation";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import { updateService } from "@/services/updateService";
 import { createLogger } from "@/lib/logger";
@@ -84,11 +89,18 @@ export function useAppEvents({
           setActiveSection("home");
         });
 
-        await register<MainNavigate>("main-navigate", (destination) => {
+        const navigate = (destination: MainNavigate) => {
           routeMainNavigation(destination, setActiveSection, setSourceFilter, openSettingsPane);
-        });
+        };
+        await register<MainNavigate>("main-navigate", navigate);
         await register<IslandNavigate>("island-navigate", (action) => {
-          routeMainNavigation(islandDestination(action), setActiveSection, setSourceFilter, openSettingsPane);
+          navigate(islandDestination(action));
+        });
+        await register<string | undefined>("navigate-to-settings", (pane) => {
+          navigate({ screen: "settings", pane });
+        });
+        await register<string>("navigate-to-section", (screen) => {
+          navigate({ screen });
         });
 
         await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {

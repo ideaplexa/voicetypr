@@ -15,6 +15,7 @@ import {
 } from "@/components/polish/agentCli";
 import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
+import { KeepWordsSetting } from "@/components/polish/KeepWordsSetting";
 import { SettingsPage } from "@/components/settings/settings-ui";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
@@ -155,6 +156,9 @@ export function EnhancementsSection() {
         onToggleEnabled={handleToggleEnabled}
         onOpenProviderSetup={openProviderSetup}
       />
+
+      <KeepWordsSetting checked={settings?.polish_keep_words ?? false}
+        onCheckedChange={(checked) => void updateSettings({ polish_keep_words: checked })} />
 
           <EnhancementSettingsPanel
             preset={enhancementOptions.preset}

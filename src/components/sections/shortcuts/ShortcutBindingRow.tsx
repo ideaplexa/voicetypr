@@ -1,3 +1,4 @@
+import { KeyCaps } from "@/components/KeyCaps";
 import { HotkeyInput } from "@/components/HotkeyInput";
 import { Button } from "@/components/settings/SettingsButton";
 import { Spinner } from "@/components/ui/spinner";
@@ -5,7 +6,7 @@ import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import type { ShortcutActionDefinition, ShortcutBinding } from "@/types/shortcuts";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import { formatBindingDisplay, singleKeyValidation, type EditingCapture } from "./shortcutUtils";
+import { formatBindingDisplay, singleKeyValidation, type EditingCapture } from "@/components/sections/shortcuts/shortcutUtils";
 
 type ShortcutBindingRowProps = {
   pane?: boolean;
@@ -120,15 +121,8 @@ export function ShortcutBindingRow({
           : "flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-2"
       }
     >
-      <span
-        aria-label={`${action.label} shortcut`}
-        className={
-          pane
-            ? "rounded-md border border-border bg-card px-[7px] py-[3px] font-mono text-xs text-muted-foreground"
-            : "font-mono text-sm"
-        }
-      >
-        {formatBindingDisplay(binding)}
+      <span aria-label={`${action.label} shortcut`}>
+        <KeyCaps caps={[formatBindingDisplay(binding)]} />
       </span>
       <div className="flex items-center gap-1">
         {isSaving && <Spinner className="mr-1 h-4 w-4 text-muted-foreground" />}

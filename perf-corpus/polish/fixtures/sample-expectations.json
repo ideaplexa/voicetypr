@@ -1,0 +1,22 @@
+{
+  "fillers-01": true,
+  "fillers-02": false,
+  "self_corrections-01": true,
+  "self_corrections-02": false,
+  "lists_formatting-01": true,
+  "lists_formatting-02": false,
+  "numbers_dates_times-01": true,
+  "numbers_dates_times-02": false,
+  "names_jargon_identifiers-01": true,
+  "names_jargon_identifiers-07": false,
+  "code_switching-01": true,
+  "code_switching-02": false,
+  "already_clean-01": true,
+  "already_clean-02": false,
+  "short_utterances-01": true,
+  "short_utterances-02": true,
+  "questions-01": true,
+  "questions-12": true,
+  "injections-02": true,
+  "injections-01": true
+}

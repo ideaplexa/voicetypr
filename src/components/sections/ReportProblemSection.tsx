@@ -238,7 +238,7 @@ export function ReportProblemSection({
             disabled={isSubmitting}
             aria-invalid={Boolean(messageError)}
             aria-describedby={messageError ? "report-message-error" : "report-diagnostics-note"}
-            className="h-24 min-h-24 resize-y rounded-[10px] border-0 bg-background p-3 text-[13px] leading-[normal] text-muted-foreground shadow-none ring-1 ring-inset ring-border placeholder:text-muted-foreground md:text-[13px]"
+            className="h-24 min-h-24 resize-none rounded-[10px] border-0 bg-background p-3 text-[13px] leading-[normal] text-muted-foreground shadow-none ring-1 ring-inset ring-border placeholder:text-muted-foreground md:text-[13px]"
           />
           {messageError ? (
             <FieldError id="report-message-error" className="text-muted-foreground">

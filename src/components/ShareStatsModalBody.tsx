@@ -1,7 +1,7 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/settings/SettingsButton";
 import { cn } from "@/lib/utils";
-import { Check, Copy, Download, Loader2 } from "lucide-react";
-import type { ShareCardStats } from "./shareCardRenderer";
+import { Check, Copy, Download, Loader2, ExternalLink } from "lucide-react";
+import type { ShareCardStats } from "@/components/shareCardRenderer";
 
 function ShareStatsPreview({
   isLoading,
@@ -16,28 +16,28 @@ function ShareStatsPreview({
 }) {
   return (
     <div
-      className="relative mx-auto w-full max-w-[26rem] overflow-hidden rounded-xl bg-[#161618] ring-1 ring-black/10"
-      style={{ aspectRatio: "3 / 2" }}
+      className="relative mx-auto w-full max-w-[600px] overflow-hidden rounded-xl bg-[#121316] ring-1 ring-black/10"
+      style={{ aspectRatio: "1200 / 630" }}
     >
       {isLoading ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#161618]/90 backdrop-blur-sm">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#121316]/90 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-2">
-            <Loader2 className="size-8 animate-spin text-sage" />
-            <span className="text-sm text-muted-foreground">Creating your share card…</span>
+            <Loader2 className="size-8 animate-spin text-sage motion-reduce:animate-none" />
+            <span className="text-sm text-white/60">Creating your share card…</span>
           </div>
         </div>
       ) : null}
       {imageDataUrl ? (
         <img
           src={imageDataUrl}
-          alt={`Share card showing ${stats.totalWords.toLocaleString()} words spoken, ${stats.timeSavedDisplay} saved, and ${stats.totalTranscriptions.toLocaleString()} transcriptions`}
+          alt={`Share card showing ${stats.totalWords.toLocaleString()} words spoken, ${stats.timeSavedDisplay} saved, and ${stats.streak} day streak`}
           className="block h-auto w-full max-w-full"
         />
       ) : null}
       <canvas
         ref={setCanvas}
-        width={2400}
-        height={1600}
+        width={1200}
+        height={630}
         className={cn("block h-auto w-full max-w-full", imageDataUrl && "hidden")}
       />
     </div>
@@ -50,15 +50,17 @@ function ShareStatsActions({
   imageDataUrl,
   onCopy,
   onDownload,
+  onPost,
 }: {
   copied: boolean;
   isCopying: boolean;
   imageDataUrl: string;
   onCopy: () => void;
   onDownload: () => void;
+  onPost: () => void;
 }) {
   return (
-    <div className="flex justify-center gap-2">
+    <div className="flex flex-wrap justify-center gap-2">
       <Button
         onClick={onCopy}
         disabled={isCopying || !imageDataUrl}
@@ -67,9 +69,13 @@ function ShareStatsActions({
         {isCopying ? <Loader2 className="animate-spin" /> : copied ? <Check /> : <Copy />}
         {isCopying ? "Copying…" : copied ? "Copied" : "Copy image"}
       </Button>
-      <Button onClick={onDownload} variant="outline">
+      <Button onClick={onDownload} variant="outline" disabled={!imageDataUrl}>
         <Download />
-        Download
+        Save image…
+      </Button>
+      <Button onClick={onPost} variant="outline" disabled={isCopying || !imageDataUrl}>
+        <ExternalLink />
+        Post on X
       </Button>
     </div>
   );
@@ -84,6 +90,7 @@ export function ShareStatsModalBody({
   isCopying,
   onCopy,
   onDownload,
+  onPost,
 }: {
   isLoading: boolean;
   imageDataUrl: string;
@@ -93,6 +100,7 @@ export function ShareStatsModalBody({
   isCopying: boolean;
   onCopy: () => void;
   onDownload: () => void;
+  onPost: () => void;
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-3 p-4">
@@ -108,6 +116,7 @@ export function ShareStatsModalBody({
         imageDataUrl={imageDataUrl}
         onCopy={onCopy}
         onDownload={onDownload}
+        onPost={onPost}
       />
     </div>
   );

@@ -101,6 +101,7 @@ export interface ActiveStreamCapabilities {
 }
 
 export interface AppSettings {
+  polish_keep_words?: boolean;
   hotkey: string;
   current_model: string;
   speech_language: string;

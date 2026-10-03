@@ -30,33 +30,101 @@ function renderSidebar(activeSection: Parameters<typeof Sidebar>[0]["activeSecti
   return onSectionChange;
 }
 
+// Base UI distinguishes mouse hover from touch; jsdom has no PointerEvent.
+class MousePointerEvent extends MouseEvent {
+  readonly pointerType: string;
+  constructor(type: string, options: PointerEventInit = {}) {
+    super(type, options);
+    this.pointerType = options.pointerType ?? "mouse";
+  }
+}
+
 beforeEach(() => {
+  vi.stubGlobal("PointerEvent", MousePointerEvent);
   vi.clearAllMocks();
   licenseState.current = { status: "licensed", license_type: "pro", trial_days_left: null };
 });
 
 describe("Sidebar navigation", () => {
-  it("shows the new ordered destinations and Setup group", async () => {
+  it("shows the ordered destinations separated by a hairline", async () => {
     renderSidebar();
     const main = within(screen.getByRole("navigation", { name: "Main navigation" }));
     expect(main.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Home",
       "History",
+      "Insights",
       "Transcription",
       "Polish",
       "Dictionary",
       "Recording",
     ]);
-    expect(main.getByText("Setup")).toHaveClass("text-text-3");
+    expect(main.queryByText("Setup")).not.toBeInTheDocument();
+    expect(main.getByRole("separator")).toHaveClass("bg-border");
     const support = within(screen.getByRole("navigation", { name: "Support navigation" }));
     expect(support.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Settings",
       "Help & feedback",
     ]);
     expect(main.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
-    expect(await screen.findByText("2.1.0")).toHaveClass("text-text-3");
+    expect(await screen.findByText("2.1.0")).toHaveClass("text-muted-foreground");
     expect(screen.queryByRole("button", { name: "Check for updates" })).not.toBeInTheDocument();
   });
+
+  it("overrides the primitive active colors, weight, shadow and icon by composition", async () => {
+    renderSidebar("insights");
+    const active = screen.getByRole("button", { name: "Insights" });
+    await screen.findByText("2.1.0");
+    expect(active).toHaveAttribute("data-active");
+    expect(active).toHaveClass(
+      "data-active:bg-card",
+      "data-active:text-foreground",
+      "data-active:font-semibold",
+      "data-active:shadow-[0_1px_2px_#0000000f]",
+      "data-active:[&>svg]:text-sage",
+    );
+    expect(active).not.toHaveClass(
+      "data-active:bg-sidebar-accent",
+      "data-active:text-sidebar-accent-foreground",
+      "data-active:font-medium",
+    );
+  });
+
+  it("shows label tooltips on the rail, including the license badge", async () => {
+    const user = userEvent.setup();
+    const change = renderSidebar();
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    const history = screen.getByRole("button", { name: "History" });
+    expect(history).toHaveClass(
+      "group-data-[collapsible=icon]:size-[40px]!",
+      "group-data-[collapsible=icon]:h-[34px]!",
+    );
+    await user.hover(history);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("History");
+    await user.click(history);
+    expect(change).toHaveBeenCalledWith("history");
+    await user.unhover(history);
+    await user.hover(screen.getByRole("button", { name: /Pro. Open License/ }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Pro · License");
+  });
+
+  it.each(["Meta", "Control"])(
+    "keeps %s+B toggling and writes the existing cookie",
+    async (modifier) => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.keyboard(`{${modifier}>}b{/${modifier}}`);
+      expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute(
+        "data-state",
+        "collapsed",
+      );
+      expect(document.cookie).toContain("sidebar_state=false");
+      await user.keyboard(`{${modifier}>}b{/${modifier}}`);
+      expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute(
+        "data-state",
+        "expanded",
+      );
+    },
+  );
 
   it("marks the current destination and navigates through brand, footer and license", async () => {
     const user = userEvent.setup();
@@ -95,9 +163,15 @@ describe("Sidebar navigation", () => {
   it("collapses to an icon rail while keeping navigation accessible", async () => {
     const user = userEvent.setup();
     renderSidebar();
-    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "expanded");
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute(
+      "data-state",
+      "expanded",
+    );
     await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
-    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute(
+      "data-state",
+      "collapsed",
+    );
     expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Help & feedback" })).toBeInTheDocument();
   });

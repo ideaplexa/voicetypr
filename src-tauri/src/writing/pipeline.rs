@@ -384,6 +384,7 @@ async fn run_smart_formatting(
         request.transcript_language.as_deref(),
         ai_context.as_deref(),
         app_category_hint.as_deref(),
+        request.needs_output_language_transform,
     )
     .await
     {
@@ -480,7 +481,7 @@ fn resolve_smart_formatting_outcome(
             });
 
             Ok(SmartFormattingOutcome {
-                text: library_text.to_string(),
+                text: crate::ai::polish::raw_fallback(library_text),
                 error: Some(error.error),
                 duration_ms: None,
                 execution,
@@ -742,7 +743,7 @@ mod tests {
         crate::commands::ai::AiPolishAttemptError {
             error,
             provider_id: "openai".to_string(),
-            model_id: "gpt-4.1-mini".to_string(),
+            model_id: "gpt-6-luna".to_string(),
         }
     }
 
@@ -822,7 +823,7 @@ mod tests {
             outcome.execution,
             Some(AiExecutionMetadata {
                 provider_id: "openai".to_string(),
-                model_id: "gpt-4.1-mini".to_string(),
+                model_id: "gpt-6-luna".to_string(),
             })
         );
         assert_eq!(warnings.len(), 1);

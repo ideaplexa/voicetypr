@@ -1,3 +1,4 @@
+import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { installOnboardingPreview } from "@/components/onboarding/onboardingPreview";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
@@ -13,14 +14,20 @@ const options: PreviewOptions = {
   theme: query.get("theme") === "dark" ? "dark" : "light",
   platform: query.get("platform") === "windows" ? "windows" : "macos",
   empty: query.get("empty") === "1",
+  sidebar: query.get("sidebar") === "rail" ? "rail" : "expanded",
   onboarding: onboardingPhase,
 };
+document.cookie = `sidebar_state=${options.sidebar !== "rail"}; path=/`;
 installPreviewPlatform(options.platform);
 const fixtures = createFixtures(options);
 const unknown = new Set<string>();
 mockWindows("main");
 mockIPC(
-  (command) => {
+  (command, args) => {
+    if (command === "get_usage_stats") {
+      const since = args && typeof args === "object" && "since" in args && typeof args.since === "string" ? args.since : null;
+      return createUsageFixture(since, options.empty);
+    }
     if (command.startsWith("plugin:event|")) return null;
     if (Object.prototype.hasOwnProperty.call(fixtures, command)) return fixtures[command];
     if (!unknown.has(command)) {
@@ -39,3 +46,14 @@ await import("@/main");
 window.setTimeout(() => {
   void emit("download-progress", demoDownloadProgress);
 }, 1200);
+
+// Direct modal fixtures use the same app event path as tray/deep-link navigation.
+const shot = query.get("screen");
+if (shot === "license" || shot?.startsWith("settings-")) {
+  window.setTimeout(() => {
+    void emit(
+      "navigate-to-settings",
+      shot === "license" ? "license" : shot.slice("settings-".length),
+    );
+  }, 1200);
+}

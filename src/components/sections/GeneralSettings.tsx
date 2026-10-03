@@ -2,10 +2,6 @@ import { AppearanceCard } from "@/components/sections/general/AppearanceCard";
 import { AppBehaviorCard } from "@/components/sections/general/AppBehaviorCard";
 import { TelemetrySection } from "@/components/sections/TelemetrySection";
 import { SettingsPaneCard } from "@/components/settings/settings-ui";
-import { SettingsPaneRow } from "@/components/settings/settings-ui";
-import { getTrayStatus, retryTrayCreation, type TrayStatus } from "@/lib/tray";
-import { toast } from "sonner";
-import { useEffect, useState } from "react";
 import { Button } from "@/components/settings/SettingsButton";
 import {
   Dialog,
@@ -91,6 +87,7 @@ export function GeneralSettings({ embedded = false }: { embedded?: boolean } = {
             />
             <AppBehaviorCard
               pane
+              rows="startup"
               updateChannel={settings.update_channel}
               checkUpdatesAutomatically={settings.check_updates_automatically}
               onUpdateChannelChange={(channel) => updateSettings({ update_channel: channel })}
@@ -101,7 +98,6 @@ export function GeneralSettings({ embedded = false }: { embedded?: boolean } = {
                 updateSettings({ launch_at_startup: enabled })
               }
             />
-            <MenuBarRow />
           </SettingsPaneCard>
         ) : (
           <>
@@ -127,49 +123,5 @@ export function GeneralSettings({ embedded = false }: { embedded?: boolean } = {
         )}
       </div>
     </div>
-  );
-}
-
-function MenuBarRow() {
-  const [status, setStatus] = useState<TrayStatus | null>(null);
-  const [retrying, setRetrying] = useState(false);
-  useEffect(() => {
-    void getTrayStatus()
-      .then(setStatus)
-      .catch(() => setStatus(null));
-  }, []);
-  const retry = async () => {
-    setRetrying(true);
-    try {
-      const next = await retryTrayCreation();
-      setStatus(next);
-      if (next.available) toast.success("Menu-bar icon restored");
-      else
-        toast.error(
-          "Menu-bar icon is still unavailable. Keep this window open and report the issue.",
-        );
-    } catch {
-      toast.error("Could not retry the menu-bar icon. Keep this window open and report the issue.");
-    } finally {
-      setRetrying(false);
-    }
-  };
-  return (
-    <SettingsPaneRow
-      className="min-h-[66px]"
-      title="Menu bar icon"
-      description="Show Voicetypr's status in the menu bar."
-      control={
-        status?.available ? (
-          <span className="text-xs text-muted-foreground">Visible</span>
-        ) : status?.attempts ? (
-          <Button variant="outline" size="sm" disabled={retrying} onClick={() => void retry()}>
-            Retry icon
-          </Button>
-        ) : (
-          <span className="text-xs text-muted-foreground">Checking…</span>
-        )
-      }
-    />
   );
 }

@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   AudioLines,
   BadgeCheck,
+  ChartNoAxesColumnIncreasing,
   BookA,
   History,
   House,
@@ -14,6 +15,7 @@ import {
 export type MainScreenId =
   | "home"
   | "history"
+  | "insights"
   | "transcription"
   | "polish"
   | "dictionary"
@@ -32,9 +34,21 @@ export type LegacyScreenId =
   | "network"
   | "agent"
   | "advanced"
+  | "privacy"
+  | "storage"
+  | "about"
   | "report-problem";
 export type ScreenId = MainScreenId | LegacyScreenId;
-export type SettingsPane = "general" | "shortcuts" | "privacy" | "storage" | "network" | "agent" | "advanced";
+export type SettingsPane =
+  | "general"
+  | "shortcuts"
+  | "privacy"
+  | "storage"
+  | "network"
+  | "agent"
+  | "advanced"
+  | "license"
+  | "about";
 
 export interface ScreenDefinition {
   id: MainScreenId;
@@ -51,9 +65,15 @@ export const mainNavScreens: ScreenDefinition[] = [
     icon: History,
     description: "Past transcriptions and file transcription.",
   },
+  {
+    id: "insights",
+    label: "Insights",
+    icon: ChartNoAxesColumnIncreasing,
+    description: "Your dictation activity and progress.",
+  },
 ];
 
-export const setupNavScreens: ScreenDefinition[] = [
+export const tuningNavScreens: ScreenDefinition[] = [
   {
     id: "transcription",
     label: "Transcription",
@@ -116,6 +136,9 @@ export const screenAliases: Record<
   network: { screen: "settings", pane: "network" },
   agent: { screen: "settings", pane: "agent" },
   advanced: { screen: "settings", pane: "advanced" },
+  privacy: { screen: "settings", pane: "privacy" },
+  storage: { screen: "settings", pane: "storage" },
+  about: { screen: "settings", pane: "about" },
   "report-problem": { screen: "help" },
 };
 
@@ -124,5 +147,6 @@ export function resolveScreen(id: ScreenId): {
   pane?: SettingsPane;
   openUpload?: boolean;
 } {
+  if (id === "license") return { screen: "settings", pane: "license" };
   return id in screenAliases ? screenAliases[id as LegacyScreenId] : { screen: id as MainScreenId };
 }
