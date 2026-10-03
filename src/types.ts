@@ -128,6 +128,8 @@ export interface AppSettings {
   pill_indicator_mode?: PillIndicatorMode;
   // Pill indicator detail level
   pill_indicator_style?: PillIndicatorStyle;
+  island_start_details?: "always" | "changed" | "never";
+  island_start_details_shown?: number;
   // Pill indicator screen position
   pill_indicator_position?: PillIndicatorPosition;
   // Pill indicator offset from screen edge in pixels (10-50)
@@ -197,3 +199,23 @@ export interface LicenseStatus {
   verification_state?: "verified" | "offline_grace" | "needs_revalidation";
   verification_expires_at?: string;
 }
+
+/** Backend-only app identity: icon_key is opaque and never contains a path. */
+export interface DictationContext {
+  generation: number;
+  app: { name: string; icon_key: string | null };
+  polish: {
+    will_run: boolean;
+    style: "clean" | "writing" | "notes" | "message" | "code" | null;
+    key_ok: boolean;
+    keep_words: boolean;
+  };
+  mic: { name: string; tooltip: string; ok: boolean };
+  engine: { short_name: string; kind: "local" | "cloud" | "network" };
+  language: { code: string; label: string };
+  mode: "hold" | "toggle";
+  changed_since_last: boolean;
+  show_start_card: boolean;
+}
+export interface PillAudioLevel { generation: number; level: number }
+export type PillPointer = { inside: true; x: number; y: number } | { inside: false };

@@ -84,6 +84,7 @@ pub fn start(window: &WebviewWindow) {
     reset_pointer(&app);
     let task = tauri::async_runtime::spawn(async move {
         let mut inside = false;
+        let mut last_emitted = None;
         let _ = window.set_ignore_cursor_events(true);
         let mut interval = tokio::time::interval(Duration::from_nanos(1_000_000_000 / 30));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -93,42 +94,82 @@ pub fn start(window: &WebviewWindow) {
                 reset_pointer(&task_app);
                 break;
             }
-            let next = match (
+            let point = match (
                 task_app.cursor_position(),
                 window.inner_position(),
                 window.scale_factor(),
             ) {
                 (Ok(cursor), Ok(origin), Ok(scale)) => {
-                    let state = task_app.state::<PointerState>();
-                    let rects = state.rects.lock().unwrap();
-                    hit_test(
-                        &rects,
-                        (cursor.x - origin.x as f64) / scale,
-                        (cursor.y - origin.y as f64) / scale,
-                        inside,
-                    )
+                    // Tao reports the global macOS cursor using the primary
+                    // display scale; window origins use their own display scale.
+                    #[cfg(target_os = "macos")]
+                    let cursor_scale = task_app
+                        .primary_monitor()
+                        .ok()
+                        .flatten()
+                        .map(|m| m.scale_factor())
+                        .unwrap_or(scale);
+                    #[cfg(not(target_os = "macos"))]
+                    let cursor_scale = scale;
+                    Some((
+                        cursor.x / cursor_scale - origin.x as f64 / scale,
+                        cursor.y / cursor_scale - origin.y as f64 / scale,
+                    ))
                 }
-                _ => false,
+                _ => None,
             };
+            let next = point.is_some_and(|(x, y)| {
+                hit_test(
+                    &task_app.state::<PointerState>().rects.lock().unwrap(),
+                    x,
+                    y,
+                    inside,
+                )
+            });
             if next != inside && window.set_ignore_cursor_events(!next).is_ok() {
                 inside = next;
                 task_app
                     .state::<PointerState>()
                     .inside
                     .store(inside, Ordering::Relaxed);
-                let _ = task_app.emit_to(
-                    "pill",
-                    "pill-pointer",
-                    serde_json::json!({"inside": inside}),
-                );
+                if !inside {
+                    last_emitted = None;
+                    // One exit transition clears hover; no outside polling events.
+                    let _ = task_app.emit_to(
+                        "pill",
+                        "pill-pointer",
+                        serde_json::json!({"inside": false}),
+                    );
+                }
+            }
+            if inside {
+                if let Some((x, y)) = point {
+                    if pointer_moved(last_emitted, (x, y)) {
+                        let _ = task_app.emit_to(
+                            "pill",
+                            "pill-pointer",
+                            serde_json::json!({"inside": true, "x": x, "y": y}),
+                        );
+                        last_emitted = Some((x, y));
+                    }
+                }
             }
         }
     });
     *task_slot = Some(task);
 }
+fn pointer_moved(last: Option<(f64, f64)>, next: (f64, f64)) -> bool {
+    last.is_none_or(|last| (last.0 - next.0).hypot(last.1 - next.1) > 1.0)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn movement_threshold() {
+        assert!(pointer_moved(None, (0.0, 0.0)));
+        assert!(!pointer_moved(Some((0.0, 0.0)), (1.0, 0.0)));
+        assert!(pointer_moved(Some((0.0, 0.0)), (1.01, 0.0)));
+    }
     #[test]
     fn hit_regions_and_hysteresis() {
         let regions = [

@@ -87,6 +87,10 @@ pub struct Settings {
     // Pill indicator detail level: "compact" or "full"
     #[serde(default = "default_pill_indicator_style")]
     pub pill_indicator_style: String,
+    #[serde(default = "default_island_start_details")]
+    pub island_start_details: String,
+    #[serde(default)]
+    pub island_start_details_shown: u32,
     // Pill indicator screen position
     pub pill_indicator_position: String,
     // Pill indicator offset from screen edge in pixels (10-50)
@@ -141,6 +145,8 @@ impl Default for Settings {
             play_sound_on_paste_success: true,
             pill_indicator_mode: "always".to_string(), // New installs keep the resting dot visible
             pill_indicator_style: default_pill_indicator_style(),
+            island_start_details: default_island_start_details(),
+            island_start_details_shown: 0,
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
             pause_media_during_recording: false, // Default to off; user opts in
@@ -154,6 +160,16 @@ impl Default for Settings {
             transcription_mode: TRANSCRIPTION_MODE_REGULAR.to_string(),
             update_channel: default_update_channel(),
         }
+    }
+}
+
+fn default_island_start_details() -> String {
+    "changed".into()
+}
+pub(crate) fn normalize_island_start_details(value: &str) -> &str {
+    match value {
+        "always" | "never" => value,
+        _ => "changed",
     }
 }
 
@@ -579,6 +595,19 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             store.get("show_pill_indicator").and_then(|v| v.as_bool()),
             Settings::default().pill_indicator_mode,
         ),
+        island_start_details: normalize_island_start_details(
+            store
+                .get("island_start_details")
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .unwrap_or("changed"),
+        )
+        .to_owned(),
+        island_start_details_shown: store
+            .get("island_start_details_shown")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .min(5) as u32,
         pill_indicator_style: resolve_pill_indicator_style(
             store
                 .get("pill_indicator_style")
@@ -848,6 +877,19 @@ pub async fn save_settings(
     );
     store.delete("play_sound_on_recording_end");
     store.set("pill_indicator_mode", json!(settings.pill_indicator_mode));
+    store.set(
+        "island_start_details",
+        json!(normalize_island_start_details(
+            &settings.island_start_details
+        )),
+    );
+    // The start counter is backend-owned; a stale settings form must not reset it.
+    let shown = store
+        .get("island_start_details_shown")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        .min(5);
+    store.set("island_start_details_shown", json!(shown));
     store.set(
         "pill_indicator_style",
         json!(resolve_pill_indicator_style(Some(

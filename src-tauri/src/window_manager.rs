@@ -633,63 +633,25 @@ impl WindowManager {
         )
     }
 
-    /// Get the logical positioning area. macOS uses the monitor work area,
-    /// which excludes the Dock and menu bar. Other platforms retain the
-    /// existing full-screen, zero-origin geometry.
+    /// Work area of the app/cursor display captured at recording start.
     fn get_positioning_area(&self) -> DesktopArea {
-        let area_for_monitor = |monitor: tauri::Monitor| {
-            let scale = monitor.scale_factor();
-
-            #[cfg(target_os = "macos")]
-            {
-                let work_area = monitor.work_area();
-                logical_desktop_area(
-                    work_area.position.x,
-                    work_area.position.y,
-                    work_area.size.width,
-                    work_area.size.height,
-                    scale,
-                )
-                .or_else(|| {
-                    log::warn!("Monitor work area was invalid; using full monitor bounds");
-                    let position = monitor.position();
-                    let size = monitor.size();
-                    logical_desktop_area(position.x, position.y, size.width, size.height, scale)
-                })
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
+        crate::pill::positioning::monitor(&self.app_handle)
+            .and_then(|monitor| {
+                let work = monitor.work_area();
+                let pos = monitor.position();
                 let size = monitor.size();
-                logical_desktop_area(0, 0, size.width, size.height, scale)
-            }
-        };
-
-        // Try to get monitor from main window
-        if let Some(main_window) = self.get_main_window() {
-            if let Some(area) = crate::utils::monitor::catch_monitor_panic(|| {
-                let monitor = main_window.current_monitor().ok().flatten()?;
-                area_for_monitor(monitor)
+                let (x, y, width, height) = crate::pill::positioning::select_area(
+                    (
+                        work.position.x,
+                        work.position.y,
+                        work.size.width,
+                        work.size.height,
+                    ),
+                    (pos.x, pos.y, size.width, size.height),
+                );
+                logical_desktop_area(x, y, width, height, monitor.scale_factor())
             })
-            .flatten()
-            {
-                return area;
-            }
-        }
-
-        // Fallback to primary monitor
-        if let Some(area) = crate::utils::monitor::catch_monitor_panic(|| {
-            let monitor = self.app_handle.primary_monitor().ok().flatten()?;
-            area_for_monitor(monitor)
-        })
-        .flatten()
-        {
-            return area;
-        }
-
-        // Safe default for common screen sizes
-        log::error!("Could not get any monitor info, using safe defaults");
-        DesktopArea::new(0.0, 0.0, 1920.0, 1080.0)
+            .unwrap_or_else(|| DesktopArea::new(0.0, 0.0, 1920.0, 1080.0))
     }
 
     fn emit_pill_geometry(&self, window: &WebviewWindow) {
@@ -788,6 +750,25 @@ mod tests {
     // Screen: 1920x1080, pill: 260x64, edge_offset: 10
     // x_left = 10, x_center = 830, x_right = 1650
     // y_top = 10, y_bottom = 1006
+
+    #[test]
+    fn taskbar_selection_keeps_ten_pixel_offset() {
+        let full = (-1920, 0, 1920, 1080);
+        for work in [(-1920, 0, 1920, 1040), (-1880, 0, 1880, 1080), full] {
+            let selected = crate::pill::positioning::select_area(work, full);
+            for scale in [1.0, 2.0] {
+                let area =
+                    logical_desktop_area(selected.0, selected.1, selected.2, selected.3, scale)
+                        .unwrap();
+                let position = calculate_pill_position("bottom-left", area, 10.0);
+                assert_eq!(position.0, area.x + 10.0);
+                assert_eq!(
+                    position.1 + crate::pill::geometry::LEGACY_HEIGHT,
+                    area.y + area.height - 10.0
+                );
+            }
+        }
+    }
 
     #[test]
     fn calculate_pill_position_top_left() {

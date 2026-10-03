@@ -137,7 +137,7 @@ export class EventCoordinator {
       // Transcription events
       "transcription-complete": "pill", // Pill window handles paste/clipboard/save
       "history-updated": "main", // Main window reloads history
-      "audio-level": "pill",
+      "audio-level": "all", // pill wave + Recording screen mic meter
       "recording-state-changed": "all",
 
       // Model events should go to all windows (for onboarding support)

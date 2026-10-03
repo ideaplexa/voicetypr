@@ -7,7 +7,7 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import { createPillIcon as createIcon } from "@/pill-icons";
 import "./pill.css";
-import { DEFAULT_PILL_INDICATOR_MODE } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type PillAudioLevel } from "@/types";
 import { applyPillGeometry, reportPillHitRegions, type PillGeometry } from "@/pill-geometry";
 
 type BackendRecordingState =
@@ -402,9 +402,9 @@ export function createRecordingPill(
     if (audioUnlisten || audioListenPending) return;
 
     audioListenPending = true;
-    void tauriListen<number>("audio-level", (event) => {
+    void tauriListen<PillAudioLevel>("audio-level", (event) => {
       if (isDestroyed || visibleState() !== "listening") return;
-      audioLevel = event.payload;
+      audioLevel = event.payload.level;
       render();
     })
       .then((unlisten) => {

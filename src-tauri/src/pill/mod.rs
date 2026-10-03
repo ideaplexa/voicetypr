@@ -1,6 +1,10 @@
+pub mod context;
 pub mod geometry;
 pub mod hit_test;
+pub mod icons;
+pub mod level;
 pub mod native;
+pub mod positioning;
 
 #[tauri::command]
 pub fn pill_get_geometry(window: tauri::WebviewWindow) -> Result<geometry::Geometry, String> {

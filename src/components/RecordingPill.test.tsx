@@ -183,11 +183,11 @@ describe("RecordingPill", () => {
   it("listens to audio-level only while listening", () => {
     createTestPill();
 
-    emitMockEvent("audio-level", 0.75);
+    emitMockEvent("audio-level", { generation: 1, level: 0.75 });
     expect(pillRoot()).toHaveAttribute("data-state", "idle");
 
     emitMockEvent("recording-started");
-    emitMockEvent("audio-level", 0.75);
+    emitMockEvent("audio-level", { generation: 1, level: 0.75 });
 
     const firstBar = getByTestId(root, "pill-bars").querySelector("span");
     expect(firstBar).toHaveStyle({ transform: "scaleY(0.466)" });

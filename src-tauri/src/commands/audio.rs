@@ -5228,6 +5228,8 @@ pub async fn start_recording(
     state: State<'_, RecorderState>,
 ) -> Result<bool, String> {
     let recording_start = Instant::now();
+    let island_context = crate::pill::context::capture(&app);
+    let island_monitor = crate::pill::positioning::snapshot(&app);
 
     log_start("RECORDING_START");
     log::debug!("⏱️ [REC TIMING] start_recording called (+0ms)");
@@ -5339,6 +5341,7 @@ pub async fn start_recording(
             app_state.set_recording_app_context(hint);
         }
     }
+    crate::pill::positioning::install(island_monitor);
     update_recording_state(&app, RecordingState::Starting, None);
     // Ensure transition actually happened; if blocked, abort early
     if !matches!(
@@ -5346,6 +5349,12 @@ pub async fn start_recording(
         crate::RecordingState::Starting
     ) {
         return Err("Cannot start recording in current state".to_string());
+    }
+
+    if let Some(context) = island_context {
+        let context_app = app.clone();
+        let generation = current_recording_generation();
+        tauri::async_runtime::spawn(async move { context.emit(&context_app, generation).await });
     }
 
     // Arm Escape as soon as Starting is published, before device initialization.
@@ -5965,26 +5974,7 @@ pub async fn start_recording(
     }
 
     if let Some(audio_level_rx) = audio_level_rx_to_spawn {
-        let app_for_levels = app.clone();
-        // Use a thread instead of tokio spawn for std::sync::mpsc
-        std::thread::spawn(move || {
-            let mut last_emit = std::time::Instant::now();
-            let emit_interval = std::time::Duration::from_millis(100); // Throttle to 10fps
-            let mut last_emitted_level = 0.0f64;
-            const LEVEL_CHANGE_THRESHOLD: f64 = 0.05; // Only emit if change > 5%
-
-            while let Ok(level) = audio_level_rx.recv() {
-                // Check both time throttling and significant change
-                let level_changed = (level - last_emitted_level).abs() > LEVEL_CHANGE_THRESHOLD;
-
-                if last_emit.elapsed() >= emit_interval && level_changed {
-                    // Only emit to pill window - main window doesn't need audio levels
-                    let _ = app_for_levels.emit_to("pill", "audio-level", level);
-                    last_emit = std::time::Instant::now();
-                    last_emitted_level = level;
-                }
-            }
-        });
+        crate::pill::level::spawn(app.clone(), audio_level_rx, recording_generation);
     }
 
     // Show pill widget if enabled and mode is not "never" (graceful degradation)

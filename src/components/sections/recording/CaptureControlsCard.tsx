@@ -43,8 +43,9 @@ export function CaptureControlsCard() {
         else unlisteners.push(unlisten);
       })
       .catch(() => undefined);
-    void listen<number>("audio-level", (event) => {
-      if (!disposed) setLevel(Math.max(0, Math.min(1, event.payload)));
+    void listen<number | { level: number }>("audio-level", (event) => {
+      const raw = typeof event.payload === "number" ? event.payload : event.payload.level;
+      if (!disposed) setLevel(Math.max(0, Math.min(1, raw)));
     })
       .then((unlisten) => {
         if (disposed) unlisten();

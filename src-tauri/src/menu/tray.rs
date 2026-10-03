@@ -202,7 +202,7 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
         build_start.elapsed().as_millis()
     );
 
-    let (available_models, whisper_models_info) = {
+    let (available_models, _whisper_models_info) = {
         // Store (name, display_name, accuracy_score, speed_score) for sorting to match UI order
         let mut models: Vec<(String, String, u8, u8)> = Vec::new();
         let mut whisper_all = std::collections::HashMap::new();
@@ -277,7 +277,7 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
         let mut remote_check_items = Vec::new();
 
         // Add local models first
-        for (model_name, display_name) in &available_models {
+        for (model_name, _display_name) in &available_models {
             // Local model - only selected if no remote is active
             let is_selected = effective_active_id.is_none()
                 && should_mark_model_selected(onboarding_done, model_name, &current_model);
@@ -285,7 +285,7 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
             let model_item = CheckMenuItem::with_id(
                 app,
                 format!("model_{}", model_name),
-                display_name,
+                crate::pill::context::engine_short_name(model_name, model_name),
                 true,
                 is_selected,
                 None::<&str>,
@@ -345,48 +345,21 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
             }
         }
 
-        // Resolve display name for the menu label - prioritize active remote server
-        let (effective_model, resolved_display_name) = if let Some(ref remote_display) =
-            active_remote_display
-        {
-            // Remote server is active - show "ServerName - ModelName"
-            let display = if let Some(ref model) = active_remote_model {
-                format!("{} - {}", remote_display, model)
-            } else {
-                remote_display.clone()
-            };
-            ("remote".to_string(), Some(display))
-        } else if onboarding_done && !current_model.is_empty() {
-            let display = if let Some(info) = whisper_models_info.get(&current_model) {
-                Some(info.display_name.clone())
-            } else if let Some(parakeet_manager) =
-                app.try_state::<crate::parakeet::ParakeetManager>()
-            {
-                if let Some(pm) = parakeet_manager
-                    .list_models()
-                    .into_iter()
-                    .find(|m| m.name == current_model)
-                {
-                    Some(pm.display_name)
-                } else if let Some(p) = crate::cloud_stt::CloudProvider::from_id(&current_model) {
-                    Some(p.cloud_label())
-                } else {
-                    Some(humanize_model_id(&current_model))
-                }
-            } else if let Some(p) = crate::cloud_stt::CloudProvider::from_id(&current_model) {
-                Some(p.cloud_label())
-            } else {
-                Some(humanize_model_id(&current_model))
-            };
-            (current_model.clone(), display)
+        let effective_model = if active_remote_display.is_some() {
+            "remote".to_owned()
+        } else if onboarding_done {
+            current_model.clone()
         } else {
-            (String::new(), None)
+            String::new()
         };
 
         let current_model_display = format_tray_model_label(
             onboarding_done || effective_active_id.is_some(),
             &effective_model,
-            resolved_display_name,
+            Some(crate::pill::context::engine_short_name(
+                active_remote_model.as_deref().unwrap_or(&effective_model),
+                &effective_model,
+            )),
         );
 
         Some(Submenu::with_id_and_items(

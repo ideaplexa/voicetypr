@@ -97,7 +97,7 @@ coreaudio-sys = "0.2"
 media-remote = "0.3"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSBitmapImageRep", "NSButton", "NSControl", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDictionary", "NSString", "NSGeometry"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSBundle", "NSData", "NSDictionary", "NSString", "NSGeometry"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
@@ -118,6 +118,9 @@ windows = { version = "0.62", features = [
     "Media_Control",
     "Foundation",
     "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    "Win32_Storage_FileSystem",
     "Win32_System_Console",
 ] }
 winreg = "0.52"
