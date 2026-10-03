@@ -640,7 +640,6 @@ impl WindowManager {
         self.calculate_pill_canvas_position_for(&position)
     }
 
-    #[cfg(target_os = "macos")]
     /// Reposition pill window using the current placement setting.
     /// Called when monitor configuration changes (display connect/disconnect, resolution change).
     pub fn reposition_floating_windows(&self) {
