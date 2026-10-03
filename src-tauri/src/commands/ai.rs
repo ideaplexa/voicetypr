@@ -7,6 +7,9 @@ use crate::ai::genai_runtime::AiKeyResolver;
 use crate::ai::providers::{
     launch_providers, AGENT_CLI_PROVIDER_IDS, PROVIDER_CUSTOM, PROVIDER_OPENROUTER,
 };
+pub(crate) use crate::ai::settings_selection::selected_ai_provider_and_model;
+#[cfg(test)]
+use crate::ai::settings_selection::selection_meets_model_requirement;
 use crate::ai::EnhancementOptions;
 use crate::commands::settings::{
     persist_settings_and_invalidate, FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
@@ -204,15 +207,6 @@ fn check_has_api_key<R: tauri::Runtime>(
     }
 }
 
-/// Whether a selected (provider, model) pair satisfies the executor's model
-/// requirement. Agent-CLI runtimes (Claude Code) waive it — they carry no
-/// catalog model because the CLI selects its own; every other runtime requires
-/// a non-empty model. Shared by the readiness/selection guards below so the
-/// model-less-CLI exemption lives in exactly one place.
-fn selection_meets_model_requirement(provider: &str, model: &str) -> bool {
-    !model.is_empty() || catalog::runtime_kind(provider) == Some("agent_cli")
-}
-
 pub(crate) fn has_ai_model_and_key(app: &tauri::AppHandle) -> Result<bool, String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
     let provider = store
@@ -338,6 +332,7 @@ async fn run_openai_chat_probe(
         provider_id: PROVIDER_CUSTOM.to_string(),
         model_id: model.to_string(),
         input_text: "ping".to_string(),
+        needs_output_language_transform: false,
         reasoning_level: None,
         fast_mode: false,
         prompt: "Reply with OK.".to_string(),
@@ -717,6 +712,7 @@ pub async fn validate_ai_api_key(
         provider_id: provider.clone(),
         model_id: validation_model,
         input_text: "ok".to_string(),
+        needs_output_language_transform: false,
         reasoning_level: None,
         fast_mode: false,
         prompt: "Reply with exactly: ok".to_string(),
@@ -1081,7 +1077,7 @@ pub async fn update_writing_settings(
     Ok(())
 }
 
-fn custom_base_url_from_settings(app: &tauri::AppHandle) -> Option<String> {
+fn custom_base_url_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     app.store("settings").ok().and_then(|store| {
         store
             .get(CUSTOM_BASE_URL_KEY)
@@ -1094,7 +1090,10 @@ fn custom_base_url_from_settings(app: &tauri::AppHandle) -> Option<String> {
     })
 }
 
-fn custom_no_auth_from_settings(app: &tauri::AppHandle, has_key: bool) -> bool {
+fn custom_no_auth_from_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    has_key: bool,
+) -> bool {
     app.store("settings")
         .ok()
         .and_then(|store| {
@@ -1226,26 +1225,6 @@ pub(crate) async fn prefetch_ai_provider(app: tauri::AppHandle, provider_id: Str
     }
 }
 
-fn selected_ai_provider_and_model(
-    app: &tauri::AppHandle,
-) -> Result<(String, String), AiProviderError> {
-    let store = app
-        .store("settings")
-        .map_err(|_| AiProviderError::Internal)?;
-    let provider = store
-        .get("ai_provider")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    let model = store
-        .get("ai_model")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    if provider.is_empty() || !selection_meets_model_requirement(&provider, &model) {
-        return Err(AiProviderError::InvalidModel);
-    }
-    Ok((provider, model))
-}
-
 #[derive(Debug)]
 pub(crate) struct AiPolishAttemptError {
     pub error: AiProviderError,
@@ -1275,8 +1254,8 @@ impl AiPolishAttemptError {
         self
     }
 }
-fn executor_for_provider(
-    app: &tauri::AppHandle,
+fn executor_for_provider<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     selected_provider: &str,
 ) -> Result<(AiExecutor, String), AiPolishAttemptError> {
     let cache = API_KEY_CACHE.lock().map_err(|_| {
@@ -1415,17 +1394,17 @@ fn executor_for_provider(
     ))
 }
 
-pub(crate) fn prepare_polish_runtime(
-    app: &tauri::AppHandle,
+pub(crate) fn prepare_polish_runtime<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     provider: &str,
     model: &str,
 ) -> Result<crate::ai::polish::PolishRuntime, AiPolishAttemptError> {
-    let resolved_model = catalog::resolve_model(provider, model).ok_or_else(|| {
-        AiPolishAttemptError::for_provider(AiProviderError::InvalidModel, provider)
-    })?;
-    let model = resolved_model.as_str();
     let (executor, runtime_provider) = executor_for_provider(app, provider)
         .map_err(|error| error.with_model(model.to_string()))?;
+    let resolved_model = catalog::resolve_model(&runtime_provider, model).ok_or_else(|| {
+        AiPolishAttemptError::for_provider(AiProviderError::InvalidModel, &runtime_provider)
+    })?;
+    let model = resolved_model.as_str();
     // The subprocess runtime owns provider-specific local-agent budgets; reuse
     // that value here so the executor cannot cancel a healthy child first.
     let timeout_ms = if catalog::runtime_kind(&runtime_provider) == Some("agent_cli") {
@@ -1471,13 +1450,13 @@ pub async fn polish_text_typed(
     transcript_language: Option<&str>,
     context: Option<&str>,
     app_category_hint: Option<&str>,
-    skip_allowed: bool,
+    needs_output_language_transform: bool,
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
     let (provider, model) =
         selected_ai_provider_and_model(app).map_err(AiPolishAttemptError::unattributed)?;
     // Zero-wait: already-clean text needs no model call. The caller decides
     // eligibility (no translation pending), since engines may omit a language.
-    if skip_allowed && crate::ai::skip::should_skip(text, options.preset) {
+    if !needs_output_language_transform && crate::ai::skip::should_skip(text, options.preset) {
         return Ok(crate::ai::contract::AiPolishResult {
             output_text: text.to_string(),
             provider_id: provider,
@@ -1495,13 +1474,19 @@ pub async fn polish_text_typed(
     );
     let runtime = prepare_polish_runtime(app, &provider, &model)?;
     let mut timings = crate::ai::polish::PolishTimings::default();
-    let result = crate::ai::polish::execute_prompt(&runtime, text, prompt, &mut timings)
-        .await
-        .map_err(|error| AiPolishAttemptError {
-            error,
-            provider_id: runtime.provider,
-            model_id: model,
-        })?;
+    let result = crate::ai::polish::execute_prompt(
+        &runtime,
+        text,
+        prompt,
+        &mut timings,
+        needs_output_language_transform,
+    )
+    .await
+    .map_err(|error| AiPolishAttemptError {
+        error,
+        provider_id: runtime.provider,
+        model_id: model,
+    })?;
     log::info!(
         "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
         result.provider_id,

@@ -273,3 +273,20 @@ Final local gates passed: `cargo test` (1,682 unit tests, 3 CLI integration test
 - Remaining scorer strictness, not a product bug:
   - "summarise this" → "Summarize this." counted as obeyed
   - "I thought it was X, actually it was Y" is a statement, not a correction
+
+## Review record, 2026-10-03
+
+One adversarial review per phase: gpt-6.1-sol, xhigh, read-only. It covered the full branch diff against origin/main at `309261e9`. **No P0.** Every finding was fixed in one round (gpt-6.1-sol medium) with a regression test that fails before the fix and passes after. Claude verified the round: cargo test 1696 + 3, clippy -D warnings, fmt.
+
+- **P1 — translation:** translations were rejected by the same-language overlap guard. The transformation intent is now threaded into validation (meta check kept, length cap ×1.6).
+- **P1 — stale models at startup:** startup cleared stale models before the fallback ran. Migration now persists the primary replacement and the per-provider model memory.
+- **P1 — answers and wrappers:** question→statement answers and inline wrappers ("Here's your cleaned text: …") reached the cursor. Answers with added content are now rejected; introduced wrappers are stripped and the remainder re-validated.
+- **P1 — skip vs corrections:** skip bypassed spoken corrections ("Tuesday, no, Wednesday."). Standalone correction markers always run Polish.
+- **P2 — fixture reasons:** fixture fallback reasons can no longer leak into scorecards (closed enum).
+- **P2 — custom endpoint:** a custom endpoint no longer gets a native replacement model; the effective provider is resolved first.
+- **P2 — catalog:** embedding, rerank, TTS, image and audio models are excluded from the catalog.
+- **P2 — identifiers:** `keeps` treats `_` as an identifier character.
+- **P2 — judge:** the judge identity is compared after resolution.
+- **P2 — "I cannot":** the refusal check exempts dictated "I cannot / I can't" after stutter normalisation.
+
+Clean: settings invariant 9, `copy_last_original`, the agent-CLI defaults and reasoning payloads, no transcript/prompt/key exposure.

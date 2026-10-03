@@ -26,7 +26,7 @@ pub fn should_skip(input: &str, preset: EnhancementPreset) -> bool {
         .collect();
     if words.iter().any(|w| {
         [
-            "um", "uh", "er", "ah", "erm", "hmm", "like", "sorry", "rather", "actually",
+            "no", "um", "uh", "er", "ah", "erm", "hmm", "like", "sorry", "rather", "actually",
         ]
         .contains(w)
     }) {

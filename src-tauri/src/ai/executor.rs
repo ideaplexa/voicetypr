@@ -119,7 +119,11 @@ impl AiExecutor {
                     let validation = if truncated {
                         Err(AiProviderError::BadResponse)
                     } else {
-                        validate_ai_output(&cleaned, &request.input_text)
+                        validate_ai_output_with_intent(
+                            &cleaned,
+                            &request.input_text,
+                            request.needs_output_language_transform,
+                        )
                     };
                     timings.validate += super::polish::elapsed_ms(validate_start);
                     let validated = match validation {
@@ -210,23 +214,29 @@ fn should_retry(error: &AiProviderError) -> bool {
     )
 }
 
+#[cfg(test)]
 fn validate_ai_output(output: &str, input: &str) -> Result<String, AiProviderError> {
-    let cleaned = strip_wrapping_quotes(
-        strip_known_preamble(
-            strip_wrapping_quotes(strip_markdown_fence(output).trim(), input),
-            input,
-        ),
-        input,
-    )
-    .trim()
-    .to_string();
+    validate_ai_output_with_intent(output, input, false)
+}
+
+fn validate_ai_output_with_intent(
+    output: &str,
+    input: &str,
+    translation: bool,
+) -> Result<String, AiProviderError> {
+    let output = strip_wrapping_quotes(strip_markdown_fence(output).trim(), input);
+    let output = strip_known_preamble(output, input);
+    let output = super::output_guard::strip_inline_wrapper(output, input);
+    let cleaned = strip_wrapping_quotes(output, input).trim().to_string();
 
     if cleaned.is_empty() {
         return Err(AiProviderError::BadResponse);
     }
-    super::output_guard::check(input, &cleaned).map_err(AiProviderError::OutputGuard)?;
+    super::output_guard::check_with_intent(input, &cleaned, translation)
+        .map_err(AiProviderError::OutputGuard)?;
 
-    if starts_with_refusal_or_commentary(&cleaned) || has_anomalous_cleanup_length(&cleaned, input)
+    if super::output_guard::starts_with_refusal_or_commentary(&cleaned, input)
+        || has_anomalous_cleanup_length(&cleaned, input)
     {
         Err(AiProviderError::BadResponse)
     } else {
@@ -344,14 +354,6 @@ fn strip_known_preamble<'a>(output: &'a str, input: &str) -> &'a str {
     } else {
         output
     }
-}
-
-fn starts_with_refusal_or_commentary(output: &str) -> bool {
-    let lower = output.trim_start().to_ascii_lowercase();
-    lower.starts_with("i can't")
-        || lower.starts_with("i cannot")
-        || lower.starts_with("i'm sorry")
-        || lower.starts_with("i am sorry")
 }
 
 fn has_anomalous_cleanup_length(output: &str, input: &str) -> bool {
@@ -549,10 +551,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_identity_guard_does_not_bypass_refusal_check() {
+    fn validate_preserves_dictated_refusal() {
         let refusal = "I'm sorry, I can't help with that.";
-        let error = validate_ai_output(refusal, refusal).unwrap_err();
-        assert!(matches!(error, AiProviderError::BadResponse));
+        assert_eq!(validate_ai_output(refusal, refusal).unwrap(), refusal);
     }
 
     #[test]

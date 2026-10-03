@@ -103,7 +103,63 @@ fn question_or_imperative(input: &str) -> bool {
         .any(|w| lower == *w || lower.starts_with(&format!("{w} ")))
 }
 
+fn is_question(text: &str) -> bool {
+    let lower = normalize(text);
+    lower.ends_with('?')
+        || [
+            "what", "what's", "how", "why", "when", "where", "who", "which", "can", "could",
+            "would", "should", "is", "are", "do", "does", "did", "will",
+        ]
+        .iter()
+        .any(|w| lower == *w || lower.starts_with(&format!("{w} ")))
+}
+
+/// Only remove a leading wrapper introduced by the model. The executor validates
+/// the remaining payload normally, including answer and expansion checks.
+pub(crate) fn strip_inline_wrapper<'a>(output: &'a str, input: &str) -> &'a str {
+    let Some((clause, rest)) = output.split_once(':') else {
+        return output;
+    };
+    let candidate = normalize(clause);
+    let source = normalize(input);
+    let wrapper = candidate.starts_with("here's ")
+        || candidate.starts_with("here is ")
+        || candidate.starts_with("sure, ")
+        || candidate == "cleaned text";
+    if wrapper && !source.starts_with(&candidate) {
+        rest.trim()
+    } else {
+        output
+    }
+}
+
+pub(crate) fn starts_with_refusal_or_commentary(output: &str, input: &str) -> bool {
+    fn collapse_stutters(text: &str) -> String {
+        let normalized = normalize(text);
+        let mut words = Vec::new();
+        for word in normalized.split_whitespace() {
+            if words.last().copied() != Some(word) {
+                words.push(word);
+            }
+        }
+        words.join(" ")
+    }
+    let output = collapse_stutters(output);
+    let input = collapse_stutters(input);
+    ["i can't", "i cannot", "i'm sorry", "i am sorry"]
+        .iter()
+        .any(|phrase| output.starts_with(phrase) && !input.starts_with(phrase))
+}
+
 pub fn check(input: &str, output: &str) -> Result<(), OutputGuardReason> {
+    check_with_intent(input, output, false)
+}
+
+pub fn check_with_intent(
+    input: &str,
+    output: &str,
+    translation: bool,
+) -> Result<(), OutputGuardReason> {
     let source = normalize(input);
     let target = normalize(output);
     if META_SIGNALS
@@ -112,9 +168,15 @@ pub fn check(input: &str, output: &str) -> Result<(), OutputGuardReason> {
     {
         return Err(OutputGuardReason::MetaReply);
     }
-    let expanded =
-        output.chars().count() > input.chars().count().saturating_mul(2).saturating_add(24);
-    let low_overlap = if question_or_imperative(input) {
+    let cap = input.chars().count().saturating_mul(2).saturating_add(24);
+    // Language changes can expand text independently of cleanup.
+    let cap = if translation {
+        cap.saturating_mul(8) / 5
+    } else {
+        cap
+    };
+    let expanded = output.chars().count() > cap;
+    let low_overlap = if !translation && question_or_imperative(input) {
         let source = content_words(input);
         let target = content_words(output);
         !source.is_empty()
@@ -123,7 +185,11 @@ pub fn check(input: &str, output: &str) -> Result<(), OutputGuardReason> {
     } else {
         false
     };
-    if expanded || low_overlap {
+    let answered_question = !translation
+        && is_question(input)
+        && !is_question(output)
+        && !content_words(output).is_subset(&content_words(input));
+    if expanded || low_overlap || answered_question {
         Err(OutputGuardReason::Answered)
     } else {
         Ok(())

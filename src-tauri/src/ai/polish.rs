@@ -54,6 +54,7 @@ pub(crate) async fn execute_prompt(
     text: &str,
     prompt: String,
     timings: &mut PolishTimings,
+    needs_output_language_transform: bool,
 ) -> Result<AiPolishResult, AiProviderError> {
     runtime
         .executor
@@ -64,6 +65,7 @@ pub(crate) async fn execute_prompt(
                 reasoning_level: runtime.reasoning_level.clone(),
                 fast_mode: runtime.fast_mode,
                 input_text: text.to_string(),
+                needs_output_language_transform,
                 prompt,
                 timeout_ms: runtime.timeout_ms,
             },
@@ -124,7 +126,7 @@ pub(crate) async fn measure(
             keep_words,
         );
         timings.prompt = elapsed_ms(prompt_start);
-        match execute_prompt(runtime, text, prompt, &mut timings).await {
+        match execute_prompt(runtime, text, prompt, &mut timings, false).await {
             Ok(result) => (result.output_text, PolishOutcome::Polished, None),
             Err(error) => (
                 raw_fallback(text),

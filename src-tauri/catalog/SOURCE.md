@@ -3,13 +3,16 @@
 - Upstream: https://models.dev/api.json (MIT)
 - Fetched: 2026-10-03
 - Projected snapshot SHA256: 3e83335a8143df2043a2f07c98d0a68f7c90089f785202b8728e1c8e5a9d2b79
-- Providers: 4 | text->text models: 75 (Anthropic 16, Google Gemini 19, OpenAI 36, OpenRouter 4)
+- Providers: 4 | text->text models: 70 (anthropic 16, gemini 17, openai 33, openrouter 4)
 
 ## Deterministic filter (plan 017, STOP-1 tighter rule)
 A provider is in the catalog IFF it has an entry in `overlay.json` mapping it to
 an implemented runtime (native genai adapter or OpenAI-compatible). Native
 providers include all upstream models accepting text with output exactly
 `["text"]`; multimodal input is allowed, image/audio/video output is excluded.
+Specialist embedding, rerank, TTS, image, audio and moderation IDs are excluded
+even when upstream labels their output as text; modality metadata must still
+allow text input and text-only output. Multimodal chat input remains allowed.
 Models marked `status: deprecated` or `retired` are excluded. OpenRouter remains
 curated through `model_ids`, with labels, costs and reasoning metadata copied
 from the same projected snapshot. Recommendation order comes from the overlay;
@@ -35,3 +38,11 @@ in `plans/081-q3-catalog-audit.md` for the full before/after diff and old-id aud
 3. `python generate.py` (snapshot + overlay -> catalog.generated.json).
 4. Review diff, run `cargo test ai`, commit.
 Never fetched at app runtime.
+
+## Fix-round specialist exclusions (2026-10-03)
+
+- gemini: `gemini-embedding-001`
+- gemini: `gemini-embedding-2`
+- openai: `text-embedding-3-large`
+- openai: `text-embedding-3-small`
+- openai: `text-embedding-ada-002`

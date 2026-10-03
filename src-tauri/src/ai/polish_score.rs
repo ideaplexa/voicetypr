@@ -97,13 +97,13 @@ fn filler_words(text: &str) -> BTreeSet<String> {
         .filter(|w| ["um", "uh", "erm", "hmm"].contains(&w.as_str()))
         .collect()
 }
-// Unicode word characters include combining marks and join controls. Underscore
-// is deliberately excluded: _, - and . delimit version/identifier components.
+// Unicode identifier characters include underscores, combining marks and join
+// controls. Dots and hyphens still delimit version components.
 fn word_char(c: char) -> bool {
     static WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"^[\p{L}\p{M}\p{N}\p{Pc}\x{200C}\x{200D}]$").unwrap()
     });
-    c != '_' && WORD.is_match(c.encode_utf8(&mut [0; 4]))
+    WORD.is_match(c.encode_utf8(&mut [0; 4]))
 }
 
 fn keeps_token(output: &str, token: &str) -> bool {
@@ -251,11 +251,12 @@ mod tests {
             ("2.1.0-beta.3", "2.1.0"),
             ("2.1.0-beta.3", "beta"),
             ("2.1.0-beta.3", "3"),
-            ("build_request_id", "request_id"),
         ] {
             assert!(keeps_token(output, token));
         }
         for (output, token) in [
+            ("build_request_id", "request_id"),
+            ("request_id2", "request_id"),
             ("merciful", "merci"),
             ("prémerci", "merci"),
             ("a\u{301}", "a"),
@@ -285,7 +286,7 @@ mod tests {
     fn keeps_requires_whole_identifiers_and_numbers() {
         assert!(keeps_token("Ask Zorvi about request_id 42.", "Zorvi"));
         assert!(keeps_token("Ask Zorvi about request_id 42.", "request_id"));
-        assert!(keeps_token("request_id_old", "request_id"));
+        assert!(!keeps_token("request_id_old", "request_id"));
         assert!(!keeps_token("Zorvian", "Zorvi"));
         assert!(!keeps_token("142", "42"));
         assert!(!keeps_token("17.5", "17"));

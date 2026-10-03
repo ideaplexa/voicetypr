@@ -477,30 +477,6 @@
           "temperature": true
         },
         {
-          "context": 2048,
-          "cost_input": 0.15,
-          "cost_output": 0,
-          "label": "Gemini Embedding 001",
-          "model_id": "gemini-embedding-001",
-          "output": 1,
-          "reasoning": false,
-          "reasoning_efforts": [],
-          "recommended": false,
-          "temperature": false
-        },
-        {
-          "context": 8192,
-          "cost_input": 0.2,
-          "cost_output": 0,
-          "label": "Gemini Embedding 2",
-          "model_id": "gemini-embedding-2",
-          "output": 1,
-          "reasoning": false,
-          "reasoning_efforts": [],
-          "recommended": false,
-          "temperature": false
-        },
-        {
           "context": 1048576,
           "cost_input": 0.75,
           "cost_output": 3.75,
@@ -1112,42 +1088,6 @@
             "medium",
             "high"
           ],
-          "recommended": false,
-          "temperature": false
-        },
-        {
-          "context": 8191,
-          "cost_input": 0.13,
-          "cost_output": 0,
-          "label": "text-embedding-3-large",
-          "model_id": "text-embedding-3-large",
-          "output": 3072,
-          "reasoning": false,
-          "reasoning_efforts": [],
-          "recommended": false,
-          "temperature": false
-        },
-        {
-          "context": 8191,
-          "cost_input": 0.02,
-          "cost_output": 0,
-          "label": "text-embedding-3-small",
-          "model_id": "text-embedding-3-small",
-          "output": 1536,
-          "reasoning": false,
-          "reasoning_efforts": [],
-          "recommended": false,
-          "temperature": false
-        },
-        {
-          "context": 8192,
-          "cost_input": 0.1,
-          "cost_output": 0,
-          "label": "text-embedding-ada-002",
-          "model_id": "text-embedding-ada-002",
-          "output": 1536,
-          "reasoning": false,
-          "reasoning_efforts": [],
           "recommended": false,
           "temperature": false
         }

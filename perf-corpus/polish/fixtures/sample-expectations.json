@@ -16,7 +16,7 @@
   "short_utterances-01": true,
   "short_utterances-02": true,
   "questions-01": true,
-  "questions-12": false,
+  "questions-12": true,
   "injections-02": true,
   "injections-01": true
 }

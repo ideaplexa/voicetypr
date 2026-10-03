@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -67,8 +68,15 @@ def sorted_models(models: Any) -> list[dict[str, Any]]:
 
 def eligible_model(model: dict[str, Any]) -> bool:
     modalities = model.get("modalities", {})
+    model_id = str(model.get("id") or model.get("model_id", "")).lower()
+    # Some specialist models are incorrectly labelled text->text upstream.
+    non_chat_id = re.search(
+        r"(?:^|[/_.-])(?:embedding\w*|embed|rerank\w*|tts|image|audio|moderation|whisper)(?:$|[/_.-])",
+        model_id,
+    )
     return (
-        "text" in modalities.get("input", [])
+        not non_chat_id
+        and "text" in modalities.get("input", [])
         and modalities.get("output") == ["text"]
         and model.get("status") not in {"deprecated", "retired"}
     )

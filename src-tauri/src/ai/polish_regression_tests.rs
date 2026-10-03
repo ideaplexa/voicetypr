@@ -57,7 +57,7 @@ fn baseline_guard_rejects_all_meta_answers_without_correct_output_regressions() 
             );
             assert!(response.output == case.input, "raw fallback {}", case.id);
             assert_eq!(
-                response.fallback_reason.as_deref(),
+                response.fallback_reason.map(|r| r.code()),
                 reason.map(|r| r.code())
             );
             blocked.push(case.id.clone());

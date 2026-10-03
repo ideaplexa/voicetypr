@@ -29,3 +29,11 @@ pub mod skip;
 mod catalog_migration_tests;
 
 pub(crate) mod keep_words;
+
+#[cfg(test)]
+mod fix_round_tests;
+pub(crate) mod settings_migration;
+
+mod fallback_reason;
+
+pub(crate) mod settings_selection;

@@ -70,6 +70,7 @@ mod tests {
                         reasoning_level: selected.map(str::to_string),
                         fast_mode: false,
                         input_text: "raw transcript".to_string(),
+                        needs_output_language_transform: false,
                         prompt: "polish".to_string(),
                         timeout_ms: 1_000,
                     };
@@ -399,6 +400,7 @@ mod tests {
                     reasoning_level: None,
                     fast_mode: false,
                     input_text: "raw transcript".to_string(),
+                    needs_output_language_transform: false,
                     prompt: "polish the transcript".to_string(),
                     timeout_ms: 1_000,
                 },
@@ -813,6 +815,7 @@ mod tests {
             reasoning_level: None,
             fast_mode: false,
             input_text: "raw transcript".to_string(),
+            needs_output_language_transform: false,
             prompt: "polish the transcript".to_string(),
             timeout_ms,
         }
@@ -921,6 +924,7 @@ mod tests {
             reasoning_level: Some("low".to_string()),
             fast_mode: false,
             input_text: "raw transcript".to_string(),
+            needs_output_language_transform: false,
             prompt: "polish the transcript".to_string(),
             timeout_ms: 2_000,
         };
