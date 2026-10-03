@@ -134,7 +134,7 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
         .as_ref()
         .and_then(|store| store.get("hotkey"))
         .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| "CommandOrControl+Shift+Space".to_string());
+        .unwrap_or_else(|| crate::commands::shortcuts::FALLBACK_PRIMARY.to_string());
     let recording_mode_str = store
         .as_ref()
         .and_then(|store| store.get("recording_mode"))
@@ -293,7 +293,7 @@ fn plan_engine_bindings(
         // global-shortcut startup fell back to this same default for that
         // inconsistent state.
         let combo_hotkey = if hotkey.trim().is_empty() {
-            "CommandOrControl+Shift+Space".to_string()
+            crate::commands::shortcuts::FALLBACK_PRIMARY.to_string()
         } else {
             hotkey.to_string()
         };

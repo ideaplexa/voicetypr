@@ -952,7 +952,7 @@ fn current_existing_shortcuts(app: &AppHandle) -> ExistingShortcutStrings {
         Ok(store) => store,
         Err(_) => {
             return ExistingShortcutStrings {
-                primary_hotkey: Some("CommandOrControl+Shift+Space".to_string()),
+                primary_hotkey: Some(FALLBACK_PRIMARY.to_string()),
                 ptt_hotkey: None,
             }
         }

@@ -130,7 +130,8 @@ mod tests {
     /// after the readiness decision in `start_recording`.
     #[test]
     fn island_context_is_resolved_after_first_audio() {
-        let src = include_str!("../commands/audio.rs");
+        // Windows checkouts use CRLF line endings.
+        let src = include_str!("../commands/audio.rs").replace("\r\n", "\n");
         let start = src
             .find("pub async fn start_recording(")
             .expect("start_recording exists");

@@ -14,7 +14,10 @@ mod tests {
     fn test_settings_default() {
         let settings = Settings::default();
 
-        assert_eq!(settings.hotkey, "CommandOrControl+Shift+Space");
+        assert_eq!(
+            settings.hotkey,
+            crate::commands::shortcuts::FALLBACK_PRIMARY
+        );
         assert_eq!(settings.current_model, ""); // Empty means auto-select
         assert_eq!(settings.speech_language, "en");
         assert_eq!(settings.transcription_task, TRANSCRIPTION_TASK_TRANSCRIBE);
@@ -288,7 +291,10 @@ mod tests {
             "onboarding_completed": settings.onboarding_completed,
         });
 
-        assert_eq!(value["hotkey"], "CommandOrControl+Shift+Space");
+        assert_eq!(
+            value["hotkey"],
+            crate::commands::shortcuts::FALLBACK_PRIMARY
+        );
         assert_eq!(value["current_model"], "");
         assert_eq!(value["speech_language"], "en");
         assert_eq!(value["transcription_task"], "transcribe");
@@ -608,7 +614,13 @@ mod tests {
     fn test_ptt_settings_defaults() {
         let settings = Settings::default();
         assert!(!settings.use_different_ptt_key);
-        assert_eq!(settings.ptt_hotkey, Some("Alt+Space".to_string()));
+        // Alt+Space opens the window menu on Windows.
+        let expected = if cfg!(target_os = "windows") {
+            "Control+Alt+Space"
+        } else {
+            "Alt+Space"
+        };
+        assert_eq!(settings.ptt_hotkey.as_deref(), Some(expected));
     }
 
     #[test]
