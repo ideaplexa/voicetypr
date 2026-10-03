@@ -1067,7 +1067,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 audio::device_watcher::try_start_device_watcher_if_ready(&app_handle_for_watcher).await;
             });
 
-            // Create display watcher to reposition pill/toast on monitor changes
+            // Create display watcher to reposition pill on monitor changes
             let display_watcher = utils::display_watcher::DisplayWatcher::new(app.app_handle().clone());
             display_watcher.start();
             app.manage(display_watcher);
@@ -1437,89 +1437,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            // Create pill (macOS) and toast (all platforms) windows at startup
-            {
-                use tauri::{WebviewUrl, WebviewWindowBuilder};
-
-                // On macOS, use the same saved placement and monitor work area as
-                // later repositioning so an always-visible pill starts clear of the Dock.
-                #[cfg(target_os = "macos")]
-                let ((pos_x, pos_y), (toast_x, toast_y)) = {
-                    let app_state = app.state::<AppState>();
-                    app_state
-                        .get_window_manager()
-                        .map(|manager| manager.current_floating_window_positions())
-                        .unwrap_or_else(|| {
-                            log::warn!("Window manager unavailable during floating window placement; using safe defaults");
-                            ((600.0, 842.0), (520.0, 754.0))
-                        })
-                };
-
-                // Preserve the established non-macOS startup behavior: primary
-                // monitor, bottom-center, with the fixed 10px edge offset.
-                #[cfg(not(target_os = "macos"))]
-                let ((pos_x, pos_y), (toast_x, toast_y)) = {
-                    let (screen_width, screen_height) =
-                        crate::utils::monitor::catch_monitor_panic(|| {
-                            let monitor = app.primary_monitor().ok().flatten()?;
-                            let size = monitor.size();
-                            let scale = monitor.scale_factor();
-                            Some((size.width as f64 / scale, size.height as f64 / scale))
-                        })
-                        .flatten()
-                        .unwrap_or((1440.0, 900.0));
-                    let pill_x = (screen_width - crate::pill::geometry::LEGACY_WIDTH) / 2.0;
-                    let pill_y = screen_height - crate::pill::geometry::LEGACY_HEIGHT - 10.0;
-                    let toast_x = pill_x
-                        + (crate::pill::geometry::LEGACY_WIDTH
-                            - crate::window_manager::TOAST_WIDTH)
-                            / 2.0;
-                    let toast_y = pill_y
-                        - crate::window_manager::TOAST_HEIGHT
-                        - crate::window_manager::FLOATING_WINDOW_GAP;
-                    ((pill_x, pill_y), (toast_x, toast_y))
-                };
-
-                // Create toast window for feedback messages - all platforms
-                log::info!(
-                    "Toast window position: ({}, {}) relative to pill at ({}, {})",
-                    toast_x,
-                    toast_y,
-                    pos_x,
-                    pos_y
-                );
-
-                let toast_builder = WebviewWindowBuilder::new(app, "toast", WebviewUrl::App("toast".into()))
-                    .title("Feedback")
-                    .resizable(false)
-                    .decorations(false)
-                    .always_on_top(true)
-                    .skip_taskbar(true)
-                    .transparent(true)
-                    .shadow(false) // Prevent window shadow/outline on macOS
-                    .inner_size(
-                        crate::window_manager::TOAST_WIDTH,
-                        crate::window_manager::TOAST_HEIGHT,
-                    )
-                    .position(toast_x, toast_y)
-                    .focusable(false)
-                    .focused(false)
-                    .visible(false); // Starts hidden
-
-                #[cfg(not(debug_assertions))]
-                let toast_builder = toast_builder.initialization_script("document.addEventListener('contextmenu', e => e.preventDefault());");
-
-                #[cfg(debug_assertions)]
-                let toast_builder = toast_builder;
-
-                #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-                let toast_window = toast_builder.build()?;
-
-                crate::pill::native::configure(&toast_window)?;
-
-                log::info!("Created toast window for feedback");
-            }
-
             // Sync autostart state on startup using shared logic
             {
                 let app_handle = app.app_handle().clone();
@@ -1651,7 +1568,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             hide_pill_widget,
             close_pill_widget,
             recreate_pill_widget,
-            hide_toast_window,
+            commands::pill_feedback::pill_feedback_visible,
+            commands::pill_feedback::pill_feedback_ready,
             focus_main_window,
             check_accessibility_permission,
             request_accessibility_permission,

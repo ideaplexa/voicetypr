@@ -100,7 +100,7 @@ export function useRecording(): UseRecordingReturn {
       // after the pill finishes processing and calls transcription_processed
 
       // NOTE: Error events (transcription-error, recording-error) are handled
-      // via pill_toast() in the backend and shown in FeedbackToast window.
+      // via island problem events in the backend.
       // State errors come through recording-state-changed event.
     };
 

@@ -9,7 +9,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 #[derive(Clone, Serialize)]
@@ -23,7 +23,11 @@ pub struct Recovery {
 }
 fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
     crate::commands::pill_feedback::cancel_terminal_hide(recovery.generation);
-    let _ = app.emit_to("pill", "dictation-recovery", recovery.clone());
+    crate::commands::pill_feedback::send(
+        app,
+        "dictation-recovery",
+        serde_json::to_value(recovery).unwrap(),
+    );
 }
 struct Clip {
     recovery: Recovery,
@@ -228,14 +232,24 @@ pub async fn keep(
         .temp_dir()
         .map_err(|_| "Recovery storage unavailable")?
         .join("kept-dictation");
-    let recovery = STORE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .retain(&dir, path, generation, kind)?;
+    let (recovery, removed) = {
+        let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+        let previous: Vec<_> = store.clips.iter().map(|c| c.recovery.id.clone()).collect();
+        let recovery = store.retain(&dir, path, generation, kind)?;
+        let removed: Vec<_> = previous
+            .into_iter()
+            .filter(|id| !store.clips.iter().any(|c| &c.recovery.id == id))
+            .collect();
+        (recovery, removed)
+    };
+    for id in removed {
+        crate::commands::pill_feedback::expire_kept_id(app, &id);
+    }
     let id = recovery.id.clone();
     let expires_in_ms = recovery.expires_in_ms;
     audio::clear_in_flight_transcription_audio_for_generation(generation);
     let expiry_id = id.clone();
+    let expiry_app = app.clone();
     tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(expires_in_ms);
         loop {
@@ -263,6 +277,7 @@ pub async fn keep(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .discard(&expiry_id);
+        crate::commands::pill_feedback::expire_kept_id(&expiry_app, &expiry_id);
     });
     let alternative = local_alternative(app).await;
     let store_settings = app.store("settings").ok();
@@ -515,6 +530,11 @@ async fn retry_inner(
     if audio::delivery_aborted(state.is_cancellation_requested(), generation) {
         return Err("Retry discarded".into());
     }
+    // Polish changed the words when the pipeline kept the pre-Polish text.
+    let polished = output
+        .metadata
+        .as_ref()
+        .is_some_and(|m| m.get("original_text").is_some());
     audio::save_transcription_with_recording_if_current(
         app.clone(),
         generation,
@@ -534,6 +554,7 @@ async fn retry_inner(
                 app.clone(),
                 output.text.clone(),
                 generation,
+                polished,
             )
             .await
             .is_ok()
@@ -552,6 +573,7 @@ async fn retry_inner(
                 Some(true),
                 output.text.split_whitespace().count() as u32,
                 generation,
+                polished,
             );
         }
         result

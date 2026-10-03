@@ -7,9 +7,6 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 
 pub(crate) const PILL_WIDTH: f64 = crate::pill::geometry::CANVAS_WIDTH;
 pub(crate) const PILL_HEIGHT: f64 = crate::pill::geometry::CANVAS_HEIGHT;
-pub(crate) const TOAST_WIDTH: f64 = 400.0;
-pub(crate) const TOAST_HEIGHT: f64 = 80.0;
-pub(crate) const FLOATING_WINDOW_GAP: f64 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DesktopArea {
@@ -102,17 +99,6 @@ fn logical_desktop_area(
         physical_width as f64 / scale_factor,
         physical_height as f64 / scale_factor,
     ))
-}
-
-fn calculate_toast_position(position: &str, pill_x: f64, pill_y: f64) -> (f64, f64) {
-    let x = pill_x + (crate::pill::geometry::LEGACY_WIDTH - TOAST_WIDTH) / 2.0;
-    let y = if position.starts_with("top-") {
-        pill_y + crate::pill::geometry::LEGACY_HEIGHT + FLOATING_WINDOW_GAP
-    } else {
-        pill_y - TOAST_HEIGHT - FLOATING_WINDOW_GAP
-    };
-
-    (x, y)
 }
 
 impl WindowManager {
@@ -358,6 +344,9 @@ impl WindowManager {
 
     /// Hide the pill window (don't close it) with retry logic
     pub async fn hide_pill_window(&self) -> Result<(), String> {
+        if crate::commands::pill_feedback::feedback_owned() {
+            return Ok(());
+        }
         crate::pill::hit_test::stop(&self.app_handle);
         const MAX_RETRIES: u32 = 3;
         const RETRY_DELAY_MS: u64 = 50;
@@ -428,6 +417,7 @@ impl WindowManager {
 
     /// Close the pill window (actually destroy it)
     pub async fn close_pill_window(&self) -> Result<(), String> {
+        crate::commands::pill_feedback::renderer_closed();
         crate::pill::hit_test::stop(&self.app_handle);
         // Take the window out of the mutex
         let window = {
@@ -590,7 +580,7 @@ impl WindowManager {
         }
     }
 
-    fn calculate_floating_window_positions_for(&self, position: &str) -> ((f64, f64), (f64, f64)) {
+    fn calculate_pill_canvas_position_for(&self, position: &str) -> (f64, f64) {
         let desktop_area = self.get_positioning_area();
         let edge_offset = self.get_pill_offset_setting();
         let pill_position = calculate_pill_position(position, desktop_area, edge_offset);
@@ -605,32 +595,7 @@ impl WindowManager {
             desktop_area,
         );
 
-        let toast_position = calculate_toast_position(position, pill_position.0, pill_position.1);
-
-        // On macOS, the Dock and menu bar reduce NSScreen.visibleFrame. Keep
-        // the wider toast inside that same usable area while retaining its
-        // intended relationship above or below the pill.
-        #[cfg(target_os = "macos")]
-        let toast_position =
-            constrain_window_position(toast_position, (TOAST_WIDTH, TOAST_HEIGHT), desktop_area);
-
-        log::info!(
-            "Calculated floating positions: pill=({}, {}), toast=({}, {}) for '{}' in desktop area ({}, {}) {}x{} with offset {}",
-            pill_position.0,
-            pill_position.1,
-            toast_position.0,
-            toast_position.1,
-            position,
-            desktop_area.x,
-            desktop_area.y,
-            desktop_area.width,
-            desktop_area.height,
-            edge_offset
-        );
-        (
-            crate::pill::geometry::Geometry::new(position).canvas_origin(pill_position),
-            toast_position,
-        )
+        crate::pill::geometry::Geometry::new(position).canvas_origin(pill_position)
     }
 
     /// Work area of the app/cursor display captured at recording start.
@@ -664,23 +629,17 @@ impl WindowManager {
 
     fn calculate_center_position(&self) -> (f64, f64) {
         let position = self.get_pill_position_setting();
-        self.calculate_floating_window_positions_for(&position).0
+        self.calculate_pill_canvas_position_for(&position)
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn current_floating_window_positions(&self) -> ((f64, f64), (f64, f64)) {
-        let position = self.get_pill_position_setting();
-        self.calculate_floating_window_positions_for(&position)
-    }
-
-    /// Reposition pill and toast windows using the current placement setting.
+    /// Reposition pill window using the current placement setting.
     /// Called when monitor configuration changes (display connect/disconnect, resolution change).
     pub fn reposition_floating_windows(&self) {
         use tauri::LogicalPosition;
 
         let position = self.get_pill_position_setting();
-        let ((pill_x, pill_y), (toast_x, toast_y)) =
-            self.calculate_floating_window_positions_for(&position);
+        let (pill_x, pill_y) = self.calculate_pill_canvas_position_for(&position);
 
         // Reposition pill window
         if let Some(pill) = self.get_pill_window() {
@@ -691,24 +650,14 @@ impl WindowManager {
                 log::info!("Repositioned pill window to ({}, {})", pill_x, pill_y);
             }
         }
-
-        // Keep the toast centered on the pill window and in the usable area.
-        if let Some(toast) = self.app_handle.get_webview_window("toast") {
-            if let Err(e) = toast.set_position(LogicalPosition::new(toast_x, toast_y)) {
-                log::warn!("Failed to reposition toast window: {}", e);
-            } else {
-                log::info!("Repositioned toast window to ({}, {})", toast_x, toast_y);
-            }
-        }
     }
 
-    /// Reposition pill and toast windows to a specific position.
+    /// Reposition pill window to a specific position.
     /// Called when the pill_indicator_position setting changes.
     pub fn reposition_floating_windows_with_position(&self, position: &str) {
         use tauri::LogicalPosition;
 
-        let ((pill_x, pill_y), (toast_x, toast_y)) =
-            self.calculate_floating_window_positions_for(position);
+        let (pill_x, pill_y) = self.calculate_pill_canvas_position_for(position);
 
         // Reposition pill window
         if let Some(pill) = self.get_pill_window() {
@@ -724,24 +673,12 @@ impl WindowManager {
                 );
             }
         }
-
-        // Keep the toast centered on the pill window and in the usable area.
-        if let Some(toast) = self.app_handle.get_webview_window("toast") {
-            if let Err(e) = toast.set_position(LogicalPosition::new(toast_x, toast_y)) {
-                log::warn!("Failed to reposition toast window: {}", e);
-            } else {
-                log::info!("Repositioned toast window to ({}, {})", toast_x, toast_y);
-            }
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        calculate_pill_position, calculate_toast_position, constrain_window_position,
-        logical_desktop_area, DesktopArea, TOAST_HEIGHT, TOAST_WIDTH,
-    };
+    use super::{calculate_pill_position, logical_desktop_area, DesktopArea};
 
     fn full_screen() -> DesktopArea {
         DesktopArea::new(0.0, 0.0, 1920.0, 1080.0)
@@ -828,22 +765,6 @@ mod tests {
     }
 
     #[test]
-    fn toast_is_centered_and_below_top_pill() {
-        assert_eq!(
-            calculate_toast_position("top-left", 10.0, 10.0),
-            (-60.0, 82.0)
-        );
-    }
-
-    #[test]
-    fn toast_is_centered_and_above_bottom_pill() {
-        assert_eq!(
-            calculate_toast_position("bottom-right", 1650.0, 1006.0),
-            (1580.0, 918.0)
-        );
-    }
-
-    #[test]
     fn bottom_pill_uses_visible_area_above_dock() {
         // 1024x768 display with a 25px menu bar and 47px bottom Dock.
         let visible_area = DesktopArea::new(0.0, 25.0, 1024.0, 696.0);
@@ -859,22 +780,6 @@ mod tests {
         assert_eq!(
             calculate_pill_position("bottom-right", visible_area, 50.0),
             (-310.0, 746.0)
-        );
-    }
-
-    #[test]
-    fn toast_is_constrained_to_visible_area_edges() {
-        let visible_area = DesktopArea::new(0.0, 25.0, 1024.0, 696.0);
-        let left = calculate_toast_position("top-left", 10.0, 35.0);
-        let right = calculate_toast_position("bottom-right", 754.0, 647.0);
-
-        assert_eq!(
-            constrain_window_position(left, (TOAST_WIDTH, TOAST_HEIGHT), visible_area),
-            (0.0, 107.0)
-        );
-        assert_eq!(
-            constrain_window_position(right, (TOAST_WIDTH, TOAST_HEIGHT), visible_area),
-            (624.0, 559.0)
         );
     }
 

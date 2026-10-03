@@ -37,3 +37,9 @@ export interface IslandProblemEvents {
 }
 /** Main-window navigation handoff for P3; emitted only after a button action. */
 export type IslandNavigateAction = "open_models" | "open_cloud_keys" | "choose_mic";
+export interface IslandNotice {
+  kind: 'finishing' | 'polish_on' | 'polish_off' | 'polish_setup' | 'shortcuts_retired'
+    | 'long_silence' | 'silence_stopped' | 'silence_discarded' | 'recording_failed'
+    | 'copy_failed' | 'transcription_failed' | 'history_retry'
+    | 'shortcut_throttled' | 'no_speech';
+}

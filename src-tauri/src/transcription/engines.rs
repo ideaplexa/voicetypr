@@ -156,9 +156,6 @@ where
                         "GPU sidecar failed, unloading sidecar before CPU fallback: {error}"
                     );
                     gpu_client.abort_active_process().await;
-                    if mode == "gpu" {
-                        crate::commands::audio::pill_toast(app, "GPU unavailable, using CPU", 4000);
-                    }
                 }
             }
         } else {

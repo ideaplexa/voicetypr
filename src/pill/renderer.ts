@@ -1,3 +1,6 @@
+import { StackView } from '@/pill/stack-view';
+import { blockedCard, recoveryCard, noteCard, shortCard, noticeCard, type FeedbackCard } from '@/pill/feedback';
+import type { DictationBlocked, DictationRecovery, DictationNote, RecordingTooShort, IslandNotice } from '@/types/island-events';
 import { formatKeyForDisplay } from '@/lib/keyboard-normalizer';
 import { createIslandDom } from '@/pill/dom';
 import { Crossfade } from '@/pill/crossfade';
@@ -25,8 +28,14 @@ export interface RendererDeps {
 }
 export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const dom = createIslandDom(host), machine = new IslandMachine();
+  let feedbackOwned = false, polished = false, pastedLeft = 2400, pastedSince = 0;
+  const stack = new StackView(dom.root, {
+    wake: () => wake(), changed: () => sync(),
+    call: c => deps.actions.card?.(c) ?? Promise.reject(new Error('Unavailable')),
+    announce: s => announce(s), setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout,
+  });
   const appIcon = new AppIcon(dom.icon);
-  const farRow = (state: typeof machine.state) => state === 'start' || state === 'copied' || state === 'no_permission';
+  const farRow = (state: typeof machine.state) => state === 'start' || state === 'copied' || state === 'no_permission' || state === 'pasted' && !top;
   const words = new Words(dom.get('.pill-preview-line'), dom.committed, dom.tentative);
   const crossfade = new Crossfade(dom.surface);
   const layers = new Layers(dom.surface), glyph = new Glyph(dom.canvas), badge = new Badge(dom.badge);
@@ -36,33 +45,34 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const media = window.matchMedia('(prefers-reduced-motion: reduce)');
   let reduced = media.matches, mode: PillSettings['pill_indicator_mode'] = 'when_recording';
   let destroyed = false, frame: number | undefined, last = 0, hovering = false, top = false;
+  let finishing = false, finishingTimer: number | undefined;
+  let copiedTimer: number | undefined;
   let lastState = machine.state, startTimer: number | undefined, feedbackTimer: number | undefined, hintTimer: number | undefined, hoverTimer: number | undefined;
   let slowSince = 0;
   let entered = 0, pointerX = 0, pointerY = 0, pointerTime = 0;
   let closeHold = 0;
   let waveSeconds = 0, cancelPending = false, stopPending = false;
-  let previousX = NaN, previousY = NaN, previousWidth = NaN, previousHeight = NaN, previouslyHidden: HTMLElement['hidden'] | undefined;
   let enabledStream = false, displayedSeconds = -1;
   let badgeFromX = 25, badgeFromY = 56, shortcut = deps.mac ? 'Alt+Space' : 'Ctrl+Alt+Space';
   const timerEl = dom.get<HTMLElement>('.pill-timer'), startTimeEl = dom.get<HTMLElement>('.start-time'), workTimeEl = dom.get<HTMLElement>('.work-time'), hintTimeEl = dom.get<HTMLElement>('.hint-time');
   const timerElements = [timerEl, startTimeEl, workTimeEl, hintTimeEl];
   const rowEl = dom.get<HTMLElement>('.listening-row'), ctlEl = dom.get<HTMLElement>('.ctl');
   const rowLayers = ['row', 'hint', 'work', 'note'].map(name => layers.entries[name as 'row' | 'hint' | 'work' | 'note'].el);
-  const timers = () => { for (const id of [startTimer, feedbackTimer, hintTimer, hoverTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hintTimer = hoverTimer = undefined; };
-  const text = (selector: string, value: string) => { const el = dom.get<HTMLElement>(selector); if (el.textContent !== value) el.textContent = value; };
+  const timers = () => { for (const id of [startTimer, feedbackTimer, hintTimer, hoverTimer, copiedTimer, finishingTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hintTimer = hoverTimer = copiedTimer = finishingTimer = undefined; finishing = false; };
+  const text = (selector: string, value: string) => { const el = dom.get<HTMLElement>(selector); if (el.textContent !== value) el.textContent = value; if (el.matches('.done-label,.note-text')) el.title = value; };
   const inlineWidth = (selector: string) => {
     const range = document.createRange(); range.selectNodeContents(dom.get(selector));
     const width = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect().width : 0;
     range.detach(); return width;
   };
+  let regionSignature = '';
   const hit = () => {
     const b = dom.surface.getBoundingClientRect();
-    let x = b.x, y = b.y, width = b.width, height = b.height;
-    if (machine.state === 'rest') { x -= 4; width += 8; height += 12; if (!top) y -= 12; }
-    if (dom.surface.hidden !== previouslyHidden || !dom.surface.hidden && (x !== previousX || y !== previousY || width !== previousWidth || height !== previousHeight)) {
-      previouslyHidden = dom.surface.hidden; previousX = x; previousY = y; previousWidth = width; previousHeight = height;
-      deps.hitRegions(dom.surface.hidden ? [] : [{ x, y, width, height }]);
-    }
+    let x=b.x,y=b.y,width=b.width,height=b.height;
+    if(machine.state==='rest') {x-=4;width+=8;height+=12;if(!top)y-=12;}
+    const rects = [...(dom.surface.hidden ? [] : [{x,y,width,height}]),...stack.rects()];
+    const signature=JSON.stringify(rects);
+    if(signature!==regionSignature){regionSignature=signature;deps.hitRegions(rects);}
   };
   const wake = () => { if (!destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
   const syncTime = (now: number) => {
@@ -93,7 +103,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   };
   function tick(now: number) {
     frame = undefined;
-    if (destroyed || dom.surface.hidden) return;
+    if (destroyed) return;
     const dt = Math.min(.05, Math.max(0, (now - last) / 1000)); last = now;
     let moving = false, shapeMoving = false;
     if (closeHold > 0 && !reduced) { closeHold = Math.max(0, closeHold - dt); moving = true; }
@@ -109,12 +119,15 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const size = Math.max(0, IS.x), badgeY = Math.max(IY.x - size / 2 - 2, 8);
     moving = badge.step(dt, IX.x + size / 2 - 4, top ? badgeY - 6 : H.x - 2 - badgeY - 6, reduced, badgeFromX, badgeFromY) || moving;
     if (shapeMoving) place(); glyph.draw(waveSeconds, Math.max(0, GW.x), reduced);
+    const landed = machine.state === 'rest' && W.x < 12.5 && H.x < 12.5;
+    stack.tuck(mode === 'never' || !landed);
+    moving = stack.step(dt,reduced,landed) || moving;
     hit();
     if (moving || (!dom.surface.hidden && machine.recording && !reduced)) frame = requestAnimationFrame(tick);
     else dom.surface.style.willChange = 'auto';
   }
   const sync = () => {
-    const state = machine.state, previousState = lastState, fromStart = lastState === 'start' && state !== 'start';
+    const state = machine.state, fromStart = lastState === 'start' && state !== 'start';
     if (state !== lastState && reduced) crossfade.capture();
     if (state !== lastState && !reduced && (machine.width < W.to || machine.height < H.to)) closeHold = .08;
     if (farRow(state) && !farRow(lastState)) { ITOP.x = H.x - 2 - IY.x; ITOP.v = H.v - IY.v; GTOP.x = H.x - 2 - GY.x; GTOP.v = H.v - GY.v; }
@@ -129,14 +142,19 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.root.dataset.preview = String(state === 'live');
     dom.root.dataset.platform = deps.mac ? 'macos' : 'windows';
     dom.root.dataset.reducedMotion = String(reduced);
-    dom.surface.hidden = mode === 'never' || (rest && mode !== 'always');
+    dom.surface.hidden = mode === 'never' || (rest && mode !== 'always' && !stack.present);
+    const owns = stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state);
+    if (owns !== feedbackOwned) { feedbackOwned=owns; void deps.actions.feedbackVisible?.(owns).catch(() => {}); }
     dom.root.dataset.visible = String(!dom.surface.hidden);
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
     dom.get<HTMLElement>('.core').classList.toggle('bad', !machine.context.mic.ok);
     const ctl = hovering && state === 'listening' && !machine.hint && !stopPending;
     HC.to = ctl ? 62 : 0;
     W.to = machine.width + (ctl ? 62 : 0);
-    H.to = machine.height; R.to = rest ? 6 : H.to > 34 ? 20 : 17;
+    const showDoneActions = state === 'pasted' && polished && hovering && !!deps.actions.original;
+    H.to = showDoneActions ? 70 : machine.height;
+    dom.get<HTMLElement>('.done-actions').hidden = !showDoneActions;
+    dom.get<HTMLButtonElement>('.original').hidden = !polished; R.to = rest ? 6 : H.to > 34 ? 20 : 17;
     IS.to = rest ? 0 : state === 'start' ? 28 : 18;
     IX.to = rest ? 5 : state === 'start' ? 28 : 21;
     IY.to = rest ? 5 : 16;
@@ -146,12 +164,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     badge.target(machine.context, machine.recording && state !== 'start' || machine.processing, fromStart);
     if (machine.committed || machine.tentative || layers.entries.words.alpha === 0) words.update(machine.committed, machine.tentative, reduced);
     dom.canvas.dataset.state = state;
-    const label = state === 'polishing' ? `Polishing${machine.context.polish.style ? ` · ${styleName(machine.context)}` : ''}` : 'Transcribing';
-    if (machine.processing && previousState !== state) layers.swapText(dom.get('.work-label'), label);
+    const label = finishing && machine.processing ? 'Finishing…' : state === 'polishing' ? `Polishing${machine.context.polish.style ? ` · ${styleName(machine.context)}` : ''}` : 'Transcribing';
+    if (machine.processing) layers.swapText(dom.get('.work-label'), label);
     else if (!machine.processing) text('.work-label', label);
     dom.get<HTMLButtonElement>('.skip').hidden = state !== 'polishing' || !deps.actions.skip;
     text('.done-count', `· ${machine.words} ${machine.words === 1 ? 'word' : 'words'}`);
-    text('.notice-title', state === 'error' ? machine.error : copiedTitle(deps.mac));
+    text('.notice-title', state === 'error' ? machine.error : state === 'no_permission' ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac));
+    dom.get('.notice-title').title = dom.get('.notice-title').textContent ?? '';
     text('.notice-count', state === 'error' ? '' : `${machine.words} words`);
     text('.notice-sub', state === 'no_permission' ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : state === 'copied' ? `${machine.context.app.name || 'The app'} didn't accept the paste` : '');
     dom.get<HTMLButtonElement>('.privacy-settings').hidden = state !== 'no_permission' || !deps.actions.openPrivacySettings;
@@ -167,9 +186,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.get<HTMLButtonElement>('.stop').disabled = stopPending;
     if (state === 'too_short' || state === 'nospeech') {
       const width = inlineWidth('.note-text');
-      if (width) W.to = Math.min(438,width + (state === 'too_short' ? 38 + 14 + 7 + 14 + 2 : 60 + 14 + 8 + 26 + 2));
+      if (width) W.to = Math.min(360,width + (state === 'too_short' ? 38 + 14 + 7 + 14 + 2 : 60 + 14 + 8 + 26 + 2));
     } else if (state === 'error') {
-      const width = inlineWidth('.notice-title'); if (width) W.to = Math.min(438,width + 76);
+      const width = inlineWidth('.notice-title'); if (width) W.to = Math.min(360,width + 76);
     } else if (state === 'start') {
       const styleWidth = inlineWidth('.style-name'), micWidth = inlineWidth('.mic-name'), engineWidth = inlineWidth('.engine-chip');
       if (styleWidth && micWidth && engineWidth) W.to = Math.min(340,Math.max(180,styleWidth + (machine.context.polish.style ? 39 : 12) + micWidth + 35 + engineWidth + 38));
@@ -180,13 +199,20 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (titleWidth) {
         const rowWidth = titleWidth + countWidth + 96;
         const actionWidth = inlineWidth('.notice-sub') + (state === 'no_permission' ? dom.get('.privacy-settings').offsetWidth + 5 : 0) + 26 + 5 + 24;
-        W.to = Math.min(438,Math.max(236,rowWidth,actionWidth));
-      } else if (state === 'no_permission') W.to = deps.mac ? 420 : 438;
+        W.to = Math.min(360,Math.max(236,rowWidth,actionWidth));
+      } else if (state === 'no_permission') W.to = 360;
+    }
+    if (state === 'copied' || state === 'no_permission' || state === 'error') {
+      const notice = layers.entries.notice.el;
+      notice.style.width = `${Math.min(360,W.to)}px`;
+      dom.get('.acts').hidden = state === 'error';
+      // Measure after constraining width so wrapped subtext and actions grow the card.
+      H.to = notice.scrollHeight ? notice.scrollHeight + 2 : state === 'no_permission' ? 102 : machine.height;
     }
     ITOP.to = state === 'start' ? 26 : 16; GTOP.to = state === 'start' ? 38 : 28;
     if (farRow(state)) { IY.to = H.to - 2 - ITOP.to; GY.to = H.to - 2 - GTOP.to; }
     syncTime(performance.now());
-    if (dom.surface.hidden) {
+    if (dom.surface.hidden && !stack.present) {
       if (frame !== undefined) cancelAnimationFrame(frame); frame = undefined; words.clear(); crossfade.clear();
       for (const spring of springs) spring.snap(); layers.step(1, true); glyph.step(1, true); place(); hit();
     }
@@ -219,6 +245,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, kind === 'error' ? 1500 : kind === 'too_short' ? 1400 : 30000); sync();
   };
   const start = () => {
+    if (machine.state === 'copied' || machine.state === 'no_permission') {
+      const permission=machine.state==='no_permission';
+      stack.push({key:machine.state,title:permission ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac),sub:permission ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : `${machine.context.app.name || 'The app'} didn't accept the paste`,tone:'amber',glyph:'clipboard',duration:null,actions:permission ? [{label:deps.mac ? 'Open System Settings' : 'Open Privacy settings',call:{command:'island_action',action:'open_accessibility'}}] : []},undefined,false);
+    }
+    stack.tuck(true);
     if (!machine.start(performance.now())) return;
     timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; announce('');
     if (machine.state === 'start') foldStart(); sync();
@@ -231,7 +262,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   };
   const pointer = (p: PillPointer) => {
     const now = performance.now();
-    if (dom.surface.hidden) { hovering = false; if (hoverTimer !== undefined) deps.clearTimeout(hoverTimer); hoverTimer = undefined; return; }
+    if (dom.surface.hidden && !stack.present) { hovering = false; if (hoverTimer !== undefined) deps.clearTimeout(hoverTimer); hoverTimer = undefined; return; }
     const bounds = dom.surface.getBoundingClientRect();
     // P1 coordinates are logical webview coordinates. Never depend on DOM mousemove.
     const inside = p.inside && (p.x === undefined || p.y === undefined || (p.x >= bounds.left - (machine.state === 'rest' ? 4 : 0) && p.x <= bounds.right + (machine.state === 'rest' ? 4 : 0) && p.y >= bounds.top - (machine.state === 'rest' && !top ? 12 : 0) && p.y <= bounds.bottom + (machine.state === 'rest' && top ? 12 : 0)));
@@ -247,6 +278,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       hoverTimer = deps.setTimeout(() => { hoverTimer = undefined; if (hovering && machine.state === 'rest') { machine.state = 'peek'; sync(); } }, quietWait + dwellLeft);
     }
     else if (machine.state === 'peek' && !inside) hoverTimer = deps.setTimeout(() => { hoverTimer = undefined; if (!hovering && machine.state === 'peek') rest(); }, 400);
+    stack.pointer(p.x,p.y);
+    if (machine.state === 'pasted') {
+      if (feedbackTimer !== undefined) { deps.clearTimeout(feedbackTimer);feedbackTimer=undefined;pastedLeft=Math.max(0,pastedLeft-(now-pastedSince)); }
+      if (!inside) { pastedSince=now;feedbackTimer=deps.setTimeout(rest,pastedLeft); }
+      dom.get<HTMLElement>('.hold i').style.animationPlayState=inside ? 'paused' : 'running';
+      sync();
+    }
     if (machine.recording) sync();
     const buttons = dom.surface.querySelectorAll<HTMLButtonElement>('button');
     for (const button of buttons) { const b = button.getBoundingClientRect(); button.classList.toggle('hov', inside && p.x !== undefined && p.y !== undefined && p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom); }
@@ -261,6 +299,12 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   };
   dom.get<HTMLButtonElement>('.note-dismiss').onclick = rest;
   dom.get<HTMLButtonElement>('.privacy-settings').onclick = () => { void deps.actions.openPrivacySettings?.().catch(() => {}); };
+  dom.get<HTMLButtonElement>('.original').onclick = () => {
+    const generation=machine.generation;
+    void deps.actions.original?.().then(result => {
+      if (!destroyed && machine.state === 'pasted' && machine.generation === generation && result === 'copied') {text('.done-label','Original copied');announce('Original copied');}
+    }).catch(() => {});
+  };
   dom.get<HTMLButtonElement>('.skip').onclick = () => { void deps.actions.skip?.(); };
   dom.get<HTMLButtonElement>('.dismiss').onclick = () => { rest(); if (mode === 'when_recording') void deps.actions.dismiss(); };
   dom.surface.onclick = e => {
@@ -275,8 +319,26 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   contextText(); sync();
   return {
     machine,
+    get feedbackActive() { return stack.active; },
     settings(value: PillSettings) { shortcut = value.recording_mode === 'push_to_talk' ? value.ptt_hotkey ?? shortcut : value.hotkey ?? shortcut; contextText(); mode = value.pill_indicator_mode ?? 'when_recording'; enabledStream = value.transcription_mode === 'live_preview' || value.streaming_preview_enabled === true; if (!enabledStream) machine.clearStream(); sync(); },
-    geometry(value: PillGeometry) { top = value.anchor.startsWith('top-'); applyPillGeometry(dom.root, value); sync(); },
+    feedback(card: FeedbackCard, handoff = true, announce = true) {
+      const origin = handoff && !machine.recording && machine.state !== 'rest' ? dom.surface.getBoundingClientRect() : undefined;
+      stack.push(card, origin, announce);
+      if (handoff && !machine.recording) rest();
+    },
+    blocked(value: DictationBlocked) { if (machine.observeGeneration(value.generation)) this.feedback(blockedCard(value,deps.mac),value.kind !== 'starting_up',!(value.kind==='accessibility_off' && machine.state==='no_permission')); },
+    recovery(value: DictationRecovery) { if (machine.observeGeneration(value.generation)) this.feedback(recoveryCard(value,performance.now())); },
+    note(value: DictationNote) { if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
+    tooShort(value: RecordingTooShort) { if (machine.observeGeneration(value.generation)) this.feedback(shortCard(value)); },
+    notice(value: IslandNotice) {
+      if(value.kind==='finishing' && machine.processing) {
+        finishing=true;if(finishingTimer!==undefined)deps.clearTimeout(finishingTimer);
+        finishingTimer=deps.setTimeout(()=>{finishingTimer=undefined;finishing=false;sync();},600);sync();
+      } else this.feedback(noticeCard(value),false);
+    },
+    expired(id: string) { stack.remove(`recovery:${id}`); },
+    clearNotice(kind: IslandNotice['kind']) { stack.remove(`notice:${kind}`); },
+    geometry(value: PillGeometry) { stack.setGeometry(value); top = value.anchor.startsWith('top-'); applyPillGeometry(dom.root, value); sync(); },
     context, pointer, start, rest, flash,
     level(value: PillAudioLevel) {
       if (!machine.recording || !machine.observeGeneration(value.generation)) return;
@@ -288,8 +350,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     outcome(value: PasteOutcomePayload) {
       if (machine.terminal && machine.state === value.outcome && machine.words === value.words) return;
       if (!machine.outcome(value)) return;
+      polished = value.polished === true; pastedLeft=2400;pastedSince=performance.now();text('.done-label','Pasted');
       timers(); announce(value.outcome === 'pasted' ? `Pasted · ${value.words} words` : value.outcome === 'no_permission' ? 'Copied — allow Accessibility to paste automatically' : copiedTitle(deps.mac));
       if (value.outcome === 'pasted') dom.get<HTMLElement>('.hold').replaceChildren(document.createElement('i'));
+      if (value.outcome !== 'pasted') copiedTimer=deps.setTimeout(() => {
+        copiedTimer=undefined;
+        stack.push({key:value.outcome,title: value.outcome === 'no_permission' ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac),sub:value.outcome === 'no_permission' ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : `${machine.context.app.name || 'The app'} didn't accept the paste`,tone:'amber',glyph:'clipboard',duration:null,actions:value.outcome === 'no_permission' ? [{label:deps.mac ? 'Open System Settings' : 'Open Privacy settings',call:{command:'island_action',action:'open_accessibility'}}] : []},dom.surface.getBoundingClientRect(),false);
+        rest();
+      },2400);
       if (value.outcome === 'pasted') feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, 2400);
       sync();
     },
@@ -299,6 +367,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (hintTimer !== undefined) deps.clearTimeout(hintTimer);
       hintTimer = deps.setTimeout(() => { hintTimer = undefined; machine.hint = false; sync(); }, 2000); sync();
     },
-    destroy() { destroyed = true; appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },
+    destroy() { destroyed = true; stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },
   };
 }

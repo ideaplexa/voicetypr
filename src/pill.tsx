@@ -1,3 +1,4 @@
+import type { DictationBlocked, DictationRecovery, DictationNote, RecordingTooShort, EscapeHint, IslandNotice } from '@/types/island-events';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { isMacOS } from '@/lib/platform';
@@ -5,7 +6,7 @@ import { TRANSCRIPTION_STREAM_EVENT, type TranscriptionStreamEvent } from '@/typ
 import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import type { PillAudioLevel } from '@/types';
 import type { PillGeometry } from '@/pill-geometry';
-import type { DictationContext, PillPointer, PillSettings, RecordingStatePayload, ToastPayload } from '@/pill/contracts';
+import type { DictationContext, PillPointer, PillSettings, RecordingStatePayload } from '@/pill/contracts';
 import { createIsland } from '@/pill/renderer';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
@@ -24,6 +25,7 @@ interface RecordingPillDeps {
 export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps = {}): RecordingPillController {
   const call = deps.invoke ?? invoke, on = deps.listen ?? listen;
   let destroyed = false, settingsRevision = 0, recordingEventReceived = false;
+  const subscriptions: Promise<void>[] = [];
   const unlisteners: Array<() => void> = [];
   type Regions = Array<{ x: number; y: number; width: number; height: number }>;
   let queuedRegions: Regions | undefined, sendingRegions = false;
@@ -39,12 +41,22 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       sendingRegions = false;
     })();
   };
+  let feedbackQueued: boolean | undefined, feedbackSending = false;
+  const feedbackVisible = (visible: boolean): Promise<void> => {
+    feedbackQueued=visible;
+    if(feedbackSending)return Promise.resolve();
+    feedbackSending=true;
+    return (async()=>{while(feedbackQueued!==undefined){const latest=feedbackQueued;feedbackQueued=undefined;try{await call('pill_feedback_visible',{visible:latest});}catch{ /* A later state change can retry. */ }}feedbackSending=false;})();
+  };
   let streamUnlisten: (() => void) | undefined, streamPending = false, streamEnabled = false;
   const island = createIsland(root, {
     mac: isMacOS,
     actions: {
       start: () => call('start_recording'), stop: () => call('stop_recording'),
       cancel: () => call('cancel_recording'), dismiss: () => call('hide_pill_widget'),
+      original: () => call('copy_last_original'),
+      card: c => call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}),
+      feedbackVisible,
       openPrivacySettings: () => call('open_accessibility_settings'),
     },
     icon: key => call<string | null>('pill_app_icon', { iconKey: key }),
@@ -53,9 +65,9 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     clearTimeout: handle => (deps.clearTimeout ?? window.clearTimeout.bind(window))(handle),
   });
   const subscribe = <T,>(event: string, handler: (payload: T) => void) => {
-    void on<T>(event, ({ payload }) => { if (!destroyed) handler(payload); }).then(stop => {
+    subscriptions.push(on<T>(event, ({ payload }) => { if (!destroyed) handler(payload); }).then(stop => {
       if (destroyed) stop(); else unlisteners.push(stop);
-    }).catch(() => {});
+    }).catch(() => {}));
   };
   const syncStream = () => {
     if (!streamEnabled) { streamUnlisten?.(); streamUnlisten = undefined; return; }
@@ -85,7 +97,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     else if (payload.state === 'stopping' || payload.state === 'transcribing') {
       if (island.machine.state !== 'polishing') island.work('transcribing');
     } else if (!island.machine.terminal) {
-      if (payload.state === 'error') island.flash('error', payload.error || 'Recording failed');
+      if (payload.state === 'error' && !island.feedbackActive) island.flash('error', 'Recording failed');
       else if (!['error', 'too_short', 'nospeech'].includes(island.machine.state)) island.rest();
     }
   };
@@ -98,17 +110,19 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   subscribe('transcription-started', () => { recordingEventReceived = true; island.work('transcribing'); });
   subscribe('enhancing-started', () => { recordingEventReceived = true; island.work('polishing'); });
   for (const name of ['enhancing-completed', 'enhancing-failed']) subscribe(name, () => { if (island.machine.state === 'polishing') island.work('transcribing'); });
-  subscribe('recording-too-short', () => island.flash('too_short'));
+  subscribe<RecordingTooShort>('recording-too-short', value => island.tooShort(value));
+  subscribe<DictationBlocked>('dictation-blocked', value => island.blocked(value));
+  subscribe<DictationRecovery>('dictation-recovery', value => island.recovery(value));
+  subscribe<DictationNote>('dictation-note', value => island.note(value));
+  subscribe<EscapeHint>('escape-hint', value => { if(island.machine.observeGeneration(value.generation)) island.escapeHint(); });
+  subscribe<IslandNotice>('island-notice', value => island.notice(value));
+  subscribe<{id:string}>('kept-dictation-expired', value => island.expired(value.id));
+  subscribe<{kind: IslandNotice['kind']}>('island-notice-clear', value => island.clearNotice(value.kind));
   subscribe<PasteOutcomePayload>('paste-outcome', value => island.outcome(value));
-  // Existing backend Esc and speech-gate events share the toast transport.
-  subscribe<ToastPayload>('toast', value => {
-    if (value.action === 'hide') return;
-    if (/^Press ESC again to cancel$/i.test(value.message)) island.escapeHint();
-    else if (/^(?:Recording )?too short/i.test(value.message)) island.flash('too_short');
-    else if (/^No speech detected/i.test(value.message)) island.flash('nospeech');
-  });
   subscribe('settings-changed', () => { void readSettings(); });
   void Promise.resolve().then(async () => {
+    await Promise.all(subscriptions);
+    await call('pill_feedback_ready').catch(() => {});
     const statePromise = call<RecordingStatePayload>('get_current_recording_state');
     void readSettings();
     try {

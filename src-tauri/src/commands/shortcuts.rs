@@ -647,7 +647,10 @@ pub async fn toggle_ai_formatting(app: AppHandle) -> Result<(), String> {
                 std::convert::identity,
             )
             .await?;
-            crate::commands::audio::pill_toast(&app, "Polish on", 2500);
+            crate::commands::island_notice::notice(
+                &app,
+                crate::commands::island_notice::NoticeKind::PolishOn,
+            );
             let _ = crate::emit_to_window(&app, "main", "ai-enabled-changed", true);
         }
         Some(false) => {
@@ -661,14 +664,16 @@ pub async fn toggle_ai_formatting(app: AppHandle) -> Result<(), String> {
                 std::convert::identity,
             )
             .await?;
-            crate::commands::audio::pill_toast(&app, "Polish off", 2500);
+            crate::commands::island_notice::notice(
+                &app,
+                crate::commands::island_notice::NoticeKind::PolishOff,
+            );
             let _ = crate::emit_to_window(&app, "main", "ai-enabled-changed", false);
         }
         None => {
-            crate::commands::audio::pill_toast(
+            crate::commands::island_notice::notice(
                 &app,
-                "Set up an AI model in Settings to use Polish",
-                3500,
+                crate::commands::island_notice::NoticeKind::PolishSetup,
             );
         }
     }
@@ -846,7 +851,10 @@ pub(crate) fn load_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettings
 
             if should_notice {
                 let message = "Formatting-mode shortcuts were retired.";
-                crate::commands::audio::pill_toast(app, message, 3500);
+                crate::commands::island_notice::notice(
+                    app,
+                    crate::commands::island_notice::NoticeKind::ShortcutsRetired,
+                );
                 let _ = app.emit("shortcut-bindings-retired", message);
             }
 

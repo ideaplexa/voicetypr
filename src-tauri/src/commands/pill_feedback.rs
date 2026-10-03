@@ -14,7 +14,7 @@ fn pill_focus_safe() -> bool {
     cfg!(any(target_os = "macos", target_os = "windows"))
 }
 
-fn pill_mode(app: &AppHandle) -> String {
+fn pill_mode<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
     let store = app.store("settings").ok();
     resolve_pill_indicator_mode(
         store
@@ -83,7 +83,9 @@ pub(crate) fn schedule_terminal_hide(app: &AppHandle, generation: u64, outcome: 
         // the hide is queued. No show/activate call and no delivery await here.
         let _ = app.run_on_main_thread(move || {
             let mut pending = PENDING_HIDE.lock().unwrap();
-            if hide_is_current(*pending, generation, current_recording_generation()) {
+            if !feedback_owned()
+                && hide_is_current(*pending, generation, current_recording_generation())
+            {
                 *pending = None;
                 if keep_visible_for_terminal(&hide_app) {
                     if let Some(window) = hide_app.get_webview_window("pill") {
@@ -145,4 +147,77 @@ mod tests {
         assert!(!hide_is_current(Some(7), 7, 8));
         assert!(!hide_is_current(Some(8), 7, 8));
     }
+}
+
+// Feedback owns the reused, non-activating panel across idle transitions.
+static FEEDBACK_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static QUEUED: Mutex<Vec<(&'static str, serde_json::Value)>> = Mutex::new(Vec::new());
+pub(crate) fn feedback_owned() -> bool {
+    FEEDBACK_OWNED.load(Ordering::SeqCst)
+}
+pub(crate) fn send<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    event: &'static str,
+    payload: serde_json::Value,
+) {
+    use tauri::Emitter;
+    if app.try_state::<crate::AppState>().is_some() && pill_mode(app) == "never" {
+        return;
+    }
+    FEEDBACK_OWNED.store(true, Ordering::SeqCst);
+    let mut queued = QUEUED.lock().unwrap();
+    if READY.load(Ordering::SeqCst) || app.try_state::<crate::AppState>().is_none() {
+        let _ = app.emit_to("pill", event, payload);
+    } else {
+        if queued.len() == 32 {
+            queued.remove(0);
+        }
+        queued.push((event, payload));
+    }
+    drop(queued);
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        if let Some(manager) = state.get_window_manager() {
+            tauri::async_runtime::spawn(async move {
+                let _ = manager.show_pill_window().await;
+            });
+        }
+    }
+}
+#[tauri::command]
+pub fn pill_feedback_ready(app: AppHandle) {
+    use tauri::Emitter;
+    let mut queued = QUEUED.lock().unwrap();
+    READY.store(true, Ordering::SeqCst);
+    for (event, payload) in queued.drain(..) {
+        let _ = app.emit_to("pill", event, payload);
+    }
+}
+#[tauri::command]
+pub async fn pill_feedback_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    FEEDBACK_OWNED.store(visible, Ordering::SeqCst);
+    if !visible
+        && crate::get_recording_state(&app) == crate::RecordingState::Idle
+        && pill_mode(&app) == "when_recording"
+    {
+        crate::commands::window::hide_pill_widget(app).await?;
+    }
+    Ok(())
+}
+
+/// Expiry/eviction invalidates any event queued before the renderer mounted.
+pub(crate) fn expire_kept_id<R: tauri::Runtime>(app: &AppHandle<R>, id: &str) {
+    use tauri::Emitter;
+    QUEUED.lock().unwrap().retain(|(event, payload)| {
+        *event != "dictation-recovery"
+            || payload.get("id").and_then(serde_json::Value::as_str) != Some(id)
+    });
+    let _ = app.emit_to(
+        "pill",
+        "kept-dictation-expired",
+        serde_json::json!({"id":id}),
+    );
+}
+pub(crate) fn renderer_closed() {
+    READY.store(false, Ordering::SeqCst);
 }

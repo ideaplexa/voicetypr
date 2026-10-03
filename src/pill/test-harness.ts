@@ -6,7 +6,7 @@ export function pillHarness(settings: Record<string, unknown> = {}, initial = { 
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   const root = document.createElement('div'); document.body.append(root);
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
-  const invoke = vi.fn(async (cmd: string) => cmd === 'get_settings' ? { pill_indicator_mode: 'always', streaming_preview_enabled: true, ...settings } : cmd === 'get_current_recording_state' ? initial : null);
+  const invoke = vi.fn(async (cmd: string): Promise<unknown> => cmd === 'get_settings' ? { pill_indicator_mode: 'always', streaming_preview_enabled: true, ...settings } : cmd === 'get_current_recording_state' ? initial : null);
   const controller = createRecordingPill(root, { invoke: invoke as never, listen: async (name, handler) => { handlers.set(name, handler as never); return () => { handlers.delete(name); }; } });
   const emit = (name: string, payload?: unknown) => handlers.get(name)?.({ payload });
   const settle = async (ms = 350) => { await vi.advanceTimersByTimeAsync(ms); };

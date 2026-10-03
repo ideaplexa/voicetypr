@@ -68,9 +68,6 @@ pub(crate) use crate::transcription::engines::*;
 pub(crate) const PTT_START_ABORTED_AFTER_RELEASE: &str =
     "PTT key released before recording could start";
 
-/// Atomic counter for toast IDs to prevent race conditions
-static TOAST_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 /// Global media pause controller for pausing/resuming system media during recording
 static MEDIA_CONTROLLER: Lazy<MediaPauseController> = Lazy::new(MediaPauseController::new);
 
@@ -1286,186 +1283,13 @@ fn transcription_task_in_flight(app_state: &AppState) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum PillToastAction {
-    Show,
-    Clear,
-}
-
-#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum PillToastVariant {
-    Info,
-    Warning,
-}
-
-/// Payload emitted to the frontend. Optional fields preserve the legacy
-/// severity-inference path: ordinary `pill_toast` calls emit no explicit variant.
-#[derive(serde::Serialize, Clone)]
-pub(crate) struct PillToastEventPayload {
-    pub id: u64,
-    pub message: String,
-    pub duration_ms: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub action: Option<PillToastAction>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variant: Option<PillToastVariant>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub persistent: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggestion: Option<String>,
-}
-
-fn next_toast_id() -> u64 {
-    TOAST_ID_COUNTER
-        .fetch_add(1, AtomicOrdering::SeqCst)
-        .wrapping_add(1)
-}
-
-fn toast_clear_is_current(counter: &AtomicU64, toast_id: u64) -> bool {
-    counter
-        .compare_exchange(
-            toast_id,
-            toast_id.wrapping_add(1),
-            AtomicOrdering::SeqCst,
-            AtomicOrdering::SeqCst,
-        )
-        .is_ok()
-}
-
-fn emit_pill_toast<R: Runtime>(
-    app: &AppHandle<R>,
-    message: &str,
-    duration_ms: u64,
-    variant: Option<PillToastVariant>,
-    persistent: bool,
-    suggestion: Option<&str>,
-) -> u64 {
-    let id = next_toast_id();
-
-    if let Some(toast_window) = app.get_webview_window("toast") {
-        let _ = crate::pill::native::show(&toast_window);
-
-        if !persistent {
-            let app_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
-                if TOAST_ID_COUNTER.load(AtomicOrdering::SeqCst) == id {
-                    if let Some(tw) = app_clone.get_webview_window("toast") {
-                        let _ = tw.hide();
-                    }
-                }
-            });
-        }
-    } else {
-        // The toast window may not be registered yet during early startup. Retry the
-        // show once after a short delay so the message is not silently dropped; the
-        // `toast` event is emitted below regardless, so a late-mounting frontend still
-        // renders it.
-        log::warn!(
-            "pill_toast: toast window not found, retrying show shortly: {}",
-            message
-        );
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            if let Some(toast_window) = app_clone.get_webview_window("toast") {
-                let _ = crate::pill::native::show(&toast_window);
-                if !persistent {
-                    tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
-                    if TOAST_ID_COUNTER.load(AtomicOrdering::SeqCst) == id {
-                        if let Some(tw) = app_clone.get_webview_window("toast") {
-                            let _ = tw.hide();
-                        }
-                    }
-                }
-            } else {
-                log::warn!("pill_toast: toast window still missing after retry");
-            }
-        });
-    }
-
-    let payload = PillToastEventPayload {
-        id,
-        message: message.to_string(),
-        duration_ms,
-        action: if persistent {
-            Some(PillToastAction::Show)
-        } else {
-            None
-        },
-        variant,
-        persistent,
-        suggestion: suggestion.map(|s| s.to_string()),
-    };
-    let _ = app.emit("toast", payload);
-    id
-}
-
-/// Show a toast message on the pill's toast window (above the pill).
-/// Existing call sites intentionally emit no variant, preserving frontend
-/// severity inference.
-pub fn pill_toast<R: Runtime>(app: &AppHandle<R>, message: &str, duration_ms: u64) -> u64 {
-    emit_pill_toast(app, message, duration_ms, None, false, None)
-}
-
-pub fn pill_toast_with_variant<R: Runtime>(
-    app: &AppHandle<R>,
-    message: &str,
-    duration_ms: u64,
-    variant: PillToastVariant,
-) -> u64 {
-    emit_pill_toast(app, message, duration_ms, Some(variant), false, None)
-}
-
-pub fn pill_toast_persistent<R: Runtime>(
-    app: &AppHandle<R>,
-    message: &str,
-    variant: PillToastVariant,
-) -> u64 {
-    emit_pill_toast(app, message, 0, Some(variant), true, None)
-}
-
-/// Show a toast with a remediation suggestion rendered below the message.
-pub fn pill_toast_with_suggestion<R: Runtime>(
-    app: &AppHandle<R>,
-    message: &str,
-    suggestion: &str,
-    duration_ms: u64,
-    variant: Option<PillToastVariant>,
-) -> u64 {
-    emit_pill_toast(app, message, duration_ms, variant, false, Some(suggestion))
-}
-
-pub fn clear_pill_toast<R: Runtime>(app: &AppHandle<R>, toast_id: u64) {
-    if !toast_clear_is_current(&TOAST_ID_COUNTER, toast_id) {
-        return;
-    }
-
-    if let Some(toast_window) = app.get_webview_window("toast") {
-        let _ = toast_window.hide();
-    }
-    let payload = PillToastEventPayload {
-        id: toast_id,
-        message: String::new(),
-        duration_ms: 0,
-        action: Some(PillToastAction::Clear),
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    let _ = app.emit("toast", payload);
-}
-
 fn should_hide_pill_when_idle(mode: &str) -> bool {
     mode != "always"
 }
 
 fn emit_recording_too_short_feedback<R: Runtime>(
     app: &AppHandle<R>,
-    min_duration_label: &str,
+    _min_duration_label: &str,
     generation: u64,
 ) -> u64 {
     let hold = if app.try_state::<AppState>().is_some() {
@@ -1479,11 +1303,7 @@ fn emit_recording_too_short_feedback<R: Runtime>(
         false
     };
     island::too_short(app, generation, hold);
-    pill_toast(
-        app,
-        &format!("Recording shorter than {} seconds", min_duration_label),
-        1000,
-    )
+    0
 }
 
 /// Check if pill should be hidden based on pill_indicator_mode setting.
@@ -1942,6 +1762,7 @@ fn remote_client_error_kind(error: &RemoteClientError) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn remote_server_error_pill_message(can_retry_from_history: bool) -> &'static str {
     if can_retry_from_history {
         "Remote transcription failed. Go to History to re-transcribe, or select a different model."
@@ -1950,7 +1771,7 @@ fn remote_server_error_pill_message(can_retry_from_history: bool) -> &'static st
     }
 }
 
-/// Classification of a `TranscriptionFailure::Local` message for pill-toast
+/// Classification of a `TranscriptionFailure::Local` message for island
 /// dispatch.  Auth and model failures are not fixed by retrying; everything else
 /// is a transient fault where "try again" is appropriate.
 #[derive(Debug, PartialEq)]
@@ -1963,7 +1784,7 @@ enum LocalFailureKind {
     Generic,
 }
 
-/// Classify a `TranscriptionFailure::Local` message so the pill-toast can give
+/// Classify a `TranscriptionFailure::Local` message so the island can give
 /// actionable guidance instead of a generic "try again" for auth/model faults.
 /// Matches are anchored to the `user_message_for_code` strings in
 /// `transcription::error`, which are the deterministic prefixes present in the
@@ -2316,6 +2137,7 @@ fn ai_failure_category(error: &AiProviderError) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn ai_failure_notice(error: &AiProviderError) -> &'static str {
     match error {
         AiProviderError::MissingApiKey => "AI key missing — check Settings",
@@ -2357,12 +2179,14 @@ fn emit_enhancing_failed(app: &AppHandle, error: &AiProviderError) {
 
 fn notify_ai_polish_failure(app: &AppHandle, error: &AiProviderError) {
     emit_enhancing_failed(app, error);
-    pill_toast_with_variant(
+    island::note(
         app,
-        ai_failure_notice(error),
-        1500,
-        PillToastVariant::Warning,
+        current_recording_generation(),
+        Note::PolishSkipped {
+            reason: island::polish_reason(error),
+        },
     );
+
     if is_ai_auth_error(error) {
         let _ = emit_to_window(
             app,
@@ -2507,10 +2331,10 @@ mod tests {
         remote_server_error_pill_message, set_in_flight_transcription_audio,
         should_hide_pill_when_idle, silence_event_runs_in_state, silence_timeout_disposition,
         stop_should_reset_to_idle, sync_retranscription_failure_metadata,
-        take_in_flight_transcription_audio, toast_clear_is_current, transcript_ready_cue_eligible,
-        LocalFailureKind, NormalizedTempFile, PillToastEventPayload, RecordingConfig,
-        RecordingLicenseState, SilenceDetectorEvent, SilenceTimeoutDisposition,
-        StartReadinessDecision, StopInFlightGuard, TranscriptionFailure, TranscriptionStatus,
+        take_in_flight_transcription_audio, transcript_ready_cue_eligible, LocalFailureKind,
+        NormalizedTempFile, RecordingConfig, RecordingLicenseState, SilenceDetectorEvent,
+        SilenceTimeoutDisposition, StartReadinessDecision, StopInFlightGuard, TranscriptionFailure,
+        TranscriptionStatus,
     };
     use crate::audio::recorder::RecordingReadiness;
     use crate::cloud_stt::CloudProvider;
@@ -2809,15 +2633,8 @@ mod tests {
     }
 
     #[test]
-    fn recording_too_short_feedback_emits_toast_without_pill_window() {
+    fn recording_too_short_feedback_emits_island_event_without_pill_window() {
         let app = tauri::test::mock_app();
-        let received = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
-        let received_for_listener = received.clone();
-        app.listen("toast", move |event| {
-            let payload = serde_json::from_str(event.payload()).expect("toast payload json");
-            received_for_listener.lock().unwrap().push(payload);
-        });
-
         let short_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
         let short_events_for_listener = short_events.clone();
         app.listen_any("recording-too-short", move |event| {
@@ -2832,14 +2649,6 @@ mod tests {
             short_events.lock().unwrap().as_slice(),
             &[serde_json::json!({"generation":42,"mode":"toggle"})]
         );
-
-        let events = received.lock().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(
-            events[0]["message"].as_str(),
-            Some("Recording shorter than 0.5 seconds")
-        );
-        assert_eq!(events[0]["duration_ms"].as_u64(), Some(1000));
     }
 
     #[test]
@@ -3240,16 +3049,6 @@ mod tests {
     }
 
     #[test]
-    fn stale_clear_pill_toast_cannot_advance_newer_toast_id() {
-        let counter = AtomicU64::new(2);
-
-        assert!(!toast_clear_is_current(&counter, 1));
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
-        assert!(toast_clear_is_current(&counter, 2));
-        assert_eq!(counter.load(Ordering::SeqCst), 3);
-    }
-
-    #[test]
     fn silence_terminal_events_are_ignored_outside_recording() {
         assert!(silence_event_runs_in_state(RecordingState::Recording));
         assert!(!silence_event_runs_in_state(RecordingState::Starting));
@@ -3617,43 +3416,6 @@ mod tests {
             data["writing"] = m;
         }
         assert!(!data.as_object().unwrap().contains_key("writing"));
-    }
-
-    #[test]
-    fn pill_toast_event_payload_serializes_suggestion_when_present() {
-        let payload = PillToastEventPayload {
-            id: 1,
-            message: "Microphone access failed".to_string(),
-            duration_ms: 1500,
-            action: None,
-            variant: None,
-            persistent: false,
-            suggestion: Some("Enable Microphone access in System Settings".to_string()),
-        };
-        let json = serde_json::to_value(&payload).unwrap();
-        assert_eq!(
-            json["suggestion"].as_str(),
-            Some("Enable Microphone access in System Settings")
-        );
-        assert_eq!(json["message"].as_str(), Some("Microphone access failed"));
-    }
-
-    #[test]
-    fn pill_toast_event_payload_omits_suggestion_when_none() {
-        let payload = PillToastEventPayload {
-            id: 2,
-            message: "Recording error".to_string(),
-            duration_ms: 1500,
-            action: None,
-            variant: None,
-            persistent: false,
-            suggestion: None,
-        };
-        let json = serde_json::to_value(&payload).unwrap();
-        assert!(
-            json.get("suggestion").is_none(),
-            "suggestion key must be absent when None"
-        );
     }
 
     #[test]
@@ -4884,8 +4646,7 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
                     .to_string(),
             )
             };
-        // Bring the dashboard forward so the error toast + onboarding are visible
-        // (the main window normally stays hidden in tray/pill mode).
+        // Keep the user in the target app; the island offers setup.
         island::blocked(
             app,
             current_recording_generation(),
@@ -5029,9 +4790,12 @@ fn silence_timeout_disposition(event: SilenceDetectorEvent) -> Option<SilenceTim
     }
 }
 
-fn clear_active_silence_toast(app: &AppHandle, active_toast_id: &mut Option<u64>) {
-    if let Some(toast_id) = active_toast_id.take() {
-        clear_pill_toast(app, toast_id);
+fn clear_active_silence_notice(
+    app: &AppHandle,
+    active_notice: &mut Option<crate::commands::island_notice::NoticeKind>,
+) {
+    if let Some(kind) = active_notice.take() {
+        crate::commands::island_notice::clear(app, kind);
     }
 }
 
@@ -5047,46 +4811,39 @@ fn spawn_silence_event_listener(
     silence_event_rx: std::sync::mpsc::Receiver<SilenceDetectorEvent>,
 ) {
     std::thread::spawn(move || {
-        let mut active_silence_toast_id: Option<u64> = None;
+        let mut active_silence_notice: Option<crate::commands::island_notice::NoticeKind> = None;
 
         while let Ok(event) = silence_event_rx.recv() {
             let current_state = crate::get_recording_state(&app);
             if !silence_event_runs_in_state(current_state) {
-                clear_active_silence_toast(&app, &mut active_silence_toast_id);
+                clear_active_silence_notice(&app, &mut active_silence_notice);
                 break;
             }
 
             match event {
                 SilenceDetectorEvent::Clear => {
-                    clear_active_silence_toast(&app, &mut active_silence_toast_id);
+                    clear_active_silence_notice(&app, &mut active_silence_notice);
                 }
                 SilenceDetectorEvent::DeadMicWarn => {
-                    clear_active_silence_toast(&app, &mut active_silence_toast_id);
-                    active_silence_toast_id = Some(pill_toast_persistent(
-                        &app,
-                        "No audio detected — check your microphone",
-                        PillToastVariant::Warning,
-                    ));
+                    clear_active_silence_notice(&app, &mut active_silence_notice);
+                    island::note(&app, current_recording_generation(), Note::MicSilent);
                 }
                 SilenceDetectorEvent::LongSilenceWarn => {
-                    clear_active_silence_toast(&app, &mut active_silence_toast_id);
-                    active_silence_toast_id = Some(pill_toast_persistent(
+                    clear_active_silence_notice(&app, &mut active_silence_notice);
+                    active_silence_notice = Some(crate::commands::island_notice::notice(
                         &app,
-                        "Long silence detected",
-                        PillToastVariant::Warning,
+                        crate::commands::island_notice::NoticeKind::LongSilence,
                     ));
                 }
                 event @ (SilenceDetectorEvent::TimeoutWithSpeech
                 | SilenceDetectorEvent::TimeoutNoSpeech) => {
-                    clear_active_silence_toast(&app, &mut active_silence_toast_id);
+                    clear_active_silence_notice(&app, &mut active_silence_notice);
                     match silence_timeout_disposition(event) {
                         Some(SilenceTimeoutDisposition::StopAndTranscribe) => {
                             // Speech captured → stop normally so it is transcribed.
-                            pill_toast_with_variant(
+                            crate::commands::island_notice::notice(
                                 &app,
-                                "Ended after long silence",
-                                1500,
-                                PillToastVariant::Info,
+                                crate::commands::island_notice::NoticeKind::SilenceStopped,
                             );
                             let app_for_stop = app.clone();
                             tauri::async_runtime::spawn(async move {
@@ -5107,22 +4864,11 @@ fn spawn_silence_event_listener(
                             tauri::async_runtime::spawn(async move {
                                 match cancel_recording(app_for_cancel.clone()).await {
                                     Ok(()) => {
-                                        pill_toast_with_suggestion(
-                                            &app_for_cancel,
-                                            "No audio captured",
-                                            "Try recording again",
-                                            1500,
-                                            Some(PillToastVariant::Warning),
-                                        );
+                                        crate::commands::island_notice::notice(&app_for_cancel, crate::commands::island_notice::NoticeKind::SilenceDiscarded);
                                     }
                                     Err(e) => {
                                         log::error!("No-speech timeout cancel failed: {}", e);
-                                        pill_toast_with_variant(
-                                            &app_for_cancel,
-                                            "Recording error",
-                                            1500,
-                                            PillToastVariant::Warning,
-                                        );
+                                        crate::commands::island_notice::notice(&app_for_cancel, crate::commands::island_notice::NoticeKind::RecordingFailed);
                                     }
                                 }
                             });
@@ -5134,7 +4880,7 @@ fn spawn_silence_event_listener(
             }
         }
 
-        clear_active_silence_toast(&app, &mut active_silence_toast_id);
+        clear_active_silence_notice(&app, &mut active_silence_notice);
     });
 }
 
@@ -5640,13 +5386,9 @@ pub async fn start_recording(
                         Some("Microphone initialization failed".to_string()),
                     );
 
-                    // Emit user-friendly error via pill toast
-                    pill_toast_with_suggestion(
+                    crate::commands::island_notice::notice(
                         &app,
-                        "Microphone access failed",
-                        "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
-                        1500,
-                        None,
+                        crate::commands::island_notice::NoticeKind::RecordingFailed,
                     );
 
                     resume_media_if_needed();
@@ -5687,22 +5429,6 @@ pub async fn start_recording(
                 update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
 
                 // Provide specific error messages for common issues
-                let (user_message, suggestion) = if e.contains("permission") || e.contains("access")
-                {
-                    (
-                        "Microphone permission denied",
-                        "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
-                    )
-                } else if e.contains("device") || e.contains("not found") {
-                    ("No microphone found", "Connect a microphone and try again")
-                } else if e.contains("in use") || e.contains("busy") {
-                    ("Microphone busy", "Close other apps using the microphone")
-                } else {
-                    ("Recording failed", "Try recording again")
-                };
-
-                island::mic_blocked(&app, recording_generation, &e);
-                pill_toast_with_suggestion(&app, user_message, suggestion, 1500, None);
 
                 resume_media_if_needed();
                 return Err(e);
@@ -5767,20 +5493,7 @@ pub async fn start_recording(
             }
             island::mic_blocked(&app, current_recording_generation(), &error);
             update_recording_state(&app, RecordingState::Error, Some(error.clone()));
-            let (user_message, suggestion) =
-                if error.contains("permission") || error.contains("access") {
-                    (
-                        "Microphone permission denied",
-                        "Enable Microphone access in System Settings \u{25b8} Privacy & Security",
-                    )
-                } else if error.contains("device") || error.contains("not found") {
-                    ("No microphone found", "Connect a microphone and try again")
-                } else if error.contains("in use") || error.contains("busy") {
-                    ("Microphone busy", "Close other apps using the microphone")
-                } else {
-                    ("Recording failed", "Try recording again")
-                };
-            pill_toast_with_suggestion(&app, user_message, suggestion, 1500, None);
+
             resume_media_if_needed();
             return Err(error);
         }
@@ -6243,13 +5956,7 @@ async fn stop_recording_with_mode_at(
         // A valid WAV header is typically 44 bytes; <= 44 implies no audio samples were written
         if meta.len() <= 44 {
             dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
-            pill_toast_with_suggestion(
-                &app,
-                "No audio captured",
-                "Try recording again",
-                1000,
-                None,
-            );
+
             let _ = crate::recording::kept::keep(
                 &app,
                 task_generation,
@@ -6304,13 +6011,7 @@ async fn stop_recording_with_mode_at(
             )
             .await;
             update_recording_state(&app, RecordingState::Idle, None);
-            pill_toast_with_suggestion(
-                &app,
-                "No speech detected",
-                "Try speaking closer to the microphone",
-                1500,
-                None,
-            );
+
             return Ok(String::new());
         }
 
@@ -7189,14 +6890,8 @@ async fn stop_recording_with_mode_at(
                     dictation_telemetry.text_ready("");
                     log::info!("Whisper returned empty transcription - no speech detected");
 
-                    // Emit graceful feedback to user via pill toast
-                    pill_toast_with_suggestion(
-                        &app_for_task,
-                        "No speech detected",
-                        "Try speaking closer to the microphone",
-                        1500,
-                        None,
-                    );
+                    // Emit graceful feedback to user via island feedback
+                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::NoSpeech);
 
                     // Wait for feedback to show before hiding pill
                     let app_for_hide = app_for_task.clone();
@@ -7263,12 +6958,7 @@ async fn stop_recording_with_mode_at(
                                     if should_emit_enhancing_for_task {
                                         emit_enhancing_failed(&app_for_process, error);
                                     }
-                                    pill_toast_with_variant(
-                                        &app_for_process,
-                                        ai_failure_notice(error),
-                                        1500,
-                                        PillToastVariant::Warning,
-                                    );
+
                                     if is_ai_auth_error(error) {
                                         let _ = emit_to_window(
                                             &app_for_process,
@@ -7339,11 +7029,6 @@ async fn stop_recording_with_mode_at(
                                     let _ = app_for_process.emit("enhancing-failed", ());
                                 }
 
-                                pill_toast(
-                                    &app_for_process,
-                                    "Final output language requires AI enhancement",
-                                    1500,
-                                );
 
                                 {
                                     island::note(&app_for_process, task_generation, Note::PolishSkipped { reason: PolishReason::Guard });
@@ -7356,7 +7041,6 @@ async fn stop_recording_with_mode_at(
                                     let _ = app_for_process.emit("enhancing-failed", ());
                                 }
 
-                                pill_toast(&app_for_process, "Formatting failed", 1500);
 
                                 {
                                     island::note(&app_for_process, task_generation, Note::PolishSkipped { reason: PolishReason::Guard });
@@ -7383,7 +7067,7 @@ async fn stop_recording_with_mode_at(
                     // newer-generation arriving during the (long) AI-polish
                     // await is invisible to the outer task's pre-delivery gate,
                     // which already passed. Abort before ANY side effect: no
-                    // pill toast, no text insertion, no history; revoke audio.
+                    // island feedback, no text insertion, no history; revoke audio.
                     if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
                         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
                         log::info!(
@@ -7487,6 +7171,7 @@ async fn stop_recording_with_mode_at(
                                 app_for_process.clone(),
                                 final_text.clone(),
                                 task_generation,
+                                writing_metadata.as_ref().is_some_and(|m| m.get("original_text").is_some()),
                             )
                         });
                         let Some(insert_future) = insert_result else {
@@ -7515,29 +7200,12 @@ async fn stop_recording_with_mode_at(
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Failed;
                                 log::error!("Failed to insert text: {}", e);
                                 crate::telemetry::capture_paste_failure("insert");
-
-
-                                // Check if it's an accessibility permission issue
                                 if e.contains("accessibility") || e.contains("permission") {
                                     island::blocked(&app_for_process, task_generation, BlockedKind::AccessibilityOff, IslandAction::OpenAccessibility);
-                                    // Show pill toast for accessibility permission error
-                                    pill_toast_with_suggestion(
-                                        &app_for_process,
-                                        "Text copied",
-                                        "Grant Accessibility permission to enable auto-paste",
-                                        1500,
-                                        None,
-                                    );
-                                } else {
-                                    // Generic paste error
-                                    pill_toast_with_suggestion(
-                                        &app_for_process,
-                                        "Text copied",
-                                        "Press the paste shortcut",
-                                        1500,
-                                        None,
-                                    );
                                 }
+
+
+
                             }
                         }
                         let insertion_ms = insertion_start
@@ -7579,8 +7247,9 @@ async fn stop_recording_with_mode_at(
                                     Some(true),
                                     final_text.split_whitespace().count() as u32,
                                     task_generation,
+                                    writing_metadata.as_ref().is_some_and(|m| m.get("original_text").is_some()),
                                 );
-                                pill_toast(&app_for_process, "Transcription copied", 1500);
+
                             }
                             Err(e) => {
                                 delivery_journey.mark_failed();
@@ -7589,7 +7258,7 @@ async fn stop_recording_with_mode_at(
                                 log::error!("Failed to copy text to clipboard: {}", e);
                                 crate::telemetry::capture_paste_failure("clipboard");
                                 crate::commands::pill_feedback::schedule_terminal_hide(&app_for_process, task_generation, "failed");
-                                pill_toast(&app_for_process, "Copy failed", 1500);
+                                crate::commands::island_notice::notice(&app_for_process, crate::commands::island_notice::NoticeKind::CopyFailed);
                             }
                         }
                         let insertion_ms = insertion_start
@@ -7691,7 +7360,7 @@ async fn stop_recording_with_mode_at(
                         // Clean up the audio file
                         // The recovery store owns this clip now.
 
-                        // Emit specific feedback via pill toast
+                        // Emit specific feedback via island feedback
                         emit_recording_too_short_feedback(&app_for_task, "0.5", task_generation);
 
                         // Hide pill after showing feedback
@@ -7752,11 +7421,7 @@ async fn stop_recording_with_mode_at(
                         );
 
                         // Update pill message to guide user to History only when retry is durable
-                        pill_toast(
-                            &app_for_task,
-                            remote_server_error_pill_message(can_retry_from_history),
-                            if can_retry_from_history { 6000 } else { 2000 },
-                        );
+                        crate::commands::island_notice::notice(&app_for_task, if can_retry_from_history {crate::commands::island_notice::NoticeKind::HistoryRetry} else {crate::commands::island_notice::NoticeKind::TranscriptionFailed});
 
                         update_recording_state(
                             &app_for_task,
@@ -7815,41 +7480,21 @@ async fn stop_recording_with_mode_at(
                             Some(e.clone()),
                         );
 
-                        // Log the full internal detail before any toast so nothing is lost.
+                        // Log the full internal detail before any feedback so nothing is lost.
                         log::warn!("Local transcription failure: {}", e);
 
                         if can_retry_from_history {
-                            pill_toast(
-                                &app_for_task,
-                                "Transcription failed. Go to History to re-transcribe, or try again.",
-                                6000,
-                            );
+                            crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::HistoryRetry);
                         } else {
                             match classify_local_failure(e) {
                                 LocalFailureKind::AuthInvalid => {
-                                    pill_toast_with_suggestion(
-                                        &app_for_task,
-                                        "Transcription key rejected",
-                                        "Update the API key in Models",
-                                        4000,
-                                        Some(PillToastVariant::Warning),
-                                    );
+                                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed);
                                 }
                                 LocalFailureKind::ModelUnavailable => {
-                                    pill_toast_with_suggestion(
-                                        &app_for_task,
-                                        "Transcription model unavailable",
-                                        "Select a different model in Models",
-                                        4000,
-                                        None,
-                                    );
+                                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed);
                                 }
                                 LocalFailureKind::Generic => {
-                                    pill_toast(
-                                        &app_for_task,
-                                        "Transcription failed — try again",
-                                        1500,
-                                    );
+                                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed);
                                 }
                             }
                         }

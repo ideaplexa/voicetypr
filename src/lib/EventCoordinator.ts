@@ -147,7 +147,7 @@ export class EventCoordinator {
       "download-cancelled": "all",
       "download-error": "all",
 
-      // Recording/transcription errors now use pill_toast() → FeedbackToast directly,
+      // Recording/transcription errors now use island problem events directly,
       // not as routed events. Only domain-specific main window errors are listed here.
       "parakeet-unavailable": "main",
 

@@ -24,7 +24,6 @@ export interface RecordingStatePayload {
   state: 'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'error';
   error: string | null;
 }
-export interface ToastPayload { id?: number; message: string; duration_ms: number; action?: 'show' | 'hide' }
 /** Future slice actions are capabilities, never buttons that invoke missing commands. */
 export interface IslandActions {
   start(): Promise<unknown>;
@@ -36,7 +35,9 @@ export interface IslandActions {
   undo?: () => Promise<unknown>;
   original?: () => Promise<unknown>;
   retry?: (engine: string) => Promise<unknown>;
-  transcribeAnyway?: () => Promise<unknown>;
+  transcribeAnyway?: (id: string) => Promise<unknown>;
+  card?: (call: import('@/pill/feedback').CardCommand) => Promise<unknown>;
+  feedbackVisible?: (visible: boolean) => Promise<unknown>;
   quickSetting?: (kind: 'polish' | 'mic' | 'engine' | 'language') => void;
   feedback?: (kind: string) => void;
 }

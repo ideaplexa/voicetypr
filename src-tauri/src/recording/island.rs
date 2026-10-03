@@ -99,20 +99,25 @@ struct BlockedEvent {
 }
 pub fn note(app: &AppHandle, generation: u64, note: Note) {
     if !crate::commands::audio::recording_generation_is_stale(generation) {
-        let _ = app.emit_to("pill", "dictation-note", NoteEvent { generation, note });
+        crate::commands::pill_feedback::send(
+            app,
+            "dictation-note",
+            serde_json::to_value(NoteEvent { generation, note }).unwrap(),
+        );
     }
 }
 pub fn blocked(app: &AppHandle, generation: u64, kind: BlockedKind, action: IslandAction) {
     if !crate::commands::audio::recording_generation_is_stale(generation) {
         crate::commands::pill_feedback::cancel_terminal_hide(generation);
-        let _ = app.emit_to(
-            "pill",
+        crate::commands::pill_feedback::send(
+            app,
             "dictation-blocked",
-            BlockedEvent {
+            serde_json::to_value(BlockedEvent {
                 generation,
                 kind,
                 action,
-            },
+            })
+            .unwrap(),
         );
     }
 }
@@ -140,12 +145,10 @@ pub fn polish_reason(error: &crate::ai::error::AiProviderError) -> PolishReason 
     }
 }
 pub fn too_short<R: Runtime>(app: &AppHandle<R>, generation: u64, hold: bool) {
-    let _ = app.emit_to(
-        "pill",
+    crate::commands::pill_feedback::send(
+        app,
         "recording-too-short",
-        serde_json::json!({
-            "generation": generation, "mode": if hold { "hold" } else { "toggle" }
-        }),
+        serde_json::json!({"generation":generation,"mode":if hold {"hold"} else {"toggle"}}),
     );
 }
 

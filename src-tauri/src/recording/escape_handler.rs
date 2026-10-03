@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Handle ESC key press during recording
 ///
 /// Implements a double-tap system:
-/// 1. First ESC: Show toast "Press ESC again to cancel" for 2 seconds
+/// 1. First ESC: Show inline hint "Press ESC again to cancel" for 2 seconds
 /// 2. Second ESC within 2 seconds: Cancel recording
 /// 3. Timeout after 2 seconds: Reset to single-tap mode
 pub async fn handle_escape_key_press(
@@ -47,12 +47,12 @@ pub async fn handle_escape_key_press(
     }
 }
 
-/// Handle first ESC press: Show confirmation toast and start timeout
+/// Handle first ESC press: Show confirmation hint and start timeout
 async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
     log::info!("First ESC press detected during recording");
     app_state.esc_pressed_once.store(true, Ordering::SeqCst);
 
-    // Show pill toast for ESC warning (2 seconds)
+    // Show inline hint for ESC warning (2 seconds)
     let phase = escape_phase(get_recording_state(app_handle));
     let _ = app_handle.emit_to(
         "pill",
@@ -60,15 +60,6 @@ async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
         serde_json::json!({
             "generation": crate::commands::audio::current_recording_generation(), "phase": phase
         }),
-    );
-    crate::commands::audio::pill_toast(
-        app_handle,
-        if phase == "transcribing" {
-            "Press ESC again to discard"
-        } else {
-            "Press ESC again to cancel"
-        },
-        2000,
     );
 
     // Set timeout to reset ESC state after 2 seconds
@@ -97,11 +88,6 @@ async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
 /// Handle second ESC press: Cancel recording immediately
 async fn handle_second_esc_press(app_state: &AppState, app_handle: &AppHandle) {
     log::info!("Second ESC press detected, cancelling recording");
-
-    // Hide toast immediately
-    if let Some(toast_window) = app_handle.get_webview_window("toast") {
-        let _ = toast_window.hide();
-    }
 
     // Cancel timeout
     if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {

@@ -1,4 +1,4 @@
-//! Non-activating native configuration, shared by the pill and temporary toast.
+//! Non-activating native configuration, for the island panel.
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 use tauri::{Runtime, WebviewWindow};

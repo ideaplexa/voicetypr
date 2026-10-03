@@ -56,7 +56,10 @@ fn handle_toggle_mode(
     };
 
     if should_throttle {
-        crate::commands::audio::pill_toast(app, "Hold on...", 1000);
+        crate::commands::island_notice::notice(
+            app,
+            crate::commands::island_notice::NoticeKind::ShortcutThrottled,
+        );
         return;
     }
 
@@ -95,6 +98,12 @@ fn handle_toggle_mode(
         }
         RecordingState::Starting => {
             log::info!("Toggle: stop requested while starting; will stop after start completes");
+        }
+        RecordingState::Stopping | RecordingState::Transcribing => {
+            crate::commands::island_notice::notice(
+                app,
+                crate::commands::island_notice::NoticeKind::Finishing,
+            );
         }
         _ => log::debug!("Toggle: Ignoring hotkey in state {:?}", current_state),
     }

@@ -91,15 +91,16 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
 
 #[tauri::command]
 pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    insert_text_with_generation(app, text, None).await
+    insert_text_with_generation(app, text, None, false).await
 }
 
 pub(crate) async fn insert_dictation_text(
     app: tauri::AppHandle,
     text: String,
     generation: u64,
+    polished: bool,
 ) -> Result<(), String> {
-    let result = insert_text_with_generation(app.clone(), text, Some(generation)).await;
+    let result = insert_text_with_generation(app.clone(), text, Some(generation), polished).await;
     if result.is_err() {
         // A permission outcome already owns its 2.5 s timeout. Other errors
         // have no terminal feedback; release the window immediately.
@@ -112,6 +113,7 @@ async fn insert_text_with_generation(
     app: tauri::AppHandle,
     text: String,
     generation: Option<u64>,
+    polished: bool,
 ) -> Result<(), String> {
     // Check if already inserting text
     if IS_INSERTING.swap(true, Ordering::SeqCst) {
@@ -170,12 +172,18 @@ async fn insert_text_with_generation(
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))??;
-    let _ = outcome_app.emit("paste-outcome", paste_outcome_payload(&outcome, words));
+    let payload = paste_outcome_payload(&outcome, words, polished);
+    let _ = outcome_app.emit_to("main", "paste-outcome", payload.clone());
+    super::pill_feedback::send(
+        &outcome_app,
+        "paste-outcome",
+        serde_json::to_value(payload).unwrap(),
+    );
     if let Some(generation) = generation {
         super::pill_feedback::schedule_terminal_hide(
             &outcome_app,
             generation,
-            paste_outcome_payload(&outcome, words).outcome,
+            paste_outcome_payload(&outcome, words, polished).outcome,
         );
     }
     if outcome == PasteOutcome::NoPermission {
@@ -246,9 +254,14 @@ enum PasteOutcome {
 struct PasteOutcomePayload {
     outcome: &'static str,
     words: u32,
+    polished: bool,
 }
 
-fn paste_outcome_payload(outcome: &PasteOutcome, words: u32) -> PasteOutcomePayload {
+fn paste_outcome_payload(
+    outcome: &PasteOutcome,
+    words: u32,
+    polished: bool,
+) -> PasteOutcomePayload {
     PasteOutcomePayload {
         outcome: match outcome {
             PasteOutcome::Pasted => "pasted",
@@ -256,13 +269,19 @@ fn paste_outcome_payload(outcome: &PasteOutcome, words: u32) -> PasteOutcomePayl
             PasteOutcome::NoPermission => "no_permission",
         },
         words,
+        polished,
     }
 }
 
 // None means the dictation copy was skipped; false means it failed. Manual
 // copy commands keep using copy_text_to_clipboard and never enter this seam.
-fn dictation_copy_payload(succeeded: Option<bool>, words: u32) -> Option<PasteOutcomePayload> {
-    (succeeded == Some(true)).then(|| paste_outcome_payload(&PasteOutcome::LeftInClipboard, words))
+fn dictation_copy_payload(
+    succeeded: Option<bool>,
+    words: u32,
+    polished: bool,
+) -> Option<PasteOutcomePayload> {
+    (succeeded == Some(true))
+        .then(|| paste_outcome_payload(&PasteOutcome::LeftInClipboard, words, polished))
 }
 
 pub(crate) fn emit_dictation_copy_outcome(
@@ -270,9 +289,15 @@ pub(crate) fn emit_dictation_copy_outcome(
     succeeded: Option<bool>,
     words: u32,
     generation: u64,
+    polished: bool,
 ) {
-    if let Some(payload) = dictation_copy_payload(succeeded, words) {
-        let _ = app.emit("paste-outcome", payload.clone());
+    if let Some(payload) = dictation_copy_payload(succeeded, words, polished) {
+        let _ = app.emit_to("main", "paste-outcome", payload.clone());
+        super::pill_feedback::send(
+            app,
+            "paste-outcome",
+            serde_json::to_value(&payload).unwrap(),
+        );
         super::pill_feedback::schedule_terminal_hide(app, generation, payload.outcome);
     }
 }
@@ -502,16 +527,7 @@ fn insert_via_clipboard(
                     }
                     Ok(Err(e)) => {
                         log::warn!("AppleScript paste failed: {}, text remains in clipboard", e);
-                        // Notify user through pill toast that paste failed but text is in clipboard
-                        if let Some(app) = &app_handle {
-                            crate::commands::audio::pill_toast_with_suggestion(
-                                app,
-                                "Text copied",
-                                "Grant Accessibility permission to enable auto-paste",
-                                1500,
-                                None,
-                            );
-                        }
+                        // Notify user through island feedback that paste failed but text is in clipboard
                         // Don't fail - text is still in clipboard for manual paste
                         PasteOutcome::LeftInClipboard
                     }
@@ -520,16 +536,7 @@ fn insert_via_clipboard(
                             "PANIC during paste: {:?}, text remains in clipboard",
                             panic_err
                         );
-                        // Notify user through pill toast about the failure
-                        if let Some(app) = &app_handle {
-                            crate::commands::audio::pill_toast_with_suggestion(
-                                app,
-                                "Text copied",
-                                "Grant Accessibility permission to enable auto-paste",
-                                1500,
-                                None,
-                            );
-                        }
+                        // Notify user through island feedback about the failure
                         // Don't fail - text is still in clipboard for manual paste
                         PasteOutcome::LeftInClipboard
                     }
@@ -1176,12 +1183,12 @@ mod tests {
 
     #[test]
     fn only_successful_dictation_copy_emits_content_free_copied_outcome() {
-        assert!(dictation_copy_payload(None, 38).is_none());
-        assert!(dictation_copy_payload(Some(false), 38).is_none());
-        let payload = dictation_copy_payload(Some(true), 38).unwrap();
+        assert!(dictation_copy_payload(None, 38, false).is_none());
+        assert!(dictation_copy_payload(Some(false), 38, false).is_none());
+        let payload = dictation_copy_payload(Some(true), 38, false).unwrap();
         assert_eq!(
             serde_json::to_value(payload).unwrap(),
-            serde_json::json!({ "outcome": "copied", "words": 38 })
+            serde_json::json!({ "outcome": "copied", "words": 38, "polished": false })
         );
     }
 
@@ -1192,7 +1199,7 @@ mod tests {
             (PasteOutcome::LeftInClipboard, "copied"),
             (PasteOutcome::NoPermission, "no_permission"),
         ] {
-            let payload = paste_outcome_payload(&outcome, 38);
+            let payload = paste_outcome_payload(&outcome, 38, false);
             let value = serde_json::to_value(payload).unwrap();
             assert_eq!(value["outcome"], expected);
             assert_eq!(value["words"], 38);
@@ -1202,8 +1209,24 @@ mod tests {
                 .keys()
                 .map(String::as_str)
                 .collect();
-            assert_eq!(keys, vec!["outcome", "words"]);
+            assert_eq!(keys, vec!["outcome", "polished", "words"]);
             assert!(value.get("text").is_none());
+        }
+    }
+
+    #[test]
+    fn polished_provenance_survives_every_delivery_outcome() {
+        for outcome in [
+            PasteOutcome::Pasted,
+            PasteOutcome::LeftInClipboard,
+            PasteOutcome::NoPermission,
+        ] {
+            for polished in [true, false] {
+                let value =
+                    serde_json::to_value(paste_outcome_payload(&outcome, 1, polished)).unwrap();
+                assert_eq!(value["polished"], polished);
+                assert_eq!(value.as_object().unwrap().len(), 3);
+            }
         }
     }
 
