@@ -52,7 +52,14 @@ pub(crate) fn schedule_terminal_hide(app: &AppHandle, generation: u64, outcome: 
     if !keep_visible_for_terminal(app) {
         return;
     }
-    let timeout_ms = terminal_timeout_ms(outcome);
+    let Some(timeout_ms) = terminal_timeout_ms(outcome) else {
+        // Copied cards are sticky until dismissed or interrupted by a new take.
+        let mut pending = PENDING_HIDE.lock().unwrap();
+        if generation == current_recording_generation() {
+            *pending = Some(generation);
+        }
+        return;
+    };
     {
         let mut pending = PENDING_HIDE.lock().unwrap();
         if generation != current_recording_generation() {
@@ -83,12 +90,11 @@ pub(crate) fn schedule_terminal_hide(app: &AppHandle, generation: u64, outcome: 
     });
 }
 
-fn terminal_timeout_ms(outcome: &str) -> u64 {
+fn terminal_timeout_ms(outcome: &str) -> Option<u64> {
     match outcome {
-        "pasted" => 1200,
-        "copied" => 1600,
-        "no_permission" => 2500,
-        _ => 0, // Delivery failed before producing a terminal outcome.
+        "pasted" => Some(2400),
+        "copied" | "no_permission" => None,
+        _ => Some(0), // Delivery failed before producing a terminal outcome.
     }
 }
 
@@ -106,10 +112,10 @@ mod tests {
 
     #[test]
     fn terminal_timeouts_match_frontend_feedback() {
-        assert_eq!(terminal_timeout_ms("pasted"), 1200);
-        assert_eq!(terminal_timeout_ms("copied"), 1600);
-        assert_eq!(terminal_timeout_ms("no_permission"), 2500);
-        assert_eq!(terminal_timeout_ms("failed"), 0);
+        assert_eq!(terminal_timeout_ms("pasted"), Some(2400));
+        assert_eq!(terminal_timeout_ms("copied"), None);
+        assert_eq!(terminal_timeout_ms("no_permission"), None);
+        assert_eq!(terminal_timeout_ms("failed"), Some(0));
     }
 
     #[test]

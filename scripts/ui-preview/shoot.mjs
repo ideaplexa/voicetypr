@@ -78,7 +78,7 @@ try {
   }
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
-      for (const state of ["idle", "listening", "preview", "transcribing", "formatting", "pasted", "copied", "no_permission", "error", "too_short"]) {
+      for (const state of ["rest", "start", "listening", "listening-amber", "listening-no-badge", "live", "transcribing", "polishing", "pasted", "copied", "no_permission", "error", "too_short", "nospeech", "esc-hint", "top-anchor-live"]) {
         const name = `pill-${state}`;
         if (!shouldCapture(platform, theme, name)) continue;
         const page = await browser.newPage({ viewport: { width: 440, height: 420 }, deviceScaleFactor: 2 });
