@@ -1127,13 +1127,22 @@ async fn wait_for_cleanup_progress(
     }
 }
 
-/// Frontend escalation when the storage-limit self-heal did NOT succeed:
-/// same shape as the license-required flow — bring the dashboard to front
-/// and let the main window navigate itself to the Soniox stored-files card.
-/// No toast action needed: the user lands directly on the fix.
-async fn notify_storage_limit(app: &AppHandle) {
-    use tauri::Emitter;
-    let _ = crate::commands::window::focus_main_window(app.clone()).await;
+/// Content-free island blocker; dashboard feedback only if already visible.
+async fn notify_storage_limit(app: &AppHandle, generation: u64) {
+    use tauri::{Emitter, Manager};
+    crate::recording::island::blocked(
+        app,
+        generation,
+        crate::recording::island::BlockedKind::SonioxStorageFull,
+        crate::recording::island::IslandAction::OpenStorage,
+    );
+    if !app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+    {
+        return;
+    }
     let _ = app.emit(
         "soniox-storage-limit",
         serde_json::json!({
@@ -1186,6 +1195,7 @@ pub(super) async fn transcribe_typed(
     language: Option<&str>,
 ) -> Result<String, common::SttError> {
     use tokio::fs;
+    let generation = crate::commands::audio::current_recording_generation();
 
     let wav_bytes = fs::read(wav_path)
         .await
@@ -1204,7 +1214,7 @@ pub(super) async fn transcribe_typed(
     )
     .await;
     if matches!(result, Err(common::SttError::LimitExceeded { .. })) {
-        notify_storage_limit(app).await;
+        notify_storage_limit(app, generation).await;
     }
     result
 }
@@ -1539,6 +1549,7 @@ pub(super) async fn transcribe_typed_diarized(
     language: Option<&str>,
 ) -> Result<super::CloudTranscript, common::SttError> {
     use tokio::fs;
+    let generation = crate::commands::audio::current_recording_generation();
 
     let wav_bytes = fs::read(wav_path)
         .await
@@ -1557,7 +1568,7 @@ pub(super) async fn transcribe_typed_diarized(
     )
     .await;
     if matches!(result, Err(common::SttError::LimitExceeded { .. })) {
-        notify_storage_limit(app).await;
+        notify_storage_limit(app, generation).await;
     }
     result
 }

@@ -1,3 +1,8 @@
+use crate::recording::island::{
+    self, emit_visible_main, plan_translation_failure, polish_was_guarded, recovery_for_failure,
+    validate_recording_license, BlockedKind, DesktopWritingSuccessPlan, IslandAction, Note,
+    PolishReason, RecoveryKind,
+};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
@@ -46,9 +51,7 @@ use crate::utils::logger::*;
 #[cfg(debug_assertions)]
 use crate::utils::system_monitor;
 use crate::whisper::manager::WhisperManager;
-use crate::{
-    emit_to_all, emit_to_window, update_recording_state, AppState, RecordingMode, RecordingState,
-};
+use crate::{emit_to_window, update_recording_state, AppState, RecordingMode, RecordingState};
 use cpal::traits::{DeviceTrait, HostTrait};
 use once_cell::sync::Lazy;
 use serde_json;
@@ -1060,7 +1063,7 @@ pub(crate) fn take_in_flight_transcription_audio() -> Option<PathBuf> {
         .and_then(|mut guard| guard.take().map(|(_, path)| path))
 }
 
-fn clear_in_flight_transcription_audio_for_generation(generation: u64) {
+pub(crate) fn clear_in_flight_transcription_audio_for_generation(generation: u64) {
     if let Ok(mut guard) = IN_FLIGHT_TRANSCRIPTION_AUDIO.lock() {
         if guard
             .as_ref()
@@ -1137,10 +1140,10 @@ async fn revoke_saved_recording(app: &AppHandle, filename: &str) {
     };
     delete_persisted_recording(&dir.join("recordings"), filename);
 }
-struct StopInFlightGuard(Arc<AtomicBool>);
+pub(crate) struct StopInFlightGuard(Arc<AtomicBool>);
 
 impl StopInFlightGuard {
-    fn try_acquire(flag: Arc<AtomicBool>) -> Option<Self> {
+    pub(crate) fn try_acquire(flag: Arc<AtomicBool>) -> Option<Self> {
         flag.compare_exchange(false, true, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
             .ok()
             .map(|_| Self(flag))
@@ -1281,23 +1284,6 @@ fn transcription_task_in_flight(app_state: &AppState) -> bool {
         .lock()
         .map(|guard| guard.as_ref().map(|h| !h.is_finished()).unwrap_or(false))
         .unwrap_or(false)
-}
-
-fn take_and_remove_current_recording_path(app_state: &AppState, reason: &str) {
-    let audio_path = match app_state.current_recording_path.lock() {
-        Ok(mut path_guard) => path_guard.take(),
-        Err(e) => {
-            log::warn!("Failed to acquire recording path lock for cleanup: {}", e);
-            None
-        }
-    };
-
-    if let Some(audio_path) = audio_path {
-        log::info!("Removing {} recording file", reason);
-        if let Err(e) = std::fs::remove_file(&audio_path) {
-            log::warn!("Failed to remove {} recording: {}", reason, e);
-        }
-    }
 }
 
 #[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1480,7 +1466,19 @@ fn should_hide_pill_when_idle(mode: &str) -> bool {
 fn emit_recording_too_short_feedback<R: Runtime>(
     app: &AppHandle<R>,
     min_duration_label: &str,
+    generation: u64,
 ) -> u64 {
+    let hold = if app.try_state::<AppState>().is_some() {
+        app.store("settings")
+            .ok()
+            .and_then(|s| s.get("recording_mode"))
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .as_deref()
+            == Some("push_to_talk")
+    } else {
+        false
+    };
+    island::too_short(app, generation, hold);
     pill_toast(
         app,
         &format!("Recording shorter than {} seconds", min_duration_label),
@@ -1550,11 +1548,7 @@ impl Drop for NormalizedTempFile {
     fn drop(&mut self) {
         if let Err(error) = std::fs::remove_file(&self.path) {
             if error.kind() != std::io::ErrorKind::NotFound {
-                log::warn!(
-                    "Failed to remove normalized temp file {:?}: {}",
-                    self.path,
-                    error
-                );
+                log::warn!("Failed to remove normalized temporary audio");
             }
         }
     }
@@ -1923,7 +1917,7 @@ impl TranscriptionFailure {
 
     /// Whether a failed attempt's recording should be preserved for retry: genuine
     /// engine/network failures, not user cancellation or a too-short clip.
-    fn is_retryable_failure(&self) -> bool {
+    pub(crate) fn is_retryable_failure(&self) -> bool {
         match self {
             Self::Remote(_) => true,
             Self::Local { message, .. } => {
@@ -2307,7 +2301,9 @@ fn record_insertion_timing(metadata: &mut Option<serde_json::Value>, insertion_m
 /// `text` is the raw, untranslated transcript (kept so the user does not lose
 /// their words). The frontend surfaces this as a "translation failed" badge so the
 /// untranslated row is not mistaken for a successful translation.
-fn build_translation_failed_history_metadata(target_language: &str) -> serde_json::Value {
+pub(crate) fn build_translation_failed_history_metadata(
+    target_language: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "translation_failed": true,
         "target_language": target_language,
@@ -2384,14 +2380,6 @@ fn notify_ai_polish_failure(app: &AppHandle, error: &AiProviderError) {
             "Please check your AI API key in settings.",
         );
     }
-}
-
-#[derive(Debug)]
-struct DesktopWritingSuccessPlan {
-    final_text: String,
-    writing_metadata: Option<serde_json::Value>,
-    should_deliver: bool,
-    save_history_entries: usize,
 }
 
 fn plan_desktop_writing_success(
@@ -2839,8 +2827,20 @@ mod tests {
             received_for_listener.lock().unwrap().push(payload);
         });
 
+        let short_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let short_events_for_listener = short_events.clone();
+        app.listen_any("recording-too-short", move |event| {
+            short_events_for_listener
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).unwrap());
+        });
         assert!(app.get_webview_window("pill").is_none());
-        emit_recording_too_short_feedback(app.handle(), "0.5");
+        emit_recording_too_short_feedback(app.handle(), "0.5", 42);
+        assert_eq!(
+            short_events.lock().unwrap().as_slice(),
+            &[serde_json::json!({"generation":42,"mode":"toggle"})]
+        );
 
         let events = received.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -4694,26 +4694,40 @@ pub async fn open_recordings_folder(app: AppHandle) -> Result<(), String> {
 async fn abort_due_to_missing_model(
     app: &AppHandle,
     audio_path: &Path,
+    generation: u64,
     log_message: &str,
     user_message: &str,
 ) -> Result<String, String> {
+    if recording_generation_is_stale(generation) {
+        return Err("Dictation discarded".into());
+    }
     log::error!("{}", log_message);
     update_recording_state(app, RecordingState::Error, Some(user_message.to_string()));
 
-    if let Err(e) = std::fs::remove_file(audio_path) {
-        log::warn!("Failed to remove audio file: {}", e);
-    }
-
-    // Show pill toast for no models error
-    pill_toast(app, user_message, 2000);
-    // Bring the dashboard forward so the no-models error is actionable
-    // (the main window normally stays hidden in tray/pill mode).
-    let _ = crate::commands::window::focus_main_window(app.clone()).await;
+    let kind = if log_message == "Selected remote unavailable" {
+        RecoveryKind::RemoteOffline
+    } else {
+        RecoveryKind::ModelMissing
+    };
+    let _ = crate::recording::kept::keep(app, generation, audio_path, kind).await;
+    island::blocked(
+        app,
+        generation,
+        if log_message.contains("key not configured") {
+            BlockedKind::CloudKeyMissing
+        } else {
+            BlockedKind::NoEngine
+        },
+        if log_message.contains("key not configured") {
+            IslandAction::OpenCloudKeys
+        } else {
+            IslandAction::OpenModels
+        },
+    );
 
     // Also emit domain event for main window
-    let _ = emit_to_window(
+    let _ = emit_visible_main(
         app,
-        "main",
         "no-models-error",
         serde_json::json!({
             "title": "No Models Installed",
@@ -4722,7 +4736,7 @@ async fn abort_due_to_missing_model(
         }),
     );
 
-    if should_hide_pill(app).await {
+    if should_hide_pill(app).await && !crate::recording::kept::has_generation(generation) {
         if let Err(e) = crate::commands::window::hide_pill_widget(app.clone()).await {
             log::error!("Failed to hide pill window: {}", e);
         }
@@ -4811,7 +4825,7 @@ fn select_best_fallback_model(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RecordingLicenseState {
+pub(crate) enum RecordingLicenseState {
     Ready,
     Loading,
     CheckFailed,
@@ -4819,7 +4833,7 @@ enum RecordingLicenseState {
     VerificationRequired,
 }
 
-fn recording_license_state(
+pub(crate) fn recording_license_state(
     cache: &crate::commands::license::RuntimeLicenseCache,
 ) -> RecordingLicenseState {
     use crate::commands::license::RuntimeLicenseCache;
@@ -4881,10 +4895,22 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
             };
         // Bring the dashboard forward so the error toast + onboarding are visible
         // (the main window normally stays hidden in tray/pill mode).
-        let _ = crate::commands::window::focus_main_window(app.clone()).await;
-        let _ = emit_to_window(
+        island::blocked(
             app,
-            "main",
+            current_recording_generation(),
+            if availability.cloud_selected && !availability.cloud_ready {
+                BlockedKind::CloudKeyMissing
+            } else {
+                BlockedKind::NoEngine
+            },
+            if availability.cloud_selected && !availability.cloud_ready {
+                IslandAction::OpenCloudKeys
+            } else {
+                IslandAction::OpenModels
+            },
+        );
+        let _ = emit_visible_main(
+            app,
             "no-models-error",
             serde_json::json!({
                 "title": title,
@@ -4895,80 +4921,7 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
         return Err(error_text);
     }
 
-    // Check cached license status (warmed during startup/license transitions - no network call)
-    let app_state = app.state::<AppState>();
-    let license_state = recording_license_state(&*app_state.license_cache.read().await);
-
-    match license_state {
-        RecordingLicenseState::CheckFailed => {
-            log::warn!("Recording blocked: license check failed; recovery required");
-            let message = "License check failed. Open License and retry, or re-enter your existing license key to activate it again.";
-            let _ = crate::commands::window::focus_main_window(app.clone()).await;
-            let _ = emit_to_all(
-                app,
-                "license-required",
-                serde_json::json!({
-                    "title": "License Check Failed",
-                    "message": message,
-                    "action": "restore"
-                }),
-            );
-            return Err(message.to_string());
-        }
-        RecordingLicenseState::VerificationRequired => {
-            log::warn!("Recording blocked: offline license verification window has ended");
-            let _ = crate::commands::window::focus_main_window(app.clone()).await;
-            let _ = emit_to_all(
-                app,
-                "license-required",
-                serde_json::json!({
-                    "title": "License Verification Required",
-                    "message": "Connect to the internet and revalidate your license to continue recording.",
-                    "action": "revalidate"
-                }),
-            );
-            return Err("License verification required to record".to_string());
-        }
-        RecordingLicenseState::Blocked => {
-            log::warn!("Recording blocked: no active license or trial");
-
-            let _ = crate::commands::window::focus_main_window(app.clone()).await;
-
-            let _ = emit_to_all(
-                app,
-                "license-required",
-                serde_json::json!({
-                    "title": "License Required",
-                    "message": "No active license or trial was found. If you already purchased a license, re-enter your existing key here to activate it again.",
-                    "action": "restore"
-                }),
-            );
-            return Err("License required to record".to_string());
-        }
-        RecordingLicenseState::Ready => {}
-        RecordingLicenseState::Loading => {
-            log::warn!("Recording blocked: license cache not initialized yet");
-            let _ = emit_to_window(
-                app,
-                "main",
-                "license-loading",
-                serde_json::json!({
-                    "title": "Checking License",
-                    "message": "License status is still loading. Please try again in a moment.",
-                    "action": "wait"
-                }),
-            );
-            return Err(
-                "License status is still loading. Please try again in a moment.".to_string(),
-            );
-        }
-    }
-
-    log::debug!(
-        "⏱️ [VALIDATE] validation complete (+{}ms)",
-        validate_start.elapsed().as_millis()
-    );
-    Ok(())
+    validate_recording_license(app).await
 }
 
 pub(crate) fn clear_pending_stop_after_start(app_state: &AppState) {
@@ -5757,6 +5710,7 @@ pub async fn start_recording(
                     ("Recording failed", "Try recording again")
                 };
 
+                island::mic_blocked(&app, recording_generation, &e);
                 pill_toast_with_suggestion(&app, user_message, suggestion, 1500, None);
 
                 resume_media_if_needed();
@@ -5820,6 +5774,7 @@ pub async fn start_recording(
                     }
                 }
             }
+            island::mic_blocked(&app, current_recording_generation(), &error);
             update_recording_state(&app, RecordingState::Error, Some(error.clone()));
             let (user_message, suggestion) =
                 if error.contains("permission") || error.contains("access") {
@@ -6090,6 +6045,7 @@ async fn stop_recording_with_mode_at(
         return Ok(String::new());
     };
     let entry_state = app_state.get_current_state();
+    let task_generation = current_recording_generation();
 
     // Update state to stopping
     log_state_transition("RECORDING", "recording", "stopping", true, None);
@@ -6098,6 +6054,7 @@ async fn stop_recording_with_mode_at(
     // Cancellation should only happen in cancel_recording command
 
     let capture_metrics;
+    let mut mic_dropped = false;
     let mut stop_unfinalized = false;
     let mut stop_integrity_failure = false;
     // Stop recording (lock only within this scope to stay Send)
@@ -6143,7 +6100,8 @@ async fn stop_recording_with_mode_at(
         let stop_message = match recorder.stop_recording_with_post_roll(post_roll) {
             Ok(msg) => msg,
             Err(e) => {
-                log::error!("Recorder stop returned error: {}", e);
+                mic_dropped = e.starts_with("Audio device error:");
+                log::error!("Recorder stop returned error");
                 if crate::audio::recorder::stop_error_is_integrity_failure(&e) {
                     stop_integrity_failure = true;
                 } else if crate::audio::recorder::stop_error_is_unfinalized(&e) {
@@ -6196,57 +6154,24 @@ async fn stop_recording_with_mode_at(
 
     log::debug!("Unregistered ESC key and cleaned up state");
 
-    // A recorder error where the worker FINISHED still finalizes the captured WAV (e.g. a
-    // device error), so we fall through to the normal transcription path below and recover the
-    // speech (never-lose-speech). Integrity failures mean the WAV finalized after losing chunks:
-    // do not transcribe gappy audio or write failed history rows. Only when the worker did NOT
-    // finish (stop timeout / thread panic / finalize failure) is there no usable WAV: surface an
-    // error and reset, having already run the media-resume + ESC cleanup above.
-    if stop_integrity_failure {
+    if stop_integrity_failure || stop_unfinalized {
         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
-        let user_message = "Recording was interrupted — please try again";
-        take_and_remove_current_recording_path(&app_state, "interrupted");
-        pill_toast_with_suggestion(
-            &app,
-            "Recording was interrupted",
-            "Try recording again",
-            2000,
-            None,
-        );
-        update_recording_state(&app, RecordingState::Error, Some(user_message.to_string()));
-        let app_for_reset = app.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if should_hide_pill(&app_for_reset).await {
-                if let Err(e) =
-                    crate::commands::window::hide_pill_widget(app_for_reset.clone()).await
-                {
-                    log::error!("Failed to hide pill window: {}", e);
-                }
-            }
-            update_recording_state(&app_for_reset, RecordingState::Idle, None);
-        });
-        return Ok(String::new());
-    }
-
-    if stop_unfinalized {
-        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
-        // The recording worker may STILL hold the WAV open: `stop_recording`'s
-        // bounded join detached it when it missed the finalize deadline. hound
-        // finalizes the file via its `WavWriter::drop` on the worker's
-        // eventual exit, so we must NOT delete the file here — deleting
-        // mid-write would race the detached worker and could remove a file
-        // another thread still has open. Just drop our reference to the path;
-        // the eventually-finalized file is orphaned for the OS temp-dir
-        // cleanup. (The file-deleting helper is still used by the integrity
-        // branch above, where the worker has already fully joined + finalized.)
-        if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
-            path_guard.take();
-        }
-        pill_toast(&app, "Recording error", 1500);
-        if should_hide_pill(&app).await {
-            if let Err(e) = crate::commands::window::hide_pill_widget(app.clone()).await {
-                log::error!("Failed to hide pill window: {}", e);
+        let path = app_state
+            .current_recording_path
+            .lock()
+            .ok()
+            .and_then(|mut p| p.take());
+        if let Some(path) = path {
+            if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
+                let _ = std::fs::remove_file(path);
+            } else {
+                let _ = crate::recording::kept::keep(
+                    &app,
+                    task_generation,
+                    &path,
+                    RecoveryKind::Integrity,
+                )
+                .await;
             }
         }
         update_recording_state(&app, RecordingState::Idle, None);
@@ -6310,7 +6235,6 @@ async fn stop_recording_with_mode_at(
             return Ok("".to_string());
         }
     };
-    let task_generation = current_recording_generation();
     // Register the file the upcoming transcription task will own as EARLY as
     // possible — the moment `stop_recording` takes ownership of the recording
     // path, before model selection / normalization. A `cancel_recording` that
@@ -6335,9 +6259,17 @@ async fn stop_recording_with_mode_at(
                 1000,
                 None,
             );
-            if let Err(e) = std::fs::remove_file(&audio_path) {
-                log::debug!("Failed to remove empty audio file: {}", e);
-            }
+            let _ = crate::recording::kept::keep(
+                &app,
+                task_generation,
+                &audio_path,
+                if mic_dropped {
+                    RecoveryKind::MicDroppedEmpty
+                } else {
+                    RecoveryKind::NoSpeech
+                },
+            )
+            .await;
             // Frontend will hide pill after showing feedback
             update_recording_state(&app, RecordingState::Idle, None);
             return Ok("".to_string());
@@ -6347,8 +6279,21 @@ async fn stop_recording_with_mode_at(
         duration_ms: capture_metrics.as_ref().map(|metrics| metrics.duration_ms),
     });
 
+    if mic_dropped {
+        island::note(
+            &app,
+            task_generation,
+            Note::MicDropped {
+                captured_ms: capture_metrics.map(|m| m.duration_ms).unwrap_or(0),
+            },
+        );
+    }
     let evidence_class = classify_speech_evidence(capture_metrics, None);
-    if evidence_class.would_skip_engine() {
+    if evidence_class.would_skip_engine()
+        && !(mic_dropped
+            && evidence_class
+                == crate::audio::speech_evidence::SpeechEvidenceClass::HighConfidenceNoSpeech)
+    {
         let mut speech_evidence_attempt =
             SpeechEvidenceAttempt::new("none".to_string(), "pre_engine", capture_metrics);
         if evidence_class
@@ -6360,9 +6305,13 @@ async fn stop_recording_with_mode_at(
             log::info!(
                 "Skipping speech engine: capture below calibrated no-speech floor (no sustained speech, negligible energy)"
             );
-            if let Err(error) = std::fs::remove_file(&audio_path) {
-                log::debug!("Failed to remove no-speech recording: {}", error);
-            }
+            let _ = crate::recording::kept::keep(
+                &app,
+                task_generation,
+                &audio_path,
+                RecoveryKind::NoSpeech,
+            )
+            .await;
             update_recording_state(&app, RecordingState::Idle, None);
             pill_toast_with_suggestion(
                 &app,
@@ -6371,41 +6320,44 @@ async fn stop_recording_with_mode_at(
                 1500,
                 None,
             );
-            if should_hide_pill(&app).await {
-                if let Err(error) = crate::commands::window::hide_pill_widget(app.clone()).await {
-                    log::error!(
-                        "Failed to hide pill window after no-speech recording: {}",
-                        error
-                    );
-                }
-            }
             return Ok(String::new());
         }
 
         speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::SkippedNoInput);
         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
         log::info!("Skipping speech engine: capture contained only exact digital zero samples");
-        if let Err(error) = std::fs::remove_file(&audio_path) {
-            log::debug!("Failed to remove no-input recording: {}", error);
-        }
+        island::note(&app, task_generation, Note::MicSilent);
+        let _ = crate::recording::kept::keep(
+            &app,
+            task_generation,
+            &audio_path,
+            if mic_dropped {
+                RecoveryKind::MicDroppedEmpty
+            } else {
+                RecoveryKind::NoSpeech
+            },
+        )
+        .await;
         update_recording_state(&app, RecordingState::Idle, None);
-        if should_hide_pill(&app).await {
-            if let Err(error) = crate::commands::window::hide_pill_widget(app.clone()).await {
-                log::error!(
-                    "Failed to hide pill window after no-input recording: {}",
-                    error
-                );
-            }
-        }
         return Ok(String::new());
     }
 
     // Decide engine early to optionally skip normalization for cloud providers
-    let config = get_recording_config(&app).await.map_err(|e| {
-        dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
-        log::error!("Failed to load recording config: {}", e);
-        format!("Configuration error: {}", e)
-    })?;
+    let config = match get_recording_config(&app).await {
+        Ok(config) => config,
+        Err(_) => {
+            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
+            let _ = crate::recording::kept::keep(
+                &app,
+                task_generation,
+                &audio_path,
+                RecoveryKind::Integrity,
+            )
+            .await;
+            update_recording_state(&app, RecordingState::Idle, None);
+            return Err("Recording configuration unavailable".into());
+        }
+    };
     if dictation_telemetry.facts.engine != crate::product_analytics::EngineKind::Remote {
         dictation_telemetry.facts.engine = dictation_engine_from_id(&config.current_engine);
         dictation_telemetry.facts.model = config.current_model.clone();
@@ -6465,6 +6417,7 @@ async fn stop_recording_with_mode_at(
             return abort_due_to_missing_model(
                 &app,
                 &audio_path,
+                task_generation,
                 "Selected remote unavailable",
                 "Selected remote unavailable. Reconnect or choose another source.",
             )
@@ -6479,6 +6432,7 @@ async fn stop_recording_with_mode_at(
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
+                        task_generation,
                         "No Parakeet model selected",
                         "Please select a Parakeet model before recording.",
                     )
@@ -6494,6 +6448,7 @@ async fn stop_recording_with_mode_at(
                         return abort_due_to_missing_model(
                             &app,
                             &audio_path,
+                            task_generation,
                             "Selected Parakeet model is not downloaded",
                             "Please download the selected Parakeet model before recording.",
                         )
@@ -6505,6 +6460,7 @@ async fn stop_recording_with_mode_at(
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
+                        task_generation,
                         "Selected Parakeet model is not available",
                         "The selected Parakeet model is unavailable. Please download it again.",
                     )
@@ -6523,6 +6479,7 @@ async fn stop_recording_with_mode_at(
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
+                        task_generation,
                         "No cloud transcription model configured",
                         "Please choose a cloud transcription model from Models before recording.",
                     )
@@ -6535,6 +6492,7 @@ async fn stop_recording_with_mode_at(
                     return abort_due_to_missing_model(
                         &app,
                         &audio_path,
+                        task_generation,
                         &format!("{} key not configured", provider.display_name()),
                         &format!(
                             "Please configure your {} key in Models before recording.",
@@ -6559,6 +6517,7 @@ async fn stop_recording_with_mode_at(
                     return abort_due_to_missing_model(
                     &app,
                     &audio_path,
+                        task_generation,
                     "No speech recognition models installed",
                     "Please download at least one speech recognition model from Models to use Voicetypr.",
                 )
@@ -6613,14 +6572,19 @@ async fn stop_recording_with_mode_at(
                             }),
                         );
 
-                        let _ = emit_to_window(
+                        island::note(
                             &app,
-                            "pill",
-                            "model-fallback",
-                            serde_json::json!({
-                                "requested": configured_model,
-                                "fallback": fallback_model
-                            }),
+                            task_generation,
+                            Note::ModelFallback {
+                                engine_short: crate::pill::context::engine_short_name(
+                                    &configured_model,
+                                    "whisper",
+                                ),
+                                alt_engine_short: crate::pill::context::engine_short_name(
+                                    &fallback_model,
+                                    "whisper",
+                                ),
+                            },
                         );
 
                         fallback_model
@@ -6645,15 +6609,19 @@ async fn stop_recording_with_mode_at(
                     best_model
                 };
 
-                let model_path = whisper_manager
-                    .read()
-                    .await
-                    .get_model_path(&chosen_model)
-                    .ok_or_else(|| {
-                        dictation_telemetry.facts.outcome =
-                            crate::product_analytics::DictationOutcome::Failed;
-                        format!("Model '{}' path not found", chosen_model)
-                    })?;
+                let model_path = whisper_manager.read().await.get_model_path(&chosen_model);
+                let Some(model_path) = model_path else {
+                    dictation_telemetry.facts.outcome =
+                        crate::product_analytics::DictationOutcome::Failed;
+                    return abort_due_to_missing_model(
+                        &app,
+                        &audio_path,
+                        task_generation,
+                        "Selected model unavailable",
+                        "The selected model is unavailable.",
+                    )
+                    .await;
+                };
 
                 ActiveEngineSelection::Whisper {
                     model_name: chosen_model,
@@ -6741,7 +6709,15 @@ async fn stop_recording_with_mode_at(
                                 RecordingState::Error,
                                 Some("Audio normalization failed".to_string()),
                             );
-                            let _ = std::fs::remove_file(&audio_path);
+                            let _ = crate::recording::kept::keep(
+                                &app,
+                                task_generation,
+                                &audio_path,
+                                RecoveryKind::Integrity,
+                            )
+                            .await;
+                            let _ = std::fs::remove_file(&out_path);
+                            update_recording_state(&app, RecordingState::Idle, None);
                             return Err("Audio normalization failed".to_string());
                         }
                         out_path
@@ -6798,14 +6774,18 @@ async fn stop_recording_with_mode_at(
                 Ok((duration < min_duration_s_f32, duration_ms))
             })();
 
-            if matches!(duration_gate, Ok((true, _))) {
+            if matches!(duration_gate, Ok((true, _))) && !mic_dropped {
                 dictation_telemetry.facts.outcome =
                     crate::product_analytics::DictationOutcome::Empty;
                 speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::RecordingTooShort);
-                emit_recording_too_short_feedback(&app, &min_duration_label);
-                if let Err(e) = std::fs::remove_file(&normalized_path) {
-                    log::debug!("Failed to remove short normalized audio: {}", e);
-                }
+                emit_recording_too_short_feedback(&app, &min_duration_label, task_generation);
+                let _ = crate::recording::kept::keep(
+                    &app,
+                    task_generation,
+                    &normalized_path,
+                    RecoveryKind::NoSpeech,
+                )
+                .await;
                 // Frontend will hide pill after showing feedback
                 update_recording_state(&app, RecordingState::Idle, None);
                 return Ok("".to_string());
@@ -7144,7 +7124,24 @@ async fn stop_recording_with_mode_at(
         // Clean up the task-owned temp recording and release the in-flight
         // tracker slot regardless of outcome (so a concurrent cancel cannot
         // resurrect a removed path). Shared with the early-cancel branch.
-        finalize_in_flight_audio(task_generation, &audio_path_clone);
+        let recovery_kind = match &transcription_result {
+            Ok(result) if is_non_speech_transcript(&result.raw_text) => Some(RecoveryKind::NoSpeech),
+            Err(failure) => recovery_for_failure(failure, &engine_selection_for_task),
+            _ => None,
+        };
+        if matches!(&transcription_result, Err(TranscriptionFailure::Local { code: Some(TranscriptionErrorCode::Unauthorized), .. })) {
+            island::blocked(&app_for_task, task_generation, BlockedKind::CloudKeyRejected, IslandAction::OpenCloudKeys);
+        }
+        if let Some(kind) = recovery_kind.filter(|_| !delivery_aborted(app_state.is_cancellation_requested(), task_generation)) {
+            let _ = crate::recording::kept::keep(&app_for_task, task_generation, &audio_path_clone, kind).await;
+        } else {
+            finalize_in_flight_audio(task_generation, &audio_path_clone);
+        }
+
+        if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
+            if !recording_generation_is_stale(task_generation) { update_recording_state(&app_for_task, RecordingState::Idle, None); }
+            return;
+        }
 
         match transcription_result {
             Ok(transcription) => {
@@ -7192,6 +7189,7 @@ async fn stop_recording_with_mode_at(
 
                 // Check if transcription is empty or just noise
                 if is_non_speech_transcript(&transcription.raw_text) {
+                    update_recording_state(&app_for_task, RecordingState::Idle, None);
                     dictation_telemetry.facts.outcome = if transcription.raw_text.trim().is_empty() {
                         crate::product_analytics::DictationOutcome::Empty
                     } else {
@@ -7213,9 +7211,10 @@ async fn stop_recording_with_mode_at(
                     let app_for_hide = app_for_task.clone();
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                            if recording_generation_is_stale(task_generation) { return; }
 
                         // Hide pill window (only if show_pill_indicator is false)
-                        if should_hide_pill(&app_for_hide).await {
+                        if should_hide_pill(&app_for_hide).await && !crate::recording::kept::has_generation(task_generation) {
                             if let Err(e) =
                                 crate::commands::window::hide_pill_widget(app_for_hide.clone())
                                     .await
@@ -7261,7 +7260,11 @@ async fn stop_recording_with_mode_at(
                         {
                             Ok(writing_result) => {
                                 let writing_succeeded = writing_result.ai_error.is_none();
+                                if writing_succeeded && polish_was_guarded(&writing_result) {
+                                    island::note(&app_for_process, task_generation, Note::PolishSkipped { reason: PolishReason::Guard });
+                                }
                                 if let Some(error) = writing_result.ai_error.as_ref() {
+                                    island::note(&app_for_process, task_generation, Note::PolishSkipped { reason: island::polish_reason(error) });
                                     log::warn!(
                                         "AI polish failed with {}; delivering deterministic text",
                                         ai_failure_category(error)
@@ -7333,75 +7336,11 @@ async fn stop_recording_with_mode_at(
                                     writing_succeeded,
                                 )
                             }
-                            Err(crate::writing::WritingError::TranslationFailed {
-                                target_language,
-                                ..
-                            }) => {
-                                log::warn!("Translation failed after transcription; saving raw transcript to history without delivery");
-                                if should_emit_enhancing_for_task {
-                                    let _ = app_for_process.emit("enhancing-failed", ());
-                                }
-
-                                let saved = save_transcription_with_recording_if_current(
-                                    app_for_process.clone(),
-                                    task_generation,
-                                    transcription_for_process.raw_text.clone(),
-                                    model_for_process.clone(),
-                                    recording_file_for_task.clone(),
-                                    Some(build_translation_failed_history_metadata(
-                                        &target_language,
-                                    )),
-                                )
-                                .await;
-
-                                match saved {
-                                    None => {
-                                        log::info!(
-                                            "Skipped translation-failed history for stale/cancelled generation {}",
-                                            task_generation
-                                        );
-                                    }
-                                    Some(Err(save_err)) => {
-                                        // History save failed: fall back to clipboard so the
-                                        // transcript is never lost (the old path always pasted).
-                                        log::error!(
-                                            "Failed to save raw transcript after translation failure: {}; copying to clipboard",
-                                            save_err
-                                        );
-                                        let app_state = app_for_process.state::<AppState>();
-                                        let copy_result =
-                                            persist_if_current(&app_state, task_generation, || {
-                                                crate::commands::text::copy_text_to_clipboard(
-                                                    transcription_for_process.raw_text.clone(),
-                                                )
-                                            });
-                                        let message = match copy_result {
-                                            None => {
-                                                "Translation failed - cancelled before clipboard fallback"
-                                            }
-                                            Some(copy_future) => match copy_future.await {
-                                                Ok(_) => "Translation failed - copied to clipboard",
-                                                Err(copy_err) => {
-                                                    log::error!(
-                                                        "Clipboard fallback also failed after translation failure: {}",
-                                                        copy_err
-                                                    );
-                                                    "Translation failed - transcript could not be saved"
-                                                }
-                                            },
-                                        };
-                                        pill_toast(&app_for_process, message, 6000);
-                                    }
-                                    Some(Ok(())) => {
-                                        pill_toast(
-                                            &app_for_process,
-                                            "Translation failed - saved to history, not pasted",
-                                            6000,
-                                        );
-                                    }
-                                }
-
-                                (text_for_process.clone(), None, false, false)
+                            Err(crate::writing::WritingError::TranslationFailed { target_language, .. }) => {
+                                island::note(&app_for_process, task_generation, Note::TranslateFailed);
+                                if should_emit_enhancing_for_task { let _ = app_for_process.emit("enhancing-failed", ()); }
+                                let plan = plan_translation_failure(&transcription_for_process, &target_language);
+                                (plan.final_text, plan.writing_metadata, plan.should_deliver, false)
                             }
                             Err(crate::writing::WritingError::OutputLanguageRequiresAi) => {
                                 log::warn!("Formatting failed: Final output language requires AI enhancement or native translation");
@@ -7415,7 +7354,10 @@ async fn stop_recording_with_mode_at(
                                     1500,
                                 );
 
-                                (text_for_process.clone(), None, false, false)
+                                {
+                                    island::note(&app_for_process, task_generation, Note::PolishSkipped { reason: PolishReason::Guard });
+                                    (text_for_process.clone(), None, true, false)
+                                }
                             }
                             Err(crate::writing::WritingError::Config(e)) => {
                                 log::warn!("Formatting failed: {}", e);
@@ -7425,7 +7367,10 @@ async fn stop_recording_with_mode_at(
 
                                 pill_toast(&app_for_process, "Formatting failed", 1500);
 
-                                (text_for_process.clone(), None, false, false)
+                                {
+                                    island::note(&app_for_process, task_generation, Note::PolishSkipped { reason: PolishReason::Guard });
+                                    (text_for_process.clone(), None, true, false)
+                                }
                             }
                         };
                     dictation_telemetry.text_ready(&final_text);
@@ -7583,6 +7528,7 @@ async fn stop_recording_with_mode_at(
 
                                 // Check if it's an accessibility permission issue
                                 if e.contains("accessibility") || e.contains("permission") {
+                                    island::blocked(&app_for_process, task_generation, BlockedKind::AccessibilityOff, IslandAction::OpenAccessibility);
                                     // Show pill toast for accessibility permission error
                                     pill_toast_with_suggestion(
                                         &app_for_process,
@@ -7596,7 +7542,7 @@ async fn stop_recording_with_mode_at(
                                     pill_toast_with_suggestion(
                                         &app_for_process,
                                         "Text copied",
-                                        "Grant Accessibility permission to enable auto-paste",
+                                        "Press the paste shortcut",
                                         1500,
                                         None,
                                     );
@@ -7752,20 +7698,19 @@ async fn stop_recording_with_mode_at(
                         log::info!("Recording was too short: {}", e);
 
                         // Clean up the audio file
-                        if let Err(cleanup_err) = std::fs::remove_file(&audio_path_clone) {
-                            log::warn!("Failed to remove short audio file: {}", cleanup_err);
-                        }
+                        // The recovery store owns this clip now.
 
                         // Emit specific feedback via pill toast
-                        pill_toast(&app_for_task, "Recording too short", 1000);
+                        emit_recording_too_short_feedback(&app_for_task, "0.5", task_generation);
 
                         // Hide pill after showing feedback
                         let app_for_reset = app_for_task.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                            if recording_generation_is_stale(task_generation) { return; }
 
                             // Only hide if show_pill_indicator is false
-                            if should_hide_pill(&app_for_reset).await {
+                            if should_hide_pill(&app_for_reset).await && !crate::recording::kept::has_generation(task_generation) {
                                 if let Err(e) =
                                     crate::commands::window::hide_pill_widget(app_for_reset.clone())
                                         .await
@@ -7832,7 +7777,8 @@ async fn stop_recording_with_mode_at(
                         let app_for_reset = app_for_task.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                            if should_hide_pill(&app_for_reset).await {
+                            if recording_generation_is_stale(task_generation) { return; }
+                            if should_hide_pill(&app_for_reset).await && !crate::recording::kept::has_generation(task_generation) {
                                 if let Err(e) =
                                     crate::commands::window::hide_pill_widget(app_for_reset.clone())
                                         .await
@@ -7921,10 +7867,11 @@ async fn stop_recording_with_mode_at(
                         let app_for_reset = app_for_task.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            if recording_generation_is_stale(task_generation) { return; }
                             log::debug!(
                                 "Resetting from Error to Idle state after transcription failure"
                             );
-                            if should_hide_pill(&app_for_reset).await {
+                            if should_hide_pill(&app_for_reset).await && !crate::recording::kept::has_generation(task_generation) {
                                 if let Err(e) =
                                     crate::commands::window::hide_pill_widget(app_for_reset.clone())
                                         .await
@@ -8061,7 +8008,7 @@ pub async fn save_transcription_with_recording(
     .unwrap_or(Ok(()))
 }
 
-async fn save_transcription_with_recording_if_current(
+pub(crate) async fn save_transcription_with_recording_if_current(
     app: AppHandle,
     generation: u64,
     text: String,
@@ -8319,6 +8266,7 @@ pub async fn transcribe_audio_file(
         None,
         None,
         None,
+        None,
     )
     .await
 }
@@ -8341,6 +8289,7 @@ pub async fn transcribe_audio_file_for_cli(
         language_override,
         audio_ctx,
         speed_mode_override,
+        None,
     )
     .await
 }
@@ -8412,7 +8361,7 @@ async fn maybe_return_diarized_cloud_upload(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn transcribe_audio_file_impl(
+pub(crate) async fn transcribe_audio_file_impl(
     app: AppHandle,
     file_path: String,
     model_name: String,
@@ -8421,13 +8370,10 @@ async fn transcribe_audio_file_impl(
     language_override: Option<String>,
     audio_ctx: Option<i32>,
     speed_mode_override: Option<bool>,
+    retry_generation: Option<u64>,
 ) -> Result<UploadTranscription, String> {
-    log::info!(
-        "[UPLOAD] transcribe_audio_file START | file_path={:?}, model_name={}, engine_hint={:?}",
-        file_path,
-        model_name,
-        model_engine
-    );
+    let upload_generation = retry_generation.unwrap_or_else(current_recording_generation);
+    log::info!("[UPLOAD] transcribe_audio_file started");
     if validate_requirements {
         validate_recording_requirements(&app).await?;
     }
@@ -8452,7 +8398,7 @@ async fn transcribe_audio_file_impl(
 
     // No pre-conversion needed; the normalizer can read most formats directly.
     let wav_path = audio_path.to_path_buf();
-    log::info!("[UPLOAD] Input ready at {:?}", wav_path);
+    log::info!("[UPLOAD] Input ready");
 
     // Resolve engine (whisper/parakeet/cloud) for the requested model
     let engine_selection =
@@ -8502,7 +8448,11 @@ async fn transcribe_audio_file_impl(
     );
 
     let transcription_job = build_transcription_job(
-        TranscriptionSource::AudioFile,
+        if retry_generation.is_some() {
+            TranscriptionSource::DesktopRecording
+        } else {
+            TranscriptionSource::AudioFile
+        },
         engine_selection.engine_name().to_string(),
         engine_selection.model_name().to_string(),
         Some(language.clone()),
@@ -8531,7 +8481,7 @@ async fn transcribe_audio_file_impl(
             .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
             out_path
         });
-        log::info!("[UPLOAD] Normalized WAV at {:?}", normalized_file.path());
+        log::info!("[UPLOAD] Normalized WAV ready");
 
         log::info!(
             "🌐 [Remote Upload] Starting transcription to '{}' ({}:{})",
@@ -8596,16 +8546,18 @@ async fn transcribe_audio_file_impl(
                 .map_err(upload_error_to_string)?;
                 let normalized_file =
                     normalize_upload_audio_for_cloud(&recordings_dir, &wav_path).await?;
-                if let Some(diarized) = maybe_return_diarized_cloud_upload(
-                    &app,
-                    *provider,
-                    normalized_file.path(),
-                    &language,
-                    &transcription_job,
-                )
-                .await?
-                {
-                    return Ok(diarized);
+                if retry_generation.is_none() {
+                    if let Some(diarized) = maybe_return_diarized_cloud_upload(
+                        &app,
+                        *provider,
+                        normalized_file.path(),
+                        &language,
+                        &transcription_job,
+                    )
+                    .await?
+                    {
+                        return Ok(diarized);
+                    }
                 }
                 let path = normalized_file.path().to_path_buf();
                 _executor_audio_guard = Some(normalized_file);
@@ -8654,17 +8606,59 @@ async fn transcribe_audio_file_impl(
         "[UPLOAD] Completed transcription, {} characters",
         transcription_result.raw_text.len()
     );
-    let writing_result =
-        crate::writing::process_transcription(app.clone(), transcription_result.clone())
-            .await
-            .map_err(|e| e.user_message())?;
+    if let Some(generation) = retry_generation {
+        if delivery_aborted(
+            app.state::<AppState>().is_cancellation_requested(),
+            generation,
+        ) {
+            return Err("Retry discarded".into());
+        }
+    }
+    let writing_result = match crate::writing::process_transcription(
+        app.clone(),
+        transcription_result.clone(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(crate::writing::WritingError::TranslationFailed {
+            target_language, ..
+        }) if retry_generation.is_some() => {
+            island::note(&app, upload_generation, Note::TranslateFailed);
+            return Ok(UploadTranscription {
+                text: transcription_result.raw_text.clone(),
+                words: None,
+                metadata: Some(build_translation_failed_history_metadata(&target_language)),
+            });
+        }
+        Err(error) => return Err(error.user_message()),
+    };
     if let Some(error) = writing_result.ai_error.as_ref() {
         log::warn!(
             "AI polish failed with {}; returning deterministic upload text",
             ai_failure_category(error)
         );
+        island::note(
+            &app,
+            upload_generation,
+            Note::PolishSkipped {
+                reason: island::polish_reason(error),
+            },
+        );
         notify_ai_polish_failure(&app, error);
         // Upload history is persisted by the frontend after this command returns non-blank text.
+    }
+    if retry_generation.is_some()
+        && writing_result.ai_error.is_none()
+        && polish_was_guarded(&writing_result)
+    {
+        island::note(
+            &app,
+            upload_generation,
+            Note::PolishSkipped {
+                reason: PolishReason::Guard,
+            },
+        );
     }
     let metadata = Some(build_writing_history_metadata(
         &transcription_result,
@@ -8716,6 +8710,7 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     // Request cancellation FIRST
     let app_state = app.state::<AppState>();
     app_state.request_cancellation();
+    crate::recording::kept::discard_generation(current_recording_generation());
     log::info!("Cancellation requested in app state");
 
     // Get current state
@@ -9356,3 +9351,7 @@ mod failure_class_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../recording/audio_recovery_tests.rs"]
+mod island_recovery_tests;

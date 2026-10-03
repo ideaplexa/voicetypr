@@ -44,6 +44,14 @@ pub(crate) fn advance_recording_generation(counter: &AtomicU64) -> u64 {
     counter.fetch_add(1, Ordering::SeqCst) + 1
 }
 
+/// A recovery/blocker owns the window until its card is resolved by the UI.
+pub(crate) fn cancel_terminal_hide(generation: u64) {
+    let mut pending = PENDING_HIDE.lock().unwrap();
+    if hide_is_current(*pending, generation, current_recording_generation()) {
+        *pending = None;
+    }
+}
+
 fn hide_is_current(pending: Option<u64>, captured: u64, current: u64) -> bool {
     pending == Some(captured) && captured == current
 }

@@ -11,7 +11,6 @@ import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { invoke } from "@tauri-apps/api/core";
 import type { ScreenId } from "../navigation";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import { updateService } from "@/services/updateService";
@@ -87,15 +86,6 @@ export function useAppEvents({
           toast.error("Hotkey Registration Failed", {
             description: data.suggestion || "The hotkey is in use by another application",
             duration: 10000,
-          });
-        });
-
-        await register<ErrorEventPayload>("no-speech-detected", (data) => {
-          log.warn("No speech detected:", data);
-          const toastFn = data.severity === "error" ? toast.error : toast.warning;
-          toastFn(data.title || "No Speech Detected", {
-            description: data.message || "Please check your microphone and speak clearly",
-            duration: data.severity === "error" ? 8000 : 5000,
           });
         });
 
@@ -204,14 +194,6 @@ export function useAppEvents({
               description: data.message || "Please purchase or restore a license to continue",
               duration: 5000,
             });
-
-            // Focus the main window after navigation.
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            try {
-              await invoke("focus_main_window");
-            } catch (error) {
-              log.error("Failed to focus window:", error);
-            }
           },
         );
 

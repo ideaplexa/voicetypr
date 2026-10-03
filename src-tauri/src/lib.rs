@@ -1581,6 +1581,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            recording::kept::retry_kept_dictation,
+            recording::kept::transcribe_anyway,
+            recording::kept::discard_kept_dictation,
+            recording::island::island_action,
             start_recording,
             stop_recording,
             cancel_recording,
@@ -1798,6 +1802,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 });
                 #[cfg(target_os = "macos")]
                 crate::commands::audio::cleanup_media_pause_on_exit();
+                recording::kept::cleanup();
                 product_analytics::shutdown();
             }
             #[cfg(target_os = "macos")]

@@ -172,7 +172,13 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
 }
 
 fn escape_cancel_eligible(state: RecordingState) -> bool {
-    matches!(state, RecordingState::Starting | RecordingState::Recording)
+    matches!(
+        state,
+        RecordingState::Starting
+            | RecordingState::Recording
+            | RecordingState::Stopping
+            | RecordingState::Transcribing
+    )
 }
 
 /// Pure decision core for [`rebuild_engine_bindings`]. Given the persisted
@@ -398,7 +404,8 @@ mod tests {
         assert!(escape_cancel_eligible(RecordingState::Starting));
         assert!(escape_cancel_eligible(RecordingState::Recording));
         assert!(!escape_cancel_eligible(RecordingState::Idle));
-        assert!(!escape_cancel_eligible(RecordingState::Stopping));
+        assert!(escape_cancel_eligible(RecordingState::Stopping));
+        assert!(escape_cancel_eligible(RecordingState::Transcribing));
 
         let (starting_bindings, _) = plan_engine_bindings(
             &[],
