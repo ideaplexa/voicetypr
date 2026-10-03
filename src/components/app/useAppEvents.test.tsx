@@ -34,6 +34,7 @@ describe("useAppEvents registration lifecycle", () => {
     listeners.clear();
     pendingOverview.length = 0;
     eventCoordinator.clearWindowRegistrations("main");
+    eventCoordinator.setActiveWindow("main");
     vi.mocked(listen).mockImplementation((eventName, handler) =>
       deferredOverviewListen(eventName, handler as (event: Event<unknown>) => void),
     );
@@ -70,6 +71,26 @@ describe("useAppEvents registration lifecycle", () => {
     expect(setActiveSection).toHaveBeenCalledWith("home");
     mounted.unmount();
     expect(listeners.get("hotkey-registration-failed")?.size).toBe(0);
+  });
+
+  it("routes tray and island events to main while the island is active", async () => {
+    const options = {
+      checkModels: vi.fn(async () => ({ hasModels: true })),
+      setActiveSection: vi.fn(), setSourceFilter: vi.fn(), openSettingsPane: vi.fn(),
+      setForceShowOnboarding: vi.fn(), forceOnboardingNeedsFreshAvailabilityRef: { current: false },
+    };
+    const mounted = renderHook(() => useAppEvents(options));
+    await act(async () => pendingOverview[0]());
+    await waitFor(() => expect(listeners.get("island-navigate")?.size).toBe(1));
+    eventCoordinator.setActiveWindow("pill");
+    act(() => {
+      for (const handler of listeners.get("main-navigate") ?? []) handler({ payload: { screen: "settings", pane: "shortcuts" } } as Event<unknown>);
+      for (const handler of listeners.get("island-navigate") ?? []) handler({ payload: "open_cloud_keys" } as Event<unknown>);
+    });
+    expect(options.openSettingsPane).toHaveBeenCalledWith("shortcuts");
+    expect(options.setSourceFilter).toHaveBeenCalledWith("cloud");
+    expect(options.setActiveSection).toHaveBeenCalledWith("transcription");
+    mounted.unmount();
   });
 
   it("an older cleanup cannot remove a replacement registration", async () => {

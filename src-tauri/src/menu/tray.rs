@@ -33,6 +33,7 @@ pub fn should_mark_model_selected(
     onboarding_done && model_name == current_model
 }
 
+#[cfg(test)]
 fn title_case_token(token: &str) -> String {
     if token.is_empty() {
         return String::new();
@@ -51,6 +52,7 @@ fn title_case_token(token: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn humanize_model_id(model_id: &str) -> String {
     let without_en = model_id.strip_suffix(".en").unwrap_or(model_id);
     let suffix = if without_en.len() != model_id.len() {
@@ -67,6 +69,7 @@ fn humanize_model_id(model_id: &str) -> String {
     format!("{}{}", name, suffix)
 }
 /// Formats the tray's model label given onboarding status and an optional resolved display name
+#[cfg(test)]
 pub fn format_tray_model_label(
     onboarding_done: bool,
     current_model: &str,
@@ -80,6 +83,7 @@ pub fn format_tray_model_label(
     }
 }
 
+#[cfg(test)]
 pub fn format_tray_polish_label(enabled: bool) -> &'static str {
     if enabled {
         "Polish: On"
@@ -114,9 +118,9 @@ pub(crate) fn latest_copyable_transcription_id(
         .map(|(timestamp, _)| timestamp.clone())
 }
 /// Build the tray menu with all submenus (models, microphones, recent transcriptions, recording mode)
-pub async fn build_tray_menu<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error>> {
+pub async fn build_tray_menu(
+    app: &tauri::AppHandle,
+) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     use std::time::Instant;
     let build_start = Instant::now();
     log::debug!("⏱️ [TRAY BUILD TIMING] build_tray_menu called");
@@ -152,7 +156,7 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
     // Get remote server info (active connection and saved connections)
     // Use CACHED data - do NOT make HTTP calls here (that would block tray menu for seconds)
     // The frontend/background tasks handle status polling separately
-    let (effective_active_id, active_remote_display, active_remote_model, remote_connections) = {
+    let (effective_active_id, _active_remote_display, active_remote_model, remote_connections) = {
         if let Some(remote_state) = app.try_state::<AsyncMutex<RemoteSettings>>() {
             log::debug!(
                 "⏱️ [TRAY BUILD TIMING] Acquiring remote_settings lock... (+{}ms)",
@@ -269,331 +273,197 @@ pub async fn build_tray_menu<R: tauri::Runtime>(
         (models, whisper_all)
     };
 
-    let model_submenu = if !available_models.is_empty() || !remote_connections.is_empty() {
-        let mut model_items: Vec<&dyn tauri::menu::IsMenuItem<_>> = Vec::new();
-        let mut model_check_items = Vec::new();
-        let mut separator_items = Vec::new();
-        let mut remote_header_items = Vec::new();
-        let mut remote_check_items = Vec::new();
-
-        // Add local models first
-        for (model_name, _display_name) in &available_models {
-            // Local model - only selected if no remote is active
-            let is_selected = effective_active_id.is_none()
-                && should_mark_model_selected(onboarding_done, model_name, &current_model);
-
-            let model_item = CheckMenuItem::with_id(
-                app,
-                format!("model_{}", model_name),
-                crate::pill::context::engine_short_name(model_name, model_name),
-                true,
-                is_selected,
-                None::<&str>,
-            )?;
-            model_check_items.push(model_item);
-        }
-
-        for item in &model_check_items {
-            model_items.push(item);
-        }
-
-        // Add remote servers section if any exist
-        if !remote_connections.is_empty() {
-            // Add separator
-            let sep = PredefinedMenuItem::separator(app)?;
-            separator_items.push(sep);
-            for item in &separator_items {
-                model_items.push(item);
-            }
-
-            // Add "Remote Voicetypr" header (disabled item)
-            let header = MenuItem::with_id(
-                app,
-                "remote_header",
-                "Remote Voicetypr",
-                false,
-                None::<&str>,
-            )?;
-            remote_header_items.push(header);
-            for item in &remote_header_items {
-                model_items.push(item);
-            }
-
-            // Add remote server items with format "ServerName - ModelName"
-            for (conn_id, conn_display, conn_model) in &remote_connections {
-                let model_id = format!("remote_{}", conn_id);
-                let display = if let Some(model) = conn_model {
-                    format!("{} - {}", conn_display, model)
-                } else {
-                    conn_display.clone()
-                };
-                let is_selected = effective_active_id.as_deref() == Some(conn_id.as_str());
-
-                let remote_item = CheckMenuItem::with_id(
-                    app,
-                    format!("model_{}", model_id),
-                    &display,
-                    true,
-                    is_selected,
-                    None::<&str>,
-                )?;
-                remote_check_items.push(remote_item);
-            }
-
-            for item in &remote_check_items {
-                model_items.push(item);
-            }
-        }
-
-        let effective_model = if active_remote_display.is_some() {
-            "remote".to_owned()
-        } else if onboarding_done {
-            current_model.clone()
+    let settings_store = app.store("settings")?;
+    let text = |key: &str, default: &str| {
+        settings_store
+            .get(key)
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| default.into())
+    };
+    let engine_hint = if effective_active_id.is_some() {
+        if crate::parakeet::models::AVAILABLE_MODELS
+            .iter()
+            .any(|m| Some(m.id) == active_remote_model.as_deref())
+        {
+            "parakeet".into()
         } else {
-            String::new()
-        };
-
-        let current_model_display = format_tray_model_label(
-            onboarding_done || effective_active_id.is_some(),
-            &effective_model,
-            Some(crate::pill::context::engine_short_name(
-                active_remote_model.as_deref().unwrap_or(&effective_model),
-                &effective_model,
-            )),
-        );
-
-        Some(Submenu::with_id_and_items(
-            app,
-            "models",
-            &current_model_display,
-            true,
-            &model_items,
-        )?)
-    } else {
-        None
-    };
-
-    let available_devices = if onboarding_done {
-        audio::recorder::AudioRecorder::get_devices()
-    } else {
-        Vec::new()
-    };
-
-    let microphone_submenu = if onboarding_done && !available_devices.is_empty() {
-        let mut mic_items: Vec<&dyn tauri::menu::IsMenuItem<_>> = Vec::new();
-        let mut mic_check_items = Vec::new();
-
-        let default_item = CheckMenuItem::with_id(
-            app,
-            "microphone_default",
-            "System Default",
-            true,
-            selected_microphone.is_none(),
-            None::<&str>,
-        )?;
-        mic_check_items.push(default_item);
-
-        for device_name in &available_devices {
-            let is_selected = selected_microphone.as_ref() == Some(device_name);
-            let mic_item = CheckMenuItem::with_id(
-                app,
-                format!("microphone_{}", device_name),
-                device_name,
-                true,
-                is_selected,
-                None::<&str>,
-            )?;
-            mic_check_items.push(mic_item);
+            "whisper".into()
         }
-
-        for item in &mic_check_items {
-            mic_items.push(item);
-        }
-
-        let current_mic_display = if let Some(ref mic_name) = selected_microphone {
-            format!("Microphone: {}", mic_name)
-        } else {
-            "Microphone: Default".to_string()
-        };
-
-        Some(Submenu::with_id_and_items(
-            app,
-            "microphones",
-            &current_mic_display,
-            true,
-            &mic_items,
-        )?)
     } else {
-        None
+        text("current_model_engine", "whisper")
     };
-
-    let polish_on_item = tauri::menu::CheckMenuItem::with_id(
-        app,
-        "polish_on",
-        "On",
-        true,
-        polish_enabled,
-        None::<&str>,
-    )?;
-    let polish_off_item = tauri::menu::CheckMenuItem::with_id(
-        app,
-        "polish_off",
-        "Off",
-        true,
-        !polish_enabled,
-        None::<&str>,
-    )?;
-
-    let mut recent_owned: Vec<tauri::menu::MenuItem<R>> = Vec::new();
-    let mut latest_copyable_id: Option<String> = None;
-    {
-        if let Ok(store) = app.store("transcriptions") {
-            let mut entries: Vec<(String, serde_json::Value)> = Vec::new();
-            for key in store.keys() {
-                if let Some(value) = store.get(&key) {
-                    entries.push((key.to_string(), value));
-                }
+    let effective_model = active_remote_model.as_deref().unwrap_or(&current_model);
+    let engine = if onboarding_done || effective_active_id.is_some() {
+        crate::pill::context::engine_short_name(effective_model, &engine_hint)
+    } else {
+        "None".into()
+    };
+    let mut engines = available_models
+        .into_iter()
+        .map(|(id, _)| {
+            let name = crate::pill::context::engine_short_name(&id, &id);
+            let group = if crate::cloud_stt::CloudProvider::from_id(&id).is_some() {
+                "cloud"
+            } else {
+                "local"
+            };
+            let selected = effective_active_id.is_none()
+                && should_mark_model_selected(onboarding_done, &id, &current_model);
+            (id, name, group.into(), selected)
+        })
+        .collect::<Vec<_>>();
+    for (id, display, model) in remote_connections {
+        let name = model
+            .map(|m| {
+                format!(
+                    "{} · {}",
+                    display,
+                    crate::pill::context::engine_short_name(&m, &m)
+                )
+            })
+            .unwrap_or(display);
+        let selected = effective_active_id.as_deref() == Some(&id);
+        engines.push((format!("remote_{id}"), name, "network".into(), selected));
+    }
+    let cloud_model =
+        crate::cloud_stt::CloudProvider::from_id(&engine_hint).map(|p| p.selected_model(app).id);
+    let languages = super::languages::supported(effective_model, &engine_hint, cloud_model);
+    let mut recent = Vec::new();
+    if let Ok(store) = app.store("transcriptions") {
+        let mut entries = store
+            .keys()
+            .into_iter()
+            .filter_map(|id| store.get(&id).map(|v| (id, v)))
+            .filter(|(_, v)| is_copyable_transcription_entry(v))
+            .collect::<Vec<_>>();
+        entries.sort_by(|a, b| b.0.cmp(&a.0));
+        for (id, entry) in entries.into_iter().take(5) {
+            let raw = entry["text"]
+                .as_str()
+                .unwrap_or_default()
+                .replace(['\n', '\r', '\t'], " ");
+            let mut preview = raw.chars().take(40).collect::<String>();
+            if raw.chars().count() > 40 {
+                preview.push('…');
             }
-            entries.sort_by(|a, b| b.0.cmp(&a.0));
-            latest_copyable_id = latest_copyable_transcription_id(&entries);
-            entries.truncate(5);
-
-            for (ts, entry) in entries {
-                let mut label = entry
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .map(|s| {
-                        let first_line = s.lines().next().unwrap_or("").trim();
-                        let char_count = first_line.chars().count();
-                        let mut preview: String = first_line.chars().take(40).collect();
-                        if char_count > 40 {
-                            preview.push('\u{2026}');
-                        }
-                        if preview.is_empty() {
-                            "(empty)".to_string()
-                        } else {
-                            preview
-                        }
-                    })
-                    .unwrap_or_else(|| "(unknown)".to_string());
-
-                if label.is_empty() {
-                    label = "(empty)".to_string();
-                }
-
-                let item = tauri::menu::MenuItem::with_id(
-                    app,
-                    format!("recent_copy_{}", ts),
-                    label,
-                    true,
-                    None::<&str>,
-                )?;
-                recent_owned.push(item);
-            }
+            let age = chrono::DateTime::parse_from_rfc3339(&id)
+                .ok()
+                .map(|ts| {
+                    relative_time(
+                        (chrono::Utc::now() - ts.with_timezone(&chrono::Utc)).num_seconds(),
+                    )
+                })
+                .unwrap_or_else(|| "earlier".into());
+            recent.push((id, format!("{preview} · {age}")));
         }
     }
-    let mut recent_refs: Vec<&dyn tauri::menu::IsMenuItem<_>> = Vec::new();
-    for item in &recent_owned {
-        recent_refs.push(item);
-    }
-
-    let (toggle_item, ptt_item) = {
-        let recording_mode = match app.store("settings") {
-            Ok(store) => store
-                .get("recording_mode")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "toggle".to_string()),
-            Err(_) => "toggle".to_string(),
-        };
-
-        let toggle = tauri::menu::CheckMenuItem::with_id(
-            app,
-            "recording_mode_toggle",
-            "Toggle",
-            true,
-            recording_mode == "toggle",
-            None::<&str>,
-        )?;
-        let ptt = tauri::menu::CheckMenuItem::with_id(
-            app,
-            "recording_mode_push_to_talk",
-            "Push-to-Talk",
-            true,
-            recording_mode == "push_to_talk",
-            None::<&str>,
-        )?;
-        (toggle, ptt)
-    };
-
-    let copy_last_i = MenuItem::with_id(
-        app,
-        "copy_last_transcription",
-        "Copy Last Transcription",
-        latest_copyable_id.is_some(),
-        None::<&str>,
-    )?;
-    let separator1 = PredefinedMenuItem::separator(app)?;
-    let settings_i = MenuItem::with_id(app, "dashboard", "Dashboard", true, None::<&str>)?;
-    let check_updates_i = if crate::commands::distribution::is_store_install() {
-        None
+    let preset = settings_store
+        .get("enhancement_options")
+        .and_then(|v| serde_json::from_value::<crate::ai::prompts::EnhancementOptions>(v).ok())
+        .map(|o| o.preset);
+    let polish = if polish_enabled {
+        preset.map(super::actions::style_label).unwrap_or("Clean")
     } else {
-        Some(MenuItem::with_id(
-            app,
-            "check_updates",
-            "Check for Updates",
-            true,
-            None::<&str>,
-        )?)
+        "Off"
     };
-    let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit Voicetypr", true, None::<&str>)?;
-
-    let mut menu_builder = MenuBuilder::new(app);
-
-    if let Some(model_submenu) = model_submenu {
-        menu_builder = menu_builder.item(&model_submenu);
-    }
-
-    if let Some(microphone_submenu) = microphone_submenu {
-        menu_builder = menu_builder.item(&microphone_submenu);
-    }
-
-    let polish_items: Vec<&dyn tauri::menu::IsMenuItem<_>> =
-        vec![&polish_on_item, &polish_off_item];
-    let polish_submenu = Submenu::with_id_and_items(
-        app,
-        "polish",
-        format_tray_polish_label(polish_enabled),
-        true,
-        &polish_items,
-    )?;
-    menu_builder = menu_builder.item(&polish_submenu);
-
-    menu_builder = menu_builder.item(&copy_last_i);
-    if !recent_refs.is_empty() {
-        let recent_submenu =
-            Submenu::with_id_and_items(app, "recent", "Recent Transcriptions", true, &recent_refs)?;
-        menu_builder = menu_builder.item(&recent_submenu);
-    }
-
-    let mode_items: Vec<&dyn tauri::menu::IsMenuItem<_>> = vec![&toggle_item, &ptt_item];
-    let mode_submenu =
-        Submenu::with_id_and_items(app, "recording_mode", "Recording Mode", true, &mode_items)?;
-    menu_builder = menu_builder.item(&mode_submenu);
-
-    let mut menu_builder = menu_builder.item(&separator1).item(&settings_i);
-
-    if let Some(check_updates_i) = &check_updates_i {
-        menu_builder = menu_builder.item(check_updates_i);
-    }
-
-    let menu = menu_builder.item(&separator2).item(&quit_i).build()?;
-
+    let (recording, blocked) = super::runtime::snapshot();
+    let shortcut = super::runtime::shortcut_text(app);
+    let (kept, kept_busy) = if let Some((id, _, busy)) = crate::recording::kept::tray_recovery() {
+        let alternative = crate::recording::kept::local_alternative(app)
+            .await
+            .map(|(m, e)| crate::pill::context::engine_short_name(&m, &e));
+        (Some((id, alternative)), busy)
+    } else {
+        (None, false)
+    };
+    let snapshot = super::model::Snapshot {
+        windows: cfg!(target_os = "windows"),
+        engine,
+        recording,
+        blocked,
+        kept,
+        kept_busy,
+        shortcut,
+        polish: polish.into(),
+        engines,
+        mic: selected_microphone,
+        devices: audio::recorder::AudioRecorder::get_devices(),
+        language: text("speech_language", "en"),
+        languages,
+        hold: text("recording_mode", "toggle") == "push_to_talk",
+        preview: text("transcription_mode", "regular") == "live_preview",
+        recent,
+        updates: !crate::commands::distribution::is_store_install(),
+    };
+    let menu = render(app, &super::model::build(&snapshot))?;
     log::debug!(
         "⏱️ [TRAY BUILD TIMING] build_tray_menu COMPLETE - total: {}ms",
         build_start.elapsed().as_millis()
     );
     Ok(menu)
+}
+
+fn render<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    items: &[super::model::Item],
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    let menu = MenuBuilder::new(app).build()?;
+    for item in items {
+        menu.append(&render_item(app, item)?)?;
+    }
+    Ok(menu)
+}
+fn render_item<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    item: &super::model::Item,
+) -> tauri::Result<tauri::menu::MenuItemKind<R>> {
+    use super::model::Item;
+    use tauri::menu::MenuItemKind;
+    Ok(match item {
+        Item::Separator => MenuItemKind::Predefined(PredefinedMenuItem::separator(app)?),
+        Item::Action {
+            id,
+            label,
+            enabled,
+            checked: Some(checked),
+            accelerator,
+        } => MenuItemKind::Check(CheckMenuItem::with_id(
+            app,
+            id,
+            label,
+            *enabled,
+            *checked,
+            accelerator.as_deref(),
+        )?),
+        Item::Action {
+            id,
+            label,
+            enabled,
+            accelerator,
+            ..
+        } => MenuItemKind::MenuItem(MenuItem::with_id(
+            app,
+            id,
+            label,
+            *enabled,
+            accelerator.as_deref(),
+        )?),
+        Item::Submenu { id, label, items } => {
+            let submenu = Submenu::with_id(app, id, label, true)?;
+            for child in items {
+                submenu.append(&render_item(app, child)?)?;
+            }
+            MenuItemKind::Submenu(submenu)
+        }
+    })
+}
+fn relative_time(seconds: i64) -> String {
+    match seconds.max(0) {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{}m ago", seconds / 60),
+        3600..=86399 => format!("{}h ago", seconds / 3600),
+        _ => format!("{}d ago", seconds / 86400),
+    }
 }
 
 #[cfg(test)]

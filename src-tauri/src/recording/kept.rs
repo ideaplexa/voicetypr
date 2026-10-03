@@ -167,11 +167,12 @@ impl Store {
         }
     }
 }
-pub fn discard_generation(generation: u64) {
+pub fn discard_generation(app: &AppHandle, generation: u64) {
     STORE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .discard_generation(generation);
+    crate::menu::runtime::refresh(app);
 }
 pub fn has_generation(generation: u64) -> bool {
     STORE
@@ -180,6 +181,23 @@ pub fn has_generation(generation: u64) -> bool {
         .clips
         .iter()
         .any(|c| c.recovery.generation == generation && c.expires > Instant::now())
+}
+/// Opaque recovery ID and display name only; never expose the private audio path.
+pub fn tray_recovery() -> Option<(String, Option<String>, bool)> {
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clips
+        .iter()
+        .rev()
+        .find(|c| c.expires > Instant::now())
+        .map(|c| {
+            (
+                c.recovery.id.clone(),
+                c.recovery.alt_engine_short.clone(),
+                c.busy,
+            )
+        })
 }
 pub fn cleanup() {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
@@ -236,6 +254,7 @@ pub async fn keep(
     let expires_in_ms = recovery.expires_in_ms;
     audio::clear_in_flight_transcription_audio_for_generation(generation);
     let expiry_id = id.clone();
+    let expiry_app = app.clone();
     tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(expires_in_ms);
         loop {
@@ -263,6 +282,7 @@ pub async fn keep(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .discard(&expiry_id);
+        crate::menu::runtime::refresh(&expiry_app);
     });
     let alternative = local_alternative(app).await;
     let store_settings = app.store("settings").ok();
@@ -301,6 +321,8 @@ pub async fn keep(
             emit_recovery(app, &clip.recovery);
         }
     }
+    drop(store);
+    crate::menu::runtime::refresh(app);
     Ok(())
 }
 fn move_finalized(source: &Path, target: &Path) -> bool {
@@ -386,6 +408,7 @@ pub fn discard_kept_dictation(app: AppHandle, id: String) {
         app.state::<crate::AppState>().request_cancellation();
     }
     STORE.lock().unwrap_or_else(|e| e.into_inner()).discard(&id);
+    crate::menu::runtime::refresh(&app);
 }
 #[tauri::command]
 pub async fn retry_kept_dictation(
@@ -437,6 +460,7 @@ async fn retry(
     crate::update_recording_state(&app, crate::RecordingState::Recording, None);
     crate::update_recording_state(&app, crate::RecordingState::Stopping, None);
     crate::update_recording_state(&app, crate::RecordingState::Transcribing, None);
+    crate::menu::runtime::refresh(&app);
     let result = retry_inner(&app, &lease, generation, engine).await;
     if !audio::recording_generation_is_stale(generation) {
         crate::update_recording_state(&app, crate::RecordingState::Idle, None);
@@ -454,6 +478,8 @@ async fn retry(
             emit_recovery(&app, &clip.recovery);
         }
     }
+    drop(store);
+    crate::menu::runtime::refresh(&app);
     result.map_err(|_| "Retry failed; recording remains available until expiry".into())
 }
 async fn retry_inner(

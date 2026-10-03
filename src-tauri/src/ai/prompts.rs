@@ -185,7 +185,7 @@ pub fn enhancement_options_for_ai_enabled(
     };
     let expected = EnhancementOptions::default_for_ai_enabled(ai_enabled);
 
-    Ok(if stored.preset == expected.preset {
+    Ok(if stored.preset.requires_ai_formatting() == ai_enabled {
         stored
     } else {
         expected

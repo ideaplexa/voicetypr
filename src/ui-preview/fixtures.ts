@@ -226,7 +226,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "open_dashboard",
-    label: "Open Dashboard",
+    label: "Open Voicetypr",
     description: "Show the main window.",
     section: "App",
     recommended_trigger: "pressed",

@@ -11,7 +11,8 @@ import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import type { ScreenId } from "../navigation";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
+import { islandDestination, routeMainNavigation, type MainNavigate, type IslandNavigate } from "@/components/app/mainNavigation";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import { updateService } from "@/services/updateService";
 import { createLogger } from "@/lib/logger";
@@ -34,6 +35,7 @@ interface ErrorEventPayload {
 }
 
 interface UseAppEventsOptions {
+  openSettingsPane?: (pane: SettingsPane) => void;
   checkModels: () => Promise<{ hasModels: boolean | null }>;
   setActiveSection: Dispatch<SetStateAction<ScreenId>>;
   setSourceFilter: (filter: SourceFilter) => void;
@@ -43,6 +45,7 @@ interface UseAppEventsOptions {
 
 export function useAppEvents({
   checkModels,
+  openSettingsPane,
   setActiveSection,
   setSourceFilter,
   setForceShowOnboarding,
@@ -79,6 +82,13 @@ export function useAppEvents({
       try {
         await register("navigate-to-overview", () => {
           setActiveSection("home");
+        });
+
+        await register<MainNavigate>("main-navigate", (destination) => {
+          routeMainNavigation(destination, setActiveSection, setSourceFilter, openSettingsPane);
+        });
+        await register<IslandNavigate>("island-navigate", (action) => {
+          routeMainNavigation(islandDestination(action), setActiveSection, setSourceFilter, openSettingsPane);
         });
 
         await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {
@@ -249,6 +259,7 @@ export function useAppEvents({
     };
   }, [
     registerEvent,
+    openSettingsPane,
     setActiveSection,
     setSourceFilter,
     setForceShowOnboarding,

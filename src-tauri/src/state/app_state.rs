@@ -267,6 +267,7 @@ pub fn update_recording_state(
         "error": error
     });
 
+    crate::menu::runtime::recording_changed(app, final_state);
     let _ = app.emit("recording-state-changed", payload);
 }
 
@@ -283,6 +284,9 @@ pub fn emit_to_window(
     event: &str,
     payload: impl serde::Serialize,
 ) -> Result<(), String> {
+    if event == "history-updated" {
+        crate::menu::runtime::refresh(app);
+    }
     let app_state = app.state::<AppState>();
     app_state.emit_to_window(window, event, payload)
 }

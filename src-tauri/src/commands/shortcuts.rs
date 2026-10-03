@@ -201,7 +201,10 @@ pub fn get_shortcut_settings(app: AppHandle) -> Result<ShortcutSettings, String>
     load_shortcut_settings(&app)
 }
 
-const FALLBACK_PRIMARY: &str = "CommandOrControl+Shift+Space";
+#[cfg(target_os = "windows")]
+pub(crate) const FALLBACK_PRIMARY: &str = "Control+Alt+Space";
+#[cfg(not(target_os = "windows"))]
+pub(crate) const FALLBACK_PRIMARY: &str = "CommandOrControl+Shift+Space";
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -950,7 +953,7 @@ fn current_existing_shortcuts(app: &AppHandle) -> ExistingShortcutStrings {
     let primary_hotkey = store
         .get("hotkey")
         .and_then(|value| value.as_str().map(str::to_string))
-        .or_else(|| Some("CommandOrControl+Shift+Space".to_string()));
+        .or_else(|| Some(FALLBACK_PRIMARY.to_string()));
 
     let recording_mode = store
         .get("recording_mode")
@@ -1072,9 +1075,9 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::OpenDashboard,
-            label: "Open dashboard",
-            description: "Focus the Voicetypr dashboard.",
-            section: "Dashboard",
+            label: "Open Voicetypr",
+            description: "Focus the Voicetypr main window.",
+            section: "Voicetypr",
             recommended_trigger: ShortcutTrigger::Pressed,
             allows_single_key: true,
         },
