@@ -1,7 +1,7 @@
 use crate::{cancel_recording, get_recording_state, AppState, RecordingState};
 use keytrigger::KeyPhase;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Handle ESC key press during recording
 ///
@@ -53,7 +53,23 @@ async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
     app_state.esc_pressed_once.store(true, Ordering::SeqCst);
 
     // Show pill toast for ESC warning (2 seconds)
-    crate::commands::audio::pill_toast(app_handle, "Press ESC again to cancel", 2000);
+    let phase = escape_phase(get_recording_state(app_handle));
+    let _ = app_handle.emit_to(
+        "pill",
+        "escape-hint",
+        serde_json::json!({
+            "generation": crate::commands::audio::current_recording_generation(), "phase": phase
+        }),
+    );
+    crate::commands::audio::pill_toast(
+        app_handle,
+        if phase == "transcribing" {
+            "Press ESC again to discard"
+        } else {
+            "Press ESC again to cancel"
+        },
+        2000,
+    );
 
     // Set timeout to reset ESC state after 2 seconds
     let app_for_timeout = app_handle.clone();
@@ -104,4 +120,21 @@ async fn handle_second_esc_press(app_state: &AppState, app_handle: &AppHandle) {
             log::error!("Failed to cancel recording: {}", e);
         }
     });
+}
+
+fn escape_phase(state: RecordingState) -> &'static str {
+    if state == RecordingState::Transcribing {
+        "transcribing"
+    } else {
+        "recording"
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn first_escape_names_the_transcribing_phase_including_polish() {
+        assert_eq!(escape_phase(RecordingState::Transcribing), "transcribing");
+        assert_eq!(escape_phase(RecordingState::Recording), "recording");
+    }
 }

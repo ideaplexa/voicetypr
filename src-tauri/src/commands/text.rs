@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 // rdev keyboard simulation (Linux paste only; macOS uses core-graphics, Windows uses Win32 SendInput).
@@ -145,18 +145,28 @@ async fn insert_text_with_generation(
 
     let words = text.split_whitespace().count() as u32;
     let outcome_app = app.clone();
+    let outcome_app_for_commit = app.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         // Apply trailing sentence space only at the insertion boundary,
         // so stored transcription history remains clean.
         let insertable_text = ensure_trailing_sentence_space(&text);
         // Always use clipboard method for reliability and to prevent duplicate insertion
         // This function handles both copying to clipboard and pasting at cursor
-        insert_via_clipboard(
-            insertable_text,
-            has_accessibility_permission,
-            Some(app),
-            keep_transcription_in_clipboard,
-        )
+        let commit = || {
+            insert_via_clipboard(
+                insertable_text,
+                has_accessibility_permission,
+                Some(app),
+                keep_transcription_in_clipboard,
+            )
+        };
+        if let Some(generation) = generation {
+            let state = outcome_app_for_commit.state::<crate::AppState>();
+            crate::commands::audio::persist_if_current(&state, generation, commit)
+                .ok_or_else(|| "Dictation discarded".to_string())?
+        } else {
+            commit()
+        }
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))??;
@@ -188,6 +198,26 @@ pub async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     .await
     .map_err(|e| format!("Task failed: {}", e))?
 }
+pub(crate) async fn copy_dictation_text_to_clipboard(
+    app: tauri::AppHandle,
+    text: String,
+    generation: u64,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<crate::AppState>();
+        crate::commands::audio::persist_if_current(&state, generation, || {
+            let mut clipboard =
+                Clipboard::new().map_err(|_| "Clipboard unavailable".to_string())?;
+            clipboard
+                .set_text(text)
+                .map_err(|_| "Clipboard copy failed".to_string())
+        })
+        .ok_or_else(|| "Dictation discarded".to_string())?
+    })
+    .await
+    .map_err(|_| "Clipboard copy failed".to_string())?
+}
+
 /// Minimal clipboard seam so insertion sequencing is unit-testable.
 trait ClipboardOps {
     fn get_text(&mut self) -> Result<String, String>;
