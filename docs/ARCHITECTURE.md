@@ -6,10 +6,9 @@ rules agents must follow live in [`AGENTS.md`](../AGENTS.md).
 ## Repository map
 
 ```
-src/                         React main window, pill, toast
+src/                         React main window and vanilla DOM island
   main.tsx / App.tsx         main window; provider stack in App.tsx
   pill.tsx, pill.css         pill window — vanilla DOM, no React
-  toast.tsx                  feedback toast window
   components/
     AppContainer.tsx         onboarding vs app; bootstrap/events in components/app/
     AppShell.tsx, Sidebar.tsx, navigation.ts   shell + nav (ScreenId is the route source of truth)
