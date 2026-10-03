@@ -4960,7 +4960,10 @@ fn spawn_island_context(
         let capture_app = app.clone();
         let context = tauri::async_runtime::spawn_blocking(move || {
             if !recording_generation_is_stale(generation) {
-                crate::pill::positioning::install(crate::pill::positioning::snapshot(&capture_app));
+                crate::pill::positioning::install(
+                    generation,
+                    crate::pill::positioning::snapshot(&capture_app),
+                );
             }
             crate::pill::context::capture(&capture_app)
         })
@@ -5133,9 +5136,6 @@ pub async fn start_recording(
             app_state.set_recording_app_context(hint);
         }
     }
-    // Drop the previous take's pinned monitor; the island uses the live one until
-    // this take's snapshot is installed after first audio.
-    crate::pill::positioning::install(None);
     update_recording_state(&app, RecordingState::Starting, None);
     // Ensure transition actually happened; if blocked, abort early
     if !matches!(

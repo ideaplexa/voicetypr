@@ -277,7 +277,10 @@ impl WindowManager {
         .minimizable(false)
         .always_on_top(true)
         .visible_on_all_workspaces(true)
-        .content_protected(true)
+        // Debug builds can opt out so E2E runs can screenshot the island.
+        .content_protected(
+            !cfg!(debug_assertions) || std::env::var_os("VOICETYPR_E2E_CAPTURE_PILL").is_none(),
+        )
         .decorations(false)
         .transparent(true)
         .shadow(false) // Disabled to fix Windows transparency issue

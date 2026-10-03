@@ -150,7 +150,7 @@ async function launch(bin, home, paths) {
   const fd = openSync(join(home, "app-stdout.log"), "w");
   // Tauri's dirs crate follows HOME; Foundation's homeDirectoryForCurrentUser
   // (used by FluidAudio's Swift sidecar) follows CFFIXED_USER_HOME on macOS.
-  const child = spawn(bin, [], { env: { ...process.env, HOME: home, CFFIXED_USER_HOME: home }, stdio: ["ignore", fd, fd] });
+  const child = spawn(bin, [], { env: { ...process.env, HOME: home, CFFIXED_USER_HOME: home, VOICETYPR_E2E_CAPTURE_PILL: "1" }, stdio: ["ignore", fd, fd] });
   closeSync(fd);
   let spawnError;
   child.on("error", (error) => { spawnError = error; });

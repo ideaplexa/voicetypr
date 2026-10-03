@@ -1,13 +1,21 @@
-//! Select the destination display before any recording-start awaits/UI work.
+//! The island's display: pinned per take once audio flows, live otherwise.
 use std::sync::Mutex;
 use tauri::{AppHandle, Monitor};
-static START_MONITOR: Mutex<Option<Monitor>> = Mutex::new(None);
+/// The take's display, tagged with its recording generation.
+static START_MONITOR: Mutex<Option<(u64, Monitor)>> = Mutex::new(None);
 
 pub fn snapshot(app: &AppHandle) -> Option<Monitor> {
     live_monitor(app)
 }
-pub fn install(monitor: Option<Monitor>) {
-    *START_MONITOR.lock().unwrap() = monitor;
+/// A late lookup from an older take never replaces a newer take's pin.
+pub fn install(generation: u64, monitor: Option<Monitor>) {
+    let mut pin = START_MONITOR.lock().unwrap();
+    if replaces(pin.as_ref().map(|(pinned, _)| *pinned), generation) {
+        *pin = monitor.map(|monitor| (generation, monitor));
+    }
+}
+fn replaces(pinned: Option<u64>, generation: u64) -> bool {
+    pinned.is_none_or(|pinned| pinned <= generation)
 }
 pub fn monitor(app: &AppHandle) -> Option<Monitor> {
     if matches!(
@@ -17,8 +25,10 @@ pub fn monitor(app: &AppHandle) -> Option<Monitor> {
             | crate::RecordingState::Stopping
             | crate::RecordingState::Transcribing
     ) {
-        if let Some(monitor) = START_MONITOR.lock().unwrap().clone() {
-            return Some(monitor);
+        if let Some((generation, monitor)) = START_MONITOR.lock().unwrap().clone() {
+            if generation == crate::commands::audio::current_recording_generation() {
+                return Some(monitor);
+            }
         }
     }
     live_monitor(app)
@@ -114,5 +124,12 @@ mod tests {
         );
         assert_eq!(select_area(full, full), full);
         assert_eq!(select_area((0, 0, 0, 0), full), full);
+    }
+    #[test]
+    fn an_older_take_never_replaces_a_newer_pin() {
+        assert!(replaces(None, 1));
+        assert!(replaces(Some(3), 3));
+        assert!(replaces(Some(3), 4));
+        assert!(!replaces(Some(4), 3));
     }
 }
