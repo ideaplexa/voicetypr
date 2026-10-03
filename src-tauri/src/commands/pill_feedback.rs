@@ -14,7 +14,7 @@ fn pill_focus_safe() -> bool {
     cfg!(any(target_os = "macos", target_os = "windows"))
 }
 
-fn pill_mode<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
+pub(crate) fn pill_mode<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
     let store = app.store("settings").ok();
     resolve_pill_indicator_mode(
         store
@@ -121,6 +121,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn never_releases_even_sticky_feedback_ownership() {
+        assert!(!super::owns_feedback("never", true));
+        assert!(!super::owns_feedback("never", false));
+        assert!(super::owns_feedback("always", true));
+        assert!(super::owns_feedback("when_recording", true));
+    }
+    #[test]
     fn terminal_timeouts_match_frontend_feedback() {
         assert_eq!(terminal_timeout_ms("pasted"), Some(2400));
         assert_eq!(terminal_timeout_ms("copied"), None);
@@ -153,6 +160,12 @@ mod tests {
 static FEEDBACK_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static QUEUED: Mutex<Vec<(&'static str, serde_json::Value)>> = Mutex::new(Vec::new());
+pub(crate) fn release_feedback_ownership() {
+    FEEDBACK_OWNED.store(false, Ordering::SeqCst);
+}
+fn owns_feedback(mode: &str, visible: bool) -> bool {
+    visible && mode != "never"
+}
 pub(crate) fn feedback_owned() -> bool {
     FEEDBACK_OWNED.load(Ordering::SeqCst)
 }
@@ -195,7 +208,11 @@ pub fn pill_feedback_ready(app: AppHandle) {
 }
 #[tauri::command]
 pub async fn pill_feedback_visible(app: AppHandle, visible: bool) -> Result<(), String> {
-    FEEDBACK_OWNED.store(visible, Ordering::SeqCst);
+    let mode = pill_mode(&app);
+    FEEDBACK_OWNED.store(owns_feedback(&mode, visible), Ordering::SeqCst);
+    if mode == "never" {
+        return crate::commands::window::hide_pill_widget(app).await;
+    }
     if !visible
         && crate::get_recording_state(&app) == crate::RecordingState::Idle
         && pill_mode(&app) == "when_recording"

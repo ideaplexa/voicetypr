@@ -368,7 +368,10 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::SeqCst);
 
         assert!(
-            crate::commands::audio::ptt_key_released(&app_state),
+            crate::commands::audio::ptt_key_released(
+                &app_state,
+                crate::recording::start_source::StartSource::Hotkey
+            ),
             "PTT guard should abort when key is not held"
         );
     }
@@ -392,7 +395,10 @@ mod tests {
         .join();
 
         assert!(
-            crate::commands::audio::ptt_key_released(&app_state),
+            crate::commands::audio::ptt_key_released(
+                &app_state,
+                crate::recording::start_source::StartSource::Hotkey
+            ),
             "PTT guard should recover poisoned mode lock and still detect released key"
         );
     }
@@ -413,7 +419,10 @@ mod tests {
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
         assert!(
-            !crate::commands::audio::ptt_key_released(&app_state),
+            !crate::commands::audio::ptt_key_released(
+                &app_state,
+                crate::recording::start_source::StartSource::Hotkey
+            ),
             "PTT guard should NOT abort when key is still held"
         );
     }
@@ -435,7 +444,10 @@ mod tests {
         assert_eq!(mode, crate::RecordingMode::Toggle);
 
         assert!(
-            !crate::commands::audio::ptt_key_released(&app_state),
+            !crate::commands::audio::ptt_key_released(
+                &app_state,
+                crate::recording::start_source::StartSource::Hotkey
+            ),
             "PTT guard should not affect toggle mode"
         );
     }

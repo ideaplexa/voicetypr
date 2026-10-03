@@ -38,6 +38,7 @@ pub struct QuickOptions {
     language: Choices,
     shortcut_caps: ShortcutCaps,
     mic_ok: bool,
+    polish_context: Option<crate::pill::context::EffectivePolish>,
 }
 fn children<'a>(items: &'a [Item], name: &str) -> &'a [Item] {
     items
@@ -158,6 +159,7 @@ fn project(s: &Snapshot) -> QuickOptions {
             keys: caps,
         },
         mic_ok,
+        polish_context: None,
     }
 }
 #[tauri::command]
@@ -166,6 +168,7 @@ pub async fn island_quick_options(app: AppHandle) -> Result<QuickOptions, String
         .await
         .map_err(|_| "Quick settings unavailable")?;
     let mut options = project(&snapshot);
+    options.polish_context = crate::pill::context::effective_polish(&app);
     if let Ok(primary) = crate::commands::shortcuts::get_effective_primary_shortcut(app) {
         options.shortcut_caps.mode = primary.mode;
     }

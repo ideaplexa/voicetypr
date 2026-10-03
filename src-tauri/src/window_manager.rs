@@ -344,6 +344,9 @@ impl WindowManager {
 
     /// Hide the pill window (don't close it) with retry logic
     pub async fn hide_pill_window(&self) -> Result<(), String> {
+        if crate::commands::pill_feedback::pill_mode(&self.app_handle) == "never" {
+            crate::commands::pill_feedback::release_feedback_ownership();
+        }
         if crate::commands::pill_feedback::feedback_owned() {
             return Ok(());
         }

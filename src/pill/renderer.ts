@@ -165,7 +165,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.root.dataset.platform = deps.mac ? 'macos' : 'windows';
     dom.root.dataset.reducedMotion = String(reduced);
     dom.surface.hidden = mode === 'never' || (rest && mode !== 'always' && !stack.present);
-    const owns = stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state);
+    const owns = mode !== 'never' && (stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state));
     if (owns !== feedbackOwned) { feedbackOwned=owns; void deps.actions.feedbackVisible?.(owns).catch(() => {}); }
     dom.root.dataset.visible = String(!dom.surface.hidden);
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
@@ -332,9 +332,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const renderPick = () => {
     if (!pick || !quick) return;
     const list = dom.get<HTMLElement>('.pick-list'); list.replaceChildren();
-    text('.pick-title', pick.from === 'start' ? 'Style for this dictation' : quickTitles[pick.kind]);
+    text('.pick-title', quickTitles[pick.kind]);
     const kind = pick.kind;
-    for (const row of quickRows(quick, kind)) {
+    const rows = [...quickRows(quick, kind)];
+    if (kind === 'polish' && pick.from === 'start' && quick.polish_context?.overridden) rows.push({id:'header:app-style',label:`${quick.polish_context.app_name} uses ${styleName(machine.context)}`,checked:false,disabled:true});
+    for (const row of rows) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'pick-option';
       button.disabled = row.disabled === true || quickPending;
       button.setAttribute('role', 'option'); button.setAttribute('aria-selected', String(row.checked));
@@ -352,9 +354,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
           for (const item of quickRows(quick, kind)) if (!item.id.startsWith('header:')) item.checked = item.id === row.id;
           if (!confirmed) quick[kind].current = row.label;
           if (kind === 'mic' && !confirmed) quick.mic_ok = true;
-          if (active.from === 'start') {
-            machine.context.polish.style = row.label === 'Off' ? null : row.label.toLowerCase();
-          }
           renderPick();
           if (pickTimer !== undefined) deps.clearTimeout(pickTimer);
           pickTimer = deps.setTimeout(() => { pickTimer = undefined; if (pick === active) closePick(); }, 350);
@@ -369,7 +368,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (startTimer !== undefined) { deps.clearTimeout(startTimer); startTimer = undefined; }
     if (hoverTimer !== undefined) { deps.clearTimeout(hoverTimer); hoverTimer = undefined; }
     const rows = quickRows(quick, kind);
-    if (machine.state === 'start') for (const row of rows) row.checked = row.label.toLowerCase() === machine.context.polish.style?.toLowerCase();
     const placement = pickPlacement(chip.getBoundingClientRect(), rows, top, dom.root.clientHeight || 420);
     pick = { kind, from: machine.state === 'start' ? 'start' : 'peek', width: Math.max(300, W.to), ...placement };
     pickGuard.open(performance.now(), pointerX, pointerY);
@@ -405,20 +403,32 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   dom.get<HTMLButtonElement>('.skip').onclick = () => { void deps.actions.skip?.(); };
   dom.get<HTMLButtonElement>('.dismiss').onclick = () => { rest(); if (mode === 'when_recording') void deps.actions.dismiss(); };
   dom.surface.onclick = e => {
-    if (pick || clickPending || machine.state !== 'rest' && machine.state !== 'peek') return;
     const target = e.target as HTMLElement;
-    if (target.closest('.chip')) return;
+    if (pick || target.closest('.chip')) return;
+    if (machine.recording) {
+      if (!target.closest('button') && !stopPending) {
+        stopPending = true; sync();
+        void deps.actions.stop().catch(() => { if (!destroyed) { stopPending = false; sync(); } });
+      }
+      return;
+    }
+    if (clickPending || machine.state !== 'rest' && machine.state !== 'peek') return;
     if (performance.now() - entered < 120) return;
     clickPending = true;
     // Backend owns generation and returns whether this call started a take. Real events drive rendering.
-    void deps.actions.start().catch(() => {}).finally(() => { clickPending = false; });
+    void deps.actions.start().catch(() => { if (!destroyed) stack.push(noticeCard({kind:'recording_failed'})); sync(); }).finally(() => { clickPending = false; });
   };
   const motionChanged = () => { reduced = media.matches; sync(); };
   media.addEventListener('change', motionChanged);
   applyPillGeometry(dom.root, geometry); contextText(); sync();
   return {
     machine,
-    quickOptions(value: QuickOptions) { if (!value?.polish || !value.engine || !value.shortcut_caps) return; quick = value; contextText(); if (pick) renderPick(); sync(); },
+    quickOptions(value: QuickOptions) { if (!value?.polish || !value.engine || !value.shortcut_caps) return; quick = value;
+      if (machine.recording && value.polish_context?.generation === machine.context.generation) {
+        machine.context.polish.style = value.polish_context.style;
+        machine.context.polish.will_run = value.polish_context.will_run;
+      }
+      contextText(); if (pick) renderPick(); sync(); },
     closeQuick() { if (pick) closePick(); else if (machine.state === 'peek') rest(); },
     get feedbackActive() { return stack.active; },
     settings(value: PillSettings) { shortcut = value.recording_mode === 'push_to_talk' ? value.ptt_hotkey ?? shortcut : value.hotkey ?? shortcut; contextText(); mode = value.pill_indicator_mode ?? 'when_recording'; enabledStream = value.transcription_mode === 'live_preview' || value.streaming_preview_enabled === true; if (!enabledStream) machine.clearStream(); sync(); },

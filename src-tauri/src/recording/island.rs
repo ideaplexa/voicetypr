@@ -73,6 +73,7 @@ pub enum Note {
         captured_ms: u64,
     },
     MicSilent,
+    StorageFailed,
     TranslateFailed,
     ModelFallback {
         engine_short: String,
@@ -387,6 +388,7 @@ mod tests {
         }
         for note in [
             Note::MicSilent,
+            Note::StorageFailed,
             Note::TranslateFailed,
             Note::ModelFallback {
                 engine_short: "Whisper Large".into(),

@@ -889,7 +889,7 @@ pub async fn save_settings(
         json!(settings.play_sound_on_paste_success),
     );
     store.delete("play_sound_on_recording_end");
-    store.set("pill_indicator_mode", json!(settings.pill_indicator_mode));
+    save_pill_indicator_mode(&store, &settings.pill_indicator_mode);
     store.set(
         "island_start_details",
         json!(normalize_island_start_details(
@@ -1497,6 +1497,11 @@ pub async fn set_model_from_tray(app: AppHandle, model_name: String) -> Result<(
 
 /// Increment the tray menu generation and return the new value.
 /// Used by callers who want to spawn background updates.
+fn save_pill_indicator_mode<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>, mode: &str) {
+    store.set("pill_indicator_mode", json!(mode));
+    store.delete("show_pill_indicator");
+}
+
 pub fn next_tray_menu_generation() -> u64 {
     TRAY_MENU_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
 }
@@ -1525,15 +1530,23 @@ pub async fn update_tray_menu_with_generation(
         .unwrap_or_default();
     log::debug!("⏱️ [TRAY TIMING] update_tray_menu called{}", gen_info);
 
+    let generation = my_generation.unwrap_or_else(next_tray_menu_generation);
+    if !crate::menu::refresh::wait_for_latest(&TRAY_MENU_GENERATION, generation).await {
+        return Ok(());
+    }
+
     // Build the new menu
     log::debug!(
         "⏱️ [TRAY TIMING] Building tray menu...{} (+{}ms)",
         gen_info,
         start_time.elapsed().as_millis()
     );
-    let new_menu = crate::build_tray_menu(&app)
+    let Some(new_menu) = crate::menu::tray::build_tray_menu_if_current(&app, generation)
         .await
-        .map_err(|e| format!("Failed to build tray menu: {}", e))?;
+        .map_err(|e| format!("Failed to build tray menu: {}", e))?
+    else {
+        return Ok(());
+    };
     log::debug!(
         "⏱️ [TRAY TIMING] Tray menu built{} (+{}ms)",
         gen_info,
@@ -1551,6 +1564,10 @@ pub async fn update_tray_menu_with_generation(
             );
             return Ok(());
         }
+    }
+
+    if generation != current_tray_menu_generation() {
+        return Ok(());
     }
 
     // Update the tray menu
@@ -1771,6 +1788,23 @@ mod tests {
     use crate::commands::updater::UpdateChannel;
     use serde_json::json;
 
+    #[test]
+    fn saving_visibility_deletes_the_legacy_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let store =
+            tauri_plugin_store::StoreBuilder::new(app.handle(), dir.path().join("settings"))
+                .build()
+                .unwrap();
+        store.set("show_pill_indicator", json!(true));
+        super::save_pill_indicator_mode(&store, "never");
+        assert_eq!(store.get("pill_indicator_mode"), Some(json!("never")));
+        assert!(store.get("show_pill_indicator").is_none());
+        store.save().unwrap();
+    }
     #[test]
     fn resolve_pill_indicator_mode_prefers_new_value() {
         let resolved = resolve_pill_indicator_mode(

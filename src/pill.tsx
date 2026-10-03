@@ -53,7 +53,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   const island = createIsland(root, {
     mac: isMacOS,
     actions: {
-      start: () => call('start_recording'), stop: () => call('stop_recording'),
+      start: () => call('start_recording', { source: 'pointer' }), stop: () => call('stop_recording'),
       cancel: () => call('cancel_recording'), dismiss: () => call('hide_pill_widget'),
       original: () => call('copy_last_original'),
       card: c => call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}),

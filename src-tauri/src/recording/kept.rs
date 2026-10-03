@@ -19,7 +19,16 @@ pub struct Recovery {
     kind: RecoveryKind,
     engine_short: String,
     alt_engine_short: Option<String>,
+    alt_engine_id: Option<String>,
     expires_in_ms: u64,
+}
+impl Recovery {
+    fn set_alternative(&mut self, alternative: Option<(String, String)>) {
+        self.alt_engine_short = alternative
+            .as_ref()
+            .map(|(m, e)| crate::pill::context::engine_short_name(m, e));
+        self.alt_engine_id = alternative.map(|(m, _)| m);
+    }
 }
 fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
     crate::commands::pill_feedback::cancel_terminal_hide(recovery.generation);
@@ -42,7 +51,8 @@ struct Store {
     clips: VecDeque<Clip>,
     closed: bool,
     leases: Vec<PathBuf>,
-    active_retry: Option<(String, u64)>,
+    active_retry: Option<(String, u64, tokio::sync::watch::Sender<bool>)>,
+    fallback: Vec<PathBuf>,
 }
 static STORE: Lazy<Mutex<Store>> = Lazy::new(|| Mutex::new(Store::default()));
 impl Store {
@@ -78,6 +88,7 @@ impl Store {
             kind,
             engine_short: "Whisper".into(),
             alt_engine_short: None,
+            alt_engine_id: None,
             expires_in_ms,
         };
         self.insert(Clip {
@@ -90,7 +101,19 @@ impl Store {
         })?;
         Ok(recovery)
     }
+    fn cancel_retry(&mut self) {
+        if let Some((_, _, cancel)) = self.active_retry.take() {
+            let _ = cancel.send(true);
+        }
+    }
     fn discard(&mut self, id: &str) {
+        if self
+            .active_retry
+            .as_ref()
+            .is_some_and(|(active, _, _)| active == id)
+        {
+            self.cancel_retry();
+        }
         if let Some(index) = self.clips.iter().position(|c| c.recovery.id == id) {
             if let Some(clip) = self.clips.remove(index) {
                 let _ = std::fs::remove_file(clip.path);
@@ -137,7 +160,7 @@ impl Store {
         if self
             .active_retry
             .as_ref()
-            .is_some_and(|(active, _)| active == id)
+            .is_some_and(|(active, _, _)| active == id)
         {
             self.active_retry = None;
         }
@@ -162,7 +185,10 @@ impl Store {
         }
     }
     fn clear(&mut self) {
-        self.active_retry = None;
+        self.cancel_retry();
+        for path in self.fallback.drain(..) {
+            let _ = std::fs::remove_file(path);
+        }
         for path in self.leases.drain(..) {
             let _ = std::fs::remove_file(path);
         }
@@ -187,7 +213,7 @@ pub fn has_generation(generation: u64) -> bool {
         .any(|c| c.recovery.generation == generation && c.expires > Instant::now())
 }
 /// Opaque recovery ID and display name only; never expose the private audio path.
-pub fn tray_recovery() -> Option<(String, Option<String>, bool)> {
+pub fn tray_recovery() -> Option<(String, Option<String>, Option<String>, bool)> {
     STORE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -199,9 +225,64 @@ pub fn tray_recovery() -> Option<(String, Option<String>, bool)> {
             (
                 c.recovery.id.clone(),
                 c.recovery.alt_engine_short.clone(),
+                c.recovery.alt_engine_id.clone(),
                 c.busy,
             )
         })
+}
+pub fn cancel_active_retry(app: &AppHandle) {
+    let generation = {
+        let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = store.active_retry.as_ref().map(|(_, g, _)| *g);
+        store.cancel_retry();
+        generation
+    };
+    finish_cancelled_retry(app, generation);
+}
+fn finish_cancelled_retry(app: &AppHandle, generation: Option<u64>) {
+    if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
+        app.state::<crate::AppState>().request_cancellation();
+        // Retry has no capture guard or recorder to stop. Publish Idle now so
+        // the caller may start a new take before the cancelled future unwinds.
+        if crate::get_recording_state(app) == crate::RecordingState::Transcribing {
+            crate::update_recording_state(app, crate::RecordingState::Idle, None);
+        }
+    }
+}
+pub fn alternative_id(id: &str) -> Option<String> {
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clips
+        .iter()
+        .find(|c| c.recovery.id == id && c.expires > Instant::now())
+        .and_then(|c| c.recovery.alt_engine_id.clone())
+}
+/// A fallback owner is installed before any fallible storage operation or await.
+/// Failed handoffs remain owned until shutdown, including detached writers.
+pub async fn handoff(app: &AppHandle, generation: u64, path: &Path, kind: RecoveryKind) {
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .fallback
+        .push(path.to_owned());
+    match keep(app, generation, path, kind).await {
+        Ok(()) => STORE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .fallback
+            .retain(|p| p != path),
+        Err(_) => {
+            // Normal finalization must not delete the fallback owner's file.
+            audio::clear_in_flight_transcription_audio_for_generation(generation);
+            if !audio::delivery_aborted(
+                app.state::<crate::AppState>().is_cancellation_requested(),
+                generation,
+            ) {
+                super::island::note(app, generation, super::island::Note::StorageFailed);
+            }
+        }
+    }
 }
 pub fn cleanup() {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
@@ -325,8 +406,7 @@ pub async fn keep(
         } else {
             engine_short
         };
-        clip.recovery.alt_engine_short =
-            alternative.map(|(m, e)| crate::pill::context::engine_short_name(&m, &e));
+        clip.recovery.set_alternative(alternative);
         clip.recovery.expires_in_ms = clip
             .expires
             .saturating_duration_since(Instant::now())
@@ -415,13 +495,14 @@ pub fn discard_kept_dictation(app: AppHandle, id: String) {
         store
             .active_retry
             .as_ref()
-            .filter(|(active, _)| active == &id)
-            .map(|(_, g)| *g)
+            .filter(|(active, _, _)| active == &id)
+            .map(|(_, g, _)| *g)
     };
     if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
         app.state::<crate::AppState>().request_cancellation();
     }
     STORE.lock().unwrap_or_else(|e| e.into_inner()).discard(&id);
+    finish_cancelled_retry(&app, generation);
     crate::menu::runtime::refresh(&app);
 }
 #[tauri::command]
@@ -449,13 +530,9 @@ async fn retry(
     ) {
         return Err("Dictation is busy".into());
     }
-    let _stop_guard = audio::StopInFlightGuard::try_acquire(state.stop_in_flight.clone())
-        .ok_or("Dictation is busy")?;
-    let lease = lease(&id, anyway)?;
-    if crate::get_recording_state(&app) == crate::RecordingState::Error {
-        crate::update_recording_state(&app, crate::RecordingState::Idle, None);
-    }
+    let lease = retry_setup(state.stop_in_flight.clone(), || lease(&id, anyway))?;
     let generation = audio::begin_recording_generation();
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
     state.clear_cancellation();
     {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
@@ -465,23 +542,27 @@ async fn retry(
             .find(|c| c.recovery.id == id)
             .ok_or("Recording discarded")?;
         clip.retry_generation = Some(generation);
-        store.active_retry = Some((id.clone(), generation));
+        store.active_retry = Some((id.clone(), generation, cancel));
     }
     if let Some(context) = crate::writing::capture_active_app_context() {
         state.set_recording_app_context(context);
+    }
+    // Retry never owns the capture-stop lock while awaiting decoding/network I/O.
+    if crate::get_recording_state(&app) == crate::RecordingState::Error {
+        crate::update_recording_state(&app, crate::RecordingState::Idle, None);
     }
     crate::update_recording_state(&app, crate::RecordingState::Starting, None);
     crate::update_recording_state(&app, crate::RecordingState::Recording, None);
     crate::update_recording_state(&app, crate::RecordingState::Stopping, None);
     crate::update_recording_state(&app, crate::RecordingState::Transcribing, None);
     crate::menu::runtime::refresh(&app);
-    let result = retry_inner(&app, &lease, generation, engine).await;
+    let result = cancellable_retry(cancelled, retry_inner(&app, &lease, generation, engine)).await;
     if !audio::recording_generation_is_stale(generation) {
         crate::update_recording_state(&app, crate::RecordingState::Idle, None);
     }
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     let discarded = audio::delivery_aborted(state.is_cancellation_requested(), generation);
-    store.complete_retry(&id, result.is_ok() || discarded);
+    store.complete_retry(&id, result.is_ok());
     if result.is_err() && !discarded {
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
             clip.recovery.generation = generation;
@@ -496,6 +577,26 @@ async fn retry(
     crate::menu::runtime::refresh(&app);
     result.map_err(|_| "Retry failed; recording remains available until expiry".into())
 }
+fn retry_setup<T>(
+    flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    setup: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _guard = audio::StopInFlightGuard::try_acquire(flag).ok_or("Dictation is busy")?;
+    setup()
+}
+async fn cancellable_retry<T>(
+    mut cancelled: tokio::sync::watch::Receiver<bool>,
+    work: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    if *cancelled.borrow() {
+        return Err("Retry discarded".into());
+    }
+    tokio::select! {
+        biased;
+        _ = cancelled.changed() => Err("Retry discarded".into()),
+        result = work => result,
+    }
+}
 async fn retry_inner(
     app: &AppHandle,
     lease: &Lease,
@@ -504,11 +605,9 @@ async fn retry_inner(
 ) -> Result<(), String> {
     let settings = crate::commands::settings::get_settings(app.clone()).await?;
     let (model, engine) = if let Some(engine) = engine {
-        // Accept catalog IDs and short names, never paths or provider errors.
+        // Accept stable model IDs, never display labels, paths or provider errors.
         let alternatives = local_candidates(app).await;
-        if let Some((model, kind)) = alternatives.into_iter().find(|(m, e)| {
-            engine == *e || engine == *m || engine == crate::pill::context::engine_short_name(m, e)
-        }) {
+        if let Some((model, kind)) = alternatives.into_iter().find(|(m, _)| engine == *m) {
             (model, Some(kind))
         } else {
             return Err("Requested local engine is not ready".into());
@@ -621,6 +720,7 @@ mod tests {
                 kind,
                 engine_short: "Whisper".into(),
                 alt_engine_short: None,
+                alt_engine_id: None,
                 expires_in_ms: kind.ttl_ms(),
             },
             target: path.clone(),
@@ -629,6 +729,95 @@ mod tests {
             expires: Instant::now() + Duration::from_millis(kind.ttl_ms()),
             busy: false,
         }
+    }
+    #[tokio::test]
+    async fn cancel_pending_retry_then_new_recording_can_stop() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        let flag = Arc::new(AtomicBool::new(false));
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        let id = clip.recovery.id.clone();
+        store.insert(clip).unwrap();
+        retry_setup(flag.clone(), || Ok(())).unwrap();
+        let (cancel, cancelled) = tokio::sync::watch::channel(false);
+        store.active_retry = Some((id, 2, cancel));
+        store.clips[0].retry_generation = Some(2);
+        let retry = cancellable_retry(cancelled, std::future::pending::<Result<(), String>>());
+        tokio::pin!(retry);
+        // Poll the pending decode before Escape/Discard cancels its generation.
+        assert!(tokio::time::timeout(Duration::from_millis(1), &mut retry)
+            .await
+            .is_err());
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "retry must not own capture Stop"
+        );
+        store.discard_generation(2);
+        assert!(tokio::time::timeout(Duration::from_secs(1), retry)
+            .await
+            .unwrap()
+            .is_err());
+        // The next take's stop path can acquire the actual StopInFlightGuard.
+        let recording = AtomicBool::new(true);
+        let stop =
+            audio::StopInFlightGuard::try_acquire(flag.clone()).expect("next Stop was disabled");
+        recording.store(false, Ordering::SeqCst);
+        drop(stop);
+        assert!(!recording.load(Ordering::SeqCst));
+        assert!(!flag.load(Ordering::SeqCst));
+    }
+    #[tokio::test]
+    async fn new_take_cancels_retry_and_preserves_the_kept_clip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let mut clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        clip.busy = true;
+        let id = clip.recovery.id.clone();
+        let path = clip.path.clone();
+        store.insert(clip).unwrap();
+        let (cancel, cancelled) = tokio::sync::watch::channel(false);
+        store.active_retry = Some((id.clone(), 2, cancel));
+        store.cancel_retry();
+        assert!(
+            cancellable_retry(cancelled, std::future::pending::<Result<(), String>>())
+                .await
+                .is_err()
+        );
+        store.complete_retry(&id, false);
+        assert!(path.exists());
+        assert!(!store.clips[0].busy);
+        store.clear();
+    }
+    #[test]
+    fn failed_storage_handoff_keeps_fallback_until_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("capture.wav");
+        std::fs::write(&source, b"capture").unwrap();
+        let unavailable = dir.path().join("not-a-directory");
+        std::fs::write(&unavailable, b"blocked").unwrap();
+        let mut store = Store::default();
+        store.fallback.push(source.clone());
+        assert!(store
+            .retain(&unavailable, &source, 1, RecoveryKind::Integrity)
+            .is_err());
+        assert!(source.exists());
+        assert!(store.clips.is_empty());
+        store.clear();
+        assert!(!source.exists());
+    }
+    #[test]
+    fn alternative_keeps_model_identifier_separate_from_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut clip = clip(dir.path(), RecoveryKind::RemoteOffline);
+        clip.recovery
+            .set_alternative(Some(("small.en".into(), "whisper".into())));
+        let value = serde_json::to_value(clip.recovery).unwrap();
+        assert_eq!(value["alt_engine_short"], "Whisper Small");
+        assert_eq!(value["alt_engine_id"], "small.en");
     }
     #[test]
     fn ttl_cap_discard_retry_and_exit_delete_owned_files() {
@@ -694,7 +883,7 @@ mod tests {
         ] {
             let clip = clip(dir.path(), kind);
             let value = serde_json::to_value(&clip.recovery).unwrap();
-            assert_eq!(value.as_object().unwrap().len(), 6);
+            assert_eq!(value.as_object().unwrap().len(), 7);
             assert!(value.get("path").is_none());
             assert!(value.get("text").is_none());
             assert_eq!(

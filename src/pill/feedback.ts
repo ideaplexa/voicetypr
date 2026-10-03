@@ -33,7 +33,7 @@ export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
     integrity: 'Recording interrupted', no_speech: 'No speech heard',
   };
   const actions: CardAction[] = e.kind === 'no_speech' ? [{label:'Transcribe anyway',call:{command:'transcribe_anyway',id:e.id}}] : [
-    ...(e.alt_engine_short ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation' as const,id:e.id,engine:e.alt_engine_short}}] : []),
+    ...(e.alt_engine_short && e.alt_engine_id ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation' as const,id:e.id,engine:e.alt_engine_id}}] : []),
     {label:'Discard',call:{command:'discard_kept_dictation',id:e.id}},
   ];
   return {...card(`recovery:${e.id}`,e.kind==='no_speech' ? titles[e.kind] : `${titles[e.kind]} · Recording kept`,e.kind === 'no_speech' ? 'Audio kept for 30 s' : '',null,e.kind === 'no_speech' ? 'neutral' : 'amber',actions),glyph:e.kind==='no_speech' ? 'quiet' : 'bang',expiresAt:now+e.expires_in_ms};
@@ -42,6 +42,7 @@ export function noteCard(e: DictationNote): FeedbackCard {
   const reasons = {timeout:'Polish timed out',rate_limited:'Polish rate limited',network:'Polish unavailable offline',guard:'Polish kept the original',error:'Polish failed'};
   switch(e.kind) {
     case 'mic_dropped': return card(e.kind,`Mic disconnected · using the ${elapsed(Math.floor(e.captured_ms/1000))} we got`);
+    case 'storage_failed': return card(e.kind,"Couldn't keep the recording",'',5000,'amber');
     case 'mic_silent': return card(e.kind,'Your mic sent silence — is it muted?','',5000,'amber',[action('Choose mic','choose_mic')]);
     case 'translate_failed': return card(e.kind,'Pasted untranslated · translation failed');
     case 'model_fallback': return card(e.kind,`Using ${e.alt_engine_short} · ${e.engine_short} isn't downloaded`);

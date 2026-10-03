@@ -170,6 +170,16 @@ pub fn capture(app: &AppHandle) -> Option<Snapshot> {
     })
 }
 impl Snapshot {
+    pub fn with_start_source(
+        mut self,
+        source: crate::recording::start_source::StartSource,
+    ) -> Self {
+        if source.is_toggle() {
+            self.payload.mode = "toggle";
+        }
+        self
+    }
+
     pub async fn emit(mut self, app: &AppHandle, generation: u64) {
         let resolved = crate::transcription::engines::resolve_engine_for_model(
             app,
@@ -245,6 +255,61 @@ impl Snapshot {
         }
         let _ = app.emit_to("pill", "dictation-context", self.payload);
     }
+}
+#[derive(Serialize)]
+pub struct EffectivePolish {
+    generation: u64,
+    app_name: String,
+    style: Option<&'static str>,
+    will_run: bool,
+    overridden: bool,
+}
+pub fn effective_polish(app: &AppHandle) -> Option<EffectivePolish> {
+    use tauri::Manager;
+    let hint = app
+        .state::<crate::AppState>()
+        .recording_app_context
+        .lock()
+        .ok()?
+        .clone()?;
+    let store = app.store("settings").ok()?;
+    let enabled = store
+        .get("ai_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let options = store.get("enhancement_options");
+    let global = crate::ai::prompts::enhancement_options_for_ai_enabled(options.as_ref(), enabled)
+        .ok()?
+        .preset;
+    let writing = crate::writing::load_writing_settings(app).ok()?;
+    let requested = crate::writing::resolve_pipeline_config(
+        &writing,
+        global,
+        "same_as_transcript",
+        Some(&hint),
+        crate::writing::PipelineAiState {
+            stored_ai_enabled: true,
+            has_model_and_key: true,
+        },
+    )
+    .preset;
+    let name = hint.app_name.unwrap_or_default();
+    let overridden = writing.app_formatting_rules.iter().any(|rule| {
+        rule.enabled
+            && name
+                .to_ascii_lowercase()
+                .contains(&rule.app_name.trim().to_ascii_lowercase())
+    });
+    let style = style(requested);
+    Some(EffectivePolish {
+        generation: crate::commands::audio::current_recording_generation(),
+        app_name: name,
+        style,
+        will_run: enabled
+            && crate::commands::ai::has_ai_model_and_key(app).unwrap_or(false)
+            && style.is_some(),
+        overridden,
+    })
 }
 fn style(preset: EnhancementPreset) -> Option<&'static str> {
     match preset {

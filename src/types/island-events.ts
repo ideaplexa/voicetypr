@@ -15,13 +15,14 @@ export interface DictationRecovery {
   kind: RecoveryKind;
   engine_short: string;
   alt_engine_short: string | null;
+  alt_engine_id: string | null;
   expires_in_ms: number;
 }
 export interface DictationBlocked { generation: number; kind: BlockedKind; action: IslandAction }
 export type PolishSkippedReason = "timeout" | "rate_limited" | "network" | "guard" | "error";
 export type DictationNote = { generation: number } & (
   | { kind: "mic_dropped"; captured_ms: number }
-  | { kind: "mic_silent" | "translate_failed" }
+  | { kind: "mic_silent" | "translate_failed" | "storage_failed" }
   | { kind: "model_fallback"; engine_short: string; alt_engine_short: string }
   | { kind: "gpu_fallback"; engine_short: string }
   | { kind: "polish_skipped"; reason: PolishSkippedReason }

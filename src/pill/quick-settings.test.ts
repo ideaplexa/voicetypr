@@ -58,6 +58,37 @@ describe('P5 quick settings',()=>{
     const h=renderer(false);await h.peek();fireEvent.click(h.get('.peek-engine'));expect([...h.host.querySelectorAll<HTMLButtonElement>('.pick-option:disabled')].map(el=>el.textContent)).toEqual(['On this PC✓','Cloud✓','Network✓']);
     fireEvent.click(h.get('.pick-back'));expect(h.get('.pill-root').dataset.state).toBe('peek');
   });
+  it('default style pick refreshes the effective app style instead of changing the take',async()=>{
+    const h=renderer();
+    const options=quickFixture();options.polish.current='Notes';
+    const effective={generation:1,app_name:'Editor',style:'writing',will_run:true,overridden:true};
+    h.island.context({...h.island.machine.context,generation:1,app:{name:'Editor',icon_key:null},show_start_card:true,polish:{will_run:true,style:'writing',key_ok:true,keep_words:false}});
+    h.island.quickOptions({...options,polish_context:effective});h.island.start();await h.settle(300);
+    fireEvent.click(h.get('.style-chip'));
+    expect(h.get('.pick-title').textContent).toBe('Default style');
+    const hint=h.host.querySelector<HTMLButtonElement>('[data-id="header:app-style"]')!;
+    expect(hint.disabled).toBe(true);expect(hint.textContent).toBe('Editor uses Writing✓');
+    h.quickSet.mockImplementationOnce(async()=>{h.island.quickOptions({...options,polish_context:effective});});
+    await h.settle(250);fireEvent.click(h.get('[data-id="style_Notes"]'));await h.settle(0);
+    expect(h.quickSet).toHaveBeenCalledWith('polish','style_Notes');
+    expect(h.island.machine.context.polish.style).toBe('writing');
+    await h.settle(1000);expect(h.get('.style-name').textContent).toBe('Writing');
+  });
+  it.each(['toggle','push_to_talk'])('the next island click stops a pointer take in %s mode',async recording_mode=>{
+    const h=pillHarness({recording_mode});cleanup=()=>h.destroy();await h.settle(0);
+    h.emit('pill-pointer',{inside:true});await h.settle(120);fireEvent.click(h.get('.pill-rest-dot'));await h.settle(0);
+    h.emit('recording-started');await h.settle(500);fireEvent.click(h.get('.listening-row'));await h.settle(0);
+    expect(h.invoke).toHaveBeenCalledWith('stop_recording');
+    expect(h.invoke.mock.calls.filter(([cmd])=>cmd==='start_recording')).toHaveLength(1);
+  });
+  it.each(['toggle','push_to_talk'])('pointer start supplies its source and surfaces failures in %s mode',async recording_mode=>{
+    const h=pillHarness({recording_mode});cleanup=()=>h.destroy();await h.settle(0);
+    const invoke=h.invoke.getMockImplementation()!;
+    h.invoke.mockImplementation(async cmd=>{if(cmd==='start_recording')throw new Error('private provider payload');return invoke(cmd);});
+    h.emit('pill-pointer',{inside:true});await h.settle(120);fireEvent.click(h.get('.pill-rest-dot'));await h.settle(1500);
+    expect(h.invoke).toHaveBeenCalledWith('start_recording',{source:'pointer'});
+    expect(h.root.textContent).toContain('Recording failed');expect(h.root.textContent).not.toContain('private provider payload');
+  });
   it('same Polish list opens from start without ending recording',async()=>{
     const h=renderer();h.island.context({...h.island.machine.context,generation:1,show_start_card:true,polish:{will_run:true,style:'message',key_ok:true,keep_words:false}});h.island.start();await h.settle(300);fireEvent.click(h.get('.style-chip'));
     expect(h.get('.pill-root').dataset.state).toBe('pick');expect(h.island.machine.recording).toBe(true);await h.settle(1000);expect(h.island.machine.state).toBe('start');

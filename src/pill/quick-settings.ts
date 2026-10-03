@@ -9,9 +9,10 @@ export interface QuickOptions {
   language: QuickChoices;
   shortcut_caps: { mode: 'hold' | 'toggle'; keys: string[] };
   mic_ok: boolean;
+  polish_context?: { generation: number; app_name: string; style: string | null; will_run: boolean; overridden: boolean } | null;
 }
 export const quickKinds: readonly QuickKind[] = ['polish', 'engine', 'mic', 'language'];
-export const quickTitles: Record<QuickKind, string> = { polish: 'Polish style', engine: 'Voice engine', mic: 'Microphone', language: 'Language' };
+export const quickTitles: Record<QuickKind, string> = { polish: 'Default style', engine: 'Voice engine', mic: 'Microphone', language: 'Language' };
 export function quickRows(options: QuickOptions, kind: QuickKind): QuickOption[] {
   return kind === 'engine' ? options.engine.groups.flatMap((group, index) => [
     { id: `header:${index}`, label: group.label, checked: false, disabled: true }, ...group.options,

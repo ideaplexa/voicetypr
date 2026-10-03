@@ -1118,12 +1118,9 @@ pub(crate) fn delivery_aborted(cancelled: bool, captured_generation: u64) -> boo
 pub(crate) fn delete_persisted_recording(recordings_dir: &Path, filename: &str) {
     let target = recordings_dir.join(filename);
     match std::fs::remove_file(&target) {
-        Ok(()) => log::info!(
-            "Revoked saved recording after late cancel/stale: {}",
-            filename
-        ),
+        Ok(()) => log::info!("Revoked saved recording after late cancel/stale"),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => log::warn!("Failed to revoke saved recording '{}': {}", filename, e),
+        Err(_) => log::warn!("Failed to revoke saved recording"),
     }
 }
 
@@ -4273,7 +4270,7 @@ async fn save_recording_internal(
             None
         }
         Some(Ok(_)) => {
-            log::info!("Saved recording to: {:?}", dest_path);
+            log::info!("Saved recording");
 
             // Cleanup old recordings by retention period.
             let retention_days = recording_retention_days_from_store(&store);
@@ -4334,7 +4331,7 @@ async fn save_recording_without_cleanup(
             None
         }
         Some(Ok(_)) => {
-            log::info!("Saved recording (no cleanup) to: {:?}", dest_path);
+            log::info!("Saved recording (no cleanup)");
             Some(filename)
         }
         Some(Err(e)) => {
@@ -4382,9 +4379,9 @@ fn cleanup_old_recordings(recordings_dir: &Path, retention_days: u32) {
         }
 
         if let Err(e) = std::fs::remove_file(&path) {
-            log::warn!("Failed to remove old recording {:?}: {}", path, e);
+            log::warn!("Failed to remove old recording: {}", e);
         } else {
-            log::info!("Cleaned up old recording: {:?}", path);
+            log::info!("Cleaned up old recording");
         }
     }
 }
@@ -4462,7 +4459,7 @@ async fn abort_due_to_missing_model(
     } else {
         RecoveryKind::ModelMissing
     };
-    let _ = crate::recording::kept::keep(app, generation, audio_path, kind).await;
+    crate::recording::kept::handoff(app, generation, audio_path, kind).await;
     island::blocked(
         app,
         generation,
@@ -4884,7 +4881,10 @@ fn spawn_silence_event_listener(
     });
 }
 
-pub(crate) fn ptt_key_released(app_state: &AppState) -> bool {
+pub(crate) fn ptt_key_released(
+    app_state: &AppState,
+    source: crate::recording::start_source::StartSource,
+) -> bool {
     let mode = match app_state.recording_mode.lock() {
         Ok(guard) => *guard,
         Err(poisoned) => {
@@ -4893,10 +4893,12 @@ pub(crate) fn ptt_key_released(app_state: &AppState) -> bool {
         }
     };
 
-    mode == RecordingMode::PushToTalk
-        && !app_state
+    source.blocked_after_release(
+        mode == RecordingMode::PushToTalk,
+        app_state
             .ptt_key_held
-            .load(std::sync::atomic::Ordering::SeqCst)
+            .load(std::sync::atomic::Ordering::SeqCst),
+    )
 }
 
 /// Rebuilds hotkey bindings from the current recording state when dropped.
@@ -4916,9 +4918,12 @@ impl Drop for RebuildBindingsOnExit {
 pub async fn start_recording(
     app: AppHandle,
     state: State<'_, RecorderState>,
+    source: Option<crate::recording::start_source::StartSource>,
 ) -> Result<bool, String> {
+    let source = source.unwrap_or_default();
     let recording_start = Instant::now();
-    let island_context = crate::pill::context::capture(&app);
+    let island_context =
+        crate::pill::context::capture(&app).map(|context| context.with_start_source(source));
     let island_monitor = crate::pill::positioning::snapshot(&app);
 
     log_start("RECORDING_START");
@@ -4981,7 +4986,7 @@ pub async fn start_recording(
     // after the user has already released the PTT key (e.g., during slow license checks).
     {
         let app_state = app.state::<AppState>();
-        if ptt_key_released(&app_state) {
+        if ptt_key_released(&app_state, source) {
             log::info!("PTT: Key was released during validation; aborting recording start");
             return Err(PTT_START_ABORTED_AFTER_RELEASE.to_string());
         }
@@ -5007,6 +5012,11 @@ pub async fn start_recording(
             return Ok(false);
         }
     }
+
+    crate::recording::kept::cancel_active_retry(&app);
+    app.state::<AppState>()
+        .pointer_recording
+        .store(source.is_toggle(), AtomicOrdering::SeqCst);
 
     // All validation passed, update state to starting
     log::debug!(
@@ -5277,7 +5287,7 @@ pub async fn start_recording(
             }
         };
 
-        log_file_operation("RECORDING_START", audio_path_str, false, None, None);
+        log::debug!("Recording file ready");
 
         // Start recording and get side-channel receivers
         let recording_generation = current_recording_generation();
@@ -5367,17 +5377,14 @@ pub async fn start_recording(
                     log_with_context(
                         log::Level::Debug,
                         "Recorder initialization failed",
-                        &[
-                            ("audio_path", audio_path_str),
-                            (
-                                "init_time_ms",
-                                recorder_init_start
-                                    .elapsed()
-                                    .as_millis()
-                                    .to_string()
-                                    .as_str(),
-                            ),
-                        ],
+                        &[(
+                            "init_time_ms",
+                            recorder_init_start
+                                .elapsed()
+                                .as_millis()
+                                .to_string()
+                                .as_str(),
+                        )],
                     );
 
                     update_recording_state(
@@ -5413,17 +5420,14 @@ pub async fn start_recording(
                 log_with_context(
                     log::Level::Debug,
                     "Recorder start failed",
-                    &[
-                        ("audio_path", audio_path_str),
-                        (
-                            "init_time_ms",
-                            recorder_init_start
-                                .elapsed()
-                                .as_millis()
-                                .to_string()
-                                .as_str(),
-                        ),
-                    ],
+                    &[(
+                        "init_time_ms",
+                        recorder_init_start
+                            .elapsed()
+                            .as_millis()
+                            .to_string()
+                            .as_str(),
+                    )],
                 );
 
                 update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
@@ -5523,11 +5527,7 @@ pub async fn start_recording(
         if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
             if let Some(path) = path_guard.take() {
                 if let Err(error) = std::fs::remove_file(&path) {
-                    log::warn!(
-                        "Failed to remove cancelled recording file {}: {}",
-                        path.display(),
-                        error
-                    );
+                    log::warn!("Failed to remove cancelled recording file: {}", error);
                 }
             }
         }
@@ -5540,7 +5540,7 @@ pub async fn start_recording(
     // Second PTT guard: check again right before committing to Recording state.
     // Audio capture has already started; if PTT key was released between the first
     // guard (before Starting) and now (e.g., during audio device init), stop immediately.
-    if ptt_key_released(&app_state) {
+    if ptt_key_released(&app_state, source) {
         log::info!("PTT: Key was released during audio init; stopping recorder immediately");
         // Stop the audio recorder synchronously before transitioning state.
         // If this fails, do not pretend the app is idle: propagate the
@@ -5567,11 +5567,7 @@ pub async fn start_recording(
             if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
                 if let Some(path) = path_guard.take() {
                     if let Err(error) = std::fs::remove_file(&path) {
-                        log::warn!(
-                            "Failed to remove aborted recording file {}: {}",
-                            path.display(),
-                            error
-                        );
+                        log::warn!("Failed to remove aborted recording file: {}", error);
                     }
                 }
             }
@@ -5684,10 +5680,7 @@ pub async fn start_recording(
     log_with_context(
         log::Level::Debug,
         "Recording started successfully",
-        &[
-            ("audio_path", format!("{:?}", audio_path).as_str()),
-            ("state", "recording"),
-        ],
+        &[("state", "recording")],
     );
 
     // Refresh bindings after the Recording transition without resetting an
@@ -5869,7 +5862,7 @@ async fn stop_recording_with_mode_at(
             if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
                 let _ = std::fs::remove_file(path);
             } else {
-                let _ = crate::recording::kept::keep(
+                crate::recording::kept::handoff(
                     &app,
                     task_generation,
                     &path,
@@ -5927,7 +5920,7 @@ async fn stop_recording_with_mode_at(
             if let Ok(metadata) = std::fs::metadata(&path) {
                 log::debug!("Audio file size: {} bytes", metadata.len());
             } else {
-                log::error!("Audio file does not exist at path: {:?}", path);
+                log::error!("Audio file does not exist");
             }
             path
         }
@@ -5957,7 +5950,7 @@ async fn stop_recording_with_mode_at(
         if meta.len() <= 44 {
             dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
 
-            let _ = crate::recording::kept::keep(
+            crate::recording::kept::handoff(
                 &app,
                 task_generation,
                 &audio_path,
@@ -6003,7 +5996,7 @@ async fn stop_recording_with_mode_at(
             log::info!(
                 "Skipping speech engine: capture below calibrated no-speech floor (no sustained speech, negligible energy)"
             );
-            let _ = crate::recording::kept::keep(
+            crate::recording::kept::handoff(
                 &app,
                 task_generation,
                 &audio_path,
@@ -6019,7 +6012,7 @@ async fn stop_recording_with_mode_at(
         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
         log::info!("Skipping speech engine: capture contained only exact digital zero samples");
         island::note(&app, task_generation, Note::MicSilent);
-        let _ = crate::recording::kept::keep(
+        crate::recording::kept::handoff(
             &app,
             task_generation,
             &audio_path,
@@ -6039,7 +6032,7 @@ async fn stop_recording_with_mode_at(
         Ok(config) => config,
         Err(_) => {
             dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
-            let _ = crate::recording::kept::keep(
+            crate::recording::kept::handoff(
                 &app,
                 task_generation,
                 &audio_path,
@@ -6401,7 +6394,7 @@ async fn stop_recording_with_mode_at(
                                 RecordingState::Error,
                                 Some("Audio normalization failed".to_string()),
                             );
-                            let _ = crate::recording::kept::keep(
+                            crate::recording::kept::handoff(
                                 &app,
                                 task_generation,
                                 &audio_path,
@@ -6456,7 +6449,6 @@ async fn stop_recording_with_mode_at(
                     log::Level::Info,
                     "NORMALIZED_AUDIO",
                     &[
-                        ("path", format!("{:?}", normalized_path).as_str()),
                         ("sample_rate", spec.sample_rate.to_string().as_str()),
                         ("channels", spec.channels.to_string().as_str()),
                         ("bits", spec.bits_per_sample.to_string().as_str()),
@@ -6471,7 +6463,7 @@ async fn stop_recording_with_mode_at(
                     crate::product_analytics::DictationOutcome::Empty;
                 speech_evidence_attempt.set_outcome(SpeechEvidenceOutcome::RecordingTooShort);
                 emit_recording_too_short_feedback(&app, &min_duration_label, task_generation);
-                let _ = crate::recording::kept::keep(
+                crate::recording::kept::handoff(
                     &app,
                     task_generation,
                     &normalized_path,
@@ -6490,10 +6482,7 @@ async fn stop_recording_with_mode_at(
     log_with_context(
         log::Level::Debug,
         "Proceeding to transcription",
-        &[
-            ("audio_path", format!("{:?}", audio_path).as_str()),
-            ("stage", "pre_transcription"),
-        ],
+        &[("stage", "pre_transcription")],
     );
     log::debug!(
         "Using cached config: model={}, speech_language={}, transcription_task={}, final_text_language={}, ai_enabled={}",
@@ -6825,7 +6814,7 @@ async fn stop_recording_with_mode_at(
             island::blocked(&app_for_task, task_generation, BlockedKind::CloudKeyRejected, IslandAction::OpenCloudKeys);
         }
         if let Some(kind) = recovery_kind.filter(|_| !delivery_aborted(app_state.is_cancellation_requested(), task_generation)) {
-            let _ = crate::recording::kept::keep(&app_for_task, task_generation, &audio_path_clone, kind).await;
+            crate::recording::kept::handoff(&app_for_task, task_generation, &audio_path_clone, kind).await;
         } else {
             finalize_in_flight_audio(task_generation, &audio_path_clone);
         }
@@ -7221,7 +7210,7 @@ async fn stop_recording_with_mode_at(
                     } else {
                         // Auto-paste disabled: copy to clipboard and notify
                         let copy_result = persist_if_current(&app_state, task_generation, || {
-                            crate::commands::text::copy_text_to_clipboard(final_text.clone())
+                            crate::commands::text::copy_dictation_text_to_clipboard(app_for_process.clone(), final_text.clone(), task_generation)
                         });
                         let Some(copy_future) = copy_result else {
                             dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
@@ -7701,7 +7690,7 @@ async fn save_transcription_with_recording_internal(
     // Add recording_file if present
     if let Some(ref file) = recording_file {
         transcription_data["recording_file"] = serde_json::json!(file);
-        log::info!("Saving transcription with recording file: {}", file);
+        log::info!("Saving transcription with recording");
     }
     if let Some(metadata) = writing_metadata {
         transcription_data["writing"] = metadata;
@@ -8228,7 +8217,11 @@ pub(crate) async fn transcribe_audio_file_impl(
             task: transcription_job.task,
             context: RequestContext::default(),
             timeout: TimeoutPolicy::Upload,
-            cancellation: CancellationToken::new(),
+            cancellation: if retry_generation.is_some() {
+                CancellationToken::from_arc(app.state::<AppState>().should_cancel_recording.clone())
+            } else {
+                CancellationToken::new()
+            },
             initial_prompt,
             audio_ctx,
             speed_mode_override,

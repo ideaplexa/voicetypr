@@ -125,6 +125,20 @@ pub async fn build_tray_menu(
     Ok(render(app, &super::model::build(&snapshot))?)
 }
 
+pub(crate) async fn build_tray_menu_if_current(
+    app: &tauri::AppHandle,
+    generation: u64,
+) -> Result<Option<tauri::menu::Menu<tauri::Wry>>, Box<dyn std::error::Error>> {
+    if generation != crate::commands::settings::current_tray_menu_generation() {
+        return Ok(None);
+    }
+    let snapshot = snapshot(app, true).await?;
+    if generation != crate::commands::settings::current_tray_menu_generation() {
+        return Ok(None);
+    }
+    Ok(Some(render(app, &super::model::build(&snapshot))?))
+}
+
 /// Shared tray/island data; quick settings never read transcript history.
 pub(super) async fn snapshot(
     app: &tauri::AppHandle,
@@ -317,13 +331,11 @@ pub(super) async fn snapshot(
         .then(|| app.store("transcriptions").ok())
         .flatten()
     {
-        let mut entries = store
-            .keys()
+        let entries = crate::commands::audio::page_history_keys(store.keys(), 5)
             .into_iter()
             .filter_map(|id| store.get(&id).map(|v| (id, v)))
             .filter(|(_, v)| is_copyable_transcription_entry(v))
             .collect::<Vec<_>>();
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
         for (id, entry) in entries.into_iter().take(5) {
             let raw = entry["text"]
                 .as_str()
@@ -355,14 +367,12 @@ pub(super) async fn snapshot(
     };
     let (recording, blocked) = super::runtime::snapshot();
     let shortcut = super::runtime::shortcut_text(app);
-    let (kept, kept_busy) = if let Some((id, _, busy)) = crate::recording::kept::tray_recovery() {
-        let alternative = crate::recording::kept::local_alternative(app)
-            .await
-            .map(|(m, e)| crate::pill::context::engine_short_name(&m, &e));
-        (Some((id, alternative)), busy)
-    } else {
-        (None, false)
-    };
+    let (kept, kept_busy) =
+        if let Some((id, alternative, _, busy)) = crate::recording::kept::tray_recovery() {
+            (Some((id, alternative)), busy)
+        } else {
+            (None, false)
+        };
     let snapshot = super::model::Snapshot {
         windows: cfg!(target_os = "windows"),
         engine,

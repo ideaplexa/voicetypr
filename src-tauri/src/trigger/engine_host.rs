@@ -27,7 +27,7 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
         .iter()
         .filter(|b| b.enabled && mapping::is_engine_kind(b))
     {
-        match mapping::to_trigger(binding) {
+        match installed_trigger(binding) {
             Some(trigger) => {
                 new_bindings.push(EngineBinding {
                     id: binding.id.clone(),
@@ -82,6 +82,14 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
     // Observe Escape for the non-key island without swallowing it in the target app.
     triggers.push(("island-escape-observer".into(), island_escape_trigger()));
     app_state.trigger_engine.set_bindings(triggers);
+}
+
+fn installed_trigger(binding: &ShortcutBinding) -> Option<keytrigger::Trigger> {
+    if binding.id == "escape-cancel" {
+        Some(island_escape_trigger())
+    } else {
+        mapping::to_trigger(binding)
+    }
 }
 
 fn island_escape_trigger() -> keytrigger::Trigger {
@@ -409,6 +417,41 @@ mod tests {
     use crate::trigger::EngineBinding;
     use crate::{RecordingMode, RecordingState};
 
+    #[test]
+    fn complete_installed_bindings_never_consume_escape() {
+        for mode in [RecordingMode::Toggle, RecordingMode::PushToTalk] {
+            for state in [
+                RecordingState::Starting,
+                RecordingState::Recording,
+                RecordingState::Stopping,
+                RecordingState::Transcribing,
+            ] {
+                let (bindings, _) = plan_engine_bindings(
+                    &[],
+                    "Alt+Space",
+                    mode,
+                    true,
+                    Some("Control+Space"),
+                    escape_cancel_eligible(state),
+                );
+                let mut triggers: Vec<_> = bindings
+                    .iter()
+                    .filter(|b| b.enabled && super::mapping::is_engine_kind(b))
+                    .filter_map(|b| super::installed_trigger(b).map(|t| (b.id.clone(), t)))
+                    .collect();
+                assert!(triggers.iter().any(|(id, _)| id == "escape-cancel"));
+                triggers.push((
+                    "island-escape-observer".into(),
+                    super::island_escape_trigger(),
+                ));
+                let consume = keytrigger::ConsumeSet::from_bindings(&triggers);
+                assert!(!consume.consumes(
+                    keytrigger::KeySpec::Named(keytrigger::NamedKey::Escape),
+                    keytrigger::ModSet::empty()
+                ));
+            }
+        }
+    }
     #[test]
     fn island_escape_is_observed_without_consuming_target_app_keys() {
         let trigger = super::island_escape_trigger();

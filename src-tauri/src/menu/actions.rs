@@ -70,11 +70,30 @@ fn destination(id: &str) -> Option<MainNavigate> {
         source,
     })
 }
+fn retry_arguments(
+    id: &str,
+    alternative: Option<String>,
+) -> Result<(String, Option<String>), String> {
+    let engine = alternative.ok_or("Local alternative unavailable")?;
+    Ok((id.into(), Some(engine)))
+}
+fn dictate_should_stop(state: crate::RecordingState) -> bool {
+    matches!(
+        state,
+        crate::RecordingState::Starting | crate::RecordingState::Recording
+    )
+}
 pub fn handle(app: &AppHandle, id: &str) {
     let app = app.clone();
     let id = id.to_owned();
     tauri::async_runtime::spawn(async move {
         if run(app.clone(), &id).await.is_err() {
+            if id == "dictate" {
+                crate::commands::island_notice::notice(
+                    &app,
+                    crate::commands::island_notice::NoticeKind::RecordingFailed,
+                );
+            }
             // Keep error payloads content-free, including clipboard/plugin errors.
             let _ = app.emit(
                 "tray-action-error",
@@ -101,7 +120,7 @@ pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
             .map_err(|_| "Update check failed".into());
     }
     if id == "dictate" {
-        if app.state::<crate::AppState>().get_current_state() == crate::RecordingState::Recording {
+        if dictate_should_stop(app.state::<crate::AppState>().get_current_state()) {
             crate::commands::audio::stop_recording(
                 app.clone(),
                 app.state::<crate::commands::audio::RecorderState>(),
@@ -111,6 +130,7 @@ pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
             crate::commands::audio::start_recording(
                 app.clone(),
                 app.state::<crate::commands::audio::RecorderState>(),
+                Some(crate::recording::start_source::StartSource::Tray),
             )
             .await?;
         }
@@ -123,7 +143,8 @@ pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
         return Ok(());
     }
     if let Some(id) = id.strip_prefix("retry_") {
-        return crate::recording::kept::retry_kept_dictation(app, id.into(), None).await;
+        let (id, engine) = retry_arguments(id, crate::recording::kept::alternative_id(id))?;
+        return crate::recording::kept::retry_kept_dictation(app, id, engine).await;
     }
     if let Some(id) = id.strip_prefix("discard_") {
         crate::recording::kept::discard_kept_dictation(app, id.into());
@@ -186,6 +207,30 @@ pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tray_recovery_passes_the_kept_alternative_id() {
+        for id in ["failed-soniox", "remote-offline"] {
+            assert_eq!(
+                retry_arguments(id, Some("small.en".into())).unwrap(),
+                (id.into(), Some("small.en".into()))
+            );
+            assert!(
+                retry_arguments(id, None).is_err(),
+                "must never fall back to the failing current engine"
+            );
+        }
+    }
+    #[test]
+    fn tray_toggle_stops_active_or_starting_pointer_take_in_either_mode() {
+        for _mode in [
+            crate::RecordingMode::Toggle,
+            crate::RecordingMode::PushToTalk,
+        ] {
+            assert!(dictate_should_stop(crate::RecordingState::Starting));
+            assert!(dictate_should_stop(crate::RecordingState::Recording));
+            assert!(!dictate_should_stop(crate::RecordingState::Idle));
+        }
+    }
     #[test]
     fn quick_settings_use_app_settings_keys() {
         let mut s = Settings::default();
