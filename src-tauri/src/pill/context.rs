@@ -115,9 +115,9 @@ pub fn capture(app: &AppHandle) -> Option<Snapshot> {
     let device = selected
         .as_ref()
         .and_then(|name| {
-            host.input_devices()
-                .ok()?
-                .find(|d| d.name().ok().as_ref() == Some(name))
+            crate::audio::recorder::find_input_device(&host, name)
+                .ok()
+                .flatten()
         })
         .or_else(|| host.default_input_device());
     let mic_name = device.as_ref().and_then(|d| d.name().ok());

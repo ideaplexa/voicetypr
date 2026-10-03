@@ -208,6 +208,20 @@ fn sane_max_frames(reported_max: u32) -> Option<usize> {
         .then_some(frames)
 }
 
+/// Finds the named input device. The system default is checked first: the chosen
+/// mic usually is the default, and that skips a full enumeration (~40 ms on
+/// macOS) before the mic can open.
+pub(crate) fn find_input_device(
+    host: &cpal::Host,
+    name: &str,
+) -> Result<Option<cpal::Device>, cpal::DevicesError> {
+    let named = |device: &cpal::Device| device.name().is_ok_and(|n| n == name);
+    if let Some(device) = host.default_input_device().filter(named) {
+        return Ok(Some(device));
+    }
+    Ok(host.input_devices()?.find(named))
+}
+
 /// Largest callback payload (in i16 samples) a CPAL input stream built from
 /// `config` could ever deliver on the real-time thread.
 ///
@@ -672,9 +686,8 @@ impl AudioRecorder {
             let host = cpal::default_host();
             let device = if let Some(device_name) = device_name {
                 // Try to find the specified device
-                host.input_devices()
+                find_input_device(&host, &device_name)
                     .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
-                    .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
                     .ok_or_else(|| {
                         log::warn!(
                             "Specified device '{}' not found, falling back to default",

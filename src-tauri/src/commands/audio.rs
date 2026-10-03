@@ -4947,6 +4947,35 @@ pub(crate) fn ptt_key_released(
     )
 }
 
+/// Pins the island's monitor and sends its dictation context (app, mic, Polish,
+/// engine) once audio flows. The device and window lookups cost 50–200 ms, so
+/// they must never run before the mic opens.
+fn spawn_island_context(
+    app: &AppHandle,
+    source: crate::recording::start_source::StartSource,
+    generation: u64,
+) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let capture_app = app.clone();
+        let context = tauri::async_runtime::spawn_blocking(move || {
+            if !recording_generation_is_stale(generation) {
+                crate::pill::positioning::install(crate::pill::positioning::snapshot(&capture_app));
+            }
+            crate::pill::context::capture(&capture_app)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(context) = context {
+            context
+                .with_start_source(source)
+                .emit(&app, generation)
+                .await;
+        }
+    });
+}
+
 /// Rebuilds hotkey bindings from the current recording state when dropped.
 struct RebuildBindingsOnExit(AppHandle);
 
@@ -4968,9 +4997,6 @@ pub async fn start_recording(
 ) -> Result<bool, String> {
     let source = source.unwrap_or_default();
     let recording_start = Instant::now();
-    let island_context =
-        crate::pill::context::capture(&app).map(|context| context.with_start_source(source));
-    let island_monitor = crate::pill::positioning::snapshot(&app);
 
     log_start("RECORDING_START");
     log::debug!("⏱️ [REC TIMING] start_recording called (+0ms)");
@@ -5107,7 +5133,9 @@ pub async fn start_recording(
             app_state.set_recording_app_context(hint);
         }
     }
-    crate::pill::positioning::install(island_monitor);
+    // Drop the previous take's pinned monitor; the island uses the live one until
+    // this take's snapshot is installed after first audio.
+    crate::pill::positioning::install(None);
     update_recording_state(&app, RecordingState::Starting, None);
     // Ensure transition actually happened; if blocked, abort early
     if !matches!(
@@ -5115,12 +5143,6 @@ pub async fn start_recording(
         crate::RecordingState::Starting
     ) {
         return Err("Cannot start recording in current state".to_string());
-    }
-
-    if let Some(context) = island_context {
-        let context_app = app.clone();
-        let generation = current_recording_generation();
-        tauri::async_runtime::spawn(async move { context.emit(&context_app, generation).await });
     }
 
     // Arm Escape as soon as Starting is published, before device initialization.
@@ -5651,6 +5673,8 @@ pub async fn start_recording(
         update_recording_state(&app, RecordingState::Idle, None);
         return Err(PTT_START_ABORTED_AFTER_RELEASE.to_string());
     }
+
+    spawn_island_context(&app, source, recording_generation);
 
     // Update state to recording
     update_recording_state(&app, RecordingState::Recording, None);
