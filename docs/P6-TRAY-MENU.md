@@ -10,9 +10,10 @@ for store-managed installations, preserving their updater restriction. The prima
 label: Tauri's menu accelerator API registers an accelerator rather than offering
 an independent display-only field. Settings and macOS Quit use real native
 accelerators. The effective primary recording shortcut comes from the same
-resolver as the app, including native modifier bindings; Windows fallback is
-Ctrl+Alt+Space. Windows defaults in Settings and the effective-primary resolver
-now agree on that combination; persisted user shortcuts are preserved.
+resolver as the app, including native modifier bindings. The default for new
+installs is two keys: ⌥ Space on macOS, Ctrl+Space on Windows (Alt+Space would
+leave a lone Alt tap that opens app menus). Settings, the effective-primary
+resolver and the trigger engine share that default; saved shortcuts are kept.
 
 `menu/model.rs` builds the pure item tree. `menu/tray.rs` collects only cached
 engine/server information, settings, devices and history, then renders that tree.

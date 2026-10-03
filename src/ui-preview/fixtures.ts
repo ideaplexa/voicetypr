@@ -237,7 +237,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
 ];
 
 export function createFixtures(options: PreviewOptions) {
-  const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Alt+Space";
+  const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
   const settings: AppSettings = {
     hotkey,
     current_model: "parakeet-v3",

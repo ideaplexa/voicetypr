@@ -141,7 +141,7 @@ pub fn shortcut_text(app: &AppHandle) -> String {
         })
         .unwrap_or_else(|| {
             if cfg!(target_os = "windows") {
-                "Ctrl+Alt+Space"
+                "Ctrl+Space"
             } else {
                 "Alt+Space"
             }

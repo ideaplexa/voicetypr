@@ -26,6 +26,9 @@ import type {
 } from "@/types/shortcuts";
 import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 
+// Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
+const DEFAULT_HOTKEY = isMacOS ? "Alt+Space" : "Control+Space";
+
 const log = createLogger("onboarding");
 
 export function useOnboardingDesktop({
@@ -299,14 +302,14 @@ export function useOnboardingDesktop({
           setHotkey("");
           setHoldToTalk(primary.action === "hold_to_record");
         } else {
-          setHotkey("Alt+Space");
+          setHotkey(DEFAULT_HOTKEY);
         }
         setHotkeyHydrated(true);
       })
       .catch((error) => {
         if (cancelled) return;
         log.error("[OnboardingDesktop] Failed to restore configured hotkey:", error);
-        setHotkey("Alt+Space");
+        setHotkey(DEFAULT_HOTKEY);
         setHotkeyHydrated(true);
       });
     return () => {

@@ -62,7 +62,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let closeHold = 0;
   let waveSeconds = 0, cancelPending = false, stopPending = false;
   let enabledStream = false, displayedSeconds = -1;
-  let badgeFromX = 25, badgeFromY = 56, shortcut = deps.mac ? 'Alt+Space' : 'Ctrl+Alt+Space';
+  let badgeFromX = 25, badgeFromY = 56, shortcut = deps.mac ? 'Alt+Space' : 'Ctrl+Space';
   const timerEl = dom.get<HTMLElement>('.pill-timer'), startTimeEl = dom.get<HTMLElement>('.start-time'), workTimeEl = dom.get<HTMLElement>('.work-time'), hintTimeEl = dom.get<HTMLElement>('.hint-time');
   const timerElements = [timerEl, startTimeEl, workTimeEl, hintTimeEl];
   const rowEl = dom.get<HTMLElement>('.listening-row'), ctlEl = dom.get<HTMLElement>('.ctl');

@@ -614,13 +614,8 @@ mod tests {
     fn test_ptt_settings_defaults() {
         let settings = Settings::default();
         assert!(!settings.use_different_ptt_key);
-        // Alt+Space opens the window menu on Windows.
-        let expected = if cfg!(target_os = "windows") {
-            "Control+Alt+Space"
-        } else {
-            "Alt+Space"
-        };
-        assert_eq!(settings.ptt_hotkey.as_deref(), Some(expected));
+        // Empty until the user picks a separate hold key.
+        assert_eq!(settings.ptt_hotkey, None);
     }
 
     #[test]

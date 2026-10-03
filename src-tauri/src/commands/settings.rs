@@ -167,14 +167,7 @@ impl Default for Settings {
             selected_microphone: None,         // Default to system default microphone
             recording_mode: "toggle".to_string(), // Default to toggle mode for backward compatibility
             use_different_ptt_key: false,         // Default to using same key
-            ptt_hotkey: Some(
-                if cfg!(target_os = "windows") {
-                    "Control+Alt+Space"
-                } else {
-                    "Alt+Space"
-                }
-                .to_string(),
-            ),
+            ptt_hotkey: None,                     // Empty until the user picks a separate hold key
             keep_transcription_in_clipboard: false, // Default to restoring clipboard after paste
             play_sound_on_recording: true,
             play_sound_on_transcription_complete: true,

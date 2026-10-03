@@ -201,10 +201,12 @@ pub fn get_shortcut_settings(app: AppHandle) -> Result<ShortcutSettings, String>
     load_shortcut_settings(&app)
 }
 
+/// Two-key default for new installs. Not Alt+Space on Windows: once the hook
+/// swallows Space, the app sees a lone Alt tap and opens its menu bar.
 #[cfg(target_os = "windows")]
-pub(crate) const FALLBACK_PRIMARY: &str = "Control+Alt+Space";
+pub(crate) const FALLBACK_PRIMARY: &str = "Control+Space";
 #[cfg(not(target_os = "windows"))]
-pub(crate) const FALLBACK_PRIMARY: &str = "CommandOrControl+Shift+Space";
+pub(crate) const FALLBACK_PRIMARY: &str = "Alt+Space";
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
