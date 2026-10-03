@@ -323,7 +323,7 @@ fn plan_engine_bindings(
             // A hold key equal to the primary is just the primary (already Hold).
             let same_as_primary = bindings.iter().any(|binding| {
                 binding.id == "primary"
-                    && crate::commands::key_normalizer::same_shortcut(&binding.shortcut, ptt_hotkey)
+                    && crate::trigger::mapping::same_shortcut(&binding.shortcut, ptt_hotkey)
             });
             if !same_as_primary {
                 bindings.push(ShortcutBinding {

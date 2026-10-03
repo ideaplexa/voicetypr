@@ -224,6 +224,7 @@ The scenario agents read the real code. These are real behaviours, not prototype
   - 6 transcription dialogs
   - 8 What's new / crash / privacy
   - 10 Windows pass. Also fix the mixed-DPI pill position: `window_manager.rs` computes the position with the destination monitor's scale but sets a `LogicalPosition`, which Tao converts with the pill's current scale. Moving between 100 % and 200 % monitors can misplace the pill. Use physical coordinates. This predates 2.1 (Codex review of `0f59233d`) and needs a two-monitor Windows smoke test.
+  - Windows hold-to-talk: auto-repeats of the held Ctrl+Space still reach the app (no text is typed; IDE suggestions may pop up). The macOS tap swallows repeats of a swallowed hotkey, but the Windows LL hook infers repeats from its down-set, and a missed key-up (secure desktop) would make it swallow a real press. Needs a missed-key-up-safe repeat signal first.
   - Island chip picks, click-to-dictate and the tray menu on a real build via cua-driver: hover and the peek were checked on 2026-10-03; the rest waits for an idle machine.
 
 ## Opus 5.5 design reviews, 2026-10-03 (island + main window)

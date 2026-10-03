@@ -830,7 +830,7 @@ pub async fn save_settings(
             // A hold key equal to the primary is just the primary.
             settings.ptt_hotkey.as_deref().filter(|value| {
                 !value.trim().is_empty()
-                    && !crate::commands::key_normalizer::same_shortcut(value, &settings.hotkey)
+                    && !crate::trigger::mapping::same_shortcut(value, &settings.hotkey)
             })
         } else {
             None

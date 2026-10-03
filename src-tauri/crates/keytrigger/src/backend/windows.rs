@@ -44,8 +44,6 @@ struct HookState {
     /// Lock-free consume set shared with the matcher's binding set; the hook
     /// consults it (no lock) to decide whether to swallow a key-down.
     consume: Arc<ArcSwap<ConsumeSet>>,
-    /// Keys whose first key-down was swallowed; their repeats are swallowed too.
-    consumed: super::ConsumedKeys,
 }
 
 thread_local! {
@@ -73,7 +71,6 @@ impl KeyEventSource for WinKeyboardHook {
                 tx: tx.clone(),
                 down: HashSet::new(),
                 consume: consume_for_hook,
-                consumed: super::ConsumedKeys::default(),
             });
         });
 
@@ -175,14 +172,13 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     }));
                     // Forward EVERY event to the matcher for observation, but
                     // swallow (consume) only a non-repeat, non-modifier key-down
-                    // whose exact (mods, key) is a registered combo/single, plus
-                    // that key's auto-repeats (`ConsumedKeys`). A bare
+                    // whose exact (mods, key) is a registered combo/single. A bare
                     // modifier VK is NEVER consumed — swallowing Control/Shift/Alt/
                     // Win would globally break shortcuts like Ctrl+C/V. macOS routes
                     // modifier changes through a FlagsChanged branch that always
                     // passes through; `should_consume_keydown` enforces the same
                     // invariant here (pure + unit-tested in `backend::vk`).
-                    let consume_first = should_consume_keydown(
+                    should_consume_keydown(
                         vk,
                         key,
                         side,
@@ -190,9 +186,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         is_repeat,
                         modset_from_down(&state.down),
                         &state.consume.load(),
-                    );
-                    // Repeats of a swallowed key are swallowed too.
-                    state.consumed.decide(vk, down, is_repeat, consume_first)
+                    )
                 } else {
                     false
                 }

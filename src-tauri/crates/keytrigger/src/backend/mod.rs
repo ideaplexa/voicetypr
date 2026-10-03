@@ -19,14 +19,16 @@ mod windows;
 
 use crate::engine::KeyEventSource;
 
-/// Keys whose first key-down a backend swallowed. Their auto-repeats are
+/// Keys whose first key-down the macOS tap swallowed. Their auto-repeats are
 /// swallowed too: the app never saw the key-down, and a passed-through repeat
-/// would type into it (holding ⌥ Space inserts non-breaking spaces on macOS).
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+/// would type into it (holding ⌥ Space inserts non-breaking spaces). macOS
+/// flags repeats natively; the Windows LL hook infers them from its down-set,
+/// which a missed key-up (secure desktop) would turn into a swallowed press.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Default)]
 pub(crate) struct ConsumedKeys(std::collections::HashSet<u32>);
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(any(target_os = "macos", test))]
 impl ConsumedKeys {
     /// Whether to swallow this key event. `consume_first` is the backend's
     /// decision for a non-repeat key-down; key-ups always pass through.
