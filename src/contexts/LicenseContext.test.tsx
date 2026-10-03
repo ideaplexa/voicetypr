@@ -98,7 +98,7 @@ describe("LicenseContext", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Activate" }));
 
-    expect(await screen.findByText("Pro Licensed")).toBeInTheDocument();
+    expect(await screen.findByText("Voicetypr Pro · lifetime")).toBeInTheDocument();
     expect(invoke).toHaveBeenCalledWith("activate_license", { licenseKey: SECRET_KEY });
     expect(screen.queryByText("Couldn’t load license status")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Enter license key")).not.toBeInTheDocument();

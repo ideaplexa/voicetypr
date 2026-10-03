@@ -198,7 +198,7 @@ vi.mock("./tabs/TabContainer", () => ({
       <button onClick={() => onNavigate("transcription")}>Open Transcription</button>
       <button onClick={() => onNavigate("home")}>Open Home</button>
       <button onClick={() => onSettingsPaneChange("advanced")}>Open Troubleshooting</button>
-      {activeSection === "settings" && <div>Settings pane: {settingsPane ?? "general"}</div>}
+      {settingsPane && <div>Settings pane: {settingsPane}</div>}
       {activeSection === "transcription" && (
         <div data-testid="transcription">
           Source filter: {sourceFilter ?? "automatic"}
@@ -385,7 +385,8 @@ describe("AppContainer", () => {
         });
       });
 
-      expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: license");
+      expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: home");
+      expect(screen.getByText("Settings pane: license")).toBeInTheDocument();
       expect(toastErrorMock).toHaveBeenCalledWith("License Required", {
         description: "Restore your license",
         duration: 5000,
@@ -436,7 +437,7 @@ describe("AppContainer", () => {
   it("opens the Troubleshooting pane through the new Settings destination", () => {
     render(<AppContainer />);
     fireEvent.click(screen.getByRole("button", { name: "Open Troubleshooting" }));
-    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: settings");
+    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: home");
     expect(screen.getByText("Settings pane: advanced")).toBeInTheDocument();
   });
 

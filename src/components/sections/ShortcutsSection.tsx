@@ -6,9 +6,9 @@ import {
 import { Button } from "@/components/settings/SettingsButton";
 import { Spinner } from "@/components/ui/spinner";
 import { AlertTriangle } from "lucide-react";
-import { ShortcutSectionGroup } from "./shortcuts/ShortcutSectionGroup";
-import { MAX_SINGLE_KEY_BINDINGS } from "./shortcuts/shortcutUtils";
-import { useShortcutsSection } from "./shortcuts/useShortcutsSection";
+import { ShortcutSectionGroup } from "@/components/sections/shortcuts/ShortcutSectionGroup";
+import { MAX_SINGLE_KEY_BINDINGS } from "@/components/sections/shortcuts/shortcutUtils";
+import { useShortcutsSection } from "@/components/sections/shortcuts/useShortcutsSection";
 
 export function ShortcutsSection({
   onNavigateRecording,
@@ -33,14 +33,14 @@ export function ShortcutsSection({
   } = useShortcutsSection();
 
   return (
-    <div className="flex flex-col gap-[14px]">
+    <div className={onNavigateRecording ? "flex flex-col gap-0" : "flex flex-col gap-[14px]"}>
       {!onNavigateRecording ? (
         <SettingsHeader
           title="Shortcuts"
           description="Additional shortcuts for history, Polish, Home, and other app actions."
         />
       ) : (
-        <SettingsPaneCard>
+        <SettingsPaneCard className="border-b border-border">
           <SettingsPaneRow
             title="Dictation shortcut"
             description="Change the shortcut that starts recording."
@@ -103,7 +103,7 @@ export function ShortcutsSection({
           No shortcut actions are available.
         </div>
       ) : (
-        <div className="divide-y divide-border/70 rounded-[14px] border border-border bg-card">
+        <div className="divide-y divide-border/70">
           {groupedActions.map(([section, sectionActions]) => (
             <ShortcutSectionGroup
               key={section}

@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings, TranscriptionHistory } from "@/types";
+import { invoke } from "@tauri-apps/api/core";
+import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { OverviewTab } from "./OverviewTab";
 
 const mock = vi.hoisted(() => ({
@@ -22,9 +24,9 @@ vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () 
 vi.mock("@/contexts/ModelManagementContext", () => ({ useModelManagementContext: () => ({ downloadProgress: mock.downloadProgress }) }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_usage_stats" ? createUsageFixture() : command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => { mock.listeners[name] = handler; return () => { delete mock.listeners[name]; }; }) }));
-vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: () => null }));
+vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: ({ open }: { open: boolean }) => open ? <div>Share stats preview</div> : null }));
 
 beforeEach(() => {
   mock.settings = { hotkey: "Alt+Space", current_model: "parakeet-tdt-0.6b-v3", current_model_engine: "parakeet", speech_language: "en", recording_mode: "push_to_talk", transcription_mode: "live_preview" };
@@ -39,13 +41,25 @@ beforeEach(() => {
 });
 
 describe("Home", () => {
+  it("links the weekly card to Insights", async () => {
+    const onNavigate = vi.fn();
+    render(<OverviewTab onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "See insights →" }));
+    expect(onNavigate).toHaveBeenCalledWith("insights");
+  });
+  it("opens the share card using whole-history usage stats", async () => {
+    render(<OverviewTab />);
+    expect(invoke).not.toHaveBeenCalledWith("get_usage_stats", expect.anything());
+    await userEvent.click(screen.getByRole("button", { name: "Share stats" }));
+    expect(await screen.findByText("Share stats preview")).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("get_usage_stats", { since: null });
+  });
   it("shows the active local engine, key caps, recording mode and setup chips", async () => {
     const onNavigate = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} />);
     expect(screen.getByText("Ready · Parakeet v3 runs on this Mac")).toHaveClass("text-sage");
     expect(screen.getByRole("heading", { name: /Press.*and start talking/ })).toBeInTheDocument();
-    expect(screen.getByText("⌥")).toBeInTheDocument();
-    expect(screen.getByText("Space")).toBeInTheDocument();
+    expect(screen.getByText("⌥ Space").tagName).toBe("KBD");
     expect(screen.getByText(/Hold to talk, release to paste/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /PolishClean/ })).toBeInTheDocument());
     const user = userEvent.setup();
@@ -61,7 +75,7 @@ describe("Home", () => {
     mock.settings = { ...mock.settings, hotkey: "Control+Alt+Space", current_model: "soniox", current_model_engine: "soniox", recording_mode: "toggle" };
     render(<OverviewTab />);
     expect(screen.getByText("Ready · Soniox (cloud)")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl + Alt + Space")).toBeInTheDocument();
     expect(screen.getByText(/Press once to start, again to paste/)).toBeInTheDocument();
   });
 
@@ -84,9 +98,7 @@ describe("Home", () => {
       mock.settings = { ...mock.settings, hotkey: "", recording_mode: "toggle" };
       mock.shortcutBindings = bindings;
       render(<OverviewTab />);
-      expect(await screen.findByText("⌘")).toBeInTheDocument();
-      expect(screen.getByText("⇧")).toBeInTheDocument();
-      expect(screen.getByText("Space")).toBeInTheDocument();
+      expect((await screen.findByText("⌘ ⇧ Space")).tagName).toBe("KBD");
     },
   );
 
@@ -99,7 +111,7 @@ describe("Home", () => {
     const onNavigate = vi.fn(); const onNavigateSettingsPane = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onNavigateSettingsPane} />);
     const warning = screen.getByRole("button", { name: new RegExp(label) });
-    expect(warning).toHaveClass("text-foreground");
+    expect(warning).toHaveClass("text-warn");
     await userEvent.setup().click(warning);
     if (pane) expect(onNavigateSettingsPane).toHaveBeenCalledWith(pane);
     else expect(onNavigate).toHaveBeenCalledWith(screenId);
@@ -161,7 +173,7 @@ describe("Home", () => {
   it("shows an empty Recent state and the last four dictations with app and time", async () => {
     const { rerender } = render(<OverviewTab />);
     expect(screen.getByText("Your dictations will show up here.")).toBeInTheDocument();
-    expect(screen.getByText("nothing yet in the last 7 days")).toBeInTheDocument();
+    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     mock.history = Array.from({ length: 5 }, (_, index) => ({ id: String(index), text: `Dictation number ${index}`, timestamp: new Date(Date.now() - index * 60_000), model: "parakeet", writing: { context_hint: { app_name: "Notes" }, audio_duration_ms: 3000 } }));
     rerender(<OverviewTab />);
@@ -169,7 +181,7 @@ describe("Home", () => {
     expect(screen.queryByText("Dictation number 4")).not.toBeInTheDocument();
     expect(screen.getAllByText("Notes")).toHaveLength(4);
     expect(screen.getByText("2m")).toBeInTheDocument();
-    expect(screen.queryByText("nothing yet in the last 7 days")).not.toBeInTheDocument();
+    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /dictations on/ })).toHaveAccessibleName(/5 dictations on/);
     expect(screen.getAllByText("Notes")[0]).toHaveClass("text-muted-foreground");
     const onNavigate = vi.fn();
@@ -181,8 +193,8 @@ describe("Home", () => {
   it("describes a short dictation without treating zero rounded savings as empty", () => {
     mock.history = [{ id: "short", text: "hello", timestamp: new Date(), model: "parakeet", writing: { audio_duration_ms: 1000 } }];
     render(<OverviewTab />);
-    expect(screen.getByText("less than a minute estimated saved")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Last 7 days" })).toBeInTheDocument();
+    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "This week" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /1 dictations on/ })).toBeInTheDocument();
   });
 

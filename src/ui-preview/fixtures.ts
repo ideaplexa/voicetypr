@@ -1,3 +1,4 @@
+import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type LicenseStatus, type ModelInfo, type TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
 import type { ShortcutActionDefinition, ShortcutSettings } from "@/types/shortcuts";
@@ -12,6 +13,7 @@ export type PreviewOptions = {
   theme: "light" | "dark";
   platform: "macos" | "windows";
   empty: boolean;
+  sidebar?: "expanded" | "rail";
   onboarding?: 1 | 2 | 3;
 };
 
@@ -178,7 +180,7 @@ export const demoWriting: WritingSettings = {
 const shortcutActions: ShortcutActionDefinition[] = [
   {
     action: "toggle_recording",
-    label: "Toggle Recording",
+    label: "Toggle recording",
     description: "Start or stop dictation.",
     section: "Recording",
     recommended_trigger: "pressed",
@@ -186,7 +188,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "hold_to_record",
-    label: "Hold to Record",
+    label: "Hold to record",
     description: "Record while holding the shortcut.",
     section: "Recording",
     recommended_trigger: "hold",
@@ -194,7 +196,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "cancel_recording",
-    label: "Cancel Recording",
+    label: "Cancel dictation",
     description: "Discard the current recording.",
     section: "Recording",
     recommended_trigger: "pressed",
@@ -202,7 +204,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "copy_last_transcription",
-    label: "Copy Last Transcription",
+    label: "Copy last transcript",
     description: "Copy the most recent text.",
     section: "History",
     recommended_trigger: "pressed",
@@ -210,7 +212,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "paste_last_transcription",
-    label: "Paste Last Transcription",
+    label: "Paste last transcript",
     description: "Paste the most recent text.",
     section: "History",
     recommended_trigger: "pressed",
@@ -218,7 +220,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "toggle_ai_formatting",
-    label: "Toggle Polish",
+    label: "Polish on / off",
     description: "Enable or disable Polish.",
     section: "Polish",
     recommended_trigger: "pressed",
@@ -226,7 +228,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
   {
     action: "open_dashboard",
-    label: "Open Dashboard",
+    label: "Open Voicetypr",
     description: "Show the main window.",
     section: "App",
     recommended_trigger: "pressed",
@@ -367,6 +369,7 @@ export function createFixtures(options: PreviewOptions) {
       remote_available: false,
     },
     get_transcription_history: history,
+    get_usage_stats: createUsageFixture(null, options.empty),
     get_transcription_count: history.length,
     get_writing_settings: writing,
     update_writing_settings: null,

@@ -1,7 +1,7 @@
 import type { ShortcutAction, ShortcutActionDefinition, ShortcutBinding } from "@/types/shortcuts";
 import type { Dispatch, SetStateAction } from "react";
-import { ShortcutActionRow } from "./ShortcutActionRow";
-import type { EditingCapture } from "./shortcutUtils";
+import { ShortcutActionRow } from "@/components/sections/shortcuts/ShortcutActionRow";
+import type { EditingCapture } from "@/components/sections/shortcuts/shortcutUtils";
 
 type ShortcutSectionGroupProps = {
   pane?: boolean;
@@ -42,7 +42,7 @@ export function ShortcutSectionGroup({
   );
 
   return (
-    <section className={pane ? "px-5" : "p-4"}>
+    <section className={pane ? "px-0" : "p-4"}>
       {!pane ? (
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-sm font-semibold text-foreground">{section}</h2>

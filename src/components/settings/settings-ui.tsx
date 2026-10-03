@@ -288,7 +288,7 @@ export function Segmented({
           key={option.value}
           value={option.value}
           disabled={option.disabled}
-          className="h-auto rounded-[7px] border border-transparent bg-transparent px-3 py-1.5 text-[12.5px] leading-[normal] font-medium text-muted-foreground aria-pressed:bg-card! aria-pressed:text-foreground aria-pressed:font-semibold aria-pressed:shadow-sm dark:aria-pressed:border-foreground/30"
+          className="h-auto focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-[7px] border border-transparent bg-transparent px-3 py-1.5 text-[12.5px] leading-[normal] font-medium text-muted-foreground aria-pressed:bg-card! aria-pressed:text-foreground aria-pressed:font-semibold aria-pressed:shadow-sm dark:aria-pressed:border-foreground/30"
         >
           {option.label}
         </ToggleGroupItem>

@@ -13,7 +13,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
 import { isMacOS } from "@/lib/platform";
 
 export interface RecentRecordingsHeaderProps {
@@ -73,7 +78,7 @@ export function RecentRecordingsHeader({
               type="button"
               variant="outline"
               onClick={onTranscribeFile}
-              className="h-[35px] rounded-[10px] px-4 text-[13px] font-medium text-muted-foreground"
+              className="h-[35px] rounded-[10px] bg-card px-4 text-[13px] font-medium text-muted-foreground"
             >
               Transcribe a file…
             </Button>
@@ -85,32 +90,32 @@ export function RecentRecordingsHeader({
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-[35px] rounded-[10px] px-3 text-[13px] text-muted-foreground"
+                    aria-label="History actions"
+                    className="h-[35px] rounded-[10px] bg-card px-3 text-[13px] text-muted-foreground"
                   />
                 }
               >
-                Export
+                <MoreHorizontal className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onExport}>JSON (.json)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onExportText("txt")}>
-                  Plain text (.txt)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onExportText("md")}>
-                  Markdown (.md)
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={onExport}>JSON (.json)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onExportText("txt")}>
+                      Plain text (.txt)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onExportText("md")}>
+                      Markdown (.md)
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={onClearAll}>
+                  Clear all
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
-          {historyLength > 0 && (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onClearAll}
-              className="h-[35px] px-2 text-[13px] text-muted-foreground hover:text-destructive"
-            >
-              Clear all
-            </Button>
           )}
         </>
       }

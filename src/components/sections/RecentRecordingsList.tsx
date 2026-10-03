@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from "react";
-import { AlertTriangle, Search } from "lucide-react";
+import { AlertTriangle, Search, History } from "lucide-react";
 import { KeyCaps } from "@/components/KeyCaps";
 import { Button } from "@/components/settings/SettingsButton";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
@@ -78,7 +78,7 @@ export function RecentRecordingsList({
   if (filteredHistory.length === 0)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Search className="size-7 text-muted-foreground" />
+        {historyLength === 0 ? <History className="size-7 text-muted-foreground" /> : <Search className="size-7 text-muted-foreground" />}
         {historyLength === 0 ? (
           readinessStatus.ready ? (
             <p className="text-sm text-muted-foreground">

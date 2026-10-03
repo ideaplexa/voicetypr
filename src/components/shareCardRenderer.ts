@@ -1,180 +1,146 @@
-import { createLogger } from "@/lib/logger";
-import { WORDS_PER_PAGE } from "./shareStats";
-
-const log = createLogger("share-stats");
-
-const LOGO_SRC = `${import.meta.env.BASE_URL}logo.png`;
+import {
+  computeUsageOverview,
+  calendarWeeks,
+  parseLocalDay,
+  periodLabels,
+  type UsagePeriod,
+} from "@/components/insights/stats";
+import type { UsageDay, UsageStats } from "@/types/usage";
 
 export interface ShareCardStats {
-  totalTranscriptions: number;
   totalWords: number;
   timeSavedDisplay: string;
+  streak: number;
+  pace: number | null;
+  range: string;
+  days: UsageDay[];
+}
+export function toShareCardStats(stats: UsageStats, period: UsagePeriod = "all"): ShareCardStats {
+  const overview = computeUsageOverview(stats, period);
+  const since = stats.first_use
+    ? parseLocalDay(stats.first_use).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+    : null;
+  return {
+    totalWords: overview.words,
+    timeSavedDisplay:
+      overview.savedMinutes >= 60
+        ? `${Math.floor(overview.savedMinutes / 60)} h`
+        : `${overview.savedMinutes} m`,
+    streak: overview.current,
+    pace: overview.pace,
+    range: `${periodLabels[period]}${period === "all" && since ? ` · since ${since}` : ""}`,
+    days: stats.days,
+  };
 }
 
-export function getSharePlays(
-  totalWords: number,
-  totalTranscriptions: number,
-  timeSavedDisplay: string,
-): Array<{ value: string; play: string }> {
-  const timeSaved = timeSavedDisplay === "0m" ? "0m" : timeSavedDisplay;
-  const plays = [
-    {
-      value: totalWords.toLocaleString(),
-      play: totalWords === 1 ? "word I spoke" : "words I spoke",
-    },
-  ];
-  if (totalWords >= 250) {
-    const pages = Math.max(1, Math.round(totalWords / WORDS_PER_PAGE));
-    plays.push({
-      value: pages.toLocaleString(),
-      play: pages === 1 ? "page I didn’t type" : "pages I didn’t type",
-    });
-  }
-  plays.push({
-    value: timeSaved,
-    play: "my fingers got back",
-  });
-  plays.push({
-    value: totalTranscriptions.toLocaleString(),
-    play:
-      totalTranscriptions === 1 ? "time I skipped the keyboard" : "times I skipped the keyboard",
-  });
-  return plays;
-}
-
-async function loadShareCardLogo(): Promise<HTMLImageElement | null> {
-  return new Promise<HTMLImageElement | null>((resolve) => {
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = () => resolve(image);
-    image.onerror = () => resolve(null);
-    image.src = LOGO_SRC;
-  });
-}
-
+/** Numbers and dates only. The canvas has exactly the exported 1200×630 dimensions. */
 export async function drawShareCard(
   canvas: HTMLCanvasElement,
   stats: ShareCardStats,
   isCancelled: () => boolean,
 ): Promise<string | null> {
-  const context = canvas.getContext("2d");
-  if (!context) {
-    log.error("Could not create the share card canvas");
-    return null;
-  }
-
-  const logo = await loadShareCardLogo();
+  await Promise.all([
+    document.fonts.load('600 58px "Geist Mono Variable"'),
+    document.fonts.load('600 14px "Geist Variable"'),
+    document.fonts.ready,
+  ]);
   if (isCancelled()) return null;
-
-  const logicalWidth = 1200;
-  const logicalHeight = 800;
-  const exportScale = 2;
-  canvas.width = logicalWidth * exportScale;
-  canvas.height = logicalHeight * exportScale;
-  context.resetTransform();
-  context.scale(exportScale, exportScale);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-
-  const fontFamily = "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-  const cream = "#fffaf2";
-  const mint = "#8ed6a3";
-  const teal = "#4fc9c7";
-  const ink = "#0f1711";
-  const plays = getSharePlays(stats.totalWords, stats.totalTranscriptions, stats.timeSavedDisplay);
-  const centerX = logicalWidth / 2;
-
-  const background = context.createLinearGradient(0, 0, logicalWidth, logicalHeight);
-  background.addColorStop(0, "#17181c");
-  background.addColorStop(1, "#101113");
-  context.fillStyle = background;
-  context.fillRect(0, 0, logicalWidth, logicalHeight);
-
-  const glow = context.createRadialGradient(centerX, 200, 30, centerX, 200, 520);
-  glow.addColorStop(0, "rgba(79, 201, 199, 0.12)");
-  glow.addColorStop(0.5, "rgba(142, 214, 163, 0.06)");
-  glow.addColorStop(1, "rgba(79, 201, 199, 0)");
-  context.fillStyle = glow;
-  context.fillRect(0, 0, logicalWidth, logicalHeight);
-
-  const accent = (x0: number, x1: number) => {
-    const gradient = context.createLinearGradient(x0, 0, x1, 0);
-    gradient.addColorStop(0, mint);
-    gradient.addColorStop(1, teal);
-    return gradient;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  canvas.width = 1200;
+  canvas.height = 630;
+  ctx.resetTransform();
+  ctx.scale(2, 2);
+  ctx.fillStyle = "#121316";
+  ctx.beginPath();
+  ctx.roundRect(0, 0, 600, 315, 16);
+  ctx.fill();
+  const sans = '"Geist Variable", sans-serif';
+  const mono = '"Geist Mono Variable", monospace';
+  const text = (
+    value: string,
+    x: number,
+    y: number,
+    size: number,
+    color: string,
+    family = sans,
+    weight = 400,
+  ) => {
+    ctx.fillStyle = color;
+    ctx.font = `${weight} ${size}px ${family}`;
+    ctx.fillText(value, x, y);
   };
-
-  if (logo) {
-    context.save();
-    [
-      { radius: 78, alpha: 0.16 },
-      { radius: 102, alpha: 0.1 },
-      { radius: 126, alpha: 0.05 },
-    ].forEach(({ radius, alpha }) => {
-      context.strokeStyle = `rgba(142, 214, 163, ${alpha})`;
-      context.lineWidth = 1.5;
-      context.beginPath();
-      context.arc(centerX, 112, radius, 0, Math.PI * 2);
-      context.stroke();
-    });
-    context.restore();
-    context.drawImage(logo, centerX - 48, 64, 96, 96);
+  ctx.fillStyle = "#8FD1A8";
+  ctx.beginPath();
+  ctx.roundRect(30, 26, 22, 22, 6);
+  ctx.fill();
+  // The real Brandmark.tsx voice V, in its original SVG coordinate system.
+  ctx.save();
+  ctx.translate(33, 29);
+  ctx.scale(16 / 312, 16 / 320);
+  ctx.translate(-100, -96);
+  ctx.strokeStyle = "#121316";
+  ctx.fillStyle = "#121316";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const paths: [string, number][] = [
+    ["M143 197 C166 288 201 350 240 393", 36],
+    ["M369 197 C346 288 311 350 272 393", 36],
+    ["M256 163 L256 338", 23],
+    ["M202 226 L202 257", 15],
+    ["M226 207 L226 276", 15],
+    ["M286 207 L286 276", 15],
+    ["M310 226 L310 257", 15],
+  ];
+  for (const [path, width] of paths) {
+    ctx.lineWidth = width;
+    ctx.stroke(new Path2D(path));
   }
-
-  context.textAlign = "center";
-  context.fillStyle = accent(centerX - 140, centerX + 140);
-  context.font = `560 26px ${fontFamily}`;
-  context.fillText("type with your voice.", centerX, 228);
-
-  const rowTop = 322;
-  const rowHeight = 88;
-  plays.forEach((item, index) => {
-    const y = rowTop + index * rowHeight;
-    context.font = `720 50px ${fontFamily}`;
-    const numberWidth = context.measureText(item.value).width;
-    context.font = `520 32px ${fontFamily}`;
-    const playWidth = context.measureText(item.play).width;
-    const rowWidth = numberWidth + 30 + playWidth;
-    const numberX = centerX - rowWidth / 2;
-    context.textAlign = "left";
-    context.fillStyle = cream;
-    context.font = `720 50px ${fontFamily}`;
-    context.fillText(item.value, numberX, y);
-    context.fillStyle = accent(numberX, numberX + rowWidth);
-    context.font = `520 32px ${fontFamily}`;
-    context.fillText(item.play, numberX + numberWidth + 30, y);
-  });
-
-  const ctaText = "Try Voicetypr free";
-  context.font = `640 28px ${fontFamily}`;
-  const ctaWidth = context.measureText(ctaText).width + 88;
-  const ctaX = centerX - ctaWidth / 2;
-  const ctaY = 636;
-  context.save();
-  context.shadowColor = "rgba(79, 201, 199, 0.35)";
-  context.shadowBlur = 28;
-  context.shadowOffsetY = 6;
-  context.fillStyle = accent(ctaX, ctaX + ctaWidth);
-  context.beginPath();
-  context.roundRect(ctaX, ctaY, ctaWidth, 66, 33);
-  context.fill();
-  context.restore();
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillStyle = ink;
-  context.font = `640 28px ${fontFamily}`;
-  context.fillText(ctaText, centerX, ctaY + 34);
-  context.textBaseline = "alphabetic";
-
-  context.fillStyle = "#b8b0a6";
-  context.font = `560 20px ${fontFamily}`;
-  context.fillText("voicetypr.com · no card required", centerX, 738);
-
+  ctx.beginPath();
+  ctx.arc(256, 124, 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  text("Voicetypr", 60, 42, 14, "#FFFFFFEB", sans, 600);
+  ctx.textAlign = "right";
+  text(stats.range, 570, 41, 12, "#FFFFFF8C");
+  ctx.textAlign = "left";
+  ctx.letterSpacing = "-2.4px";
+  // Shrink only for large totals that would otherwise collide with the calendar.
+  ctx.font = `600 58px ${mono}`;
+  const size = Math.min(
+    58,
+    (58 * 360) / Math.max(360, ctx.measureText(stats.totalWords.toLocaleString()).width),
+  );
+  text(stats.totalWords.toLocaleString(), 30, 158, size, "#FFFFFF", mono, 600);
+  ctx.letterSpacing = "0px";
+  text("words spoken, not typed", 30, 193, 16, "#8FD1A8", sans, 500);
+  const colors = ["#FFFFFF12", "#8FD1A833", "#8FD1A866", "#8FD1A8A6", "#8FD1A8"];
+  calendarWeeks(stats.days, 14).forEach((week, col) =>
+    week.forEach((cell, row) => {
+      if (cell.future) return;
+      ctx.fillStyle = colors[cell.level];
+      ctx.beginPath();
+      ctx.roundRect(405 + col * 12, 109 + row * 12, 9, 9, 2.5);
+      ctx.fill();
+    }),
+  );
+  let x = 30;
+  const metrics = [
+    { value: stats.timeSavedDisplay, label: "saved vs typing" },
+    { value: `${stats.streak} days`, label: "streak" },
+    ...(stats.pace === null
+      ? []
+      : [{ value: `${Math.round(stats.pace)} wpm`, label: "speaking pace" }]),
+  ];
+  for (const metric of metrics) {
+    text(metric.value, x, 268, 18, "#FFFFFF", mono, 600);
+    const width = ctx.measureText(metric.value).width;
+    text(metric.label, x, 286, 11.5, "#FFFFFF8C");
+    x += Math.max(width, ctx.measureText(metric.label).width) + 26;
+  }
+  ctx.textAlign = "right";
+  text("voicetypr.com", 570, 285, 12, "#FFFFFF8C", mono);
+  ctx.textAlign = "left";
   if (isCancelled()) return null;
-  try {
-    return canvas.toDataURL("image/png");
-  } catch (error) {
-    log.error("Could not encode the share card", error);
-    return null;
-  }
+  return canvas.toDataURL("image/png");
 }

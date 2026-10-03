@@ -5,7 +5,10 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
+import { Share2 } from "lucide-react";
 import { KeyCaps } from "@/components/KeyCaps";
+import { toShareCardStats } from "@/components/shareCardRenderer";
+import { useUsageStats } from "@/components/insights/useUsageStats";
 import { ShareStatsModal } from "@/components/ShareStatsModal";
 import { languages } from "@/components/languages";
 import { useReadiness } from "@/contexts/ReadinessContext";
@@ -24,7 +27,7 @@ import type { ScreenId, SettingsPane } from "@/components/navigation";
 import type { SourceFilter } from "@/components/sections/models/types";
 import { useTestDictation } from "./overview/useTestDictation";
 import { useActiveRemoteLabel } from "./overview/useActiveRemoteLabel";
-import { formatTimeSaved, formatWeekSavedTime, useOverviewStats } from "./overview/useOverviewStats";
+import { formatWeekSavedTime, useOverviewStats } from "./overview/useOverviewStats";
 
 
 function relativeTime(date: Date): string {
@@ -55,6 +58,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const [tryText, setTryText] = useState("");
   const { feedback: tryFeedback, contentChanged, reset: resetTryFeedback } = useTestDictation(tryOpen);
   const [shareOpen, setShareOpen] = useState(false);
+  const usage = useUsageStats("all", shareOpen);
   const { history, totalCount, isLoading, loadError, refreshHistory } = useTranscriptionHistory({ limit: 500, includeTotalCount: true });
   const stats = useOverviewStats(history, totalCount);
   const model = settings?.current_model ?? "";
@@ -85,10 +89,10 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   return <SettingsPage wide container className="min-h-full gap-[22px]">
     <section data-pencil-name="Hero" className="flex flex-col gap-[14px] rounded-[16px] border border-border bg-card px-7 py-[26px]">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium text-sage"><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
+        {status.ready ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium text-sage" style={{ color: "var(--ready-text)" }}><span aria-hidden className="size-1.5 rounded-full bg-sage" />{status.label}</span> : <button type="button" onClick={() => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } }} className="inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2.5 py-1 text-xs font-medium text-warn focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><span aria-hidden className="size-1.5 rounded-full bg-warn" />{status.label}<ChevronRight className="size-3 text-warn" /></button>}
         <Button variant="outline" size="sm" onClick={() => { setTryText(""); resetTryFeedback(); setTryOpen(true); }}>Try a test dictation</Button>
       </div>
-      <h1 className="flex flex-wrap items-center gap-x-[10px] gap-y-1 text-[30px] font-semibold leading-[normal] tracking-[-0.6px] text-foreground">Press <KeyCaps caps={caps} size="lg" /> and start talking</h1>
+      <h1 className="flex flex-wrap items-center gap-x-[10px] gap-y-1 text-[30px] font-semibold leading-[normal] tracking-[-0.6px] text-foreground">Press <KeyCaps caps={caps.length ? [caps.join(isMacOS ? " " : " + ")] : []} size="lg" /> and start talking</h1>
       <p className="text-[14px] leading-[normal] text-muted-foreground">{trigger.mode === "push_to_talk" ? "Hold to talk, release to paste into any app. Press Esc twice to cancel." : "Press once to start, again to paste into any app. Press Esc twice to cancel."}</p>
       <div className="pt-2 flex flex-wrap gap-2">{chips.map(({ label, value, screen, icon: Icon }) => <button key={label} type="button" onClick={() => onNavigate?.(screen)} className="inline-flex max-w-full items-center gap-[7px] rounded-[9px] bg-muted px-[11px] py-[7px] text-xs leading-[normal] text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /><span className="text-muted-foreground">{label}</span><strong className="truncate font-medium">{value}</strong></button>)}</div>
     </section>
@@ -98,16 +102,17 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
         <div className="flex items-center justify-between gap-3"><h2 id="recent-title" className="text-[15px] leading-[normal] font-semibold text-foreground">Recent</h2><button type="button" onClick={() => onNavigate?.("history")} className="text-[12.5px] leading-[normal] font-medium text-sage hover:underline focus-visible:outline-2 focus-visible:outline-ring">View all history →</button></div>
         {isLoading && history.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Loading dictations…</p> : loadError && history.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Couldn’t load history. <button type="button" onClick={() => void refreshHistory()} className="text-sage underline">Retry</button></p> : history.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Your dictations will show up here.</p> : <ul className="mt-2">{history.slice(0, 4).map((item) => <RecentRow key={item.id} item={item} />)}</ul>}
       </section>
-      <SettingsCard title="Last 7 days" className="rounded-[16px] p-5 [&>div:first-child_h2]:text-[13px] [&>div:first-child_h2]:font-medium [&>div:first-child_h2]:text-muted-foreground">
+      <SettingsCard title="This week" className="rounded-[16px] p-5 [&>div:first-child_h2]:text-[13px] [&>div:first-child_h2]:font-medium [&>div:first-child_h2]:text-muted-foreground">
         <div className="mt-4 font-sans text-[28px] font-semibold tracking-tight text-foreground">{weekTime}</div>
-        <p className="text-xs text-muted-foreground">{stats.weekCount === 0 ? "nothing yet in the last 7 days" : stats.weekSavedMinutes === 0 ? "less than a minute estimated saved" : "estimated saved vs typing at 40 wpm"}</p>
+        <p className="text-xs text-muted-foreground">saved vs typing</p>
         <div role="img" aria-label={`Dictations over the last seven days: ${stats.weekDays.map((day) => `${day.count} dictations on ${day.label}`).join(", ")}`} className="mt-4 flex h-[70px] items-end gap-1.5">{stats.weekDays.map((day) => <div key={day.key} className="flex h-full min-w-0 flex-1 flex-col justify-end gap-1"><div title={`${day.count} dictations on ${day.label}`} className={cn("min-h-1 rounded-sm", day.count === stats.weekMax && day.count > 0 ? "bg-sage" : "bg-sage-bg")} style={{ height: `${Math.max(6, Math.round(day.count / Math.max(1, stats.weekMax) * 70))}%` }} /><span className="text-center font-mono text-[10px] text-muted-foreground">{day.label.slice(0, 1)}</span></div>)}</div>
         <dl className="mt-5 grid grid-cols-2 gap-4"><div><dd className="font-mono text-base font-semibold text-foreground">{stats.weekWords.toLocaleString()}</dd><dt className="text-xs text-muted-foreground">words</dt></div><div><dd className="font-mono text-base font-semibold text-foreground">{stats.weekCount.toLocaleString()}</dd><dt className="text-xs text-muted-foreground">dictations</dt></div></dl>
-        <Button variant="ghost" size="sm" className="mt-4 -ml-2 text-xs" onClick={() => setShareOpen(true)}>Share stats</Button>
+        <div className="mt-4 flex flex-wrap items-center gap-1"><button type="button" className="text-xs text-sage hover:underline focus-visible:outline-2 focus-visible:outline-ring" onClick={() => onNavigate?.("insights")}>See insights →</button><Button variant="ghost" size="sm" className="text-xs" onClick={() => setShareOpen(true)}><Share2 className="size-3.5" />Share stats</Button></div>
+        {shareOpen && !usage.stats && <p role="status" className="text-xs text-muted-foreground">{usage.error ? "Couldn’t load stats." : "Loading stats…"}{usage.error && <button className="ml-1 text-sage underline" onClick={() => void usage.refresh()}>Retry</button>}</p>}
       </SettingsCard>
     </div>
 
     <Dialog open={tryOpen} onOpenChange={(open) => { resetTryFeedback(); setTryOpen(open); }}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Try a test dictation</DialogTitle><DialogDescription>Place the cursor below, press <KeyCaps caps={caps} />, and speak. Your words will appear here.</DialogDescription></DialogHeader><Textarea autoFocus aria-label="Test dictation" placeholder="Dictate here…" value={tryText} onChange={(event) => { if (event.target.value !== tryText) contentChanged(); setTryText(event.target.value); }} className="min-h-32" /><p role="status" className="text-sm text-muted-foreground">{tryFeedback ?? (tryText.trim() ? `${tryText.trim().split(/\s+/).length} words` : "Waiting for your dictation…")}</p></DialogContent></Dialog>
-    <ShareStatsModal open={shareOpen} onOpenChange={setShareOpen} stats={{ totalTranscriptions: stats.totalTranscriptions, totalWords: stats.totalWords, timeSavedDisplay: formatTimeSaved(stats) }} />
+    {usage.stats && <ShareStatsModal open={shareOpen} onOpenChange={setShareOpen} stats={toShareCardStats(usage.stats)} />}
   </SettingsPage>;
 }

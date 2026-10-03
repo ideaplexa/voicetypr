@@ -72,6 +72,54 @@ describe("useAppEvents registration lifecycle", () => {
     expect(listeners.get("hotkey-registration-failed")?.size).toBe(0);
   });
 
+  it("routes backend Settings pane events and accepts only known section ids", async () => {
+    const setActiveSection = vi.fn();
+    renderHook(() =>
+      useAppEvents({
+        checkModels: vi.fn(async () => ({ hasModels: true })),
+        setActiveSection,
+        setSourceFilter: vi.fn(),
+        setForceShowOnboarding: vi.fn(),
+        forceOnboardingNeedsFreshAvailabilityRef: { current: false },
+      }),
+    );
+    await act(async () => pendingOverview[0]());
+    await waitFor(() => expect(listeners.get("navigate-to-section")?.size).toBe(1));
+    for (const pane of [
+      "general",
+      "shortcuts",
+      "privacy",
+      "storage",
+      "network",
+      "agent",
+      "advanced",
+      "license",
+      "about",
+    ]) {
+      act(() => {
+        for (const handler of listeners.get("navigate-to-settings") ?? [])
+          handler({ payload: pane } as Event<unknown>);
+      });
+      expect(setActiveSection).toHaveBeenLastCalledWith(pane);
+    }
+    act(() => {
+      for (const handler of listeners.get("navigate-to-settings") ?? [])
+        handler({ payload: undefined } as Event<unknown>);
+    });
+    expect(setActiveSection).toHaveBeenLastCalledWith("settings");
+    act(() => {
+      for (const handler of listeners.get("navigate-to-section") ?? [])
+        handler({ payload: "network" } as Event<unknown>);
+    });
+    expect(setActiveSection).toHaveBeenLastCalledWith("network");
+    setActiveSection.mockClear();
+    act(() => {
+      for (const handler of listeners.get("navigate-to-section") ?? [])
+        handler({ payload: "unknown" } as Event<unknown>);
+    });
+    expect(setActiveSection).not.toHaveBeenCalled();
+  });
+
   it("an older cleanup cannot remove a replacement registration", async () => {
     const first = await eventCoordinator.register("main", "test-cleanup", vi.fn());
     const secondHandler = vi.fn();

@@ -1,3 +1,4 @@
+import { isMacOS } from "@/lib/platform";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -9,144 +10,144 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createLogger } from "@/lib/logger";
-import { ShareStatsModalBody } from "./ShareStatsModalBody";
-import { drawShareCard, type ShareCardStats } from "./shareCardRenderer";
-
-const log = createLogger("share-stats");
+import { ShareStatsModalBody } from "@/components/ShareStatsModalBody";
+import { drawShareCard, type ShareCardStats } from "@/components/shareCardRenderer";
 
 interface ShareStatsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   stats: ShareCardStats;
 }
-
 export function ShareStatsModal({ open, onOpenChange, stats }: ShareStatsModalProps) {
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [imageDataUrl, setImageDataUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCopying, setIsCopying] = useState(false);
-  // Exactly the fields the card renderer consumes; identity changes only when
-  // one of them does, so the draw effect doesn't redraw on unrelated churn.
+  const [drawError, setDrawError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const cardStats = useMemo(
-    () => ({
-      totalTranscriptions: stats.totalTranscriptions,
-      totalWords: stats.totalWords,
-      timeSavedDisplay: stats.timeSavedDisplay,
-    }),
-    [stats.totalTranscriptions, stats.totalWords, stats.timeSavedDisplay],
+    () => ({ ...stats }),
+    [stats.totalWords, stats.timeSavedDisplay, stats.streak, stats.pace, stats.range, stats.days],
   );
-
-  // Reset transient draw state when the inputs change — adjusted during render.
-  const [previousDrawInputs, setPreviousDrawInputs] = useState({
-    canvas,
-    open,
-    cardStats,
-  });
+  const [previousInputs, setPreviousInputs] = useState({ canvas, open, cardStats, attempt });
   if (
-    previousDrawInputs.canvas !== canvas ||
-    previousDrawInputs.open !== open ||
-    previousDrawInputs.cardStats !== cardStats
+    previousInputs.canvas !== canvas ||
+    previousInputs.open !== open ||
+    previousInputs.cardStats !== cardStats ||
+    previousInputs.attempt !== attempt
   ) {
-    const wasOpen = previousDrawInputs.open;
-    setPreviousDrawInputs({ canvas, open, cardStats });
-    if (open) {
-      setImageDataUrl("");
-      setIsLoading(true);
-    } else if (wasOpen) {
-      setIsLoading(true);
-      setCopied(false);
-    }
+    setPreviousInputs({ canvas, open, cardStats, attempt });
+    setImageDataUrl("");
+    setIsLoading(true);
+    setDrawError(false);
+    setCopied(false);
   }
-
   useEffect(() => {
     if (!open || !canvas) return;
-
     let cancelled = false;
-
-    const drawCard = async () => {
-      const dataUrl = await drawShareCard(canvas, cardStats, () => cancelled);
-      if (cancelled) return;
-      if (dataUrl) {
-        setImageDataUrl(dataUrl);
-      }
-      setIsLoading(false);
-    };
-
-    void drawCard();
+    void drawShareCard(canvas, cardStats, () => cancelled)
+      .then((dataUrl) => {
+        if (cancelled) return;
+        setImageDataUrl(dataUrl ?? "");
+        setDrawError(!dataUrl);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDrawError(true);
+          setIsLoading(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [canvas, open, cardStats]);
-
-  const copyImageToClipboard = async () => {
+  }, [canvas, open, cardStats, attempt]);
+  const copyImage = async () => {
     if (!imageDataUrl || isCopying) return;
-
     setIsCopying(true);
     try {
       await invoke("copy_image_to_clipboard", { imageDataUrl });
       setCopied(true);
       toast.success("Stats image copied to clipboard");
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      log.error("Failed to copy stats image:", error);
-      toast.error("Could not copy the image. Try downloading it instead.");
+    } catch {
+      toast.error("Could not copy the image. Try saving it instead.");
     } finally {
       setIsCopying(false);
     }
   };
-
-  const downloadImage = async () => {
+  const saveImage = async () => {
     if (!imageDataUrl) return;
-
+    const fileName = `voicetypr-stats-${Date.now()}.png`;
     try {
-      const fileName = `voicetypr-stats-${Date.now()}.png`;
       const filePath = await save({
         defaultPath: fileName,
         filters: [{ name: "Image", extensions: ["png"] }],
       });
-      if (filePath) {
-        await invoke("save_image_to_file", { imageDataUrl, filePath });
-      }
-    } catch (error) {
-      log.error("Failed to save stats image:", error);
+      if (filePath) await invoke("save_image_to_file", { imageDataUrl, filePath });
+    } catch {
       const link = document.createElement("a");
-      link.download = `voicetypr-stats-${Date.now()}.png`;
+      link.download = fileName;
       link.href = imageDataUrl;
       document.body.appendChild(link);
       link.click();
       link.remove();
     }
   };
-
+  const postOnX = async () => {
+    if (!imageDataUrl || isCopying) return;
+    setIsCopying(true);
+    const url = new URL("https://x.com/intent/post");
+    url.searchParams.set(
+      "text",
+      `I've dictated ${stats.totalWords.toLocaleString()} words with @voicetypr and skipped ${stats.timeSavedDisplay.endsWith(" h") ? stats.timeSavedDisplay.replace(" h", "") : (parseFloat(stats.timeSavedDisplay) / 60).toFixed(1)} h of typing`,
+    );
+    url.searchParams.set("url", "https://voicetypr.com");
+    try {
+      await invoke("copy_image_to_clipboard", { imageDataUrl });
+      setCopied(true);
+      await invoke("plugin:opener|open_url", { url: url.toString(), with: null });
+      toast.success(`Image copied — paste it into your post (${isMacOS ? "⌘V" : "Ctrl+V"})`);
+    } catch {
+      toast.error("Could not copy the image or open X. Please try again.");
+    } finally {
+      setIsCopying(false);
+    }
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="gap-0 overflow-hidden p-0"
-        style={{ width: "calc(100% - 2rem)", maxWidth: "34rem" }}
+        className="gap-0 overflow-hidden rounded-[14px] p-0"
+        style={{ width: "calc(100% - 2rem)", maxWidth: "40rem" }}
       >
-        <DialogHeader className="border-b border-border/70 px-5 py-3 pr-12 text-left">
-          <DialogTitle className="text-base">Share your stats</DialogTitle>
+        <DialogHeader className="border-b border-border px-5 py-3 pr-12 text-left">
+          <DialogTitle className="text-[18px] font-semibold">Share your stats</DialogTitle>
           <DialogDescription>
             A picture of the typing you skipped. Transcript text is never included.
           </DialogDescription>
         </DialogHeader>
-
         <ShareStatsModalBody
           isLoading={isLoading}
           imageDataUrl={imageDataUrl}
-          stats={stats}
+          stats={cardStats}
           setCanvas={setCanvas}
           copied={copied}
           isCopying={isCopying}
-          onCopy={() => {
-            void copyImageToClipboard();
-          }}
-          onDownload={() => {
-            void downloadImage();
-          }}
+          onCopy={() => void copyImage()}
+          onDownload={() => void saveImage()}
+          onPost={() => void postOnX()}
         />
+        {drawError && (
+          <p role="alert" className="px-4 pb-4 text-sm text-muted-foreground">
+            Couldn’t create the image.{" "}
+            <button
+              className="text-sage underline"
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              Retry
+            </button>
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   );

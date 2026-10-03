@@ -25,7 +25,10 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingsPaneRow } from "@/components/settings/settings-ui";
 
+import { isMacOS } from "@/lib/platform";
+
 interface AppBehaviorCardProps {
+  rows?: "startup" | "updates";
   pane?: boolean;
   updateChannel: string | null | undefined;
   checkUpdatesAutomatically: boolean | null | undefined;
@@ -35,6 +38,7 @@ interface AppBehaviorCardProps {
 }
 export function AppBehaviorCard({
   pane = false,
+  rows,
   updateChannel,
   checkUpdatesAutomatically,
   onUpdateChannelChange,
@@ -130,77 +134,82 @@ export function AppBehaviorCard({
   if (pane)
     return (
       <>
-        <SettingsPaneRow
-          className="min-h-[66px]"
-          title="Open at login"
-          description="Start Voicetypr quietly in the menu bar."
-          control={
-            <Switch
-              id="autostart"
-              aria-label="Open at login"
-              checked={autostartEnabled}
-              onCheckedChange={handleAutostartToggle}
-              disabled={autostartLoading}
-            />
-          }
-        />
-        {updateDistribution === "store" ? (
+        {rows !== "updates" && (
           <SettingsPaneRow
             className="min-h-[66px]"
-            title="Updates"
-            description="Updates are managed by Microsoft Store."
-          />
-        ) : updateDistribution === "direct" ? (
-          <>
-            <SettingsPaneRow
-              className="min-h-[66px]"
-              title="Updates"
-              description="Get new versions automatically."
-              control={
-                <Switch
-                  id="check-updates-automatically"
-                  aria-label="Updates"
-                  checked={checkUpdatesAutomatically ?? true}
-                  onCheckedChange={onCheckUpdatesAutomaticallyChange}
-                />
-              }
-            />
-            <SettingsPaneRow
-              className="min-h-[66px]"
-              title="Update channel"
-              description="Beta gets features first. You can switch back any time."
-              control={
-                <Select
-                  items={[
-                    { value: "stable", label: "Stable" },
-                    { value: "beta", label: "Beta" },
-                  ]}
-                  value={updateChannel ?? "stable"}
-                  onValueChange={(value) => value != null && void handleUpdateChannelChange(value)}
-                  disabled={isChangingUpdateChannel || isCheckingUpdate}
-                >
-                  <SelectTrigger className="w-[110px]" aria-label="Update channel">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stable">Stable</SelectItem>
-                    <SelectItem value="beta">Beta</SelectItem>
-                  </SelectContent>
-                </Select>
-              }
-            />
-          </>
-        ) : (
-          <SettingsPaneRow
-            className="min-h-[66px]"
-            title="Updates"
-            description={
-              updateDistribution === "loading"
-                ? "Checking update options…"
-                : "Update options unavailable."
+            title={isMacOS ? "Open at login" : "Start with Windows"}
+            description={`Start Voicetypr quietly in the ${isMacOS ? "menu bar" : "system tray"}.`}
+            control={
+              <Switch
+                id="autostart"
+                aria-label={isMacOS ? "Open at login" : "Start with Windows"}
+                checked={autostartEnabled}
+                onCheckedChange={handleAutostartToggle}
+                disabled={autostartLoading}
+              />
             }
           />
         )}
+        {rows !== "startup" &&
+          (updateDistribution === "store" ? (
+            <SettingsPaneRow
+              className="min-h-[66px]"
+              title="Updates"
+              description="Updates are managed by Microsoft Store."
+            />
+          ) : updateDistribution === "direct" ? (
+            <>
+              <SettingsPaneRow
+                className="min-h-[66px]"
+                title="Updates"
+                description="Get new versions automatically."
+                control={
+                  <Switch
+                    id="check-updates-automatically"
+                    aria-label="Updates"
+                    checked={checkUpdatesAutomatically ?? true}
+                    onCheckedChange={onCheckUpdatesAutomaticallyChange}
+                  />
+                }
+              />
+              <SettingsPaneRow
+                className="min-h-[66px]"
+                title="Update channel"
+                description="Beta gets features first. You can switch back any time."
+                control={
+                  <Select
+                    items={[
+                      { value: "stable", label: "Stable" },
+                      { value: "beta", label: "Beta" },
+                    ]}
+                    value={updateChannel ?? "stable"}
+                    onValueChange={(value) =>
+                      value != null && void handleUpdateChannelChange(value)
+                    }
+                    disabled={isChangingUpdateChannel || isCheckingUpdate}
+                  >
+                    <SelectTrigger className="w-[110px]" aria-label="Update channel">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="stable">Stable</SelectItem>
+                      <SelectItem value="beta">Beta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                }
+              />
+            </>
+          ) : (
+            <SettingsPaneRow
+              className="min-h-[66px]"
+              title="Updates"
+              description={
+                updateDistribution === "loading"
+                  ? "Checking update options…"
+                  : "Update options unavailable."
+              }
+            />
+          ))}
       </>
     );
 
