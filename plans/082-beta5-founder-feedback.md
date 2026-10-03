@@ -108,4 +108,28 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
      3. No leading space from the cursor context: we only add a trailing space.
      4. The Whisper prompt carries vocabulary only, with no punctuated style hint.
      5. The `transcript-text` normaliser skips multi-line text entirely.
-   - **Plan:** measure first with a blind A/B on the same real clips (our output vs VoiceInk with its options noted). Then build 1 and 2 in shadow mode, 3 with real-app tests, and 4 behind measurement.
+   - **Founder decision (2026-10-03): no A/B against VoiceInk.** Get the most out of every model ourselves, with per-model configuration. Our own before/after run on real clips is only a regression guard.
+   - **Per-engine work:**
+     - **Parakeet V2/V3** (casing and punctuation are native):
+       - return token timings from the sidecar for pause-based paragraphs on long takes
+       - keep CTC vocabulary rescoring
+       - V3 language per model
+     - **Whisper:**
+       - a short punctuated style hint ahead of the vocabulary prompt
+       - keep segment breaks and their times
+       - beam search on GPU profiles
+       - no_context review on CPU
+     - **Deepgram:**
+       - already uses `smart_format` and keyterms
+       - add `paragraphs=true` and read the paragraph transcript
+       - a filler-words option
+     - **Soniox:** context and language hints are in place; use its endpoint/sentence info for paragraphs.
+     - **OpenAI and Groq:** a prompt (vocabulary) is in place; add the same style hint as Whisper.
+   - **Shared local formatting stage** (runs for every engine, with Polish off):
+     - sentence-start capitals and standalone "i"
+     - optional filler and stutter removal
+     - paragraphs from pause timings
+     - leading space from the cursor context (needs real-app tests)
+     - a per-line normaliser (so multi-line text is normalised too)
+     - guards for URLs and code
+   - **Per-model settings** (C4), kept few: language, real-time streaming, paragraphs and filler removal, each shown only where the model supports it.
