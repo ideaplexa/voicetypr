@@ -133,3 +133,27 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
      - a per-line normaliser (so multi-line text is normalised too)
      - guards for URLs and code
    - **Per-model settings** (C4), kept few: language, real-time streaming, paragraphs and filler removal, each shown only where the model supports it.
+
+## F. Performance (founder, 2026-10-04: "smooth and fast; performance is never a second thought")
+
+1. **Frontend:**
+   - React Doctor scan, then fix every finding:
+     - needless re-renders and unstable props
+     - context fan-out
+     - effects that should be derived values
+     - big lists without virtualisation (History, Dictionary)
+     - long tasks on interaction
+   - Profile the main window and the island for dropped frames. The island must stay on compositor-only animations (transform and opacity), with demand-driven rAF only.
+   - Budget: interactions respond within 100 ms, at 60 fps with no long tasks over 50 ms.
+2. **Backend (Tauri):**
+   - no blocking work on the main thread or in command handlers; heavy work goes in `spawn_blocking`
+   - batch events rather than chatty emits
+   - cache settings and store reads on hot paths
+   - measure command latency for the commands the UI calls on every screen
+3. Verify with before/after traces, not impressions.
+
+## G. Island motion polish (founder, 2026-10-04)
+
+1. **Timed-card countdown:** replace the right-to-left line with the island's own border draining, or refilling its ring colour, as the timer.
+2. **Transcribing and Polish states:** a richer, purposeful animation instead of the plain spinner and sparkle. Explore agent-era patterns (shimmer text, flowing gradients), staying compositor-only and calm.
+3. **Pasted card:** centre the content. The text currently hugs the app icon and leaves the right side empty. Balance it within the island's three zones.
