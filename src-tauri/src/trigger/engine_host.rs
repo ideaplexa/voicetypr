@@ -320,16 +320,23 @@ fn plan_engine_bindings(
 
     if recording_mode == RecordingMode::PushToTalk && use_different_ptt_key {
         if let Some(ptt_hotkey) = ptt_hotkey.filter(|value| !value.trim().is_empty()) {
-            bindings.push(ShortcutBinding {
-                id: "ptt".to_string(),
-                action: ShortcutAction::HoldToRecord,
-                shortcut: ptt_hotkey.to_string(),
-                trigger: ShortcutTrigger::Hold,
-                enabled: true,
-                allow_risky_combo: false,
-                trigger_kind: TriggerKind::Combo,
-                modifier: None,
+            // A hold key equal to the primary is just the primary (already Hold).
+            let same_as_primary = bindings.iter().any(|binding| {
+                binding.id == "primary"
+                    && crate::commands::key_normalizer::same_shortcut(&binding.shortcut, ptt_hotkey)
             });
+            if !same_as_primary {
+                bindings.push(ShortcutBinding {
+                    id: "ptt".to_string(),
+                    action: ShortcutAction::HoldToRecord,
+                    shortcut: ptt_hotkey.to_string(),
+                    trigger: ShortcutTrigger::Hold,
+                    enabled: true,
+                    allow_risky_combo: false,
+                    trigger_kind: TriggerKind::Combo,
+                    modifier: None,
+                });
+            }
         } else {
             log::warn!(
                 "keytrigger: push-to-talk is set to use a different PTT key, but ptt_hotkey is empty — PTT will not arm"
@@ -451,6 +458,19 @@ mod tests {
                 ));
             }
         }
+    }
+    #[test]
+    fn a_hold_key_equal_to_the_primary_is_not_bound_twice() {
+        let (bindings, _) = plan_engine_bindings(
+            &[],
+            "Alt+Space",
+            RecordingMode::PushToTalk,
+            true,
+            Some("alt+space"),
+            false,
+        );
+        assert!(bindings.iter().any(|b| b.id == "primary"));
+        assert!(!bindings.iter().any(|b| b.id == "ptt"));
     }
     #[test]
     fn island_escape_is_observed_without_consuming_target_app_keys() {

@@ -827,10 +827,11 @@ pub async fn save_settings(
 
     let ptt_hotkey_for_validation =
         if recording_mode == crate::RecordingMode::PushToTalk && settings.use_different_ptt_key {
-            settings
-                .ptt_hotkey
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
+            // A hold key equal to the primary is just the primary.
+            settings.ptt_hotkey.as_deref().filter(|value| {
+                !value.trim().is_empty()
+                    && !crate::commands::key_normalizer::same_shortcut(value, &settings.hotkey)
+            })
         } else {
             None
         };

@@ -1,6 +1,11 @@
 use keyboard_types::{Code, Key};
 use std::str::FromStr;
 
+/// Two shortcut strings name the same keys (case and spelling normalized).
+pub(crate) fn same_shortcut(a: &str, b: &str) -> bool {
+    normalize_shortcut_keys(a).eq_ignore_ascii_case(&normalize_shortcut_keys(b))
+}
+
 /// Normalize keyboard shortcut keys for cross-platform compatibility
 /// Converts frontend key names to Tauri-compatible format
 pub fn normalize_shortcut_keys(shortcut: &str) -> String {
