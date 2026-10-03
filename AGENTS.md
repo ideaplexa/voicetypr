@@ -19,7 +19,7 @@ decisions: `plans/MASTER-PLAN-2026-Q4.md`.
 - Judge engines and accuracy on **real speech**, never the synthetic TTS clips
   in `perf-corpus/synthetic`.
 - No transcript, audio, clipboard, prompt, key, path or window title in logs,
-  GlitchTip or PostHog. Secrets go in `secure_store`, never the `settings` store.
+  PostHog. Secrets go in `secure_store`, never the `settings` store.
 - Keep it simple: existing Tauri plugin/API over custom platform code, no
   speculative abstractions, refactors separate from behaviour changes. Don't
   grow the oversized files listed in the architecture doc.

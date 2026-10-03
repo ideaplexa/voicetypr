@@ -58,7 +58,7 @@ flowchart TD
 | **T2.3** | Reduce `paste_mac` inter-event sleep 15→0-5 ms | `text.rs:671` | ~10 ms | Med — bare-`v` regression counter |
 | **T2.4** | Overlap Parakeet model-load with normalize tail | `executor.rs:212` | ~10–40 ms (cold-ish) | Med — engine-lease/cancel ordering |
 | **T2.5** | **Soniox REST poll → WebSocket** (removes 1000 ms poll floor) | `cloud_stt/soniox.rs:196,390` | +500 ms mean / +1000 ms p95 removed → 249 ms median | Med — auth/reconnect; keep REST fallback |
-| **T2.6** | **`lto="thin"` + `codegen-units=1`** release profile *(moved from Tier 1 per critique — it's a release-gate, not an app-latency knob)* | `src-tauri/Cargo.toml:126-133` | ~5–15% smaller binary + inlining (near-zero on Metal, more on CPU/Windows) | Low-Med | keep `strip="none"`+line-tables + `panic=unwind`; **release ships only after a forced-panic crash resolves native fn+file:line in Sentry/Bugsink on macOS AND Windows** |
+| **T2.6** | **`lto="thin"` + `codegen-units=1`** release profile *(moved from Tier 1 per critique — it's a release-gate, not an app-latency knob)* | `src-tauri/Cargo.toml:126-133` | ~5–15% smaller binary + inlining (near-zero on Metal, more on CPU/Windows) | Low-Med | keep `strip="none"`+line-tables + `panic=unwind`; **release ships only after a forced-panic crash resolves native fn+file:line in PostHog/Bugsink on macOS AND Windows** |
 | **T2.7** | **Collapse WAV write→read round-trip → in-memory PCM handoff** *(moved up from Tier 3 — it's quality + the streaming seam, not just footprint)* | `02-audio-pipeline` O2 | ~4–10 ms/record (more on slow FS) + removes lossy f32→i16→f32 dither churn | Med — never-lose-speech (keep raw WAV artifact) |
 
 **Tier 2 net:** stop→text fixed tail drops from ~120–170 ms toward **~30–50 ms**; cloud (Soniox) first-text drops ~500 ms–1 s; smaller binary; cleaner audio seam.
@@ -86,7 +86,7 @@ flowchart TD
 | **X3** | **Tokio blocking-pool / dedicated STT executor** — `features=["full"]`, no worker/blocking sizing today | prevents p95 tail spikes when normalize+decode+clipboard+startup contend | backend |
 | **X4** | **Global allocator experiment** (mimalloc/jemalloc behind a profile) | smoother p95 in decode/log/JSON paths — or neutral/worse on macOS; measure, don't adopt on faith | shell |
 | **X5** | **`n_threads` tuning** (currently `parallelism-1`, includes E-cores on Apple Silicon) | ±5–15% + thermal; auto-tune per model/clip, don't hard-code | whisper |
-| **X6** | **Sentry/telemetry hot-path guardrail** — no breadcrumbs/events on audio callback, level events, or per-partial streaming | prevents a future latency regression; panic-capture only | shell/telemetry |
+| **X6** | **PostHog/telemetry hot-path guardrail** — no breadcrumbs/events on audio callback, level events, or per-partial streaming | prevents a future latency regression; panic-capture only | shell/telemetry |
 
 ---
 
@@ -129,7 +129,7 @@ Optional later: add an `opus` crate so the Whisper path also drops ffmpeg for Op
 ## Correctness guardrails (apply to every change)
 - **plan 008**: never allocate/lock/block in the CPAL callback (T1.7 fixes the one violation found).
 - **plan 015**: never-lose-speech — audio_ctx trimming must be length-gated with a floor; decode-ahead deferred to the streaming track.
-- **Symbolication is a product constraint**: LTO is *likely* symbol-safe but **MUST be verified with a release-build crash smoke** (Sentry resolves native names; dSYM/PDB intact) before shipping — do not assume.
+- **Symbolication is a product constraint**: LTO is *likely* symbol-safe but **MUST be verified with a release-build crash smoke** (PostHog resolves native names; dSYM/PDB intact) before shipping — do not assume.
 - **Paste reliability & focus**: every sleep removal (T2.1–T2.3) needs the cross-app QA matrix + a verified non-activating overlay (currently *unverified* per `06` trap 7 — resolve before T2.2).
 - **WER bar (MULTILINGUAL)**: the acceptance corpus MUST span English + European languages (fr/de/es/it/pt/nl + a Slavic/Nordic sample) — VT's user base. flash-attn, audio_ctx, greedy-vs-beam, and turbo each need a **per-language** WER delta check. Because auto-detect hides the language until after decode, turbo & flash-attn ship as **explicit user speed-mode opt-ins**, never silent multilingual defaults. audio_ctx is language-independent (duration-based) and can default globally once the last-word assertion passes.
 - **Parakeet is ASR-only (no translation)**: steering macOS European users to Parakeet v3 is correct for *native-language transcription*, but any user who needs **translate-to-English MUST stay on Whisper large-v3** (turbo can't translate either; VT already parses `translate_to_english` but can't forward it to Parakeet). Surface this in the model-pick UI, don't silently drop the translate intent.

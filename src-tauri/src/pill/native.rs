@@ -23,7 +23,10 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
         extern "C" fn never(_: &Object, _: Sel) -> BOOL {
             NO
         }
-        let panel = window.to_panel().map_err(|e| e.to_string())?;
+        let panel = window.to_panel().map_err(|e| {
+            crate::telemetry::native_error("panel_conversion");
+            e.to_string()
+        })?;
         let subclass = Class::get("VoicetyprNonactivatingPanel").unwrap_or_else(|| {
             let mut cls = ClassDecl::new(
                 "VoicetyprNonactivatingPanel",

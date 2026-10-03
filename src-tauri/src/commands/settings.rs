@@ -93,6 +93,8 @@ pub struct Settings {
     pub pill_indicator_style: String,
     #[serde(default = "default_island_start_details")]
     pub island_start_details: String,
+    #[serde(default = "default_telemetry_enabled")]
+    pub telemetry_enabled: bool,
     #[serde(default)]
     pub island_start_details_shown: u32,
     // Pill indicator screen position
@@ -158,6 +160,7 @@ impl Default for Settings {
             pill_indicator_mode: "always".to_string(), // New installs keep the resting dot visible
             pill_indicator_style: default_pill_indicator_style(),
             island_start_details: default_island_start_details(),
+            telemetry_enabled: true,
             island_start_details_shown: 0,
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
@@ -175,6 +178,9 @@ impl Default for Settings {
     }
 }
 
+fn default_telemetry_enabled() -> bool {
+    true
+}
 fn default_island_start_details() -> String {
     "changed".into()
 }
@@ -611,6 +617,11 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             store.get("show_pill_indicator").and_then(|v| v.as_bool()),
             Settings::default().pill_indicator_mode,
         ),
+        telemetry_enabled: crate::telemetry::migrated_consent(Some(&json!({
+            "telemetry_enabled":store.get("telemetry_enabled"),
+            "analytics_enabled":store.get("analytics_enabled"),
+            "crash_reporting_enabled":store.get("crash_reporting_enabled"),
+        }))),
         island_start_details: normalize_island_start_details(
             store
                 .get("island_start_details")
@@ -889,6 +900,14 @@ pub async fn save_settings(
         json!(settings.play_sound_on_paste_success),
     );
     store.delete("play_sound_on_recording_end");
+    // Consent belongs to its dedicated command. Generic saves migrate stored
+    // choices rather than overwriting them from a potentially stale form.
+    let consent = crate::telemetry::migrated_consent(Some(&json!({
+        "telemetry_enabled":store.get("telemetry_enabled"),
+        "analytics_enabled":store.get("analytics_enabled"),
+        "crash_reporting_enabled":store.get("crash_reporting_enabled"),
+    })));
+    crate::telemetry::save_consent_values(&store, consent, false);
     save_pill_indicator_mode(&store, &settings.pill_indicator_mode);
     store.set(
         "island_start_details",

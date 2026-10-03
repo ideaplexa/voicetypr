@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { recordEvent } from "@/lib/observability";
+import { useEffect, useState } from "react";
 import { Share2 } from "lucide-react";
 import { PageHeader, Segmented, SettingsPage } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
@@ -24,6 +25,7 @@ import "@/components/insights/insights.css";
 
 export function InsightsTab() {
   const [period, setPeriod] = useState<UsagePeriod>("all");
+  useEffect(() => { recordEvent({ name: "insights_viewed", properties: { period } }); }, [period]);
   const [shareOpen, setShareOpen] = useState(false);
   const { stats, loading, error, refresh } = useUsageStats(period);
   const { settings } = useSettings();

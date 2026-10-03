@@ -12,6 +12,7 @@ import type { SourceFilter } from "@/components/sections/models/types";
 // Native event payloads are validated here, including the legacy string events.
 export interface MainNavigate {
   screen: string;
+  telemetry_source?: "tray" | "island" | "app";
   pane?: string | null;
   source?: SourceFilter | null;
 }

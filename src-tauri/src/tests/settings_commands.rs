@@ -39,6 +39,7 @@ mod tests {
     fn test_settings_serialization() {
         let settings = Settings {
             polish_keep_words: false,
+            telemetry_enabled: true,
             hotkey: "CommandOrControl+A".to_string(),
             current_model: "base".to_string(),
             current_model_engine: "whisper".to_string(),
@@ -132,6 +133,7 @@ mod tests {
     fn test_settings_clone() {
         let settings = Settings {
             polish_keep_words: false,
+            telemetry_enabled: true,
             hotkey: "CommandOrControl+B".to_string(),
             current_model: "tiny".to_string(),
             current_model_engine: "whisper".to_string(),
@@ -869,6 +871,7 @@ mod tests {
     fn test_settings_full_round_trip() {
         let original = Settings {
             polish_keep_words: false,
+            telemetry_enabled: true,
             hotkey: "CommandOrControl+Alt+V".to_string(),
             current_model: "large-v3".to_string(),
             current_model_engine: "whisper".to_string(),

@@ -386,3 +386,35 @@ describe("manual report IDs", () => {
     );
   });
 });
+
+describe("content-free report Diagnostics", () => {
+  const id = "12345678-1234-4234-8234-123456789abc";
+  const diagnostics = { app_version: "2.1.0-beta.4", os: "macos", arch: "aarch64",
+    install_id: id, dictation_ids: [id], engine: "parakeet", pill_mode: "always" };
+  it("includes lookup IDs in the submitted message", () => {
+    const payload = buildManualReportPayload({ ...baseReport, diagnostics });
+    expect(payload.message).toContain("Diagnostics\nApp version: 2.1.0-beta.4");
+    expect(payload.message).toContain("Anonymous install ID: " + id);
+    expect(payload.message).toContain("Dictation IDs: " + id);
+  });
+  it("omits the install ID with sharing off", () => {
+    const message = formatManualReportMessage("VT-ABCDE", "", { ...diagnostics, install_id: null });
+    expect(message).not.toContain("Anonymous install ID:");
+  });
+  it("rejects words, paths and app names in every diagnostics field", () => {
+    const secret = "/Users/alice/My App private words";
+    const message = formatManualReportMessage("VT-ABCDE", "", { app_version: secret, os: secret,
+      arch: secret, install_id: secret, dictation_ids: [secret], engine: secret, pill_mode: secret });
+    expect(message).not.toContain(secret);
+    expect(message).not.toContain("alice");
+  });
+  it("includes only the last five valid trace IDs", () => {
+    const message = formatManualReportMessage("VT-ABCDE", "", { ...diagnostics, dictation_ids: Array(8).fill(id) });
+    expect(message.match(/12345678-1234-4234-8234-123456789abc/g)).toHaveLength(6);
+  });
+  it("reserves the diagnostics block inside the message limit", () => {
+    const message = formatManualReportMessage("VT-ABCDE", "x".repeat(20_000), diagnostics);
+    expect(message.length).toBe(10_000);
+    expect(message).toContain("Pill mode: always");
+  });
+});

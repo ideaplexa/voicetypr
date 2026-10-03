@@ -81,14 +81,14 @@ describe("Settings pane controls", () => {
 
   it("renders Privacy's real switches and persists analytics consent", async () => {
     render(<SettingsTab pane="privacy" onPaneChange={vi.fn()} />);
-    const analytics = await screen.findByRole("switch", { name: "Enable usage analytics" });
+    const analytics = await screen.findByRole("switch", { name: "Share anonymous crash reports and usage numbers" });
     expect(
-      screen.getByRole("switch", { name: "Enable crash and error reporting" }),
+      screen.getByRole("switch", { name: "Share anonymous crash reports and usage numbers" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Audio, transcripts, clipboard contents/)).toBeInTheDocument();
+    expect(screen.getByText(/never your words, audio or app content/)).toBeInTheDocument();
     fireEvent.click(analytics);
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("set_product_analytics_consent", { enabled: false }),
+      expect(invoke).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false }),
     );
   });
 

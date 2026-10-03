@@ -84,9 +84,8 @@ active-win-pos-rs = "0.10.1"
 clap = { version = "4.5", features = ["derive"] }
 genai = "=0.6.0"
 tokio-util = "0.7"
-sentry = { version = "0.42", default-features = false, features = ["backtrace", "panic", "transport", "rustls", "debug-images"] }
 which = "4.4.2"
-posthog-rs = { version = "0.22.0", default-features = false }
+posthog-rs = { version = "0.22.0", default-features = false, features = ["error-tracking"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
@@ -150,12 +149,8 @@ opt-level = 1
 opt-level = 3
 
 [profile.release]
-# Client-side crash symbolication for GlitchTip (server-side symbolication via
-# uploaded PDB/dSYM/debug files): line tables give function + file:line resolved
-# in-process at capture (sentry `backtrace`); strip = "none" keeps the symbol
-# table so macOS resolves names. Windows additionally emits voicetypr.pdb,
-# shipped beside the exe (see windows/installer-hooks.nsh) so dbghelp can
-# resolve at runtime. Debug-image metadata is scrubbed to basenames in
-# `telemetry::scrub_debug_meta` before egress.
+# In-process PostHog symbolication needs line tables and symbols.
+# Absolute paths, debug image paths, payload strings and source context are
+# stripped by telemetry before sending; only crate-relative locations survive.
 debug = "line-tables-only"
 strip = "none"

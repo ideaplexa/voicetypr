@@ -210,6 +210,7 @@ impl WindowManager {
             match self.show_pill_window_internal().await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
+                    crate::telemetry::native_error("show");
                     if attempt < MAX_RETRIES {
                         log::warn!(
                             "Failed to show pill window (attempt {}): {}. Retrying...",
@@ -299,6 +300,7 @@ impl WindowManager {
 
         let pill_window = pill_builder.build().map_err(|e| e.to_string())?;
         if let Err(error) = pill_window.set_ignore_cursor_events(true) {
+            crate::telemetry::native_error("hit_testing");
             log::warn!("Failed to make pill window click-through: {}", error);
         }
 
@@ -648,6 +650,7 @@ impl WindowManager {
         if let Some(pill) = self.get_pill_window() {
             self.emit_pill_geometry(&pill);
             if let Err(e) = pill.set_position(LogicalPosition::new(pill_x, pill_y)) {
+                crate::telemetry::native_error("positioning");
                 log::warn!("Failed to reposition pill window: {}", e);
             } else {
                 log::info!("Repositioned pill window to ({}, {})", pill_x, pill_y);
@@ -666,6 +669,7 @@ impl WindowManager {
         if let Some(pill) = self.get_pill_window() {
             self.emit_pill_geometry(&pill);
             if let Err(e) = pill.set_position(LogicalPosition::new(pill_x, pill_y)) {
+                crate::telemetry::native_error("positioning");
                 log::warn!("Failed to reposition pill window: {}", e);
             } else {
                 log::info!(

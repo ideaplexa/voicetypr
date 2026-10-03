@@ -10,7 +10,7 @@ use super::settings::{resolve_pill_indicator_mode, Settings};
 
 static PENDING_HIDE: Mutex<Option<u64>> = Mutex::new(None);
 
-fn pill_focus_safe() -> bool {
+pub(crate) fn pill_focus_safe() -> bool {
     cfg!(any(target_os = "macos", target_os = "windows"))
 }
 

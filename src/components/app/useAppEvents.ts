@@ -1,3 +1,4 @@
+import { markSettingsSource } from "@/lib/observability";
 import {
   useEffect,
   useRef,
@@ -90,6 +91,7 @@ export function useAppEvents({
         });
 
         const navigate = (destination: MainNavigate) => {
+          markSettingsSource(destination.telemetry_source);
           routeMainNavigation(destination, setActiveSection, setSourceFilter, openSettingsPane);
         };
         await register<MainNavigate>("main-navigate", navigate);

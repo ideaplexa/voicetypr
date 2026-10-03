@@ -51,7 +51,7 @@ describe("ShareStatsModal", () => {
     await openModal();
     await userEvent.click(screen.getByRole("button", { name: "Save image…" }));
     await waitFor(() => expect(save).toHaveBeenCalled());
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith("save_image_to_file", expect.anything());
   });
   it("opens the X intent with numbers only through the opener plugin", async () => {
     await openModal();
@@ -59,8 +59,8 @@ describe("ShareStatsModal", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", expect.anything()),
     );
-    expect(vi.mocked(invoke).mock.calls[0]).toEqual(["copy_image_to_clipboard", { imageDataUrl }]);
-    const [command, args] = vi.mocked(invoke).mock.calls[1];
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command !== "record_observability_event")[0]).toEqual(["copy_image_to_clipboard", { imageDataUrl }]);
+    const [command, args] = vi.mocked(invoke).mock.calls.filter(([command]) => command !== "record_observability_event")[1];
     expect(command).toBe("plugin:opener|open_url");
     const url = new URL(String(args && "url" in args ? args.url : ""));
     expect(url.origin + url.pathname).toBe("https://x.com/intent/post");
@@ -92,7 +92,7 @@ describe("ShareStatsModal", () => {
 
 it("does not open X when copying the image fails", async () => {
   await openModal();
-  vi.mocked(invoke).mockRejectedValueOnce(new Error("clipboard unavailable"));
+  vi.mocked(invoke).mockImplementation(async (command) => { if (command === "copy_image_to_clipboard") throw new Error("clipboard unavailable"); });
   await userEvent.click(screen.getByRole("button", { name: "Post on X" }));
   expect(invoke).toHaveBeenCalledWith("copy_image_to_clipboard", { imageDataUrl });
   expect(invoke).not.toHaveBeenCalledWith("plugin:opener|open_url", expect.anything());

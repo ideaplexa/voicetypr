@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import { HotkeyInput } from "@/components/HotkeyInput";
 import { KeyCaps } from "@/components/KeyCaps";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
@@ -188,6 +189,7 @@ export function CaptureControlsCard() {
             onValueChange={async (deviceName) => {
               try {
                 await invoke("set_audio_device", { deviceName: deviceName || null });
+                recordEvent({ name: "quick_setting_changed", properties: { setting: "mic", source: "app" } });
                 toast.success(`Microphone changed to: ${deviceName || "Default"}`);
               } catch (error) {
                 log.error("Failed to set microphone:", error);

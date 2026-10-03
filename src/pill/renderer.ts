@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import { dotCentre, pickPlacement, PickGuard, quickKinds, quickRows, quickTitles, type QuickKind, type QuickOptions } from '@/pill/quick-settings';
 import { icon } from '@/pill/icons';
 import { StackView } from '@/pill/stack-view';
@@ -159,6 +160,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       badgeFromY = chip.height ? chip.top + chip.height / 2 - surface.top - 6 : top ? 16 : 54;
     }
     lastState = state;
+    if (state === 'peek' && dom.root.dataset.state !== 'peek') recordEvent({ name: 'island_peek_opened', properties: {} });
     const rest = state === 'rest';
     dom.root.dataset.state = pick ? 'pick' : rest ? 'idle' : state;
     dom.root.dataset.preview = String(state === 'live');

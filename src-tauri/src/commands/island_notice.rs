@@ -20,6 +20,11 @@ pub enum NoticeKind {
     NoSpeech,
 }
 pub fn notice<R: Runtime>(app: &AppHandle<R>, kind: NoticeKind) -> NoticeKind {
+    crate::observability::emit(
+        "island_state",
+        vec![("state", serde_json::to_value(kind).unwrap())],
+        Some(crate::commands::audio::current_recording_generation()),
+    );
     super::pill_feedback::send(app, "island-notice", serde_json::json!({ "kind": kind }));
     kind
 }

@@ -253,6 +253,25 @@ impl Snapshot {
                 let _ = store.save();
             }
         }
+        for (key, value) in [
+            ("mode", serde_json::json!(self.payload.mode)),
+            (
+                "start_card_shown",
+                serde_json::json!(self.payload.show_start_card),
+            ),
+            ("island_start_details", serde_json::json!(self.details)),
+            ("language", serde_json::json!(self.payload.language.code)),
+            (
+                "polish_keep_words",
+                serde_json::json!(self.payload.polish.keep_words),
+            ),
+            (
+                "polish_style",
+                serde_json::json!(self.payload.polish.style.unwrap_or("off").to_lowercase()),
+            ),
+        ] {
+            crate::observability::update(generation, key, value);
+        }
         let _ = app.emit_to("pill", "dictation-context", self.payload);
     }
 }

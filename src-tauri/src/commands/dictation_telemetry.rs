@@ -38,6 +38,7 @@ fn recording_route(remote_online: bool, engine: &str, model: String) -> Dictatio
 pub(crate) struct DictationCompletionGuard {
     pub(crate) facts: crate::product_analytics::DictationFacts,
     stop_requested: Instant,
+    generation: u64,
 }
 
 impl DictationCompletionGuard {
@@ -45,6 +46,7 @@ impl DictationCompletionGuard {
         app: &AppHandle,
         stop_requested: Instant,
         metrics: Option<crate::audio::recorder::CaptureAudioMetrics>,
+        generation: u64,
     ) -> Self {
         use tauri_plugin_store::StoreExt;
         let app_state = app.state::<AppState>();
@@ -83,13 +85,15 @@ impl DictationCompletionGuard {
             .ok()
             .and_then(|guard| guard.as_ref().map(crate::writing::classify))
             .unwrap_or(crate::writing::AppCategory::Other);
-        Self::from_snapshot(
+        let mut guard = Self::from_snapshot(
             stop_requested,
             metrics,
             (engine, model, transport),
             live_preview,
             app_category,
-        )
+        );
+        guard.generation = generation;
+        guard
     }
 
     fn from_snapshot(
@@ -118,6 +122,7 @@ impl DictationCompletionGuard {
                 app_category,
             },
             stop_requested,
+            generation: crate::commands::audio::current_recording_generation(),
         }
     }
 
@@ -140,9 +145,10 @@ impl Drop for DictationCompletionGuard {
                 .as_millis()
                 .min(u128::from(u64::MAX)) as u64;
         }
-        crate::product_analytics::capture(crate::product_analytics::build_dictation_completed(
-            self.facts.clone(),
-        ));
+        crate::product_analytics::capture_at(
+            crate::product_analytics::build_dictation_completed(self.facts.clone()),
+            self.generation,
+        );
     }
 }
 

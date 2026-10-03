@@ -129,6 +129,7 @@ export interface AppSettings {
   pill_indicator_mode?: PillIndicatorMode;
   // Pill indicator detail level
   pill_indicator_style?: PillIndicatorStyle;
+  telemetry_enabled?: boolean;
   island_start_details?: "always" | "changed" | "never";
   island_start_details_shown?: number;
   // Pill indicator screen position

@@ -191,7 +191,7 @@ pub async fn island_quick_set(app: AppHandle, kind: String, id: String) -> Resul
     }
     let options = island_quick_options(app.clone()).await?;
     set_with_handler(&options, &kind, id, |id| async move {
-        super::actions::run(app, &id).await
+        super::actions::run_from(app, &id, "island").await
     })
     .await
 }

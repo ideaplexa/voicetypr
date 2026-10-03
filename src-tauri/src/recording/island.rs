@@ -100,7 +100,26 @@ struct BlockedEvent {
     action: IslandAction,
 }
 pub fn note(app: &AppHandle, generation: u64, note: Note) {
+    if matches!(&note, Note::MicDropped { .. }) {
+        crate::telemetry::capture_error(
+            "audio_device_failed",
+            crate::telemetry::ErrorContext {
+                generation: Some(generation),
+                ..Default::default()
+            },
+        );
+    }
     if !crate::commands::audio::recording_generation_is_stale(generation) {
+        if let Some(kind) = serde_json::to_value(&note)
+            .ok()
+            .and_then(|v| v.get("kind").and_then(|v| v.as_str()).map(str::to_owned))
+        {
+            crate::observability::emit(
+                "island_state",
+                vec![("state", kind.into())],
+                Some(generation),
+            );
+        }
         crate::commands::pill_feedback::send(
             app,
             "dictation-note",
@@ -110,6 +129,11 @@ pub fn note(app: &AppHandle, generation: u64, note: Note) {
 }
 pub fn blocked(app: &AppHandle, generation: u64, kind: BlockedKind, action: IslandAction) {
     if !crate::commands::audio::recording_generation_is_stale(generation) {
+        crate::observability::emit(
+            "dictation_blocked",
+            vec![("kind", serde_json::to_value(kind).unwrap())],
+            Some(generation),
+        );
         crate::menu::runtime::blocked(app, kind, action);
         crate::commands::pill_feedback::cancel_terminal_hide(generation);
         crate::commands::pill_feedback::send(
@@ -125,6 +149,7 @@ pub fn blocked(app: &AppHandle, generation: u64, kind: BlockedKind, action: Isla
     }
 }
 pub fn mic_blocked(app: &AppHandle, generation: u64, error: &str) {
+    crate::telemetry::capture_error("audio_device_failed", crate::telemetry::current_context());
     let error = error.to_ascii_lowercase();
     let (kind, action) = if error.contains("permission") || error.contains("access") {
         (
@@ -148,6 +173,11 @@ pub fn polish_reason(error: &crate::ai::error::AiProviderError) -> PolishReason 
     }
 }
 pub fn too_short<R: Runtime>(app: &AppHandle<R>, generation: u64, hold: bool) {
+    crate::observability::emit(
+        "island_state",
+        vec![("state", "recording_too_short".into())],
+        Some(generation),
+    );
     crate::commands::pill_feedback::send(
         app,
         "recording-too-short",
@@ -158,8 +188,40 @@ pub fn too_short<R: Runtime>(app: &AppHandle<R>, generation: u64, hold: bool) {
 /// User-initiated navigation is the only place recovery may activate a window.
 #[tauri::command]
 pub async fn island_action(app: AppHandle, action: IslandAction) -> Result<(), String> {
+    island_action_from(app, action, "island").await
+}
+pub(crate) async fn island_action_from(
+    app: AppHandle,
+    action: IslandAction,
+    source: &str,
+) -> Result<(), String> {
+    if !matches!(action, IslandAction::OpenSettings) {
+        crate::observability::action(
+            serde_json::to_value(action)
+                .unwrap()
+                .as_str()
+                .unwrap_or("open_settings"),
+            source,
+        );
+    }
+    let result = island_action_inner(app, action, source).await;
+    if result.is_err() {
+        crate::telemetry::capture_error(
+            "island_action_failed",
+            crate::telemetry::current_context(),
+        );
+    }
+    result
+}
+async fn island_action_inner(
+    app: AppHandle,
+    action: IslandAction,
+    source: &str,
+) -> Result<(), String> {
     match action {
-        IslandAction::OpenSettings => crate::menu::actions::run(app, "nav_settings").await,
+        IslandAction::OpenSettings => {
+            Box::pin(crate::menu::actions::run_from(app, "nav_settings", source)).await
+        }
         IslandAction::RecheckLicense => {
             crate::commands::license::revalidate_license(app.clone()).await?;
             crate::menu::runtime::clear_blocked();

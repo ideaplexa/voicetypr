@@ -50,17 +50,20 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     return (async()=>{while(feedbackQueued!==undefined){const latest=feedbackQueued;feedbackQueued=undefined;try{await call('pill_feedback_visible',{visible:latest});}catch{ /* A later state change can retry. */ }}feedbackSending=false;})();
   };
   let streamUnlisten: (() => void) | undefined, streamPending = false, streamEnabled = false;
+  const action = (name: 'dictate' | 'stop' | 'cancel' | 'copy' | 'retry' | 'discard' | 'open_accessibility') => {
+    void call('record_observability_event', { name: 'island_action', properties: { action: name, source: 'island' } }).catch(() => {});
+  };
   const island = createIsland(root, {
     mac: isMacOS,
     actions: {
-      start: () => call('start_recording', { source: 'pointer' }), stop: () => call('stop_recording'),
-      cancel: () => call('cancel_recording'), dismiss: () => call('hide_pill_widget'),
-      original: () => call('copy_last_original'),
-      card: c => call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}),
+      start: () => { action('dictate'); return call('start_recording', { source: 'pointer' }); }, stop: () => { action('stop'); return call('stop_recording'); },
+      cancel: () => { action('cancel'); return call('cancel_recording'); }, dismiss: () => call('hide_pill_widget'),
+      original: () => { action('copy'); return call('copy_last_original'); },
+      card: c => { if(c.command !== 'island_action') action(c.command === 'discard_kept_dictation' ? 'discard' : 'retry'); return call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}); },
       feedbackVisible,
       quickSet: async (kind, id) => { await call('island_quick_set', { kind, id }); await readQuick(); },
       openSettings: () => call('island_action', { action: 'open_settings' }),
-      openPrivacySettings: () => call('open_accessibility_settings'),
+      openPrivacySettings: () => { action('open_accessibility'); return call('open_accessibility_settings'); },
     },
     icon: key => call<string | null>('pill_app_icon', { iconKey: key }),
     hitRegions: sendRegions,

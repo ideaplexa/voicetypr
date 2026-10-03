@@ -973,7 +973,10 @@ fn build_deepgram_stream_sink_factory(
 /// before `Starting` is published, so every stop/cancel and spawned
 /// transcription task within this attempt observes the same generation.
 pub(crate) fn begin_recording_generation() -> u64 {
-    crate::commands::pill_feedback::advance_recording_generation(&RECORDING_GENERATION)
+    let generation =
+        crate::commands::pill_feedback::advance_recording_generation(&RECORDING_GENERATION);
+    crate::observability::begin(generation);
+    generation
 }
 
 /// The generation of the most recently begun recording.
@@ -1149,7 +1152,7 @@ impl Drop for StopInFlightGuard {
         self.0.store(false, AtomicOrdering::SeqCst);
     }
 }
-/// Decode journey (PostHog) + terminal outcome. The GlitchTip log-funnel
+/// Decode journey (PostHog) + terminal outcome. The PostHog log-funnel
 /// transaction/span plumbing was removed (plan 060 pivot: logs never alerted);
 /// failure events now go through `telemetry::capture_transcription_failure`.
 /// Cancellation (None) is the default so aborting the Tokio task during an
@@ -5032,7 +5035,27 @@ pub async fn start_recording(
     // `Starting` targets THIS attempt and must win.
     {
         let app_state = app.state::<AppState>();
-        begin_recording_generation();
+        let generation = begin_recording_generation();
+        let hold = !source.is_toggle()
+            && app_state
+                .recording_mode
+                .lock()
+                .map(|m| *m == crate::RecordingMode::PushToTalk)
+                .unwrap_or(false);
+        crate::observability::update(
+            generation,
+            "mode",
+            serde_json::json!(if hold { "hold" } else { "toggle" }),
+        );
+        crate::observability::update(
+            generation,
+            "start_source",
+            serde_json::json!(match source {
+                crate::recording::start_source::StartSource::Hotkey => "hotkey",
+                crate::recording::start_source::StartSource::Pointer => "pointer",
+                crate::recording::start_source::StartSource::Tray => "tray",
+            }),
+        );
         app_state.clear_cancellation();
         clear_pending_stop_after_start(&app_state);
     }
@@ -5833,7 +5856,7 @@ async fn stop_recording_with_mode_at(
     } // MutexGuard dropped here BEFORE any await
 
     let mut dictation_telemetry =
-        DictationCompletionGuard::new(&app, stop_requested, capture_metrics).await;
+        DictationCompletionGuard::new(&app, stop_requested, capture_metrics, task_generation).await;
 
     crate::trigger::engine_host::rebuild_engine_bindings(&app);
 
@@ -6729,7 +6752,7 @@ async fn stop_recording_with_mode_at(
                     .await
                 }
             };
-        // Plan 060: terminal decode failures become alertable GlitchTip
+        // Plan 060: terminal decode failures become alertable PostHog
         // events (fixed class-suffixed message + closed-vocabulary tags).
         // Cancelled dictations are user intent, not failures — never sent.
         // The PostHog decode journey records success/failure/cancel.
@@ -6759,6 +6782,7 @@ async fn stop_recording_with_mode_at(
                         backend,
                         &transcription_failure_class(failure),
                         Some(decode_started.elapsed().as_millis() as u64),
+                        task_generation,
                     );
                 }
             }
@@ -8334,6 +8358,7 @@ pub async fn diarize_audio_file(
 
 #[tauri::command]
 pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
+    let cancel_generation = current_recording_generation();
     log::info!("=== CANCEL RECORDING CALLED ===");
 
     // Request cancellation FIRST
@@ -8419,7 +8444,8 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     })();
     if let Some(metrics) = cancelled_metrics {
         let mut completion =
-            DictationCompletionGuard::new(&app, cancel_stop_requested, metrics).await;
+            DictationCompletionGuard::new(&app, cancel_stop_requested, metrics, cancel_generation)
+                .await;
         completion.facts.outcome = if stop_result.is_ok() {
             crate::product_analytics::DictationOutcome::Cancelled
         } else {

@@ -37,7 +37,7 @@
    → slice **whisper**.
 5. **VT's release profile leaves 20–30 % binary size and real runtime perf on the table** — no `lto`,
    no `codegen-units`, no `opt-level`, `strip="none"` (`src-tauri/Cargo.toml:126-133`). The conflict:
-   VT keeps symbols deliberately for in-process Sentry symbolication. A *scoped* optimization profile
+   VT keeps symbols deliberately for in-process PostHog symbolication. A *scoped* optimization profile
    (LTO + codegen-units=1, keep line-tables) is the safe middle. → slice **shell**. [Tauri "App Size"]
 
 ---
@@ -133,10 +133,10 @@ VT's `committed`/`tentative` contract (provider finals → committed, interims �
 
 | Lever | Effect | VT today | Risk / constraint | Source |
 |---|---|---|---|---|
-| **`lto = true`** (fat LTO) | 20–30 % smaller binary; runtime perf gains from cross-crate inlining | **OFF** (VT `Cargo.toml:126-133` sets nothing) | **conflict:** VT keeps `debug="line-tables-only"` + `strip="none"` for in-process Sentry symbolication (Bugsink does *not* server-side symbolicate). LTO is symbol-safe; pair with kept line-tables | [Tauri "App Size"](https://v2.tauri.app/concept/size/); [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html) |
+| **`lto = true`** (fat LTO) | 20–30 % smaller binary; runtime perf gains from cross-crate inlining | **OFF** (VT `Cargo.toml:126-133` sets nothing) | **conflict:** VT keeps `debug="line-tables-only"` + `strip="none"` for in-process PostHog symbolication (Bugsink does *not* server-side symbolicate). LTO is symbol-safe; pair with kept line-tables | [Tauri "App Size"](https://v2.tauri.app/concept/size/); [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html) |
 | **`codegen-units = 1`** | better LLVM optimization (serial crate compile) | **OFF** | slower release builds; symbol-safe | [v1.tauri.app/.../app-size](https://v1.tauri.app/v1/guides/building/app-size/) |
 | **`opt-level`** ("s"/"z" size, 3 speed) | "z" smallest; "3" fastest | **unset** (=3 default for release) | opt-level=z trades speed for size — wrong for a hot decode path; prefer `opt-level=3` + `lto` | [Tauri App Size](https://v2.tauri.app/concept/size/) |
-| **`panic = "abort"`** | ~200 KB smaller, cleaner crash logs, removes unwind tables | **OFF** | **conflict:** `panic=abort` breaks the `sentry` panic capture that VT relies on (`backtrace`+`panic` features). **Likely NOT safe for VT** without changing crash strategy | [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html); VT `Cargo.toml:81` sentry panic feature |
+| **`panic = "abort"`** | ~200 KB smaller, cleaner crash logs, removes unwind tables | **OFF** | **conflict:** `panic=abort` breaks the `posthog-rs` panic capture that VT relies on (`backtrace`+`panic` features). **Likely NOT safe for VT** without changing crash strategy | [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html); VT `Cargo.toml:81` posthog-rs panic feature |
 | **`strip`** | 20–30 % size cut | **"none"** (intentional — symbol table needed for macOS name resolution) | **do NOT strip** — conflicts with the documented symbolication strategy (`Cargo.toml:127-131`) | VT `Cargo.toml:132` |
 | **Brotli asset compression** (frontend) | Tauri compresses embedded HTML/CSS/JS | on by default | tiny frontend → measurable only if bundle large | [oflight.co.jp Tauri v2 perf](https://www.oflight.co.jp/en/columns/tauri-v2-performance-bundle-size) |
 | **`removeUnusedCommands` (Tauri 2.4+ ACL)** | dead-code-eliminate commands not in ACL | unknown | reduces surface + size | [Tauri 2.4 release notes](https://v2.tauri.app/concept/size/) |
@@ -162,7 +162,7 @@ build-time + startup smoke test. → slice **shell**. **NEEDS MEASUREMENT** on V
 | **3** | **Phase 0: kill the fixed plumbing tail** (non-blocking clipboard restore, CGEvent paste, in-process normalize-first) | removes ~450 ms + 500 ms = ~950 ms of pure plumbing *every engine, every time* (plan 028 Evidence A) | **S/M** | Low (some already landed per oracle doc) | n/a | **hotpath** (+audio) |
 | **4** | **Default to / promote `large-v3-turbo`** | ~4–7× faster Whisper than large-v3, +0.3–0.7 WER | **S** (catalog default) | Low (user can override) | n/a (model choice) | **whisper** |
 | **5** | **Soniox REST → WebSocket** | removes 1000 ms poll floor → 249 ms median final; native partial/final | **M** | Med (auth/reconnect) | n/a | **cloud** |
-| **6** | **`lto=true` + `codegen-units=1`** release profile (keep line-tables, no panic=abort) | 20–30 % smaller binary + decode-loop inlining gains | **S** | Low (symbol-safe); verify Sentry still resolves + startup time | n/a | **shell** |
+| **6** | **`lto=true` + `codegen-units=1`** release profile (keep line-tables, no panic=abort) | 20–30 % smaller binary + decode-loop inlining gains | **S** | Low (symbol-safe); verify PostHog still resolves + startup time | n/a | **shell** |
 | **7** | **Whisper segmented decode-ahead** (scribble-style advance-head + `set_segment_callback_safe`) | collapses post-stop latency by decoding *during* recording (long-form especially) | **L** | High (WER regressions, cancel/hard-timeout, lease) | **YES** (on `full()`) | **whisper** |
 | **8** | **Parakeet StreamingEOU 120M** (live partials + EOU) | 80–160 ms streaming partials; true Handy-parity live preview on macOS | **L** | Med/High (new CoreML asset, activation, sidecar session) | n/a (FluidAudio) | **parakeet** |
 | **9** | **Deepgram live WS** (interim + `is_final`) | ~150 ms first-word partials for cloud users | **M** | Med | n/a | **cloud** |
@@ -201,7 +201,7 @@ build-time + startup smoke test. → slice **shell**. **NEEDS MEASUREMENT** on V
 | Phase 0 tail (#3) | stop→insert span log (oracle doc Step 1) | p50/p95 stop→paste on Parakeet + Whisper 2 s/5 s/15 s |
 | turbo (#4) | decode ms + WER | large-v3 vs turbo decode ms + WER |
 | Soniox WS (#5) | first-final-partial timestamp | REST-poll vs WS first-text ms; final WER |
-| LTO (#6) | release binary size + cold start + decode ms | msi/dmg size; app launch ms; decode ms; Sentry resolves names? |
+| LTO (#6) | release binary size + cold start + decode ms | msi/dmg size; app launch ms; decode ms; PostHog resolves names? |
 | Decode-ahead (#7) | decode-start-relative-to-stop timestamp | post-stop wait ms (long-form 30 s/120 s); WER vs batch |
 | EOU (#8) | first-partial + first-stable-prefix ms | p50 ≤700 ms first partial gate (oracle doc Q2) |
 
@@ -215,7 +215,7 @@ build-time + startup smoke test. → slice **shell**. **NEEDS MEASUREMENT** on V
 3. **VT Parakeet numbers unmeasured** — all Parakeet RTF figures here are third-party (FluidInference,
    macparakeet). VT must baseline its own FluidAudio sidecar stop→insert p50/p95 before claiming
    "decode is free" (oracle doc Step 1).
-4. **LTO + Sentry symbolication** — LTO is symbol-safe, but a full release build + crash must be
+4. **LTO + PostHog symbolication** — LTO is symbol-safe, but a full release build + crash must be
    verified to still resolve native names in-process (VT's whole symbolication model depends on it).
 5. **faster-whisper int8 does not help VT** — do not chase it; CT2's CUDA kernels are irrelevant to
    macOS Metal/CPU. The transferable lever is quantization (#q5/q8 GGML) + audio_ctx.

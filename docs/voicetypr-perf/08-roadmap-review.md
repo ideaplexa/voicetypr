@@ -62,7 +62,7 @@ The Parakeet slice itself lists path-IPC, cold ANE compile, and whole-request `R
 
 ### P1/P2 — LTO is worthwhile, but it should not be in the same “instant app latency” batch as audio_ctx/warmup.
 
-**Evidence:** `[profile.release]` keeps line tables and symbols for Bugsink/Sentry and does not set LTO/codegen-units (`src-tauri/Cargo.toml:126-133`, `05-cloud-and-shell.md:126-135`). The slice argues `lto="thin"` + `codegen-units=1` is symbol-safe and gives binary −5–15%, hot path −2–8%, but raises link time 30–80% and requires forced panic symbolication smoke (`05-cloud-and-shell.md:172`, `05-cloud-and-shell.md:183-189`, `05-cloud-and-shell.md:214-216`, `05-cloud-and-shell.md:224`, `05-cloud-and-shell.md:234`).
+**Evidence:** `[profile.release]` keeps line tables and symbols for Bugsink/PostHog and does not set LTO/codegen-units (`src-tauri/Cargo.toml:126-133`, `05-cloud-and-shell.md:126-135`). The slice argues `lto="thin"` + `codegen-units=1` is symbol-safe and gives binary −5–15%, hot path −2–8%, but raises link time 30–80% and requires forced panic symbolication smoke (`05-cloud-and-shell.md:172`, `05-cloud-and-shell.md:183-189`, `05-cloud-and-shell.md:214-216`, `05-cloud-and-shell.md:224`, `05-cloud-and-shell.md:234`).
 
 **Pressure-test:** This is a good release-profile hardening item, not the same class as one-line decode knobs. It requires a release build, binary-size comparison, startup/decode smoke, and a crash-path smoke because symbolication is a hard product constraint (`00-MASTER-ROADMAP.md:38`, `00-MASTER-ROADMAP.md:109`). It is broad but likely marginal for Metal/ANE-dominated paths; the Whisper slice estimates near-zero on Metal and ~5–15% on CPU/Windows (`03-whisper-engine.md:195-197` includes LTO table row context; `07-competitive-sota.md:136-140`).
 
@@ -188,15 +188,15 @@ The Parakeet slice itself lists path-IPC, cold ANE compile, and whole-request `R
 
 ---
 
-### P2 — Sentry overhead: probably not hot-path, but keep it out explicitly
+### P2 — PostHog overhead: probably not hot-path, but keep it out explicitly
 
-**Finding:** VT initializes Sentry only when opted in and with no JS plugin/envelope IPC; panic hook is chained so Sentry captures panics (`src-tauri/src/lib.rs:370-382`, `src-tauri/src/lib.rs:466-503`). Sentry dependency uses `backtrace`, `panic`, `transport`, `rustls` (`src-tauri/Cargo.toml:81`).
+**Finding:** VT initializes PostHog only when opted in and with no JS plugin/envelope IPC; panic hook is chained so PostHog captures panics (`src-tauri/src/lib.rs:370-382`, `src-tauri/src/lib.rs:466-503`). PostHog dependency uses `backtrace`, `panic`, `transport`, `rustls` (`src-tauri/Cargo.toml:81`).
 
-**Expected impact:** [INFERENCE] No evidence of per-dictation Sentry overhead unless breadcrumbs/events are added later. The risk is future: adding breadcrumbs around every hotpath event would hurt latency and I/O.
+**Expected impact:** [INFERENCE] No evidence of per-dictation PostHog overhead unless breadcrumbs/events are added later. The risk is future: adding breadcrumbs around every hotpath event would hurt latency and I/O.
 
 **Owner:** shell/telemetry.
 
-**Action:** Add a guardrail in the roadmap: no Sentry breadcrumbs/events on audio callback, per-frame level events, or per-token/partial streaming. Panic capture only; explicit perf review for any telemetry in stop→paste/decode spans.
+**Action:** Add a guardrail in the roadmap: no PostHog breadcrumbs/events on audio callback, per-frame level events, or per-token/partial streaming. Panic capture only; explicit perf review for any telemetry in stop→paste/decode spans.
 
 ---
 
@@ -226,7 +226,7 @@ The Parakeet slice itself lists path-IPC, cold ANE compile, and whole-request `R
 
 3. **`audio_ctx` is a plan-015 risk.** A bad floor silently loses speech/tail words. The guard should include last-word assertions and raw/normalized duration mismatch checks, not just average WER (`00-MASTER-ROADMAP.md:108`, `03-whisper-engine.md:192`).
 
-4. **LTO symbolication is likely safe but not assumed safe.** The roadmap correctly says smoke-verify; strengthen it to “release cannot ship until forced panic resolves native function + file:line in Bugsink/Sentry on macOS and Windows.” Keep `panic=unwind`; `panic=abort` is banned because Sentry panic capture relies on unwind/panic hook (`src-tauri/src/lib.rs:466-503`, `07-competitive-sota.md:139`, `05-cloud-and-shell.md:187`).
+4. **LTO symbolication is likely safe but not assumed safe.** The roadmap correctly says smoke-verify; strengthen it to “release cannot ship until forced panic resolves native function + file:line in Bugsink/PostHog on macOS and Windows.” Keep `panic=unwind`; `panic=abort` is banned because PostHog panic capture relies on unwind/panic hook (`src-tauri/src/lib.rs:466-503`, `07-competitive-sota.md:139`, `05-cloud-and-shell.md:187`).
 
 5. **Focus/paste sleeps are not “free tail.”** The 20 ms pill-hide sleep and paste sleeps protect cross-app focus/clipboard behavior (`01-hotpath-latency.md:145`, `01-hotpath-latency.md:DD-3/DD-4` via lines around `audio.rs:5561` and `text.rs:671`). Do not remove them before a focus-retain assertion and app matrix. The streaming oracle calls overlay focus steal a P1 trap (`06-oracle-decision.md:162`, `06-oracle-decision.md:252`).
 
@@ -293,11 +293,11 @@ The Parakeet slice itself lists path-IPC, cold ANE compile, and whole-request `R
   - `src-tauri/src/parakeet/manager.rs` — `LoadModel`, `Transcribe`, dead config fields, path payload.
   - `src-tauri/src/parakeet/sidecar.rs` — spawn, newline JSON, whole-request `RwLock` guard.
   - `sidecar/parakeet-swift/Sources/main.swift` — JSON event loop, load-from-cache/loadModels, transcribe file path.
-  - `src-tauri/src/lib.rs` — Whisper preload, Parakeet autoload, logging, Sentry/panic hook, WebView setup.
+  - `src-tauri/src/lib.rs` — Whisper preload, Parakeet autoload, logging, PostHog/panic hook, WebView setup.
   - `src-tauri/src/commands/audio.rs` — normalization-before-gate, pill-hide sleep, delivery generation gates.
   - `src-tauri/src/audio/recorder.rs` — stop-thread join poll.
   - `src-tauri/src/utils/logger.rs` — unconditional allocation in `log_with_context`.
-  - `src-tauri/Cargo.toml` — release profile, tokio features, sentry/log deps.
+  - `src-tauri/Cargo.toml` — release profile, tokio features, posthog-rs/log deps.
 
 ---
 

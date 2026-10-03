@@ -103,7 +103,55 @@ pub fn handle(app: &AppHandle, id: &str) {
     });
 }
 pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
+    run_from(app, id, "tray").await
+}
+pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(), String> {
+    let result = run_inner(app, id, source).await;
+    if result.is_ok() {
+        let setting = if id.starts_with("style_") {
+            Some("polish")
+        } else if id.starts_with("model_") {
+            Some("engine")
+        } else if id.starts_with("microphone_") {
+            Some("mic")
+        } else if id.starts_with("language_") {
+            Some("language")
+        } else if id.starts_with("recording_mode_") {
+            Some("mode")
+        } else if id == "live_preview" {
+            Some("live_preview")
+        } else {
+            None
+        };
+        if let Some(setting) = setting {
+            crate::observability::quick(setting, source);
+        }
+        let action = match id {
+            "dictate" => Some("dictate"),
+            "stop" => Some("stop"),
+            "cancel" => Some("cancel"),
+            "nav_settings" => Some("open_settings"),
+            "copy_last_transcription" => Some("copy"),
+            "paste_last" => Some("paste"),
+            id if id.starts_with("retry_") => Some("retry"),
+            id if id.starts_with("discard_") => Some("discard"),
+            _ => None,
+        };
+        if let Some(action) = action {
+            crate::observability::action(action, source);
+        }
+    } else {
+        crate::telemetry::capture_error(
+            "island_action_failed",
+            crate::telemetry::current_context(),
+        );
+    }
+    result
+}
+async fn run_inner(app: AppHandle, id: &str, source: &str) -> Result<(), String> {
     if let Some(destination) = destination(id) {
+        let mut destination = serde_json::to_value(destination).map_err(|_| "Navigation failed")?;
+        destination["telemetry_source"] = serde_json::json!(source);
         crate::commands::window::focus_main_window(app.clone()).await?;
         return app
             .emit_to("main", "main-navigate", destination)
@@ -138,7 +186,10 @@ pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
     }
     if id == "fix" {
         if let Some(action) = super::runtime::fix_action() {
-            Box::pin(crate::recording::island::island_action(app, action)).await?;
+            Box::pin(crate::recording::island::island_action_from(
+                app, action, source,
+            ))
+            .await?;
         }
         return Ok(());
     }

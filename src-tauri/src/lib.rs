@@ -20,6 +20,7 @@ mod commands;
 mod license;
 mod media;
 mod menu;
+mod observability;
 mod parakeet;
 mod pill;
 mod product_analytics;
@@ -290,9 +291,9 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 use audio::recorder::AudioRecorder;
 use commands::remote::load_remote_settings;
 use commands::telemetry::{
-    defer_privacy_consent_for_session, get_product_analytics_status, get_telemetry_status,
-    record_onboarding_completed, report_frontend_error, set_product_analytics_consent,
-    set_telemetry_consent,
+    defer_privacy_consent_for_session, get_product_analytics_status, get_report_diagnostics,
+    get_telemetry_status, record_observability_event, record_onboarding_completed,
+    report_frontend_error, set_product_analytics_consent, set_telemetry_consent,
 };
 use commands::{
     ai::{
@@ -588,9 +589,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app_context = tauri::generate_context!();
     let analytics_consent =
         product_analytics::read_consent(app_context.config().identifier.as_str());
-    let (telemetry_enabled, telemetry_install_id) =
-        telemetry::read_consent(app_context.config().identifier.as_str());
-    let _sentry_guard = telemetry::init(telemetry_enabled, telemetry_install_id);
     product_analytics::init(analytics_consent);
 
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
@@ -687,29 +685,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             ]);
 
             // Chain the previous panic hook instead of replacing it. Telemetry
-            // init installed sentry's panic hook (via the `panic` feature) to
+            // init installed PostHog's panic hook (via the `panic` feature) to
             // capture release panics as events; overwriting it here would
             // silently drop panic capture. Run our local diagnostics first, then
-            // forward to the prior hook so Sentry still records the event.
+            // forward to the prior hook so PostHog still records the event.
             let prev_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic_info| {
-                let location = panic_info.location()
-                    .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-                    .unwrap_or_else(|| "unknown location".to_string());
-
-                let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "Unknown panic payload".to_string()
-                };
-
-                log::error!("💥 CRITICAL PANIC at {}: {}", location, message);
+                let location = "panic";
+                let message = "panic";
+                log::error!("Application panic");
                 log_failed("PANIC", "Application panic occurred");
                 log_with_context(log::Level::Error, "Panic details", &[
-                    ("panic_location", &location),
-                    ("panic_message", &message),
+                    ("panic_location", location),
+                    ("panic_message", message),
                     ("severity", "critical")
                 ]);
                 eprintln!("Application panic at {}: {}", location, message);
@@ -722,7 +710,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         location, message, panic_info, chrono::Local::now()
                     ));
                 }
-                // Forward to the prior (Sentry) hook so panics are still captured.
+                // Forward to the prior (PostHog) hook so panics are still captured.
                 prev_hook(panic_info);
             }));
 
@@ -1285,6 +1273,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Hide main window on start (menu bar only)
             // Only a configured local/cloud model hides the main window immediately.
             // Remote-only sessions stay visible until startup checks verify the remote is available.
+            let observability_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move { observability::startup(observability_app).await; });
             let should_hide_main = if let Ok(store) = app.store("settings") {
                 let has_local_or_cloud_model = store
                     .get("current_model")
@@ -1452,7 +1442,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             repair_cli_tool,
             uninstall_cli_tool,
             cli_tool_status,
-            // Independent privacy controls: GlitchTip diagnostics and PostHog
+            // Independent privacy controls: PostHog diagnostics and PostHog
             // product analytics.
             get_telemetry_status,
             set_telemetry_consent,
@@ -1461,6 +1451,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             defer_privacy_consent_for_session,
             record_onboarding_completed,
             report_frontend_error,
+            get_report_diagnostics,
+            record_observability_event,
             // Remote transcription commands
             refresh_active_remote_server_status,
             get_recognition_availability_snapshot,

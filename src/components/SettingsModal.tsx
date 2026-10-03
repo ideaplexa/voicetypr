@@ -1,4 +1,5 @@
-import { useRef } from "react";
+import { recordEvent, takeSettingsSource } from "@/lib/observability";
+import { useEffect, useRef } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
 import { SettingsTab } from "@/components/tabs/SettingsTab";
@@ -16,6 +17,7 @@ export function SettingsModal({
   onClose: () => void;
   onNavigate: (screen: ScreenId) => void;
 }) {
+  useEffect(() => { if (pane) recordEvent({ name: "settings_opened", properties: { pane, source: takeSettingsSource() } }); }, [pane]);
   const returnFocus = useRef<HTMLElement | null>(null);
   return (
     <Dialog

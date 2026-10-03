@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import { isMacOS } from "@/lib/platform";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -64,6 +65,7 @@ export function ShareStatsModal({ open, onOpenChange, stats }: ShareStatsModalPr
     };
   }, [canvas, open, cardStats, attempt]);
   const copyImage = async () => {
+    recordEvent({ name: "share_card_action", properties: { action: "copy" } });
     if (!imageDataUrl || isCopying) return;
     setIsCopying(true);
     try {
@@ -77,6 +79,7 @@ export function ShareStatsModal({ open, onOpenChange, stats }: ShareStatsModalPr
     }
   };
   const saveImage = async () => {
+    recordEvent({ name: "share_card_action", properties: { action: "save" } });
     if (!imageDataUrl) return;
     const fileName = `voicetypr-stats-${Date.now()}.png`;
     try {
@@ -95,6 +98,7 @@ export function ShareStatsModal({ open, onOpenChange, stats }: ShareStatsModalPr
     }
   };
   const postOnX = async () => {
+    recordEvent({ name: "share_card_action", properties: { action: "post_x" } });
     if (!imageDataUrl || isCopying) return;
     setIsCopying(true);
     const url = new URL("https://x.com/intent/post");

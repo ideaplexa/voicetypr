@@ -85,7 +85,9 @@ pub fn start(window: &WebviewWindow) {
     let task = tauri::async_runtime::spawn(async move {
         let mut inside = false;
         let mut last_emitted = None;
-        let _ = window.set_ignore_cursor_events(true);
+        if window.set_ignore_cursor_events(true).is_err() {
+            crate::telemetry::native_error("hit_testing");
+        }
         let mut interval = tokio::time::interval(Duration::from_nanos(1_000_000_000 / 30));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -126,7 +128,12 @@ pub fn start(window: &WebviewWindow) {
                     inside,
                 )
             });
-            if next != inside && window.set_ignore_cursor_events(!next).is_ok() {
+            let changed = next != inside;
+            let applied = !changed || window.set_ignore_cursor_events(!next).is_ok();
+            if changed && !applied {
+                crate::telemetry::native_error("hit_testing");
+            }
+            if changed && applied {
                 inside = next;
                 task_app
                     .state::<PointerState>()

@@ -53,6 +53,11 @@ async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
     app_state.esc_pressed_once.store(true, Ordering::SeqCst);
 
     // Show inline hint for ESC warning (2 seconds)
+    crate::observability::emit(
+        "island_state",
+        vec![("state", "escape_hint".into())],
+        Some(crate::commands::audio::current_recording_generation()),
+    );
     let phase = escape_phase(get_recording_state(app_handle));
     let _ = app_handle.emit_to(
         "pill",

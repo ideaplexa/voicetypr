@@ -31,6 +31,16 @@ impl Recovery {
     }
 }
 fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
+    crate::observability::emit(
+        "island_state",
+        vec![("state", "recovery".into())],
+        Some(recovery.generation),
+    );
+    crate::observability::update(
+        recovery.generation,
+        "recovery_kind",
+        serde_json::to_value(recovery.kind).unwrap(),
+    );
     crate::commands::pill_feedback::cancel_terminal_hide(recovery.generation);
     crate::commands::pill_feedback::send(
         app,
@@ -39,6 +49,7 @@ fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
     );
 }
 struct Clip {
+    trace: Option<crate::observability::Trace>,
     recovery: Recovery,
     path: PathBuf,
     expires: Instant,
@@ -92,6 +103,7 @@ impl Store {
             expires_in_ms,
         };
         self.insert(Clip {
+            trace: crate::observability::snapshot(generation),
             recovery: recovery.clone(),
             path: owned_path,
             expires: Instant::now() + Duration::from_millis(expires_in_ms),
@@ -130,6 +142,9 @@ impl Store {
             .map(|c| c.recovery.id.clone())
             .collect();
         for id in ids {
+            if let Some(clip) = self.clips.iter().find(|c| c.recovery.id == id) {
+                resolve_clip(clip, "discarded");
+            }
             self.discard(&id);
         }
     }
@@ -141,6 +156,9 @@ impl Store {
             .map(|c| c.recovery.id.clone())
             .collect();
         for id in ids {
+            if let Some(clip) = self.clips.iter().find(|c| c.recovery.id == id) {
+                resolve_clip(clip, "expired");
+            }
             self.discard(&id);
         }
     }
@@ -150,6 +168,7 @@ impl Store {
             return Err("Recovery is shutting down".into());
         }
         while self.clips.len() >= 3 {
+            resolve_clip(&self.clips[0], "discarded");
             let id = self.clips[0].recovery.id.clone();
             self.discard(&id);
         }
@@ -279,6 +298,13 @@ pub async fn handoff(app: &AppHandle, generation: u64, path: &Path, kind: Recove
                 app.state::<crate::AppState>().is_cancellation_requested(),
                 generation,
             ) {
+                crate::telemetry::capture_error(
+                    "kept_storage_failed",
+                    crate::telemetry::ErrorContext {
+                        generation: Some(generation),
+                        ..Default::default()
+                    },
+                );
                 super::island::note(app, generation, super::island::Note::StorageFailed);
             }
         }
@@ -372,6 +398,7 @@ pub async fn keep(
             .await;
         }
         tokio::time::sleep_until(deadline).await;
+        resolve_id(&expiry_id, "expired");
         STORE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -501,6 +528,7 @@ pub fn discard_kept_dictation(app: AppHandle, id: String) {
     if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
         app.state::<crate::AppState>().request_cancellation();
     }
+    resolve_id(&id, "discarded");
     STORE.lock().unwrap_or_else(|e| e.into_inner()).discard(&id);
     finish_cancelled_retry(&app, generation);
     crate::menu::runtime::refresh(&app);
@@ -531,7 +559,18 @@ async fn retry(
         return Err("Dictation is busy".into());
     }
     let lease = retry_setup(state.stop_in_flight.clone(), || lease(&id, anyway))?;
+    let (original_generation, trace) = {
+        let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+        store
+            .clips
+            .iter()
+            .find(|c| c.recovery.id == id)
+            .map(|c| (c.recovery.generation, c.trace.clone()))
+            .unwrap_or((0, None))
+    };
     let generation = audio::begin_recording_generation();
+    crate::observability::inherit(original_generation, generation, trace);
+    let retry_started = Instant::now();
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
     state.clear_cancellation();
     {
@@ -556,7 +595,42 @@ async fn retry(
     crate::update_recording_state(&app, crate::RecordingState::Stopping, None);
     crate::update_recording_state(&app, crate::RecordingState::Transcribing, None);
     crate::menu::runtime::refresh(&app);
+    let alt_engine_kind = engine
+        .as_deref()
+        .map(|id| {
+            if id.starts_with("parakeet") || id.starts_with("nemotron") {
+                "parakeet"
+            } else {
+                "whisper"
+            }
+        })
+        .unwrap_or("none");
     let result = cancellable_retry(cancelled, retry_inner(&app, &lease, generation, engine)).await;
+    let resolution = if result.is_ok() {
+        if anyway {
+            "transcribed_anyway"
+        } else {
+            "retried_ok"
+        }
+    } else {
+        "retried_failed"
+    };
+    resolved(
+        lease.kind,
+        generation,
+        resolution,
+        alt_engine_kind,
+        retry_started.elapsed().as_millis() as u64,
+    );
+    if result.is_err() {
+        crate::telemetry::capture_error(
+            "retry_failed",
+            crate::telemetry::ErrorContext {
+                generation: Some(generation),
+                ..Default::default()
+            },
+        );
+    }
     if !audio::recording_generation_is_stale(generation) {
         crate::update_recording_state(&app, crate::RecordingState::Idle, None);
     }
@@ -706,6 +780,45 @@ async fn retry_inner(
     future.await
 }
 
+fn resolved(kind: RecoveryKind, generation: u64, resolution: &str, alt: &str, latency_ms: u64) {
+    crate::observability::update(
+        generation,
+        "recovery_kind",
+        serde_json::to_value(kind).unwrap(),
+    );
+    crate::observability::update(generation, "recovery_resolution", resolution.into());
+    crate::observability::emit(
+        "recovery_resolved",
+        vec![
+            ("kind", serde_json::to_value(kind).unwrap()),
+            ("resolution", resolution.into()),
+            ("alt_engine_kind", alt.into()),
+            ("latency_ms", latency_ms.min(86_400_000).into()),
+        ],
+        Some(generation),
+    );
+}
+fn resolve_id(id: &str, resolution: &str) {
+    let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(clip) = store.clips.iter().find(|c| c.recovery.id == id) {
+        resolve_clip(clip, resolution);
+    }
+}
+fn resolve_clip(clip: &Clip, resolution: &str) {
+    let latency = clip.recovery.kind.ttl_ms().saturating_sub(
+        clip.expires
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64,
+    );
+    resolved(
+        clip.recovery.kind,
+        clip.retry_generation.unwrap_or(clip.recovery.generation),
+        resolution,
+        "none",
+        latency,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -714,6 +827,7 @@ mod tests {
         let path = dir.join(&id);
         std::fs::write(&path, b"clip").unwrap();
         Clip {
+            trace: None,
             recovery: Recovery {
                 generation: 1,
                 id,

@@ -47,7 +47,7 @@ docs/                        research, reports, reviews, this file, RELEASING.md
 | `writing/` | post-recognition text: vocabulary, library rules, app category, Polish pipeline |
 | `ai/` | Polish providers: HTTP APIs, agent CLIs (Claude Code, pi, omp), prompts, catalog |
 | `license/`, `secure_store.rs` | licensing; AES-256-GCM encrypted `secure.dat` for secrets |
-| `telemetry.rs`, `product_analytics.rs` | GlitchTip errors; PostHog product events |
+| `telemetry.rs`, `product_analytics.rs` | PostHog errors and product events |
 | `media/`, `menu/`, `window_manager.rs`, `utils/` | media pause, tray, window/pill placement, logging |
 
 Oversized files (split them as part of the 2.1 clean-core work; don't grow
@@ -124,12 +124,10 @@ Secrets (cloud keys, license, remote passwords) go through `secure_store`
 
 ## Telemetry
 
-- `telemetry.rs` → **GlitchTip** (errors, crashes, curated logs): release builds
-  only, opt-out, every event rebuilt from an allowlist.
-- `product_analytics.rs` → **PostHog EU**: consent-gated, closed set of typed
-  events, personless, allowlist-scrubbed; no frontend SDK.
+- PostHog EU is the single tool for coded errors and content-free usage events.
+  Release only, one consent, no frontend SDK or replay. See [OBSERVABILITY.md](OBSERVABILITY.md).
 - `commands/dictation_telemetry.rs` owns the completion guard for the stop and
-  cancel flows. `dictation.completed` is emitted once per stopped desktop dictation, including
+  cancel flows. `dictation_completed` is emitted once per stopped desktop dictation, including
   cancellation, no speech, empty audio, failure, and successful delivery. It
   carries only closed categories and bounded numbers; no transcript, audio,
   clipboard, prompt, key, path, app name, or window title. `stop_to_text_ms`
@@ -137,7 +135,7 @@ Secrets (cloud keys, license, remote passwords) go through `secure_store`
   measures stop request to terminal outcome. Clipboard-only delivery has
   `paste=skipped`.
 
-PostHog dashboard definition (all insights filter to `dictation.completed`):
+PostHog dashboard definition (all insights filter to `dictation_completed`):
 
 | Insight | Measure | Breakdowns / filters |
 |---|---|---|

@@ -71,7 +71,12 @@ describe("Insights", () => {
     expect(screen.getByText("App stats appear when you dictate into an app.")).toBeInTheDocument();
   });
   it("offers retry on command failure", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("unavailable"));
+    let failed = false;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "record_observability_event") return;
+      if (!failed) { failed = true; throw new Error("unavailable"); }
+      return createUsageFixture();
+    });
     render(<InsightsTab />);
     await screen.findByRole("alert");
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));

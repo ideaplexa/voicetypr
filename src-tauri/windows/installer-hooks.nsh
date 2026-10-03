@@ -63,7 +63,7 @@
 !macroend
 
 !macro InstallPdbSymbols
-    ; Place debug symbols (voicetypr.pdb) beside voicetypr.exe so the Sentry
+    ; Place debug symbols (voicetypr.pdb) beside voicetypr.exe so the PostHog
     ; backtrace integration (dbghelp) resolves function names + line numbers at
     ; crash time. The bundler installs it under resources/; copy it next to the
     ; exe where dbghelp's default per-module search looks. Best-effort: symbols

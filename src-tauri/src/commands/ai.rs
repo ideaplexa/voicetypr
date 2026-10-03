@@ -1454,11 +1454,30 @@ pub async fn polish_text_typed(
     app_category_hint: Option<&str>,
     needs_output_language_transform: bool,
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
+    let generation = crate::commands::audio::current_recording_generation();
+    crate::observability::update(
+        generation,
+        "polish_keep_words",
+        serde_json::json!(crate::ai::keep_words::read(app)),
+    );
+    crate::observability::update(
+        generation,
+        "polish_style",
+        serde_json::json!(match options.preset {
+            crate::ai::prompts::EnhancementPreset::PersonalDictation => "off",
+            crate::ai::prompts::EnhancementPreset::CleanDictation => "clean",
+            crate::ai::prompts::EnhancementPreset::Writing => "writing",
+            crate::ai::prompts::EnhancementPreset::Notes => "notes",
+            crate::ai::prompts::EnhancementPreset::Message => "message",
+            crate::ai::prompts::EnhancementPreset::Code => "code",
+        }),
+    );
     let (provider, model) =
         selected_ai_provider_and_model(app).map_err(AiPolishAttemptError::unattributed)?;
     // Zero-wait: already-clean text needs no model call. The caller decides
     // eligibility (no translation pending), since engines may omit a language.
     if !needs_output_language_transform && crate::ai::skip::should_skip(text, options.preset) {
+        crate::observability::update(generation, "polish_skip_used", serde_json::json!(true));
         return Ok(crate::ai::contract::AiPolishResult {
             output_text: text.to_string(),
             provider_id: provider,
@@ -1474,7 +1493,27 @@ pub async fn polish_text_typed(
         app_category_hint,
         crate::ai::keep_words::read(app),
     );
-    let runtime = prepare_polish_runtime(app, &provider, &model)?;
+    let runtime = prepare_polish_runtime(app, &provider, &model).inspect_err(|error| {
+        let provider = crate::telemetry::PROVIDERS
+            .iter()
+            .copied()
+            .find(|p| *p == error.provider_id)
+            .unwrap_or("unknown");
+        let code = match &error.error {
+            AiProviderError::MissingApiKey | AiProviderError::InvalidApiKey => "unauthorized",
+            AiProviderError::InvalidModel => "model_unavailable",
+            _ => "unknown",
+        };
+        crate::telemetry::capture_error(
+            "polish_provider_failed",
+            crate::telemetry::ErrorContext {
+                generation: Some(generation),
+                provider: Some(provider),
+                provider_code: Some(code),
+                ..Default::default()
+            },
+        );
+    })?;
     let mut timings = crate::ai::polish::PolishTimings::default();
     let result = crate::ai::polish::execute_prompt(
         &runtime,
@@ -1484,10 +1523,45 @@ pub async fn polish_text_typed(
         needs_output_language_transform,
     )
     .await
-    .map_err(|error| AiPolishAttemptError {
-        error,
-        provider_id: runtime.provider,
-        model_id: model,
+    .map_err(|error| {
+        let provider = crate::telemetry::PROVIDERS
+            .iter()
+            .copied()
+            .find(|p| *p == runtime.provider)
+            .unwrap_or("unknown");
+        let code = match &error {
+            crate::ai::error::AiProviderError::Timeout => "timeout",
+            crate::ai::error::AiProviderError::RateLimited => "rate_limited",
+            crate::ai::error::AiProviderError::Network => "network",
+            crate::ai::error::AiProviderError::InvalidApiKey
+            | crate::ai::error::AiProviderError::MissingApiKey => "unauthorized",
+            crate::ai::error::AiProviderError::ServiceUnavailable => "unavailable",
+            crate::ai::error::AiProviderError::Canceled => "cancelled",
+            crate::ai::error::AiProviderError::BadResponse => "invalid_response",
+            crate::ai::error::AiProviderError::OutputGuard(reason) => {
+                crate::observability::update(
+                    generation,
+                    "polish_guard_reason",
+                    serde_json::json!(reason.code()),
+                );
+                "invalid_response"
+            }
+            _ => "unknown",
+        };
+        crate::telemetry::capture_error(
+            "polish_provider_failed",
+            crate::telemetry::ErrorContext {
+                generation: Some(generation),
+                provider: Some(provider),
+                provider_code: Some(code),
+                ..Default::default()
+            },
+        );
+        AiPolishAttemptError {
+            error,
+            provider_id: runtime.provider,
+            model_id: model,
+        }
     })?;
     log::info!(
         "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",

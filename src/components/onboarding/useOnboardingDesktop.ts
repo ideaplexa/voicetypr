@@ -79,7 +79,6 @@ export function useOnboardingDesktop({
   );
   // Both independent privacy choices are opt-out and default to checked.
   const [telemetryOptIn, setTelemetryOptIn] = useState(true);
-  const [analyticsOptIn, setAnalyticsOptIn] = useState(true);
   const [sourceType, setSourceType] = useState<SourceType>(() =>
     isCloudEngine(settings?.current_model_engine ?? "") ? "cloud" : "local",
   );
@@ -109,14 +108,10 @@ export function useOnboardingDesktop({
   // overwrite a previously stored opt-out with the default-on state.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      invoke<{ enabled: boolean }>("get_telemetry_status"),
-      invoke<{ enabled: boolean }>("get_product_analytics_status"),
-    ])
-      .then(([telemetry, analytics]) => {
+    invoke<{ enabled: boolean }>("get_telemetry_status")
+      .then((telemetry) => {
         if (cancelled) return;
         setTelemetryOptIn(telemetry.enabled);
-        setAnalyticsOptIn(analytics.enabled);
       })
       .catch((error) => {
         log.error("Failed to read stored privacy choices:", error);
@@ -567,9 +562,7 @@ export function useOnboardingDesktop({
       // first would mount the main app's consent dialog while these writes were
       // still pending. That dialog would then retain the old default-on state.
       await invoke("set_telemetry_consent", { enabled: telemetryOptIn });
-      await invoke("set_product_analytics_consent", {
-        enabled: analyticsOptIn,
-      });
+
 
       await updateSettings({ onboarding_completed: true }, { publishAfterSave: true });
 
@@ -759,10 +752,8 @@ export function useOnboardingDesktop({
     },
     onHoldToTalkChange: setHoldToTalk,
     telemetryOptIn,
-    analyticsOptIn,
     isSavingCompletion,
     onTelemetryChange: setTelemetryOptIn,
-    onAnalyticsChange: setAnalyticsOptIn,
     completeOnboarding,
   };
 }

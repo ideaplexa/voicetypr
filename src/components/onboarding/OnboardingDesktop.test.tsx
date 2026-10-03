@@ -787,7 +787,7 @@ describe("OnboardingDesktop", () => {
     );
   });
 
-  it("defaults both privacy choices on and persists them on completion", async () => {
+  it("defaults the unified privacy choice on and persists them on completion", async () => {
     const user = userEvent.setup();
     renderOnboarding();
 
@@ -799,20 +799,19 @@ describe("OnboardingDesktop", () => {
 
     await screen.findByRole("heading", { name: /try it now/i });
 
-    expect(screen.getByRole("checkbox", { name: /crash & error reporting/i })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /usage analytics/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i })).toBeChecked();
 
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: true });
-      expect(invokeMock).toHaveBeenCalledWith("set_product_analytics_consent", {
+      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", {
         enabled: true,
       });
       expect(invokeMock).toHaveBeenCalledWith("record_onboarding_completed");
     });
   });
 
-  it("persists an analytics opt-out independently during onboarding", async () => {
+  it("persists the unified opt-out during onboarding", async () => {
     const user = userEvent.setup();
     renderOnboarding();
 
@@ -823,17 +822,17 @@ describe("OnboardingDesktop", () => {
 
     await screen.findByRole("heading", { name: /try it now/i });
 
-    await user.click(screen.getByRole("checkbox", { name: /usage analytics/i }));
+    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: true });
-      expect(invokeMock).toHaveBeenCalledWith("set_product_analytics_consent", {
+      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false });
+      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", {
         enabled: false,
       });
     });
   });
 
-  it("keeps onboarding active until both opt-outs are persisted", async () => {
+  it("keeps onboarding active until the unified opt-out are persisted", async () => {
     const user = userEvent.setup();
     let resolveAnalytics: (() => void) | undefined;
     const analyticsPersisted = new Promise<void>((resolve) => {
@@ -841,7 +840,7 @@ describe("OnboardingDesktop", () => {
     });
     invokeMock.mockImplementation((command: string) => {
       if (command === "get_audio_devices") return Promise.resolve([]);
-      if (command === "set_product_analytics_consent") {
+      if (command === "set_telemetry_consent") {
         return analyticsPersisted;
       }
       if (command === "discover_remote_servers" || command === "list_remote_servers") {
@@ -858,13 +857,12 @@ describe("OnboardingDesktop", () => {
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("checkbox", { name: /crash & error reporting/i }));
-    await user.click(screen.getByRole("checkbox", { name: /usage analytics/i }));
+    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false });
-      expect(invokeMock).toHaveBeenCalledWith("set_product_analytics_consent", {
+      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", {
         enabled: false,
       });
     });
@@ -886,11 +884,11 @@ describe("OnboardingDesktop", () => {
     });
   });
 
-  it("keeps onboarding recoverable when analytics consent fails after diagnostics saves", async () => {
+  it("keeps onboarding recoverable when unified consent fails", async () => {
     const user = userEvent.setup();
     invokeMock.mockImplementation((command: string) => {
       if (command === "get_audio_devices") return Promise.resolve([]);
-      if (command === "set_product_analytics_consent") {
+      if (command === "set_telemetry_consent") {
         return Promise.reject(new Error("analytics consent store unavailable"));
       }
       if (command === "discover_remote_servers" || command === "list_remote_servers") {
@@ -907,8 +905,7 @@ describe("OnboardingDesktop", () => {
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("checkbox", { name: /crash & error reporting/i }));
-    await user.click(screen.getByRole("checkbox", { name: /usage analytics/i }));
+    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => {
@@ -928,7 +925,7 @@ describe("OnboardingDesktop", () => {
 
     await waitFor(() => {
       expect(
-        invokeMock.mock.calls.filter(([command]) => command === "set_product_analytics_consent"),
+        invokeMock.mock.calls.filter(([command]) => command === "set_telemetry_consent"),
       ).toHaveLength(2);
       expect(updateSettingsMock).toHaveBeenCalledWith(
         { onboarding_completed: true },
@@ -962,16 +959,14 @@ describe("OnboardingDesktop", () => {
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("checkbox", { name: /crash & error reporting/i }));
-    await user.click(screen.getByRole("checkbox", { name: /usage analytics/i }));
+    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => expect(onCompletionErrorMock).toHaveBeenCalledTimes(1));
     expect(settingsState.onboarding_completed).toBe(false);
     expect(onCompleteMock).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: /try it now/i })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /crash & error reporting/i })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /usage analytics/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i })).not.toBeChecked();
     expect(screen.getByRole("button", { name: /start using voicetypr/i })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
