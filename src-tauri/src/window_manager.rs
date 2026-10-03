@@ -64,7 +64,7 @@ fn calculate_pill_position(
     (x, y)
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn constrain_window_position(
     position: (f64, f64),
     window_size: (f64, f64),
