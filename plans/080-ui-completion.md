@@ -87,6 +87,7 @@ The scenario agents read the real code. These are real behaviours, not prototype
 7. **Raw error strings.** For a missing mic, the pill flashes the raw `payload.error` string. Use the designed "No microphone · Choose mic" state. *(beta.4)*
 8. **Timing mismatch.** The native terminal hide (pasted 1.2 s) must be aligned with the island's done card (3.2 s, with Undo/Original/Retry) once focus safety lands (task 1). *(beta.4)*
 9. **Retry / Undo / Original need backend support.** There is no re-transcribe-and-replace-last-paste yet. Design "replace last paste" carefully: only do it if the target field still ends with our text, otherwise copy it. *(beta.5)*
+10. **Tap or hold on the same shortcut.** Today one shortcut has a mode: Press to start/stop or Hold to talk (Recording settings, and Mode in the tray). Doing both at once on one key would need press-length timing (tap = hands-free, hold past ~0.3 s = talk while held). Founder, 2026-10-03: not now; keep it as an idea only. Press to start/stop stays the default, and no separate hold key in the UI.
 
 ### More gaps from the pill-coverage audit (2026-10-02, read-only, cites real code)
 
