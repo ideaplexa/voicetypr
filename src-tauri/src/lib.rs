@@ -345,6 +345,7 @@ use commands::{
     system_info::get_system_specs,
     text::*,
     updater::{check_for_app_update, install_app_update},
+    usage_stats::get_usage_stats,
     utils::{export_transcriptions, get_application_icon, save_transcript_file},
     window::*,
 };
@@ -656,6 +657,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .setup(move |app| {
+            app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
             // Windows identity persistence must run after the single-instance
@@ -1453,6 +1455,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             update_transcription,
             show_in_folder,
             get_transcription_history,
+            get_usage_stats,
             get_transcription_count,
             delete_transcription_entry,
             clear_all_transcriptions,
