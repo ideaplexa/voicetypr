@@ -50,10 +50,13 @@ fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
 }
 struct Clip {
     trace: Option<crate::observability::Trace>,
+    _trace_lease: Option<crate::observability::TraceLease>,
+    _retry_trace_lease: Option<crate::observability::TraceLease>,
     recovery: Recovery,
     path: PathBuf,
     expires: Instant,
     busy: bool,
+    terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     target: PathBuf,
     retry_generation: Option<u64>,
 }
@@ -104,10 +107,13 @@ impl Store {
         };
         self.insert(Clip {
             trace: crate::observability::snapshot(generation),
+            _trace_lease: crate::observability::pin(generation),
+            _retry_trace_lease: None,
             recovery: recovery.clone(),
             path: owned_path,
             expires: Instant::now() + Duration::from_millis(expires_in_ms),
             busy: false,
+            terminal: Default::default(),
             target,
             retry_generation: None,
         })?;
@@ -188,6 +194,7 @@ impl Store {
         } else if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             clip.busy = false;
             clip.retry_generation = None;
+            clip.terminal = Default::default();
         }
     }
     fn promote(&mut self, id: &str) -> bool {
@@ -476,11 +483,18 @@ struct Lease {
     id: String,
     kind: RecoveryKind,
     file: tempfile::NamedTempFile,
+    terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    trace: Option<crate::observability::Trace>,
 }
 impl Drop for Lease {
     fn drop(&mut self) {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        store.complete_retry(&self.id, false);
+        // An older lease must not release a newer retry of the same clip.
+        if store.clips.iter().any(|clip| {
+            clip.recovery.id == self.id && std::sync::Arc::ptr_eq(&clip.terminal, &self.terminal)
+        }) {
+            store.complete_retry(&self.id, false);
+        }
         store.leases.retain(|p| p != self.file.path());
     }
 }
@@ -507,12 +521,17 @@ fn lease(id: &str, anyway: bool) -> Result<Lease, String> {
         .map_err(|_| "Recovery unavailable")?;
     std::fs::copy(&clip.path, file.path()).map_err(|_| "Could not read kept recording")?;
     let kind = clip.recovery.kind;
+    clip.terminal = Default::default();
+    let terminal = clip.terminal.clone();
+    let trace = clip.trace.clone();
     clip.busy = true;
     store.leases.push(file.path().to_owned());
     Ok(Lease {
         id: id.into(),
         kind,
         file,
+        terminal,
+        trace,
     })
 }
 #[tauri::command]
@@ -570,6 +589,7 @@ async fn retry(
     };
     let generation = audio::begin_recording_generation();
     crate::observability::inherit(original_generation, generation, trace);
+    let _trace_lease = crate::observability::pin(generation);
     let retry_started = Instant::now();
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
     state.clear_cancellation();
@@ -606,30 +626,32 @@ async fn retry(
         })
         .unwrap_or("none");
     let result = cancellable_retry(cancelled, retry_inner(&app, &lease, generation, engine)).await;
-    let resolution = if result.is_ok() {
-        if anyway {
-            "transcribed_anyway"
-        } else {
-            "retried_ok"
-        }
+    let cancelled = matches!(&result, Err(RetryError::Cancelled))
+        || audio::delivery_aborted(state.is_cancellation_requested(), generation);
+    let result = if cancelled {
+        Err(RetryError::Cancelled)
     } else {
-        "retried_failed"
+        result
     };
-    resolved(
-        lease.kind,
-        generation,
-        resolution,
-        alt_engine_kind,
-        retry_started.elapsed().as_millis() as u64,
-    );
-    if result.is_err() {
-        crate::telemetry::capture_error(
-            "retry_failed",
-            crate::telemetry::ErrorContext {
-                generation: Some(generation),
-                ..Default::default()
-            },
+    let resolution = retry_resolution(result.is_ok(), cancelled, anyway);
+    if claim_terminal(&lease.terminal) {
+        resolved(
+            lease.kind,
+            generation,
+            resolution,
+            alt_engine_kind,
+            retry_started.elapsed().as_millis() as u64,
+            lease.trace.as_ref(),
         );
+        if resolution == "retried_failed" {
+            crate::telemetry::capture_error(
+                "retry_failed",
+                crate::telemetry::ErrorContext {
+                    generation: Some(generation),
+                    ..Default::default()
+                },
+            );
+        }
     }
     if !audio::recording_generation_is_stale(generation) {
         crate::update_recording_state(&app, crate::RecordingState::Idle, None);
@@ -639,6 +661,7 @@ async fn retry(
     store.complete_retry(&id, result.is_ok());
     if result.is_err() && !discarded {
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
+            clip._retry_trace_lease = crate::observability::pin(generation);
             clip.recovery.generation = generation;
             clip.recovery.expires_in_ms = clip
                 .expires
@@ -649,7 +672,10 @@ async fn retry(
     }
     drop(store);
     crate::menu::runtime::refresh(&app);
-    result.map_err(|_| "Retry failed; recording remains available until expiry".into())
+    result.map_err(|error| match error {
+        RetryError::Cancelled => "Retry discarded".to_string(),
+        RetryError::Failed => "Retry failed; recording remains available until expiry".to_string(),
+    })
 }
 fn retry_setup<T>(
     flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -658,17 +684,38 @@ fn retry_setup<T>(
     let _guard = audio::StopInFlightGuard::try_acquire(flag).ok_or("Dictation is busy")?;
     setup()
 }
+#[derive(Debug, PartialEq, Eq)]
+enum RetryError {
+    Cancelled,
+    Failed,
+}
+fn claim_terminal(terminal: &std::sync::atomic::AtomicBool) -> bool {
+    !terminal.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
+fn retry_resolution(succeeded: bool, cancelled: bool, anyway: bool) -> &'static str {
+    if cancelled {
+        "discarded"
+    } else if succeeded {
+        if anyway {
+            "transcribed_anyway"
+        } else {
+            "retried_ok"
+        }
+    } else {
+        "retried_failed"
+    }
+}
 async fn cancellable_retry<T>(
     mut cancelled: tokio::sync::watch::Receiver<bool>,
     work: impl std::future::Future<Output = Result<T, String>>,
-) -> Result<T, String> {
+) -> Result<T, RetryError> {
     if *cancelled.borrow() {
-        return Err("Retry discarded".into());
+        return Err(RetryError::Cancelled);
     }
     tokio::select! {
         biased;
-        _ = cancelled.changed() => Err("Retry discarded".into()),
-        result = work => result,
+        _ = cancelled.changed() => Err(RetryError::Cancelled),
+        result = work => result.map_err(|_| RetryError::Failed),
     }
 }
 async fn retry_inner(
@@ -780,14 +827,21 @@ async fn retry_inner(
     future.await
 }
 
-fn resolved(kind: RecoveryKind, generation: u64, resolution: &str, alt: &str, latency_ms: u64) {
+fn resolved(
+    kind: RecoveryKind,
+    generation: u64,
+    resolution: &str,
+    alt: &str,
+    latency_ms: u64,
+    trace: Option<&crate::observability::Trace>,
+) {
     crate::observability::update(
         generation,
         "recovery_kind",
         serde_json::to_value(kind).unwrap(),
     );
     crate::observability::update(generation, "recovery_resolution", resolution.into());
-    crate::observability::emit(
+    crate::observability::emit_with_trace(
         "recovery_resolved",
         vec![
             ("kind", serde_json::to_value(kind).unwrap()),
@@ -796,6 +850,7 @@ fn resolved(kind: RecoveryKind, generation: u64, resolution: &str, alt: &str, la
             ("latency_ms", latency_ms.min(86_400_000).into()),
         ],
         Some(generation),
+        trace,
     );
 }
 fn resolve_id(id: &str, resolution: &str) {
@@ -805,6 +860,9 @@ fn resolve_id(id: &str, resolution: &str) {
     }
 }
 fn resolve_clip(clip: &Clip, resolution: &str) {
+    if !claim_terminal(&clip.terminal) {
+        return;
+    }
     let latency = clip.recovery.kind.ttl_ms().saturating_sub(
         clip.expires
             .saturating_duration_since(Instant::now())
@@ -816,6 +874,7 @@ fn resolve_clip(clip: &Clip, resolution: &str) {
         resolution,
         "none",
         latency,
+        clip.trace.as_ref(),
     );
 }
 
@@ -828,6 +887,8 @@ mod tests {
         std::fs::write(&path, b"clip").unwrap();
         Clip {
             trace: None,
+            _trace_lease: None,
+            _retry_trace_lease: None,
             recovery: Recovery {
                 generation: 1,
                 id,
@@ -842,7 +903,58 @@ mod tests {
             retry_generation: None,
             expires: Instant::now() + Duration::from_millis(kind.ttl_ms()),
             busy: false,
+            terminal: Default::default(),
         }
+    }
+    #[test]
+    fn recovery_resolution_uses_saved_uuid_after_mapping_eviction() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        clip.recovery.generation = u64::MAX;
+        let id = uuid::Uuid::new_v4().to_string();
+        clip.trace = Some(crate::observability::Trace {
+            generation: u64::MAX,
+            id: id.clone(),
+            properties: vec![],
+        });
+        assert!(crate::observability::trace_id(u64::MAX).is_none());
+        crate::product_analytics::take_test_captures();
+        resolve_clip(&clip, "expired");
+        resolve_clip(&clip, "discarded");
+        let events = crate::product_analytics::take_test_captures();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "recovery_resolved");
+        assert_eq!(events[0].2.as_deref(), Some(id.as_str()));
+    }
+    #[tokio::test]
+    async fn discarded_or_expired_retry_has_one_terminal_and_no_failure() {
+        for resolution in ["discarded", "expired"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = Store::default();
+            let mut clip = clip(dir.path(), RecoveryKind::CloudFailed);
+            clip.retry_generation = Some(2);
+            let id = clip.recovery.id.clone();
+            let terminal = clip.terminal.clone();
+            store.insert(clip).unwrap();
+            let (cancel, cancelled) = tokio::sync::watch::channel(false);
+            store.active_retry = Some((id.clone(), 2, cancel));
+            if resolution == "expired" {
+                store.expire(Instant::now() + Duration::from_secs(601));
+            } else {
+                store.discard_generation(2);
+            }
+            let result =
+                cancellable_retry(cancelled, std::future::pending::<Result<(), String>>()).await;
+            assert_eq!(result, Err(RetryError::Cancelled));
+            assert!(
+                !claim_terminal(&terminal),
+                "a second terminal event would be emitted"
+            );
+            assert_eq!(retry_resolution(false, true, false), "discarded");
+            assert_ne!(retry_resolution(false, true, false), "retried_failed");
+        }
+        assert_eq!(retry_resolution(false, false, false), "retried_failed");
+        assert_eq!(retry_resolution(true, false, true), "transcribed_anyway");
     }
     #[tokio::test]
     async fn cancel_pending_retry_then_new_recording_can_stop() {

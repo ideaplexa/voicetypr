@@ -54,6 +54,28 @@ where
     Ok(())
 }
 
+pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+) -> Result<(), String> {
+    let _guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
+        .lock()
+        .await;
+    // Consent belongs to its dedicated command. Generic saves migrate stored
+    // choices rather than overwriting them from a potentially stale form.
+    let consent = crate::telemetry::migrated_consent(Some(&json!({
+        "telemetry_enabled":store.get("telemetry_enabled"),
+        "analytics_enabled":store.get("analytics_enabled"),
+        "crash_reporting_enabled":store.get("crash_reporting_enabled"),
+    })));
+    crate::telemetry::save_consent_values(store, consent, false);
+    if let Err(error) = store.save() {
+        // Reload remains inside the same consent transaction.
+        let _ = store.reload();
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub hotkey: String,
@@ -484,6 +506,9 @@ pub fn normalize_speech_language_for_model(
 
 #[tauri::command]
 pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
+    let _guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
+        .lock()
+        .await;
     let store = app.store("settings").map_err(|e| e.to_string())?;
     let legacy_speech_language = store
         .get("language")
@@ -900,14 +925,6 @@ pub async fn save_settings(
         json!(settings.play_sound_on_paste_success),
     );
     store.delete("play_sound_on_recording_end");
-    // Consent belongs to its dedicated command. Generic saves migrate stored
-    // choices rather than overwriting them from a potentially stale form.
-    let consent = crate::telemetry::migrated_consent(Some(&json!({
-        "telemetry_enabled":store.get("telemetry_enabled"),
-        "analytics_enabled":store.get("analytics_enabled"),
-        "crash_reporting_enabled":store.get("crash_reporting_enabled"),
-    })));
-    crate::telemetry::save_consent_values(&store, consent, false);
     save_pill_indicator_mode(&store, &settings.pill_indicator_mode);
     store.set(
         "island_start_details",
@@ -995,12 +1012,7 @@ pub async fn save_settings(
         store.set("pill_position", json!([x, y]));
     }
 
-    if let Err(error) = store.save() {
-        // Discard uncommitted in-memory mutations so a later
-        // rebuild_engine_bindings cannot read values that failed to persist.
-        let _ = store.reload();
-        return Err(error.to_string());
-    }
+    persist_generic_settings(&store).await?;
 
     crate::commands::shortcuts::sync_runtime_recording_mode(&app_state, &settings.recording_mode);
 
@@ -1932,5 +1944,45 @@ mod tests {
             update_channel_to_persist(Some("beta"), false, false, UpdateChannel::Beta),
             Some(UpdateChannel::Beta)
         );
+    }
+}
+
+#[cfg(test)]
+mod consent_transaction_tests {
+    use super::*;
+    #[tokio::test]
+    async fn generic_save_waits_for_opt_out_transaction_and_preserves_it() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings");
+        let store = tauri_plugin_store::StoreBuilder::new(app.handle(), &path)
+            .build()
+            .unwrap();
+        crate::telemetry::save_consent_values(&store, true, true);
+        store.save().unwrap();
+        // Pause the dedicated consent transaction with the generic save ready.
+        let consent_guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
+            .lock()
+            .await;
+        let generic = persist_generic_settings(&store);
+        tokio::pin!(generic);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut generic)
+                .await
+                .is_err()
+        );
+        crate::telemetry::save_consent_values(&store, false, true);
+        store.save().unwrap();
+        drop(consent_guard);
+        generic.await.unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved["telemetry_enabled"], false);
+        assert!(saved.get("telemetry_install_id").is_none());
+        assert!(saved.get("analytics_install_id").is_none());
+        assert_eq!(saved["privacy_consent_version"], 2);
     }
 }

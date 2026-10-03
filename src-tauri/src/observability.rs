@@ -2,7 +2,7 @@
 use parking_lot::Mutex;
 use posthog_rs::Event;
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::LazyLock;
 
 #[derive(Clone, Default)]
@@ -11,10 +11,59 @@ pub struct Trace {
     pub id: String,
     pub properties: Vec<(&'static str, Value)>,
 }
-static TRACES: LazyLock<Mutex<VecDeque<Trace>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
+#[derive(Default)]
+struct TraceRegistry {
+    ring: VecDeque<Trace>,
+    outstanding: HashMap<u64, (Trace, usize)>,
+}
+impl TraceRegistry {
+    fn get(&self, generation: u64) -> Option<Trace> {
+        self.outstanding
+            .get(&generation)
+            .map(|(trace, _)| trace.clone())
+            .or_else(|| {
+                self.ring
+                    .iter()
+                    .find(|t| t.generation == generation)
+                    .cloned()
+            })
+    }
+    fn pin(&mut self, generation: u64) -> bool {
+        let Some(trace) = self.get(generation) else {
+            return false;
+        };
+        self.outstanding.entry(generation).or_insert((trace, 0)).1 += 1;
+        true
+    }
+    fn release(&mut self, generation: u64) {
+        if let Some((_, count)) = self.outstanding.get_mut(&generation) {
+            *count -= 1;
+            if *count == 0 {
+                self.outstanding.remove(&generation);
+            }
+        }
+    }
+}
+static TRACES: LazyLock<Mutex<TraceRegistry>> =
+    LazyLock::new(|| Mutex::new(TraceRegistry::default()));
+/// Pins only outstanding work, independently of the five-entry support ring.
+pub struct TraceLease(u64);
+impl Drop for TraceLease {
+    fn drop(&mut self) {
+        TRACES.lock().release(self.0);
+    }
+}
+pub fn pin(generation: u64) -> Option<TraceLease> {
+    let pinned = TRACES.lock().pin(generation);
+    if pinned {
+        Some(TraceLease(generation))
+    } else {
+        None
+    }
+}
 pub fn begin(generation: u64) {
     push_trace(
-        &mut TRACES.lock(),
+        &mut TRACES.lock().ring,
         Trace {
             generation,
             id: uuid::Uuid::new_v4().to_string(),
@@ -29,42 +78,36 @@ fn push_trace(traces: &mut VecDeque<Trace>, trace: Trace) {
     }
 }
 pub fn snapshot(generation: u64) -> Option<Trace> {
-    TRACES
-        .lock()
-        .iter()
-        .find(|t| t.generation == generation)
-        .cloned()
+    TRACES.lock().get(generation)
 }
 pub fn trace_id(generation: u64) -> Option<String> {
-    TRACES
-        .lock()
-        .iter()
-        .find(|t| t.generation == generation)
-        .map(|t| t.id.clone())
+    snapshot(generation).map(|t| t.id)
 }
 pub fn last_ids() -> Vec<String> {
-    TRACES.lock().iter().map(|t| t.id.clone()).collect()
+    TRACES.lock().ring.iter().map(|t| t.id.clone()).collect()
 }
 pub fn update(generation: u64, key: &'static str, value: Value) {
-    if let Some(t) = TRACES
-        .lock()
-        .iter_mut()
-        .find(|t| t.generation == generation)
-    {
+    let mut traces = TRACES.lock();
+    let update = |t: &mut Trace| {
         t.properties.retain(|(k, _)| *k != key);
-        t.properties.push((key, value));
+        t.properties.push((key, value.clone()));
+    };
+    if let Some((t, _)) = traces.outstanding.get_mut(&generation) {
+        update(t);
+    }
+    if let Some(t) = traces.ring.iter_mut().find(|t| t.generation == generation) {
+        update(t);
     }
 }
 pub fn properties(generation: u64) -> Vec<(&'static str, Value)> {
-    TRACES
-        .lock()
-        .iter()
-        .find(|t| t.generation == generation)
-        .map(|t| t.properties.clone())
+    snapshot(generation)
+        .map(|t| t.properties)
         .unwrap_or_default()
 }
 pub fn inherit(from: u64, to: u64, fallback: Option<Trace>) {
-    inherit_trace(&mut TRACES.lock(), from, to, fallback);
+    let mut traces = TRACES.lock();
+    let original = traces.get(from).or(fallback);
+    inherit_trace(&mut traces.ring, from, to, original);
 }
 fn inherit_trace(traces: &mut VecDeque<Trace>, from: u64, to: u64, fallback: Option<Trace>) {
     let original = traces
@@ -73,7 +116,8 @@ fn inherit_trace(traces: &mut VecDeque<Trace>, from: u64, to: u64, fallback: Opt
         .cloned()
         .or(fallback);
     if let Some(mut trace) = original {
-        traces.retain(|t| t.generation != to && t.id != trace.id);
+        // A retry is an alias; original completions must still find their UUID.
+        traces.retain(|t| t.generation != to);
         trace.generation = to;
         push_trace(traces, trace);
     }
@@ -244,6 +288,14 @@ pub fn validated(event: &Event) -> Option<Vec<(&'static str, Value)>> {
         .collect()
 }
 pub fn emit(name: &'static str, properties: Vec<(&'static str, Value)>, generation: Option<u64>) {
+    emit_with_trace(name, properties, generation, None);
+}
+pub fn emit_with_trace(
+    name: &'static str,
+    properties: Vec<(&'static str, Value)>,
+    generation: Option<u64>,
+    trace: Option<&Trace>,
+) {
     let mut event = Event::new(String::from(name), String::from("schema-check"));
     for (key, value) in &properties {
         let _ = event.insert_prop(*key, value);
@@ -251,9 +303,11 @@ pub fn emit(name: &'static str, properties: Vec<(&'static str, Value)>, generati
     let Some(properties) = validated(&event) else {
         return;
     };
-    crate::product_analytics::capture_at(
+    crate::product_analytics::capture_with_trace(
         crate::product_analytics::ProductEvent::Observability { name, properties },
         generation.unwrap_or(0),
+        None,
+        trace.map(|trace| trace.id.clone()),
     );
 }
 pub fn action(action: &str, source: &str) {
@@ -270,47 +324,131 @@ pub fn quick(setting: &str, source: &str) {
         None,
     );
 }
-static PEEKS: Mutex<(i64, u64)> = Mutex::new((0, 0));
+#[derive(Default)]
+struct PeekCounter {
+    day: i64,
+    count: u64,
+    epoch: Option<u64>,
+}
+impl PeekCounter {
+    fn increment(
+        &mut self,
+        day: i64,
+        accepted: u64,
+        current: Option<u64>,
+    ) -> Option<(i64, u64, u64)> {
+        if current != Some(accepted) {
+            return None;
+        }
+        let previous = self.take(current).filter(|(old_day, _, _)| *old_day != day);
+        // Same-day counts continue only within the accepted consent epoch.
+        if self.day != day || self.epoch != current {
+            self.count = 0;
+        }
+        self.day = day;
+        self.epoch = current;
+        self.count = self.count.saturating_add(1).min(86_400_000);
+        previous
+    }
+    fn take(&mut self, current: Option<u64>) -> Option<(i64, u64, u64)> {
+        if self.epoch != current || current.is_none() {
+            self.count = 0;
+            return None;
+        }
+        (self.count > 0).then(|| (self.day, self.count, self.epoch.unwrap()))
+    }
+    fn flush(&mut self, current: Option<u64>) -> Option<(i64, u64, u64)> {
+        let count = self.take(current);
+        self.count = 0;
+        count
+    }
+}
+static PEEKS: LazyLock<Mutex<PeekCounter>> = LazyLock::new(|| Mutex::new(PeekCounter::default()));
+fn emit_peeks((day, count, epoch): (i64, u64, u64)) {
+    crate::product_analytics::capture_at_epoch(
+        crate::product_analytics::ProductEvent::Observability {
+            name: "island_peek_opened",
+            properties: vec![("count", count.into()), ("utc_day", (day as u64).into())],
+        },
+        0,
+        Some(epoch),
+    );
+}
 pub fn peek() {
-    if !crate::product_analytics::is_enabled() {
+    let Some(epoch) = crate::product_analytics::consent_epoch() else {
         return;
-    }
+    };
     let day = chrono::Utc::now().timestamp() / 86400;
-    let mut peeks = PEEKS.lock();
-    if peeks.0 != day && peeks.1 > 0 {
-        emit(
-            "island_peek_opened",
-            vec![
-                ("count", peeks.1.into()),
-                ("utc_day", (peeks.0 as u64).into()),
-            ],
-            None,
-        );
-        peeks.1 = 0;
+    let previous = PEEKS
+        .lock()
+        .increment(day, epoch, crate::product_analytics::consent_epoch());
+    if let Some(previous) = previous {
+        emit_peeks(previous);
     }
-    peeks.0 = day;
-    peeks.1 = peeks.1.saturating_add(1).min(86_400_000);
 }
 pub fn clear_peeks() {
-    PEEKS.lock().1 = 0;
+    *PEEKS.lock() = PeekCounter::default();
 }
 pub fn flush_peeks() {
-    let (day, count) = {
-        let mut peeks = PEEKS.lock();
-        (peeks.0, std::mem::take(&mut peeks.1))
-    };
-    if count > 0 {
-        emit(
-            "island_peek_opened",
-            vec![("count", count.into()), ("utc_day", (day as u64).into())],
-            None,
-        );
+    let previous = PEEKS
+        .lock()
+        .flush(crate::product_analytics::consent_epoch());
+    if let Some(previous) = previous {
+        emit_peeks(previous);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn outstanding_trace_survives_ring_eviction_and_retry_alias() {
+        let mut registry = TraceRegistry::default();
+        let original = Trace {
+            generation: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            properties: vec![],
+        };
+        push_trace(&mut registry.ring, original.clone());
+        assert!(registry.pin(1));
+        let fallback = registry.get(1);
+        inherit_trace(&mut registry.ring, 1, 2, fallback);
+        assert!(registry.pin(2));
+        assert_eq!(registry.get(1).unwrap().id, original.id);
+        for generation in 3..12 {
+            push_trace(
+                &mut registry.ring,
+                Trace {
+                    generation,
+                    id: uuid::Uuid::new_v4().to_string(),
+                    properties: vec![],
+                },
+            );
+        }
+        assert_eq!(registry.ring.len(), 5);
+        assert_eq!(registry.get(1).unwrap().id, original.id);
+        assert_eq!(registry.get(2).unwrap().id, original.id);
+        registry.release(2);
+        assert!(registry.get(2).is_none());
+        assert_eq!(registry.get(1).unwrap().id, original.id);
+        registry.release(1);
+        assert!(registry.outstanding.is_empty());
+    }
+    #[test]
+    fn peek_counter_rejects_revocation_races_on_increment_and_flush() {
+        let mut peeks = PeekCounter::default();
+        peeks.increment(10, 1, Some(1));
+        peeks.increment(10, 1, Some(1));
+        assert_eq!(peeks.count, 2);
+        assert_eq!(peeks.increment(10, 1, Some(2)), None);
+        assert_eq!(peeks.flush(Some(2)), None);
+        assert_eq!(peeks.count, 0);
+        peeks.increment(10, 2, Some(2));
+        assert_eq!(peeks.flush(None), None);
+        peeks.increment(10, 3, Some(3));
+        assert_eq!(peeks.increment(11, 3, Some(3)), Some((10, 1, 3)));
+        assert_eq!(peeks.flush(Some(3)), Some((11, 1, 3)));
+    }
     #[test]
     fn every_catalogue_payload_is_closed() {
         for name in [
@@ -372,6 +510,7 @@ mod tests {
         );
         inherit_trace(&mut traces, 901, 902, None);
         assert_eq!(traces[0].id, original.id);
+        assert!(traces.iter().any(|trace| trace.generation == 901));
         for generation in 903..910 {
             push_trace(
                 &mut traces,

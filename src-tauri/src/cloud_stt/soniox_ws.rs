@@ -154,8 +154,8 @@ async fn run_task<F>(
 
     let stream = match tokio_tungstenite::connect_async(RT_ENDPOINT).await {
         Ok((stream, _response)) => stream,
-        Err(error) => {
-            log::warn!("Soniox RT connect failed: {error}");
+        Err(_error) => {
+            log::warn!("provider=Soniox status=unknown code=network");
             finish(&mut final_slot, Err(SttError::Network));
             return;
         }
@@ -236,8 +236,8 @@ async fn run_task<F>(
                 }
                 // Ping/Pong/Binary/Frame from the server: ignore.
                 Some(Ok(_)) => {}
-                Some(Err(error)) => {
-                    log::warn!("Soniox RT read error: {error}");
+                Some(Err(_error)) => {
+                    log::warn!("provider=Soniox status=unknown code=network");
                     finish(&mut final_slot, Err(SttError::Network));
                     return;
                 }

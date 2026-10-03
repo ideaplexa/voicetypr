@@ -1453,8 +1453,8 @@ pub async fn polish_text_typed(
     context: Option<&str>,
     app_category_hint: Option<&str>,
     needs_output_language_transform: bool,
+    generation: u64,
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
-    let generation = crate::commands::audio::current_recording_generation();
     crate::observability::update(
         generation,
         "polish_keep_words",

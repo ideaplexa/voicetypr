@@ -3,7 +3,7 @@ use crate::{product_analytics, telemetry};
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
-static CONSENT_MUTATION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+pub(crate) static CONSENT_MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 #[derive(Serialize)]
 pub struct TelemetryStatus {
     pub enabled: bool,
@@ -17,6 +17,7 @@ pub struct TelemetryConsentResult {
 }
 #[tauri::command]
 pub async fn get_telemetry_status(app: AppHandle) -> Result<TelemetryStatus, String> {
+    let _guard = CONSENT_MUTATION_LOCK.lock().await;
     let consent = product_analytics::read_consent(&app.config().identifier);
     Ok(TelemetryStatus {
         enabled: consent.enabled,
@@ -29,7 +30,7 @@ pub async fn set_telemetry_consent(
     app: AppHandle,
     enabled: bool,
 ) -> Result<TelemetryConsentResult, String> {
-    let _guard = CONSENT_MUTATION_LOCK.lock();
+    let _guard = CONSENT_MUTATION_LOCK.lock().await;
     if !enabled {
         telemetry::disable_and_drop_queued();
     }
@@ -60,6 +61,7 @@ pub async fn set_product_analytics_consent(
 }
 #[tauri::command]
 pub async fn defer_privacy_consent_for_session() -> Result<(), String> {
+    let _guard = CONSENT_MUTATION_LOCK.lock().await;
     product_analytics::disable();
     Ok(())
 }

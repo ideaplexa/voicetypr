@@ -184,9 +184,6 @@ pub fn capture_transcription_failure(
         },
     );
 }
-pub fn capture_paste_failure(_stage: &str) {
-    capture_error("paste_failed", current_context());
-}
 pub fn capture_model_load_failure(_model_name: &str) {
     capture_error("model_load_failed", current_context());
 }
@@ -492,7 +489,7 @@ pub fn native_error(code: &'static str) {
     capture_error(error, current_context());
 }
 
-fn crate_location(filename: &str) -> Option<String> {
+pub(crate) fn crate_location(filename: &str) -> Option<String> {
     let normalized = filename.replace(char::from(92), "/");
     let relative = normalized
         .rsplit_once("/src-tauri/src/")
@@ -508,6 +505,13 @@ fn crate_location(filename: &str) -> Option<String> {
     }
     Some(relative)
 }
+pub(crate) fn local_panic_record(file: Option<(&str, u32)>, time: &str) -> String {
+    let location = file
+        .and_then(|(file, line)| crate_location(file).map(|file| format!("{file}:{line}")))
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("Panic at {location}\nTime: {time}\n")
+}
+
 pub fn install_coded_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -701,5 +705,27 @@ mod payload_tests {
         assert_eq!(clean.properties()["dictation_id"], id);
         let serialized = serde_json::to_value(clean).unwrap();
         assert_eq!(serialized["distinct_id"], install);
+    }
+}
+
+#[cfg(test)]
+mod local_panic_tests {
+    use super::*;
+    #[test]
+    fn crash_file_has_only_relative_location_and_time() {
+        let record = local_panic_record(
+            Some(("/Users/private/project/src-tauri/src/commands/audio.rs", 42)),
+            "2026-10-03T00:00:00Z",
+        );
+        assert_eq!(
+            record,
+            "Panic at src/commands/audio.rs:42\nTime: 2026-10-03T00:00:00Z\n"
+        );
+        assert!(!record.contains("/Users/"));
+        assert!(!record.contains("Full info"));
+        assert_eq!(
+            local_panic_record(Some(("/private/dependency.rs", 1)), "time"),
+            "Panic at unknown\nTime: time\n"
+        );
     }
 }

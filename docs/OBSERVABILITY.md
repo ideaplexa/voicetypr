@@ -41,9 +41,22 @@ unknown codes become other. Durations are bounded. Installation and dictation
 UUIDs are random v4 IDs, never content-derived. Dictation IDs are properties,
 not person IDs. Person profiles and GeoIP enrichment are disabled.
 
-The queue rechecks consent and its epoch before sending. A request already
-handed to HTTP can finish after revocation; retries are disabled. An opt-out
-invalidates pending events and clears the pending peek count.
+Every queued event and exception carries its acceptance consent epoch. The
+SDK's batch-building `before_send` hook strips exactly its pinned enrichment
+keys, checks that epoch and rebuilds the approved payload. posthog-rs 0.22.0
+has no hook between batch serialization and HTTP dispatch. Revocation closes
+the gate, advances the epoch, clears peek counts and synchronously flushes:
+pending items are dropped while consent stays off, before the dedicated consent
+command can re-enable it. Captures enqueued late still carry the revoked epoch.
+
+Residual window: at most the worker's one batch (maximum 20 events) already
+past `before_send` can make its single HTTP attempt after revocation, even if
+HTTP had not started yet. This includes serialization/compression and request
+setup between the last epoch check and dispatch, then the HTTP request's
+5-second timeout. Synchronous revocation waits for that attempt and the queue
+drain; this is not a guarantee of a 5-second total revocation latency. Retries
+are disabled. Peek counters validate their epoch on increment, flush and event
+acceptance, so old counts cannot be relabeled under a later opt-in.
 
 Exceptions pass through telemetry::capture_error(code, context), at most
 three captures per code per process. The helper supplies only AppError with
@@ -58,15 +71,21 @@ Panic payloads never enter our coded event or local logs. The SDK's opt-in
 hook is enabled; a chained coded hook snapshots consent and trace ID, supplies
 only panic plus the compiler location, then invokes the SDK's bounded flush.
 The unstamped SDK duplicate is dropped, so it cannot bypass consent epochs.
-A fixed local panic notice replaces the default payload-printing hook.
+A fixed local panic notice replaces the default payload-printing hook. The
+local crash file contains only the sanitized crate-relative file:line (or
+unknown) and UTC time, never PanicHookInfo or its payload.
 
 ## Correlation
 
 Recording generation maps to one random dictation_id. Starts from hotkeys,
 pointer or tray share this implementation. Completion snapshots the generation
 before awaiting work; island and recovery producers pass their generation.
-Recovery retries inherit the original UUID. The in-memory ring retains the
-last five IDs for support and never persists them.
+Recovery retries inherit the original UUID without removing the original
+mapping. Outstanding completion work, kept clips and retry aliases pin their
+mappings independently of the five-entry support ring; ownership releases the
+pins when that work ends. Recovery resolutions use the trace snapshot saved
+with the kept clip. Cancellation/discard/expiry claims one terminal resolution
+per attempt and never emits `retry_failed`. The ring and pins never persist.
 
 A completion describes the original take. Recovery may still be pending:
 recovery_resolution=none in that completion is expected. Join the subsequent

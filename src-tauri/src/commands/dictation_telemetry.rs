@@ -39,6 +39,7 @@ pub(crate) struct DictationCompletionGuard {
     pub(crate) facts: crate::product_analytics::DictationFacts,
     stop_requested: Instant,
     generation: u64,
+    _trace_lease: Option<crate::observability::TraceLease>,
 }
 
 impl DictationCompletionGuard {
@@ -49,6 +50,7 @@ impl DictationCompletionGuard {
         generation: u64,
     ) -> Self {
         use tauri_plugin_store::StoreExt;
+        let trace_lease = crate::observability::pin(generation);
         let app_state = app.state::<AppState>();
         let live_preview = app_state
             .recording_live_preview
@@ -93,6 +95,7 @@ impl DictationCompletionGuard {
             app_category,
         );
         guard.generation = generation;
+        guard._trace_lease = trace_lease;
         guard
     }
 
@@ -122,7 +125,8 @@ impl DictationCompletionGuard {
                 app_category,
             },
             stop_requested,
-            generation: crate::commands::audio::current_recording_generation(),
+            generation: 0,
+            _trace_lease: None,
         }
     }
 

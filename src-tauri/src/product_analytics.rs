@@ -459,11 +459,25 @@ pub fn enable(install_id: String) {
 /// Stops new egress, invalidates queued events, and forgets the in-memory id.
 /// The store command deletes the persisted id separately.
 pub fn disable() {
-    crate::observability::clear_peeks();
+    revoke_with_flush(posthog_rs::flush);
+}
+
+fn revoke_with_flush(flush: impl FnOnce()) {
     let mut state = RUNTIME.write();
     state.enabled = false;
     state.generation = state.generation.wrapping_add(1);
     state.install_id = None;
+    drop(state);
+    crate::observability::clear_peeks();
+    // The SDK has no pre-HTTP hook. Drain synchronously while the gate is off:
+    // buffered events are rejected by before_send; a batch already prepared
+    // by the worker can finish its single attempt (bounded by request timeout).
+    flush();
+}
+
+pub(crate) fn consent_epoch() -> Option<u64> {
+    let state = RUNTIME.read();
+    state.enabled.then_some(state.generation)
 }
 
 fn configure_runtime(enabled: bool, install_id: Option<String>) {
@@ -484,9 +498,32 @@ pub fn capture(event: ProductEvent) {
     );
 }
 pub fn capture_at(event: ProductEvent, dictation_generation: u64) {
+    capture_at_epoch(event, dictation_generation, None);
+}
+
+pub(crate) fn capture_at_epoch(event: ProductEvent, dictation_generation: u64, epoch: Option<u64>) {
+    capture_with_trace(event, dictation_generation, epoch, None);
+}
+
+pub(crate) fn capture_with_trace(
+    event: ProductEvent,
+    dictation_generation: u64,
+    epoch: Option<u64>,
+    trace_id: Option<String>,
+) {
+    #[cfg(test)]
+    TEST_CAPTURES.with(|captures| {
+        captures.borrow_mut().push((
+            event.name().to_string(),
+            dictation_generation,
+            trace_id
+                .clone()
+                .or_else(|| crate::observability::trace_id(dictation_generation)),
+        ))
+    });
     let (install_id, generation) = {
         let state = RUNTIME.read();
-        if !state.enabled {
+        if !state.enabled || epoch.is_some_and(|epoch| epoch != state.generation) {
             return;
         }
         let Some(install_id) = state.install_id.clone() else {
@@ -504,10 +541,19 @@ pub fn capture_at(event: ProductEvent, dictation_generation: u64) {
             let _ = posthog_event.insert_prop(key, value);
         }
     }
-    if let Some(id) = crate::observability::trace_id(dictation_generation) {
+    if let Some(id) = trace_id.or_else(|| crate::observability::trace_id(dictation_generation)) {
         let _ = posthog_event.insert_prop("dictation_id", id);
     }
     posthog_rs::capture(posthog_event);
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CAPTURES: std::cell::RefCell<Vec<(String, u64, Option<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+#[cfg(test)]
+pub(crate) fn take_test_captures() -> Vec<(String, u64, Option<String>)> {
+    TEST_CAPTURES.with(|captures| std::mem::take(&mut *captures.borrow_mut()))
 }
 
 fn insert_base_properties(event: &mut Event, generation: u64) {
@@ -643,7 +689,22 @@ fn safe_model_id(provider_id: &str, model_id: &str) -> String {
     }
 }
 
+const SDK_ENRICHMENT_KEYS: &[&str] = &[
+    "$os",
+    "$os_version",
+    "$lib",
+    "$lib_version",
+    "$lib_version__major",
+    "$lib_version__minor",
+    "$lib_version__patch",
+];
+
 fn scrub_event(mut event: Event) -> Option<Event> {
+    // Exactly the enrichment applied by pinned posthog-rs 0.22 V0 pipeline.
+    // Never accept an arbitrary dollar-prefixed property.
+    for key in SDK_ENRICHMENT_KEYS {
+        event.remove_prop(key);
+    }
     if event.event_name() == "$exception" {
         return crate::telemetry::scrub_exception_event(event);
     }
@@ -971,6 +1032,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_exact_property_set_and_rounding() {
         let event = dictation_event();
         let mut keys: Vec<&str> = event.properties().keys().map(String::as_str).collect();
@@ -1009,6 +1071,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_builder_covers_outcomes_and_privacy() {
         for outcome in [
             DictationOutcome::Delivered,
@@ -1035,6 +1098,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_validator_drops_bad_values_and_extra_keys() {
         for (key, wrong_type) in [
             ("outcome", serde_json::json!(true)),
@@ -1118,6 +1182,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_scrubber_keeps_only_closed_properties() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1134,6 +1199,162 @@ mod tests {
             .contains_key(INTERNAL_GENERATION_PROPERTY));
     }
 
+    #[tokio::test]
+    #[serial_test::serial(analytics_runtime)]
+    async fn sdk_batch_enrichment_and_revocation_use_real_worker() {
+        use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let host = server.uri();
+        let enriched = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = enriched.clone();
+        tokio::task::spawn_blocking(move || {
+            configure_runtime(true, Some(uuid::Uuid::new_v4().to_string()));
+            let epoch = consent_epoch().unwrap();
+            let mut options = ClientOptionsBuilder::default();
+            options
+                .api_key("test-token".to_string())
+                .host(host)
+                .is_server(false)
+                .flush_at(100usize)
+                .max_batch_size(20usize)
+                .flush_interval_ms(60_000u64)
+                .max_capture_attempts(1u32)
+                .before_send(move |event: Event| {
+                    for key in SDK_ENRICHMENT_KEYS {
+                        assert!(
+                            event.properties().contains_key(*key),
+                            "missing enrichment {key}"
+                        );
+                    }
+                    observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Some(event)
+                })
+                .before_send(scrub_event);
+            let client = posthog_rs::client(options.build().unwrap());
+            let mut completed = event_with_generation("dictation_completed", epoch);
+            insert_event_properties(&mut completed, build_dictation_completed(dictation_facts()));
+            client.capture(completed);
+            client.capture(event_with_generation("recording.started", epoch));
+            client.capture(event_with_generation("onboarding.completed", epoch));
+            client.flush();
+            // Accepted in the worker queue, then revoked before dispatch.
+            client.capture(event_with_generation("recording.started", epoch));
+            let mut exception = event_with_generation("$exception", epoch);
+            exception.insert_prop("code", "retry_failed").unwrap();
+            client.capture(exception);
+            revoke_with_flush(|| client.flush());
+            assert!(consent_epoch().is_none());
+            // A capture that raced revoke/enqueue cannot revive after opt-in.
+            configure_runtime(true, Some(uuid::Uuid::new_v4().to_string()));
+            client.capture(event_with_generation("recording.started", epoch));
+            client.flush();
+            client.shutdown();
+            configure_runtime(false, None);
+        })
+        .await
+        .unwrap();
+        assert_eq!(enriched.load(std::sync::atomic::Ordering::SeqCst), 6);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "revoked events or exceptions escaped");
+        let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let batch = body["batch"].as_array().unwrap();
+        assert_eq!(batch.len(), 3);
+        for (event, name) in batch.iter().zip([
+            "dictation_completed",
+            "recording.started",
+            "onboarding.completed",
+        ]) {
+            assert_eq!(event["event"], name);
+            for key in SDK_ENRICHMENT_KEYS {
+                assert!(event["properties"].get(*key).is_none());
+            }
+            assert!(event["properties"]
+                .get(INTERNAL_GENERATION_PROPERTY)
+                .is_none());
+        }
+        assert_eq!(batch[0]["properties"]["outcome"], "delivered");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(analytics_runtime)]
+    async fn revocation_waits_for_prepared_batch_and_drops_the_remaining_queue() {
+        use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let host = server.uri();
+        tokio::task::spawn_blocking(move || {
+            configure_runtime(true, Some(uuid::Uuid::new_v4().to_string()));
+            let epoch = consent_epoch().unwrap();
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release_rx = std::sync::Mutex::new(release_rx);
+            let mut options = ClientOptionsBuilder::default();
+            options
+                .api_key("test-token".to_string())
+                .host(host)
+                .is_server(false)
+                .flush_at(1usize)
+                .max_capture_attempts(1u32)
+                .before_send(scrub_event)
+                .before_send(move |event: Event| {
+                    // Pause after the final consent check: this is the SDK's
+                    // unavoidable prepared-batch window, before HTTP starts.
+                    entered_tx.send(()).unwrap();
+                    release_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(std::time::Duration::from_secs(5))
+                        .unwrap();
+                    Some(event)
+                });
+            let client = std::sync::Arc::new(posthog_rs::client(options.build().unwrap()));
+            client.capture(event_with_generation("recording.started", epoch));
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            let revoking_client = client.clone();
+            let (disabled_tx, disabled_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let revocation = std::thread::spawn(move || {
+                revoke_with_flush(|| {
+                    disabled_tx.send(()).unwrap();
+                    revoking_client.flush();
+                });
+                done_tx.send(()).unwrap();
+            });
+            disabled_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            assert!(
+                done_rx
+                    .recv_timeout(std::time::Duration::from_millis(10))
+                    .is_err(),
+                "revocation returned before the accepted batch drained"
+            );
+            client.capture(event_with_generation("recording.started", epoch));
+            let mut exception = event_with_generation("$exception", epoch);
+            exception.insert_prop("code", "retry_failed").unwrap();
+            client.capture(exception);
+            release_tx.send(()).unwrap();
+            revocation.join().unwrap();
+            client.shutdown();
+            configure_runtime(false, None);
+        })
+        .await
+        .unwrap();
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "pending events or retries escaped");
+        let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["batch"].as_array().unwrap().len(), 1);
+    }
+
     static CONSENT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     fn event_with_generation(name: &str, generation: u64) -> Event {
@@ -1143,6 +1364,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn debug_build_is_inert_even_when_enabled() {
         let _guard = CONSENT_TEST_LOCK.lock();
         assert!(!is_available());
@@ -1152,6 +1374,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn missing_consent_version_requires_acknowledgement_and_blocks_egress() {
         let value = serde_json::json!({
             KEY_ANALYTICS_ENABLED: true,
@@ -1163,6 +1386,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn explicit_opt_out_remains_disabled_after_acknowledgement() {
         let value = serde_json::json!({
             KEY_PRIVACY_CONSENT_VERSION: PRIVACY_CONSENT_VERSION,
@@ -1175,6 +1399,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn event_scrubber_rebuilds_properties_and_drops_unknown_fields() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1205,6 +1430,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn unknown_event_names_are_rejected() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1217,6 +1443,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn stale_generation_is_rejected_after_revocation() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1230,6 +1457,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn invalid_stored_install_id_is_never_used() {
         let value = serde_json::json!({
             KEY_PRIVACY_CONSENT_VERSION: PRIVACY_CONSENT_VERSION,
@@ -1242,12 +1470,14 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn arbitrary_provider_and_model_values_are_bucketed() {
         assert_eq!(safe_provider_id("secret-provider"), "unknown");
         assert_eq!(safe_model_id("unknown", "private-model-name"), "custom");
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn polish_attempts_include_fallbacks_but_not_disabled_events() {
         for (outcome, expected) in [
             (PolishOutcome::Fallback, true),
@@ -1274,6 +1504,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn duration_values_are_bounded_into_closed_buckets() {
         assert_eq!(duration_bucket(499), "lt_500ms");
         assert_eq!(duration_bucket(500), "500_1499ms");

@@ -705,10 +705,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Try to save panic info to a crash file for debugging
                 if let Ok(home_dir) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
                     let crash_file = std::path::Path::new(&home_dir).join(".voicetypr_crash.log");
-                    let _ = std::fs::write(&crash_file, format!(
-                        "Panic at {}: {}\nFull info: {:?}\nTime: {:?}",
-                        location, message, panic_info, chrono::Local::now()
-                    ));
+                    let record = crate::telemetry::local_panic_record(
+                        panic_info.location().map(|location| (location.file(), location.line())),
+                        &chrono::Utc::now().to_rfc3339(),
+                    );
+                    let _ = std::fs::write(&crash_file, record);
                 }
                 // Forward to the prior (PostHog) hook so panics are still captured.
                 prev_hook(panic_info);

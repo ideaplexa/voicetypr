@@ -1158,6 +1158,7 @@ impl Drop for StopInFlightGuard {
 /// Cancellation (None) is the default so aborting the Tokio task during an
 /// await still emits a terminal journey event.
 struct DecodeJourneyGuard {
+    generation: u64,
     started: Instant,
     /// None = cancelled/aborted before a terminal outcome was recorded.
     succeeded: Option<bool>,
@@ -1165,8 +1166,9 @@ struct DecodeJourneyGuard {
 }
 
 impl DecodeJourneyGuard {
-    fn new(analytics_engine: crate::product_analytics::EngineKind) -> Self {
+    fn new(analytics_engine: crate::product_analytics::EngineKind, generation: u64) -> Self {
         Self {
+            generation,
             started: Instant::now(),
             succeeded: None,
             analytics_engine,
@@ -1186,25 +1188,30 @@ impl Drop for DecodeJourneyGuard {
             Some(false) => crate::product_analytics::JourneyOutcome::Failed,
             None => crate::product_analytics::JourneyOutcome::Cancelled,
         };
-        crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
-            stage: crate::product_analytics::JourneyStage::Decode,
-            outcome,
-            duration_ms,
-            engine: Some(self.analytics_engine),
-        });
+        crate::product_analytics::capture_at(
+            crate::product_analytics::ProductEvent::StageFinished {
+                stage: crate::product_analytics::JourneyStage::Decode,
+                outcome,
+                duration_ms,
+                engine: Some(self.analytics_engine),
+            },
+            self.generation,
+        );
     }
 }
 
 /// Delivery journey (PostHog). A task abandoned before delivery is cancelled;
 /// only an attempted paste or clipboard operation can succeed or fail.
 struct DeliveryJourneyGuard {
+    generation: u64,
     started: Instant,
     succeeded: Option<bool>,
 }
 
 impl DeliveryJourneyGuard {
-    fn new() -> Self {
+    fn new(generation: u64) -> Self {
         Self {
+            generation,
             started: Instant::now(),
             succeeded: None,
         }
@@ -1230,12 +1237,15 @@ impl DeliveryJourneyGuard {
 impl Drop for DeliveryJourneyGuard {
     fn drop(&mut self) {
         let duration_ms = self.started.elapsed().as_millis() as u64;
-        crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
-            stage: crate::product_analytics::JourneyStage::Delivery,
-            outcome: self.outcome(),
-            duration_ms,
-            engine: None,
-        });
+        crate::product_analytics::capture_at(
+            crate::product_analytics::ProductEvent::StageFinished {
+                stage: crate::product_analytics::JourneyStage::Delivery,
+                outcome: self.outcome(),
+                duration_ms,
+                engine: None,
+            },
+            self.generation,
+        );
     }
 }
 
@@ -1245,19 +1255,41 @@ mod delivery_journey_tests {
     use crate::product_analytics::JourneyOutcome;
 
     #[test]
+    fn late_cancelled_stages_keep_the_captured_take_after_next_start() {
+        use super::{begin_recording_generation, DecodeJourneyGuard};
+        let a = begin_recording_generation();
+        crate::observability::begin(a);
+        let _lease = crate::observability::pin(a);
+        let id = crate::observability::trace_id(a).unwrap();
+        let decode = DecodeJourneyGuard::new(crate::product_analytics::EngineKind::Cloud, a);
+        let delivery = DeliveryJourneyGuard::new(a);
+        let b = begin_recording_generation();
+        crate::observability::begin(b);
+        crate::product_analytics::take_test_captures();
+        drop(decode);
+        drop(delivery);
+        let events = crate::product_analytics::take_test_captures();
+        assert_eq!(events.len(), 2);
+        for (name, generation, trace) in events {
+            assert_eq!(name, "transcription.stage_finished");
+            assert_eq!(generation, a);
+            assert_eq!(trace.as_deref(), Some(id.as_str()));
+        }
+    }
+    #[test]
     fn cancelled_or_stale_task_before_delivery_is_not_a_failure() {
         assert_eq!(
-            DeliveryJourneyGuard::new().outcome(),
+            DeliveryJourneyGuard::new(1).outcome(),
             JourneyOutcome::Cancelled
         );
     }
 
     #[test]
     fn attempted_delivery_records_its_result_even_if_history_is_cancelled() {
-        let mut delivered = DeliveryJourneyGuard::new();
+        let mut delivered = DeliveryJourneyGuard::new(1);
         delivered.mark_succeeded();
         assert_eq!(delivered.outcome(), JourneyOutcome::Succeeded);
-        let mut failed = DeliveryJourneyGuard::new();
+        let mut failed = DeliveryJourneyGuard::new(1);
         failed.mark_failed();
         assert_eq!(failed.outcome(), JourneyOutcome::Failed);
     }
@@ -4809,13 +4841,16 @@ async fn stop_recording_after_long_silence(
 fn spawn_silence_event_listener(
     app: AppHandle,
     silence_event_rx: std::sync::mpsc::Receiver<SilenceDetectorEvent>,
+    generation: u64,
 ) {
     std::thread::spawn(move || {
         let mut active_silence_notice: Option<crate::commands::island_notice::NoticeKind> = None;
 
         while let Ok(event) = silence_event_rx.recv() {
             let current_state = crate::get_recording_state(&app);
-            if !silence_event_runs_in_state(current_state) {
+            if recording_generation_is_stale(generation)
+                || !silence_event_runs_in_state(current_state)
+            {
                 clear_active_silence_notice(&app, &mut active_silence_notice);
                 break;
             }
@@ -4826,13 +4861,14 @@ fn spawn_silence_event_listener(
                 }
                 SilenceDetectorEvent::DeadMicWarn => {
                     clear_active_silence_notice(&app, &mut active_silence_notice);
-                    island::note(&app, current_recording_generation(), Note::MicSilent);
+                    island::note(&app, generation, Note::MicSilent);
                 }
                 SilenceDetectorEvent::LongSilenceWarn => {
                     clear_active_silence_notice(&app, &mut active_silence_notice);
-                    active_silence_notice = Some(crate::commands::island_notice::notice(
+                    active_silence_notice = Some(crate::commands::island_notice::notice_at(
                         &app,
                         crate::commands::island_notice::NoticeKind::LongSilence,
+                        generation,
                     ));
                 }
                 event @ (SilenceDetectorEvent::TimeoutWithSpeech
@@ -4841,12 +4877,16 @@ fn spawn_silence_event_listener(
                     match silence_timeout_disposition(event) {
                         Some(SilenceTimeoutDisposition::StopAndTranscribe) => {
                             // Speech captured → stop normally so it is transcribed.
-                            crate::commands::island_notice::notice(
+                            crate::commands::island_notice::notice_at(
                                 &app,
                                 crate::commands::island_notice::NoticeKind::SilenceStopped,
+                                generation,
                             );
                             let app_for_stop = app.clone();
                             tauri::async_runtime::spawn(async move {
+                                if recording_generation_is_stale(generation) {
+                                    return;
+                                }
                                 let recorder_state = app_for_stop.state::<RecorderState>();
                                 if let Err(e) = stop_recording_after_long_silence(
                                     app_for_stop.clone(),
@@ -4862,13 +4902,16 @@ fn spawn_silence_event_listener(
                             // No signal the whole window → cancel and discard.
                             let app_for_cancel = app.clone();
                             tauri::async_runtime::spawn(async move {
+                                if recording_generation_is_stale(generation) {
+                                    return;
+                                }
                                 match cancel_recording(app_for_cancel.clone()).await {
                                     Ok(()) => {
-                                        crate::commands::island_notice::notice(&app_for_cancel, crate::commands::island_notice::NoticeKind::SilenceDiscarded);
+                                        crate::commands::island_notice::notice_at(&app_for_cancel, crate::commands::island_notice::NoticeKind::SilenceDiscarded, generation);
                                     }
                                     Err(e) => {
                                         log::error!("No-speech timeout cancel failed: {}", e);
-                                        crate::commands::island_notice::notice(&app_for_cancel, crate::commands::island_notice::NoticeKind::RecordingFailed);
+                                        crate::commands::island_notice::notice_at(&app_for_cancel, crate::commands::island_notice::NoticeKind::RecordingFailed, generation);
                                     }
                                 }
                             });
@@ -5416,9 +5459,10 @@ pub async fn start_recording(
                         Some("Microphone initialization failed".to_string()),
                     );
 
-                    crate::commands::island_notice::notice(
+                    crate::commands::island_notice::notice_at(
                         &app,
                         crate::commands::island_notice::NoticeKind::RecordingFailed,
+                        recording_generation,
                     );
 
                     resume_media_if_needed();
@@ -5518,7 +5562,7 @@ pub async fn start_recording(
                     }
                 }
             }
-            island::mic_blocked(&app, current_recording_generation(), &error);
+            island::mic_blocked(&app, recording_generation, &error);
             update_recording_state(&app, RecordingState::Error, Some(error.clone()));
 
             resume_media_if_needed();
@@ -5610,7 +5654,10 @@ pub async fn start_recording(
 
     // Update state to recording
     update_recording_state(&app, RecordingState::Recording, None);
-    crate::product_analytics::capture(crate::product_analytics::ProductEvent::RecordingStarted);
+    crate::product_analytics::capture_at(
+        crate::product_analytics::ProductEvent::RecordingStarted,
+        recording_generation,
+    );
 
     // If a stop was requested while starting (toggle or PTT), honor it immediately
     // after entering Recording state. For PTT, key-up in Starting state sets this flag.
@@ -5648,7 +5695,7 @@ pub async fn start_recording(
         );
     }
     if let Some(silence_event_rx) = silence_event_rx_to_spawn {
-        spawn_silence_event_listener(app.clone(), silence_event_rx);
+        spawn_silence_event_listener(app.clone(), silence_event_rx, recording_generation);
     }
 
     if let Some(audio_level_rx) = audio_level_rx_to_spawn {
@@ -5989,9 +6036,12 @@ async fn stop_recording_with_mode_at(
             return Ok("".to_string());
         }
     }
-    crate::product_analytics::capture(crate::product_analytics::ProductEvent::RecordingStopped {
-        duration_ms: capture_metrics.as_ref().map(|metrics| metrics.duration_ms),
-    });
+    crate::product_analytics::capture_at(
+        crate::product_analytics::ProductEvent::RecordingStopped {
+            duration_ms: capture_metrics.as_ref().map(|metrics| metrics.duration_ms),
+        },
+        task_generation,
+    );
 
     if mic_dropped {
         island::note(
@@ -6609,7 +6659,7 @@ async fn stop_recording_with_mode_at(
         }
 
         let mut decode_journey =
-            DecodeJourneyGuard::new(engine_selection_for_task.analytics_kind());
+            DecodeJourneyGuard::new(engine_selection_for_task.analytics_kind(), task_generation);
         let decode_started = Instant::now();
 
         let transcription_result: Result<TranscriptionResult, TranscriptionFailure> =
@@ -6904,7 +6954,7 @@ async fn stop_recording_with_mode_at(
                     log::info!("Whisper returned empty transcription - no speech detected");
 
                     // Emit graceful feedback to user via island feedback
-                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::NoSpeech);
+                    crate::commands::island_notice::notice_at(&app_for_task, crate::commands::island_notice::NoticeKind::NoSpeech, task_generation);
 
                     // Wait for feedback to show before hiding pill
                     let app_for_hide = app_for_task.clone();
@@ -6951,9 +7001,10 @@ async fn stop_recording_with_mode_at(
 
                     // 1. Process the transcription and enhancement
                     let (final_text, mut writing_metadata, should_deliver, writing_succeeded) =
-                        match crate::writing::process_transcription(
+                        match crate::writing::process_transcription_at(
                             app_for_process.clone(),
                             transcription_for_process.clone(),
+                            task_generation,
                         )
                         .await
                         {
@@ -7010,13 +7061,14 @@ async fn stop_recording_with_mode_at(
                                         )
                                     })
                                     .unwrap_or_default();
-                                crate::product_analytics::capture(
+                                crate::product_analytics::capture_at(
                                     crate::product_analytics::ProductEvent::PolishFinished {
                                         outcome: polish_outcome,
                                         preset: writing_result.mode.into(),
                                         provider_id,
                                         model_id,
                                     },
+                                    task_generation,
                                 );
                                 let plan = plan_desktop_writing_success(
                                     &transcription_for_process,
@@ -7063,7 +7115,7 @@ async fn stop_recording_with_mode_at(
                         };
                     dictation_telemetry.text_ready(&final_text);
                     // PostHog formatting journey (telemetry funnel removed, plan 047).
-                    crate::product_analytics::capture(crate::product_analytics::ProductEvent::StageFinished {
+                    crate::product_analytics::capture_at(crate::product_analytics::ProductEvent::StageFinished {
                         stage: crate::product_analytics::JourneyStage::Formatting,
                         outcome: if writing_succeeded {
                             crate::product_analytics::JourneyOutcome::Succeeded
@@ -7072,7 +7124,7 @@ async fn stop_recording_with_mode_at(
                         },
                         duration_ms: formatting_started.elapsed().as_millis() as u64,
                         engine: None,
-                    });
+                    }, task_generation);
 
                     // 2. Hide pill window first, then insert text with reduced delay
                     let app_state = app_for_process.state::<AppState>();
@@ -7128,7 +7180,7 @@ async fn stop_recording_with_mode_at(
                         return;
                     }
 
-                    let mut delivery_journey = DeliveryJourneyGuard::new();
+                    let mut delivery_journey = DeliveryJourneyGuard::new(task_generation);
 
                     // Now handle text insertion or clipboard copy based on auto_paste_transcription.
                     // Missing setting keys default inside get_settings; actual settings-read failures fail closed
@@ -7212,7 +7264,7 @@ async fn stop_recording_with_mode_at(
                                 dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Failed;
                                 log::error!("Failed to insert text: {}", e);
-                                crate::telemetry::capture_paste_failure("insert");
+                                crate::telemetry::capture_error("paste_failed", crate::telemetry::ErrorContext { generation: Some(task_generation), ..Default::default() });
                                 if e.contains("accessibility") || e.contains("permission") {
                                     island::blocked(&app_for_process, task_generation, BlockedKind::AccessibilityOff, IslandAction::OpenAccessibility);
                                 }
@@ -7269,9 +7321,9 @@ async fn stop_recording_with_mode_at(
                                 dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Skipped;
                                 log::error!("Failed to copy text to clipboard: {}", e);
-                                crate::telemetry::capture_paste_failure("clipboard");
+                                crate::telemetry::capture_error("paste_failed", crate::telemetry::ErrorContext { generation: Some(task_generation), ..Default::default() });
                                 crate::commands::pill_feedback::schedule_terminal_hide(&app_for_process, task_generation, "failed");
-                                crate::commands::island_notice::notice(&app_for_process, crate::commands::island_notice::NoticeKind::CopyFailed);
+                                crate::commands::island_notice::notice_at(&app_for_process, crate::commands::island_notice::NoticeKind::CopyFailed, task_generation);
                             }
                         }
                         let insertion_ms = insertion_start
@@ -7434,7 +7486,7 @@ async fn stop_recording_with_mode_at(
                         );
 
                         // Update pill message to guide user to History only when retry is durable
-                        crate::commands::island_notice::notice(&app_for_task, if can_retry_from_history {crate::commands::island_notice::NoticeKind::HistoryRetry} else {crate::commands::island_notice::NoticeKind::TranscriptionFailed});
+                        crate::commands::island_notice::notice_at(&app_for_task, if can_retry_from_history {crate::commands::island_notice::NoticeKind::HistoryRetry} else {crate::commands::island_notice::NoticeKind::TranscriptionFailed}, task_generation);
 
                         update_recording_state(
                             &app_for_task,
@@ -7497,17 +7549,17 @@ async fn stop_recording_with_mode_at(
                         log::warn!("Local transcription failure: {}", e);
 
                         if can_retry_from_history {
-                            crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::HistoryRetry);
+                            crate::commands::island_notice::notice_at(&app_for_task, crate::commands::island_notice::NoticeKind::HistoryRetry, task_generation);
                         } else {
                             match classify_local_failure(e) {
                                 LocalFailureKind::AuthInvalid => {
-                                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed);
+                                    crate::commands::island_notice::notice_at(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed, task_generation);
                                 }
                                 LocalFailureKind::ModelUnavailable => {
-                                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed);
+                                    crate::commands::island_notice::notice_at(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed, task_generation);
                                 }
                                 LocalFailureKind::Generic => {
-                                    crate::commands::island_notice::notice(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed);
+                                    crate::commands::island_notice::notice_at(&app_for_task, crate::commands::island_notice::NoticeKind::TranscriptionFailed, task_generation);
                                 }
                             }
                         }
@@ -8267,9 +8319,10 @@ pub(crate) async fn transcribe_audio_file_impl(
             return Err("Retry discarded".into());
         }
     }
-    let writing_result = match crate::writing::process_transcription(
+    let writing_result = match crate::writing::process_transcription_at(
         app.clone(),
         transcription_result.clone(),
+        upload_generation,
     )
     .await
     {
