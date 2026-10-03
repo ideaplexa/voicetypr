@@ -1,3 +1,7 @@
+pub(crate) mod actions;
+mod languages;
+mod model;
+pub(crate) mod runtime;
 mod tray;
 
 pub(crate) use tray::latest_copyable_transcription_id;

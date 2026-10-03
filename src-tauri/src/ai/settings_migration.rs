@@ -1,18 +1,22 @@
 use tauri_plugin_store::StoreExt;
 
+/// Set once the legacy global Polish style has been normalised (see migrate_ai_settings_values).
+pub(crate) const GLOBAL_STYLE_MIGRATED_KEY: &str = "polish_global_style_migrated";
+
 pub(crate) fn migrate_ai_settings_before_key_cache<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Ok(store) = app.store("settings") else {
         log::warn!("AI settings migration skipped: settings store unavailable");
         return;
     };
 
-    const MIGRATION_KEYS: [&str; 6] = [
+    const MIGRATION_KEYS: [&str; 7] = [
         "ai_enabled",
         "ai_provider",
         "ai_model",
         "ai_models_by_provider",
         "ai_model_needs_reselection",
         "enhancement_options",
+        GLOBAL_STYLE_MIGRATED_KEY,
     ];
     let mut values = serde_json::Map::new();
     for key in MIGRATION_KEYS {
@@ -124,11 +128,29 @@ pub(crate) fn migrate_ai_settings_values(
         changed = true;
     }
 
+    // One-time upgrade step: a global style stored by an older version may be stale
+    // (the user never chose it), so it is reset to the plain on/off default once.
+    // Afterwards a global style the user picks (Polish screen, tray, island) is kept.
+    let legacy_style = values
+        .get(GLOBAL_STYLE_MIGRATED_KEY)
+        .and_then(serde_json::Value::as_bool)
+        != Some(true);
+    if legacy_style {
+        values.insert(
+            GLOBAL_STYLE_MIGRATED_KEY.to_string(),
+            serde_json::json!(true),
+        );
+        changed = true;
+    }
     if let Some(stored_options) = values.get("enhancement_options").cloned() {
-        let normalized = crate::ai::prompts::enhancement_options_for_ai_enabled(
-            Some(&stored_options),
-            ai_enabled,
-        )
+        let normalized = if legacy_style {
+            Ok(crate::ai::prompts::EnhancementOptions::default_for_ai_enabled(ai_enabled))
+        } else {
+            crate::ai::prompts::enhancement_options_for_ai_enabled(
+                Some(&stored_options),
+                ai_enabled,
+            )
+        }
         .and_then(|options| {
             serde_json::to_value(options)
                 .map_err(|error| format!("Failed to serialize Polish options: {error}"))
@@ -264,6 +286,7 @@ mod ai_settings_migration_tests {
     #[test]
     fn migration_keeps_custom_free_text_model() {
         let mut values = values("custom", "local-model", json!({ "custom": "local-model" }));
+        values.insert(GLOBAL_STYLE_MIGRATED_KEY.to_string(), json!(true));
 
         assert!(!migrate_ai_settings_values(&mut values));
         assert_eq!(values["ai_model"], json!("local-model"));
@@ -286,6 +309,27 @@ mod ai_settings_migration_tests {
         assert_eq!(
             values["enhancement_options"],
             json!({ "preset": "CleanDictation" })
+        );
+    }
+
+    #[test]
+    fn migration_keeps_a_chosen_global_style_after_the_one_time_step() {
+        let mut values = values_with_enabled(
+            true,
+            "custom",
+            "local-model",
+            json!({ "custom": "local-model" }),
+        );
+        values.insert(
+            "enhancement_options".to_string(),
+            json!({ "preset": "Writing" }),
+        );
+        values.insert(GLOBAL_STYLE_MIGRATED_KEY.to_string(), json!(true));
+
+        migrate_ai_settings_values(&mut values);
+        assert_eq!(
+            values["enhancement_options"],
+            json!({ "preset": "Writing" })
         );
     }
 

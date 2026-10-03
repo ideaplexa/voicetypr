@@ -11,7 +11,13 @@ import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import type { ScreenId } from "../navigation";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
+import {
+  islandDestination,
+  routeMainNavigation,
+  type MainNavigate,
+  type IslandNavigate,
+} from "@/components/app/mainNavigation";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import { updateService } from "@/services/updateService";
 import { createLogger } from "@/lib/logger";
@@ -34,6 +40,7 @@ interface ErrorEventPayload {
 }
 
 interface UseAppEventsOptions {
+  openSettingsPane?: (pane: SettingsPane) => void;
   checkModels: () => Promise<{ hasModels: boolean | null }>;
   setActiveSection: Dispatch<SetStateAction<ScreenId>>;
   setSourceFilter: (filter: SourceFilter) => void;
@@ -43,6 +50,7 @@ interface UseAppEventsOptions {
 
 export function useAppEvents({
   checkModels,
+  openSettingsPane,
   setActiveSection,
   setSourceFilter,
   setForceShowOnboarding,
@@ -81,43 +89,18 @@ export function useAppEvents({
           setActiveSection("home");
         });
 
-        await register<string | undefined>("navigate-to-settings", (pane) => {
-          const panes = [
-            "general",
-            "shortcuts",
-            "privacy",
-            "storage",
-            "network",
-            "agent",
-            "advanced",
-            "license",
-            "about",
-          ] as const;
-          setActiveSection(panes.find((id) => id === pane) ?? "settings");
+        const navigate = (destination: MainNavigate) => {
+          routeMainNavigation(destination, setActiveSection, setSourceFilter, openSettingsPane);
+        };
+        await register<MainNavigate>("main-navigate", navigate);
+        await register<IslandNavigate>("island-navigate", (action) => {
+          navigate(islandDestination(action));
         });
-        await register<string>("navigate-to-section", (section) => {
-          const destinations = [
-            "home",
-            "history",
-            "insights",
-            "transcription",
-            "polish",
-            "dictionary",
-            "recording",
-            "help",
-            "settings",
-            "license",
-            "general",
-            "shortcuts",
-            "privacy",
-            "storage",
-            "network",
-            "agent",
-            "advanced",
-            "about",
-          ] as const;
-          const destination = destinations.find((id) => id === section);
-          if (destination) setActiveSection(destination);
+        await register<string | undefined>("navigate-to-settings", (pane) => {
+          navigate({ screen: "settings", pane });
+        });
+        await register<string>("navigate-to-section", (screen) => {
+          navigate({ screen });
         });
 
         await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {
@@ -288,6 +271,7 @@ export function useAppEvents({
     };
   }, [
     registerEvent,
+    openSettingsPane,
     setActiveSection,
     setSourceFilter,
     setForceShowOnboarding,

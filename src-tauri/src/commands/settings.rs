@@ -49,6 +49,8 @@ where
     drop(store);
 
     crate::commands::audio::invalidate_recording_config_cache(app).await;
+    crate::menu::runtime::refresh(app);
+    let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
@@ -124,7 +126,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            hotkey: "CommandOrControl+Shift+Space".to_string(),
+            hotkey: shortcuts::FALLBACK_PRIMARY.to_string(),
             current_model: "".to_string(), // Empty means auto-select
             current_model_engine: "whisper".to_string(),
             speech_language: "en".to_string(),
@@ -141,7 +143,14 @@ impl Default for Settings {
             selected_microphone: None,         // Default to system default microphone
             recording_mode: "toggle".to_string(), // Default to toggle mode for backward compatibility
             use_different_ptt_key: false,         // Default to using same key
-            ptt_hotkey: Some("Alt+Space".to_string()), // Default PTT key
+            ptt_hotkey: Some(
+                if cfg!(target_os = "windows") {
+                    "Control+Alt+Space"
+                } else {
+                    "Alt+Space"
+                }
+                .to_string(),
+            ),
             keep_transcription_in_clipboard: false, // Default to restoring clipboard after paste
             play_sound_on_recording: true,
             play_sound_on_transcription_complete: true,
@@ -736,10 +745,7 @@ pub async fn save_settings(
         .get("current_model")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_default();
-    let old_mode = store
-        .get("recording_mode")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| Settings::default().recording_mode);
+
     let old_onboarding_completed = store
         .get("onboarding_completed")
         .and_then(|v| v.as_bool())
@@ -991,6 +997,7 @@ pub async fn save_settings(
 
     // This command reloads on save failure and rebuilds bindings after save; keep one explicit invalidation.
     crate::commands::audio::invalidate_recording_config_cache(&app).await;
+    crate::menu::runtime::refresh(&app);
 
     // Preload new model and update tray menu if model changed
     let is_parakeet_engine = settings.current_model_engine == "parakeet";
@@ -1050,12 +1057,6 @@ pub async fn save_settings(
             );
         }
 
-        // Update the tray menu to reflect the new selection
-        if let Err(e) = update_tray_menu(app.clone()).await {
-            log::warn!("Failed to update tray menu after model change: {}", e);
-            // Don't fail the whole operation if tray update fails
-        }
-
         // Update the sharing server's model if it's running
         sync_running_sharing_server_to_model(
             &app,
@@ -1073,13 +1074,6 @@ pub async fn save_settings(
             }),
         ) {
             log::warn!("Failed to emit model-changed event: {}", e);
-        }
-    }
-
-    // If recording mode changed, refresh tray to update checked state
-    if old_mode != settings.recording_mode {
-        if let Err(e) = update_tray_menu(app.clone()).await {
-            log::warn!("Failed to update tray menu after mode change: {}", e);
         }
     }
 
@@ -1514,7 +1508,7 @@ pub fn current_tray_menu_generation() -> u64 {
 
 #[tauri::command]
 pub async fn update_tray_menu(app: AppHandle) -> Result<(), String> {
-    update_tray_menu_with_generation(app, None).await
+    update_tray_menu_with_generation(app, Some(next_tray_menu_generation())).await
 }
 
 /// Update tray menu with optional generation check.
@@ -1566,8 +1560,9 @@ pub async fn update_tray_menu_with_generation(
             gen_info,
             start_time.elapsed().as_millis()
         );
-        tray.set_menu(Some(new_menu))
+        tray.set_menu(Some(new_menu.clone()))
             .map_err(|e| format!("Failed to set tray menu: {}", e))?;
+        crate::menu::runtime::install(&new_menu);
         log::debug!(
             "⏱️ [TRAY TIMING] Tray menu set{} - total: {}ms",
             gen_info,

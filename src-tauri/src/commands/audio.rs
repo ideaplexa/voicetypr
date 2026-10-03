@@ -8346,7 +8346,7 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     // Request cancellation FIRST
     let app_state = app.state::<AppState>();
     app_state.request_cancellation();
-    crate::recording::kept::discard_generation(current_recording_generation());
+    crate::recording::kept::discard_generation(&app, current_recording_generation());
     log::info!("Cancellation requested in app state");
 
     // Get current state

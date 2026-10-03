@@ -1,3 +1,4 @@
+import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -85,6 +86,8 @@ export function usePolishSectionSettings({
     handleFinalTextLanguageChangeRef.current = handleFinalTextLanguageChange;
     updateSettingsRef.current = updateSettings;
   });
+
+  useTauriEvent("polish-options-changed", () => { void loadEnhancementOptionsRef.current(true); });
 
   const handlePolishEnabled = useCallback(async () => {
     if (enhancementOptions.preset !== "CleanDictation") {

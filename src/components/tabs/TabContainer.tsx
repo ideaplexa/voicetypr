@@ -1,3 +1,5 @@
+import { useTauriEvent } from "@/hooks/useTauriEvent";
+import type { MainNavigate } from "@/components/app/mainNavigation";
 import { useEffect, useState } from "react";
 import { InsightsTab } from "@/components/tabs/InsightsTab";
 import { EnhancementsTab } from "@/components/tabs/EnhancementsTab";
@@ -164,6 +166,9 @@ function HistoryContent({
   onSourceFilterChange?: SourceFilterProps["onSourceFilterChange"];
 }) {
   const [uploadOpen, setUploadOpen] = useState(initialUploadOpen);
+  useTauriEvent<MainNavigate>("main-navigate", ({ screen }) => {
+    if (screen === "audio") setUploadOpen(true);
+  });
   return (
     <>
       <RecordingsTab

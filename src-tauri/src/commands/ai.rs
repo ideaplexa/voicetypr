@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 
 // In-memory cache for API keys to avoid system password prompts
@@ -1056,6 +1057,7 @@ pub async fn update_enhancement_options(
     )
     .await?;
 
+    let _ = app.emit("polish-options-changed", ());
     log::info!("Enhancement options updated: preset={:?}", options.preset);
 
     Ok(())
@@ -2016,7 +2018,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enhancement_options_for_ai_enabled_normalizes_global_preset() {
+    fn test_enhancement_options_for_ai_enabled_preserves_selected_style() {
         use crate::ai::prompts::{enhancement_options_for_ai_enabled, EnhancementPreset};
 
         let writing = serde_json::json!({ "preset": "Writing" });
@@ -2024,7 +2026,7 @@ mod tests {
         assert_eq!(disabled.preset, EnhancementPreset::PersonalDictation);
 
         let enabled = enhancement_options_for_ai_enabled(Some(&writing), true).unwrap();
-        assert_eq!(enabled.preset, EnhancementPreset::CleanDictation);
+        assert_eq!(enabled.preset, EnhancementPreset::Writing);
 
         let clean = serde_json::json!({ "preset": "CleanDictation" });
         let enabled_clean = enhancement_options_for_ai_enabled(Some(&clean), true).unwrap();

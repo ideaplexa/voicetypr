@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { TabContainer } from "./TabContainer";
@@ -79,6 +79,15 @@ vi.mock("../sections/AudioUploadSection", () => ({
   AudioUploadSection: () => <p>Choose audio file</p>,
 }));
 
+const menuNavigation = vi.hoisted(() => ({
+  handler: undefined as undefined | ((payload: { screen: ScreenId }) => void),
+}));
+vi.mock("@/hooks/useTauriEvent", () => ({
+  useTauriEvent: (event: string, handler: (payload: { screen: ScreenId }) => void) => {
+    if (event === "main-navigate") menuNavigation.handler = handler;
+  },
+}));
+
 describe("TabContainer destinations", () => {
   beforeEach(() => {
     platform.isMacOS = true;
@@ -120,6 +129,16 @@ describe("TabContainer destinations", () => {
     ).toBeInTheDocument();
   });
 
+  it("reopens file transcription on repeated native menu navigation", async () => {
+    const user = userEvent.setup();
+    render(<TabContainer activeSection="audio" />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    act(() => menuNavigation.handler?.({ screen: "audio" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("passes Cloud filter to Transcription", () => {
     render(<TabContainer activeSection="transcription" sourceFilter="cloud" />);
     expect(screen.getByRole("heading", { name: "Transcription screen cloud" })).toBeInTheDocument();
@@ -151,7 +170,7 @@ describe("TabContainer destinations", () => {
   it("opens file transcription from History and from the audio alias", async () => {
     const user = userEvent.setup();
     const view = render(<TabContainer activeSection="history" />);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "Transcribe a file…" }));
     expect(screen.getByRole("dialog", { name: "Transcribe a file" })).toHaveTextContent(
       "Choose audio file",

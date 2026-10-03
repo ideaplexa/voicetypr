@@ -43,6 +43,9 @@ pub fn keyring_set(app: AppHandle, key: String, value: String) -> Result<(), Str
 
     // Save to secure store
     secure_store::secure_set(&app, &key, &value)?;
+    if key.starts_with("stt_api_key_") {
+        crate::menu::runtime::refresh(&app);
+    }
     log::info!("Saved to secure store: {}", key);
     Ok(())
 }
@@ -63,6 +66,9 @@ pub fn keyring_delete(app: AppHandle, key: String) -> Result<(), String> {
 
     // Delete from secure store
     secure_store::secure_delete(&app, &key)?;
+    if key.starts_with("stt_api_key_") {
+        crate::menu::runtime::refresh(&app);
+    }
     log::info!("Deleted from secure store: {}", key);
     Ok(())
 }

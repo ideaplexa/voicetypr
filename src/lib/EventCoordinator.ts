@@ -136,6 +136,8 @@ export class EventCoordinator {
     const routingRules: Record<string, WindowId | "all"> = {
       // Transcription events
       "transcription-complete": "pill", // Pill window handles paste/clipboard/save
+      "main-navigate": "main",
+      "island-navigate": "main",
       "history-updated": "main", // Main window reloads history
       "audio-level": "all", // pill wave + Recording screen mic meter
       "recording-state-changed": "all",

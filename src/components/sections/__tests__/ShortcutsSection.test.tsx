@@ -74,8 +74,8 @@ const actionDefinitions: ShortcutActionDefinition[] = [
   },
   {
     action: "open_dashboard",
-    label: "Open Dashboard",
-    description: "Show the Voicetypr dashboard.",
+    label: "Open Voicetypr",
+    description: "Show the Voicetypr main window.",
     section: "App",
     recommended_trigger: "pressed",
     allows_single_key: true,
@@ -141,7 +141,7 @@ describe("ShortcutsSection", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Copy Last Transcription")).toBeInTheDocument();
     expect(screen.getByText("Toggle Polish")).toBeInTheDocument();
-    expect(screen.getByText("Open Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Open Voicetypr")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Set shortcut" })).toHaveLength(
       actionDefinitions.filter(
         (a) => a.action !== "toggle_recording" && a.action !== "hold_to_record",

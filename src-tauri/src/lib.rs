@@ -345,6 +345,7 @@ use commands::{
     system_info::get_system_specs,
     text::*,
     updater::{check_for_app_update, install_app_update},
+    usage_stats::get_usage_stats,
     utils::{export_transcriptions, get_application_icon, save_transcript_file},
     window::*,
 };
@@ -656,6 +657,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .setup(move |app| {
+            app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
             // Windows identity persistence must run after the single-instance
@@ -1083,7 +1085,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let tray_builder: TrayBuilder = Arc::new(move || -> Result<(), String> {
             let menu = tauri::async_runtime::block_on(build_tray_menu(&tray_app))
                 .map_err(|error| error.to_string())?;
-
+            crate::menu::runtime::install(&menu);
 
             // Bare-mark template icon for the menubar (no background; adapts to light/dark).
             let tray_icon = tauri::include_image!("icons/tray.png");
@@ -1094,192 +1096,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .tooltip("Voicetypr")
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
-                    log::info!("Tray menu event: {:?}", event.id);
-                    let event_id = event.id.as_ref().to_string();
-
-                    if event_id == "dashboard" {
-                        show_main_window(app);
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("navigate-to-overview", ());
-                        }
-                    } else if event_id == "quit" {
-                        app.exit(0);
-                    } else if event_id == "check_updates" {
-                        let _ = app.emit("tray-check-updates", ());
-                    } else if event_id.starts_with("model_") {
-                        // Handle model selection
-                        let model_name = match event_id.strip_prefix("model_") {
-                            Some(name) => name.to_string(),
-                            None => {
-                                log::warn!("Invalid model event_id format: {}", event_id);
-                                return; // Skip processing invalid model events
-                            }
-                        };
-                        let app_handle = app.app_handle().clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::set_model_from_tray(app_handle.clone(), model_name.clone()).await {
-                                Ok(_) => {
-                                    log::info!("Model changed from tray to: {}", model_name);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to set model from tray: {}", e);
-                                    // Emit error event so UI can show notification
-                                    let _ = app_handle.emit("tray-action-error", &format!("Failed to change model: {}", e));
-                                }
-                            }
-                        });
-                    } else if event_id == "microphone_default" {
-                        // Handle default microphone selection
-                        let app_handle = app.app_handle().clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::set_audio_device(app_handle.clone(), None).await {
-                                Ok(_) => {
-                                    log::info!("Microphone changed from tray to: System Default");
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to set default microphone from tray: {}", e);
-                                    let _ = app_handle.emit("tray-action-error", &format!("Failed to change microphone: {}", e));
-                                }
-                            }
-                        });
-                    } else if event_id.starts_with("microphone_") {
-                        // Handle specific microphone selection
-                        let device_name = match event_id.strip_prefix("microphone_") {
-                            Some(name) if name != "default" => Some(name.to_string()),
-                            _ => {
-                                // Already handled by microphone_default case above
-                                return;
-                            }
-                        };
-                        let app_handle = app.app_handle().clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::set_audio_device(app_handle.clone(), device_name.clone()).await {
-                                Ok(_) => {
-                                    log::info!("Microphone changed from tray to: {:?}", device_name);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to set microphone from tray: {}", e);
-                                    let _ = app_handle.emit("tray-action-error", &format!("Failed to change microphone: {}", e));
-                                }
-                            }
-                        });
-                    }
-                    else if event_id == "polish_on" || event_id == "polish_off" {
-                        let app_handle = app.app_handle().clone();
-                        let desired_enabled = event_id == "polish_on";
-                        tauri::async_runtime::spawn(async move {
-                            let current_enabled = app_handle
-                                .store("settings")
-                                .ok()
-                                .and_then(|store| store.get("ai_enabled"))
-                                .and_then(|value| value.as_bool())
-                                .unwrap_or(false);
-
-                            if current_enabled != desired_enabled {
-                                match crate::commands::shortcuts::toggle_ai_formatting(app_handle.clone()).await {
-                                    Ok(()) => {
-                                        log::info!("Polish toggled from tray to requested state: {}", desired_enabled);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to toggle Polish from tray: {}", e);
-                                        let _ = app_handle.emit("tray-action-error", &format!("Failed to change Polish: {}", e));
-                                    }
-                                }
-                            }
-
-                            if let Err(e) = crate::commands::settings::update_tray_menu(app_handle.clone()).await {
-                                log::warn!("Failed to refresh tray after Polish change: {}", e);
-                            }
-                        });
-                    }
-                    else if event_id == "copy_last_transcription" {
-                        let app_handle = app.app_handle().clone();
-                        tauri::async_runtime::spawn(async move {
-                            match app_handle.store("transcriptions") {
-                                Ok(store) => {
-                                    let mut entries: Vec<(String, serde_json::Value)> = Vec::new();
-                                    for key in store.keys() {
-                                        if let Some(value) = store.get(&key) {
-                                            entries.push((key.to_string(), value));
-                                        }
-                                    }
-
-                                    if let Some(timestamp) = crate::menu::latest_copyable_transcription_id(&entries) {
-                                        if let Some(text) = store
-                                            .get(&timestamp)
-                                            .and_then(|value| value.get("text").and_then(|text| text.as_str().map(str::to_string)))
-                                        {
-                                            if let Err(error) = crate::commands::text::copy_text_to_clipboard(text).await {
-                                                log::error!("Failed to copy last transcription: {}", error);
-                                                let _ = app_handle.emit("tray-action-error", &format!("Failed to copy: {}", error));
-                                            } else {
-                                                log::info!("Copied last transcription to clipboard");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(error) => {
-                                    log::error!("Failed to open transcriptions store: {}", error);
-                                }
-                            }
-                        });
-                    }
-                    // Recent transcriptions copy handler
-                    else if let Some(ts) = event_id.strip_prefix("recent_copy_") {
-                        let ts_owned = ts.to_string();
-                        let app_handle = app.app_handle().clone();
-                        tauri::async_runtime::spawn(async move {
-                            // Read text by timestamp and copy
-                            match app_handle.store("transcriptions") {
-                                Ok(store) => {
-                                    if let Some(val) = store.get(&ts_owned) {
-                                        if let Some(text) = val.get("text").and_then(|v| v.as_str()) {
-                                            if let Err(e) = crate::commands::text::copy_text_to_clipboard(text.to_string()).await {
-                                                log::error!("Failed to copy recent transcription: {}", e);
-                                                let _ = app_handle.emit("tray-action-error", &format!("Failed to copy: {}", e));
-                                            } else {
-                                                log::info!("Copied recent transcription to clipboard");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to open transcriptions store: {}", e);
-                                }
-                            }
-                        });
-                    }
-                    // Recording mode switchers
-                    else if event_id == "recording_mode_toggle" || event_id == "recording_mode_push_to_talk" {
-                        let app_handle = app.app_handle().clone();
-                        let mode = if event_id.ends_with("push_to_talk") { "push_to_talk" } else { "toggle" };
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::get_settings(app_handle.clone()).await {
-                                Ok(mut s) => {
-                                    s.recording_mode = mode.to_string();
-                                    match crate::commands::settings::save_settings(app_handle.clone(), s, None).await {
-                                        Err(e) => {
-                                            log::error!("Failed to save recording mode from tray: {}", e);
-                                            let _ = app_handle.emit("tray-action-error", &format!("Failed to change recording mode: {}", e));
-                                        }
-                                        Ok(()) => {
-                                            if let Err(e) = crate::commands::settings::update_tray_menu(app_handle.clone()).await {
-                                                log::warn!("Failed to refresh tray after mode change: {}", e);
-                                            }
-                                            // Notify frontend so SettingsContext refreshes
-                                            let _ = app_handle.emit("settings-changed", ());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to get settings for mode change: {}", e);
-                                }
-                            }
-                        });
-                    }
+                    crate::menu::actions::handle(app, event.id.as_ref());
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -1555,6 +1372,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             update_transcription,
             show_in_folder,
             get_transcription_history,
+            get_usage_stats,
             get_transcription_count,
             delete_transcription_entry,
             clear_all_transcriptions,

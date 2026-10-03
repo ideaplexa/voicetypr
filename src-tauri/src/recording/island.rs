@@ -108,6 +108,7 @@ pub fn note(app: &AppHandle, generation: u64, note: Note) {
 }
 pub fn blocked(app: &AppHandle, generation: u64, kind: BlockedKind, action: IslandAction) {
     if !crate::commands::audio::recording_generation_is_stale(generation) {
+        crate::menu::runtime::blocked(app, kind, action);
         crate::commands::pill_feedback::cancel_terminal_hide(generation);
         crate::commands::pill_feedback::send(
             app,
@@ -157,7 +158,9 @@ pub fn too_short<R: Runtime>(app: &AppHandle<R>, generation: u64, hold: bool) {
 pub async fn island_action(app: AppHandle, action: IslandAction) -> Result<(), String> {
     match action {
         IslandAction::RecheckLicense => {
-            crate::commands::license::revalidate_license(app).await?;
+            crate::commands::license::revalidate_license(app.clone()).await?;
+            crate::menu::runtime::clear_blocked();
+            crate::menu::runtime::refresh(&app);
             Ok(())
         }
         IslandAction::OpenMicSettings => crate::commands::permissions::open_microphone_settings(),

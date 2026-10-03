@@ -64,6 +64,7 @@ export function AppContainer() {
   const { justUpdatedVersion, setJustUpdatedVersion } = useAppBootstrap(settings);
 
   useAppEvents({
+    openSettingsPane,
     checkModels: modelAvailability.checkModels,
     setActiveSection,
     setSourceFilter,
