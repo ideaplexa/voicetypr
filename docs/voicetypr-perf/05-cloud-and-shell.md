@@ -5,7 +5,7 @@
 ## TL;DR
 
 - **Cloud:** the HTTP client is already correctly pooled (a single `LazyLock<reqwest::Client>` reused everywhere), and the Soniox 1 s poll floor is the **one dominant, quantifiable latency tax** on that provider — ~500 ms expected + up to 1 s worst-case *detection* delay added on top of the provider's own processing time, on every Soniox job (`soniox.rs:196`,`390`). WS streaming removes it entirely (cite `06` Q4/Step 6); while REST stays, an adaptive poll cadence recovers ~400 ms p50 on short clips for ~zero risk.
-- **Shell:** the release profile ships **no LTO and no codegen-units override** despite a Sentry/Bugsink symbolication constraint that only forbids *stripping* — adding `lto="thin"` + `codegen-units=1` is free perf (binary −5…−15 %, hot path −2…−8 %) **with zero symbolication regression**, because line tables and the symbol table are governed by `debug`/`strip`, not by LTO. The biggest *idle* CPU surprise is **not** the trigger engine (it is event-driven, ~0 % CPU) but two always-on OS-poll threads — a 1.5 s CoreAudio device enumeration and a 250 ms state probe — plus three resident WebViews and a 1–3 GB resident model.
+- **Shell:** the release profile ships **no LTO and no codegen-units override** despite a PostHog/Bugsink symbolication constraint that only forbids *stripping* — adding `lto="thin"` + `codegen-units=1` is free perf (binary −5…−15 %, hot path −2…−8 %) **with zero symbolication regression**, because line tables and the symbol table are governed by `debug`/`strip`, not by LTO. The biggest *idle* CPU surprise is **not** the trigger engine (it is event-driven, ~0 % CPU) but two always-on OS-poll threads — a 1.5 s CoreAudio device enumeration and a 250 ms state probe — plus three resident WebViews and a 1–3 GB resident model.
 
 ---
 
@@ -126,16 +126,16 @@ pub(super) async fn with_retry<T, F, Fut>(mut op: F) -> Result<T, SttError> ... 
 [profile.release]
 # Client-side crash symbolication for Bugsink (which does NOT symbolicate native
 # server-side): line tables give function + file:line resolved in-process at
-# capture (sentry `backtrace`); strip = "none" keeps the symbol table so macOS
+# capture (posthog-rs `backtrace`); strip = "none" keeps the symbol table so macOS
 # resolves names. Windows additionally emits voicetypr.pdb ...
 debug = "line-tables-only"
 strip = "none"
 ```
 
-There is **no** `lto`, **no** `codegen-units`, **no** `opt-level`, **no** `panic` override. So today: `opt-level = 3` (cargo default), `lto = off`, `codegen-units = 16` (default), `panic = unwind`. The comment correctly identifies that *symbolication* depends on `debug` (line tables → `file:line` resolved in-process by sentry's `backtrace` feature) and `strip` (keeps the symbol table so the host resolves names), plus a Windows `.pdb` shipped beside the exe.
+There is **no** `lto`, **no** `codegen-units`, **no** `opt-level`, **no** `panic` override. So today: `opt-level = 3` (cargo default), `lto = off`, `codegen-units = 16` (default), `panic = unwind`. The comment correctly identifies that *symbolication* depends on `debug` (line tables → `file:line` resolved in-process by PostHog's `backtrace` feature) and `strip` (keeps the symbol table so the host resolves names), plus a Windows `.pdb` shipped beside the exe.
 
 **Startup — `lib.rs` `setup()` runs synchronously before first paint.** Ordered, perf-relevant steps:
-1. Panic hook chained in front of sentry's (`lib.rs:460-504`) — cheap.
+1. Panic hook chained in front of PostHog's (`lib.rs:460-504`) — cheap.
 2. macOS `ActivationPolicy::Accessory` (`lib.rs:548`).
 3. Whisper/Parakeet managers constructed and `manage()`d (`lib.rs:581-597`) — cheap struct init, no model I/O.
 4. `TranscriberCache`, `GpuSidecarClient`, `RemoteServerManager` managed (`lib.rs:605-622`).
@@ -182,9 +182,9 @@ The main window itself is created hidden (`tauri.conf.json:22 "visible": false`)
 
 **S1 — release profile, reconciled with the symbolication constraint.** This is the headline shell win and it is safe. The constraint documented at `Cargo.toml:127-131` is precisely scoped: **Bugsink does not server-side symbolicate**, so native names + `file:line` must resolve *in-process* at capture time. That requires (a) the **symbol table** (so `strip = "none"` — already set) and (b) **line tables** (so `debug = "line-tables-only"` — already set). Neither is a function of LTO or codegen-units:
 
-- `lto = "thin"` performs cross-crate MIR/LTO inlining and dead-code elimination at link time. It does **not** remove symbols or line tables. With `strip = "none"` + `debug = "line-tables-only"` unchanged, the sentry `backtrace` capture resolves exactly as today. The macOS host symbol resolution and the Windows `.pdb` path are untouched.
+- `lto = "thin"` performs cross-crate MIR/LTO inlining and dead-code elimination at link time. It does **not** remove symbols or line tables. With `strip = "none"` + `debug = "line-tables-only"` unchanged, the posthog-rs `backtrace` capture resolves exactly as today. The macOS host symbol resolution and the Windows `.pdb` path are untouched.
 - `codegen-units = 1` lets the optimizer see the whole crate at once (more inlining, better vectorization in the whisper/cpal hot loops). It does not emit fewer symbols.
-- **Explicitly do NOT add `panic = "abort"`.** With `panic = "abort"`, a panic kills the process before sentry's async transport can flush the event reliably, and it removes unwind tables the chained panic hook path (`lib.rs:460-504`) may rely on for clean teardown. Sentry's `panic` feature is already in the dep graph (`Cargo.toml:81`, `features=["backtrace","panic",...]`) and assumes unwind. Keep the default `unwind`.
+- **Explicitly do NOT add `panic = "abort"`.** With `panic = "abort"`, a panic kills the process before PostHog's async transport can flush the event reliably, and it removes unwind tables the chained panic hook path (`lib.rs:460-504`) may rely on for clean teardown. PostHog's `panic` feature is already in the dep graph (`Cargo.toml:81`, `features=["backtrace","panic",...]`) and assumes unwind. Keep the default `unwind`.
 
 Cost to flag: `lto="thin"` + `codegen-units=1` raise **link time ~30–80 %** (not incremental compile time — the per-CGU compile is unchanged; the hit is at final link). For a CI release build that is an acceptable trade; for `cargo run`-style local release iteration it is noticeable, so gate behind the existing release profile only. **Verify:** (1) build a release binary before/after, diff `wc -c` of the `.app/Contents/MacOS/Voicetypr` binary; (2) force a panic in a debug-rel-build and confirm Bugsink still resolves `file:line`; (3) run the existing whisper decode benchmark and compare tokens/s.
 

@@ -49,6 +49,30 @@ where
     drop(store);
 
     crate::commands::audio::invalidate_recording_config_cache(app).await;
+    crate::menu::runtime::refresh(app);
+    let _ = app.emit("settings-changed", ());
+    Ok(())
+}
+
+pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+) -> Result<(), String> {
+    let _guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
+        .lock()
+        .await;
+    // Consent belongs to its dedicated command. Generic saves migrate stored
+    // choices rather than overwriting them from a potentially stale form.
+    let consent = crate::telemetry::migrated_consent(Some(&json!({
+        "telemetry_enabled":store.get("telemetry_enabled"),
+        "analytics_enabled":store.get("analytics_enabled"),
+        "crash_reporting_enabled":store.get("crash_reporting_enabled"),
+    })));
+    crate::telemetry::save_consent_values(store, consent, false);
+    if let Err(error) = store.save() {
+        // Reload remains inside the same consent transaction.
+        let _ = store.reload();
+        return Err(error.to_string());
+    }
     Ok(())
 }
 
@@ -61,6 +85,8 @@ pub struct Settings {
     pub transcription_task: String,
     pub final_text_language: String,
     pub theme: String,
+    #[serde(default)]
+    pub polish_keep_words: bool,
     // Settings disclosure mode. Post-cutover this is always "recommended".
     #[serde(default = "default_settings_mode")]
     pub settings_mode: String,
@@ -87,6 +113,12 @@ pub struct Settings {
     // Pill indicator detail level: "compact" or "full"
     #[serde(default = "default_pill_indicator_style")]
     pub pill_indicator_style: String,
+    #[serde(default = "default_island_start_details")]
+    pub island_start_details: String,
+    #[serde(default = "default_telemetry_enabled")]
+    pub telemetry_enabled: bool,
+    #[serde(default)]
+    pub island_start_details_shown: u32,
     // Pill indicator screen position
     pub pill_indicator_position: String,
     // Pill indicator offset from screen edge in pixels (10-50)
@@ -118,13 +150,14 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            hotkey: "CommandOrControl+Shift+Space".to_string(),
+            hotkey: shortcuts::FALLBACK_PRIMARY.to_string(),
             current_model: "".to_string(), // Empty means auto-select
             current_model_engine: "whisper".to_string(),
             speech_language: "en".to_string(),
             transcription_task: TRANSCRIPTION_TASK_TRANSCRIBE.to_string(),
             final_text_language: FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string(),
             theme: "system".to_string(),
+            polish_keep_words: false,
             settings_mode: default_settings_mode(),
             transcription_cleanup_days: None, // None means keep forever
             pill_position: None,              // No saved position initially
@@ -134,13 +167,16 @@ impl Default for Settings {
             selected_microphone: None,         // Default to system default microphone
             recording_mode: "toggle".to_string(), // Default to toggle mode for backward compatibility
             use_different_ptt_key: false,         // Default to using same key
-            ptt_hotkey: Some("Alt+Space".to_string()), // Default PTT key
+            ptt_hotkey: None,                     // Empty until the user picks a separate hold key
             keep_transcription_in_clipboard: false, // Default to restoring clipboard after paste
             play_sound_on_recording: true,
             play_sound_on_transcription_complete: true,
             play_sound_on_paste_success: true,
-            pill_indicator_mode: "when_recording".to_string(), // Default to showing only when recording
+            pill_indicator_mode: "always".to_string(), // New installs keep the resting dot visible
             pill_indicator_style: default_pill_indicator_style(),
+            island_start_details: default_island_start_details(),
+            telemetry_enabled: true,
+            island_start_details_shown: 0,
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
             pause_media_during_recording: false, // Default to off; user opts in
@@ -154,6 +190,19 @@ impl Default for Settings {
             transcription_mode: TRANSCRIPTION_MODE_REGULAR.to_string(),
             update_channel: default_update_channel(),
         }
+    }
+}
+
+fn default_telemetry_enabled() -> bool {
+    true
+}
+fn default_island_start_details() -> String {
+    "changed".into()
+}
+pub(crate) fn normalize_island_start_details(value: &str) -> &str {
+    match value {
+        "always" | "never" => value,
+        _ => "changed",
     }
 }
 
@@ -450,6 +499,9 @@ pub fn normalize_speech_language_for_model(
 
 #[tauri::command]
 pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
+    let _guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
+        .lock()
+        .await;
     let store = app.store("settings").map_err(|e| e.to_string())?;
     let legacy_speech_language = store
         .get("language")
@@ -484,6 +536,10 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         .unwrap_or(false);
 
     let settings = Settings {
+        polish_keep_words: crate::ai::keep_words::enabled(
+            store.get("polish_keep_words").as_ref(),
+            false,
+        ),
         hotkey: store
             .get("hotkey")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -579,6 +635,24 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             store.get("show_pill_indicator").and_then(|v| v.as_bool()),
             Settings::default().pill_indicator_mode,
         ),
+        telemetry_enabled: crate::telemetry::migrated_consent(Some(&json!({
+            "telemetry_enabled":store.get("telemetry_enabled"),
+            "analytics_enabled":store.get("analytics_enabled"),
+            "crash_reporting_enabled":store.get("crash_reporting_enabled"),
+        }))),
+        island_start_details: normalize_island_start_details(
+            store
+                .get("island_start_details")
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .unwrap_or("changed"),
+        )
+        .to_owned(),
+        island_start_details_shown: store
+            .get("island_start_details_shown")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .min(5) as u32,
         pill_indicator_style: resolve_pill_indicator_style(
             store
                 .get("pill_indicator_style")
@@ -700,10 +774,7 @@ pub async fn save_settings(
         .get("current_model")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_default();
-    let old_mode = store
-        .get("recording_mode")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| Settings::default().recording_mode);
+
     let old_onboarding_completed = store
         .get("onboarding_completed")
         .and_then(|v| v.as_bool())
@@ -756,10 +827,11 @@ pub async fn save_settings(
 
     let ptt_hotkey_for_validation =
         if recording_mode == crate::RecordingMode::PushToTalk && settings.use_different_ptt_key {
-            settings
-                .ptt_hotkey
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
+            // A hold key equal to the primary is just the primary.
+            settings.ptt_hotkey.as_deref().filter(|value| {
+                !value.trim().is_empty()
+                    && !crate::trigger::mapping::same_shortcut(value, &settings.hotkey)
+            })
         } else {
             None
         };
@@ -847,7 +919,20 @@ pub async fn save_settings(
         json!(settings.play_sound_on_paste_success),
     );
     store.delete("play_sound_on_recording_end");
-    store.set("pill_indicator_mode", json!(settings.pill_indicator_mode));
+    save_pill_indicator_mode(&store, &settings.pill_indicator_mode);
+    store.set(
+        "island_start_details",
+        json!(normalize_island_start_details(
+            &settings.island_start_details
+        )),
+    );
+    // The start counter is backend-owned; a stale settings form must not reset it.
+    let shown = store
+        .get("island_start_details_shown")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        .min(5);
+    store.set("island_start_details_shown", json!(shown));
     store.set(
         "pill_indicator_style",
         json!(resolve_pill_indicator_style(Some(
@@ -876,6 +961,7 @@ pub async fn save_settings(
         "transcription_acceleration",
         json!(&normalized_transcription_acceleration),
     );
+    store.set("polish_keep_words", json!(settings.polish_keep_words));
     store.set("whisper_speed_mode", json!(settings.whisper_speed_mode));
     store.set("transcription_mode", json!(&normalized_transcription_mode));
     match update_channel_to_persist(
@@ -920,12 +1006,7 @@ pub async fn save_settings(
         store.set("pill_position", json!([x, y]));
     }
 
-    if let Err(error) = store.save() {
-        // Discard uncommitted in-memory mutations so a later
-        // rebuild_engine_bindings cannot read values that failed to persist.
-        let _ = store.reload();
-        return Err(error.to_string());
-    }
+    persist_generic_settings(&store).await?;
 
     crate::commands::shortcuts::sync_runtime_recording_mode(&app_state, &settings.recording_mode);
 
@@ -941,6 +1022,7 @@ pub async fn save_settings(
 
     // This command reloads on save failure and rebuilds bindings after save; keep one explicit invalidation.
     crate::commands::audio::invalidate_recording_config_cache(&app).await;
+    crate::menu::runtime::refresh(&app);
 
     // Preload new model and update tray menu if model changed
     let is_parakeet_engine = settings.current_model_engine == "parakeet";
@@ -1000,12 +1082,6 @@ pub async fn save_settings(
             );
         }
 
-        // Update the tray menu to reflect the new selection
-        if let Err(e) = update_tray_menu(app.clone()).await {
-            log::warn!("Failed to update tray menu after model change: {}", e);
-            // Don't fail the whole operation if tray update fails
-        }
-
         // Update the sharing server's model if it's running
         sync_running_sharing_server_to_model(
             &app,
@@ -1026,13 +1102,6 @@ pub async fn save_settings(
         }
     }
 
-    // If recording mode changed, refresh tray to update checked state
-    if old_mode != settings.recording_mode {
-        if let Err(e) = update_tray_menu(app.clone()).await {
-            log::warn!("Failed to update tray menu after mode change: {}", e);
-        }
-    }
-
     // If onboarding just completed, try to start device watcher
     if !old_onboarding_completed && settings.onboarding_completed {
         log::info!("Onboarding just completed, checking if device watcher should start");
@@ -1040,7 +1109,9 @@ pub async fn save_settings(
     }
 
     // Handle pill window visibility when pill_indicator_mode setting changes
-    if old_pill_indicator_mode != settings.pill_indicator_mode {
+    if old_pill_indicator_mode != settings.pill_indicator_mode
+        || (!old_onboarding_completed && settings.onboarding_completed)
+    {
         let app_state = app.state::<crate::AppState>();
         let current_state = app_state.get_current_state();
         let is_idle = matches!(current_state, crate::RecordingState::Idle);
@@ -1054,7 +1125,7 @@ pub async fn save_settings(
         // Determine if pill should be visible based on new mode and current state
         let should_show = match settings.pill_indicator_mode.as_str() {
             "never" => false,
-            "always" => true,
+            "always" => settings.onboarding_completed,
             "when_recording" => !is_idle, // Show only when recording
             _ => !is_idle,                // Default to when_recording behavior
         };
@@ -1084,7 +1155,7 @@ pub async fn save_settings(
         // Check if pill should be visible based on current mode
         let should_show = match settings.pill_indicator_mode.as_str() {
             "never" => false,
-            "always" => true,
+            "always" => settings.onboarding_completed,
             "when_recording" => {
                 let app_state = app.state::<crate::AppState>();
                 let current_state = app_state.get_current_state();
@@ -1451,6 +1522,11 @@ pub async fn set_model_from_tray(app: AppHandle, model_name: String) -> Result<(
 
 /// Increment the tray menu generation and return the new value.
 /// Used by callers who want to spawn background updates.
+fn save_pill_indicator_mode<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>, mode: &str) {
+    store.set("pill_indicator_mode", json!(mode));
+    store.delete("show_pill_indicator");
+}
+
 pub fn next_tray_menu_generation() -> u64 {
     TRAY_MENU_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
 }
@@ -1462,7 +1538,7 @@ pub fn current_tray_menu_generation() -> u64 {
 
 #[tauri::command]
 pub async fn update_tray_menu(app: AppHandle) -> Result<(), String> {
-    update_tray_menu_with_generation(app, None).await
+    update_tray_menu_with_generation(app, Some(next_tray_menu_generation())).await
 }
 
 /// Update tray menu with optional generation check.
@@ -1479,15 +1555,23 @@ pub async fn update_tray_menu_with_generation(
         .unwrap_or_default();
     log::debug!("⏱️ [TRAY TIMING] update_tray_menu called{}", gen_info);
 
+    let generation = my_generation.unwrap_or_else(next_tray_menu_generation);
+    if !crate::menu::refresh::wait_for_latest(&TRAY_MENU_GENERATION, generation).await {
+        return Ok(());
+    }
+
     // Build the new menu
     log::debug!(
         "⏱️ [TRAY TIMING] Building tray menu...{} (+{}ms)",
         gen_info,
         start_time.elapsed().as_millis()
     );
-    let new_menu = crate::build_tray_menu(&app)
+    let Some(new_menu) = crate::menu::tray::build_tray_menu_if_current(&app, generation)
         .await
-        .map_err(|e| format!("Failed to build tray menu: {}", e))?;
+        .map_err(|e| format!("Failed to build tray menu: {}", e))?
+    else {
+        return Ok(());
+    };
     log::debug!(
         "⏱️ [TRAY TIMING] Tray menu built{} (+{}ms)",
         gen_info,
@@ -1507,6 +1591,10 @@ pub async fn update_tray_menu_with_generation(
         }
     }
 
+    if generation != current_tray_menu_generation() {
+        return Ok(());
+    }
+
     // Update the tray menu
     if let Some(tray) = app.tray_by_id("main") {
         log::debug!(
@@ -1514,8 +1602,9 @@ pub async fn update_tray_menu_with_generation(
             gen_info,
             start_time.elapsed().as_millis()
         );
-        tray.set_menu(Some(new_menu))
+        tray.set_menu(Some(new_menu.clone()))
             .map_err(|e| format!("Failed to set tray menu: {}", e))?;
+        crate::menu::runtime::install(&new_menu);
         log::debug!(
             "⏱️ [TRAY TIMING] Tray menu set{} - total: {}ms",
             gen_info,
@@ -1725,6 +1814,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn saving_visibility_deletes_the_legacy_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let store =
+            tauri_plugin_store::StoreBuilder::new(app.handle(), dir.path().join("settings"))
+                .build()
+                .unwrap();
+        store.set("show_pill_indicator", json!(true));
+        super::save_pill_indicator_mode(&store, "never");
+        assert_eq!(store.get("pill_indicator_mode"), Some(json!("never")));
+        assert!(store.get("show_pill_indicator").is_none());
+        store.save().unwrap();
+    }
+    #[test]
     fn resolve_pill_indicator_mode_prefers_new_value() {
         let resolved = resolve_pill_indicator_mode(
             Some("always".to_string()),
@@ -1751,9 +1857,17 @@ mod tests {
 
     #[test]
     fn resolve_pill_indicator_mode_uses_default() {
-        let resolved = resolve_pill_indicator_mode(None, None, "when_recording".to_string());
-
-        assert_eq!(resolved, "when_recording");
+        let resolved =
+            resolve_pill_indicator_mode(None, None, super::Settings::default().pill_indicator_mode);
+        assert_eq!(resolved, "always");
+        assert_eq!(
+            resolve_pill_indicator_mode(
+                Some("when_recording".into()),
+                None,
+                super::Settings::default().pill_indicator_mode
+            ),
+            "when_recording"
+        );
     }
 
     #[test]
@@ -1824,5 +1938,45 @@ mod tests {
             update_channel_to_persist(Some("beta"), false, false, UpdateChannel::Beta),
             Some(UpdateChannel::Beta)
         );
+    }
+}
+
+#[cfg(test)]
+mod consent_transaction_tests {
+    use super::*;
+    #[tokio::test]
+    async fn generic_save_waits_for_opt_out_transaction_and_preserves_it() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings");
+        let store = tauri_plugin_store::StoreBuilder::new(app.handle(), &path)
+            .build()
+            .unwrap();
+        crate::telemetry::save_consent_values(&store, true, true);
+        store.save().unwrap();
+        // Pause the dedicated consent transaction with the generic save ready.
+        let consent_guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
+            .lock()
+            .await;
+        let generic = persist_generic_settings(&store);
+        tokio::pin!(generic);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut generic)
+                .await
+                .is_err()
+        );
+        crate::telemetry::save_consent_values(&store, false, true);
+        store.save().unwrap();
+        drop(consent_guard);
+        generic.await.unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved["telemetry_enabled"], false);
+        assert!(saved.get("telemetry_install_id").is_none());
+        assert!(saved.get("analytics_install_id").is_none());
+        assert_eq!(saved["privacy_consent_version"], 2);
     }
 }

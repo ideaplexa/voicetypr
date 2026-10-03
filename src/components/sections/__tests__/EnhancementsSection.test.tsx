@@ -73,17 +73,17 @@ const providerModels = vi.hoisted(
     gemini: [{ id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", recommended: true }],
     openai: [
       {
-        id: "gpt-5-mini",
-        name: "GPT-5 Mini",
+        id: "gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
         recommended: true,
         reasoning: true,
-        contextWindow: 400000,
-        costInput: 0.25,
-        costOutput: 2,
+        contextWindow: 1050000,
+        costInput: 2,
+        costOutput: 10,
       },
-      { id: "gpt-5-nano", name: "GPT-5 Nano", recommended: false },
+      { id: "gpt-6-luna", name: "GPT-6 Luna", recommended: false },
     ],
-    anthropic: [{ id: "claude-sonnet-4", name: "Claude Sonnet 4", recommended: true }],
+    anthropic: [{ id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", recommended: true }],
     groq: [
       {
         id: "llama-3.3-70b-versatile",
@@ -93,9 +93,9 @@ const providerModels = vi.hoisted(
     ],
     "claude-code": [
       { id: "", name: "Default", recommended: true, cliDefault: true },
-      { id: "haiku", name: "Haiku", recommended: false },
-      { id: "sonnet", name: "Sonnet", recommended: false },
-      { id: "opus", name: "Opus", recommended: false },
+      { id: "fable", name: "Fable 5.1", recommended: false },
+      { id: "sonnet", name: "Sonnet 5.5", recommended: false },
+      { id: "opus", name: "Opus 5.5", recommended: false },
     ],
     pi: [
       {
@@ -105,14 +105,14 @@ const providerModels = vi.hoisted(
         cliDefault: true,
       },
       {
-        id: "openai/gpt-5-mini",
-        name: "GPT-5 Mini",
+        id: "openai/gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
         recommended: false,
         sourceProvider: "OpenAI",
       },
       {
-        id: "anthropic/claude-sonnet-4",
-        name: "Claude Sonnet 4",
+        id: "anthropic/claude-sonnet-5-5",
+        name: "Claude Sonnet 5.5",
         recommended: false,
         sourceProvider: "Anthropic",
       },
@@ -125,8 +125,8 @@ const providerModels = vi.hoisted(
         cliDefault: true,
       },
       {
-        id: "google/gemini-2.5-flash",
-        name: "Gemini 2.5 Flash",
+        id: "google/gemini-3.8-flash",
+        name: "Gemini 3.8 Flash",
         recommended: false,
         sourceProvider: "Google",
       },
@@ -142,14 +142,14 @@ const providerModels = vi.hoisted(
     droid: [
       { id: "", name: "Default", recommended: true, cliDefault: true },
       {
-        id: "claude-opus-5",
-        name: "Opus 5",
+        id: "claude-opus-5-5",
+        name: "Opus 5.5",
         recommended: false,
         reasoning: true,
       },
       {
-        id: "gpt-5.6-sol",
-        name: "GPT-5.6 Sol",
+        id: "gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
         recommended: false,
         reasoning: true,
       },
@@ -196,10 +196,10 @@ let aiSettingsHandler: (() => Promise<typeof aiSettingsResponse>) | undefined;
 const enabledAISettings = {
   enabled: true,
   provider: "openai",
-  model: "gpt-5-mini",
+  model: "gpt-6.1-sol",
   hasApiKey: true,
   modelsByProvider: {
-    openai: "gpt-5-mini",
+    openai: "gpt-6.1-sol",
   },
   reasoningByProvider: {},
   fastModeByProvider: {},
@@ -537,13 +537,13 @@ describe("EnhancementsSection", () => {
         name: "Model for OpenAI",
       }),
     );
-    await user.click(await screen.findByRole("option", { name: /gpt-5 nano/i }));
+    await user.click(await screen.findByRole("option", { name: /gpt-6 luna/i }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
         enabled: false,
         provider: "openai",
-        model: "gpt-5-nano",
+        model: "gpt-6-luna",
       });
     });
   });
@@ -629,7 +629,7 @@ describe("EnhancementsSection", () => {
     expect(launcher).toHaveTextContent("Change");
     // The summary text arrives after the async settings load — wait for it
     // instead of asserting once (this raced under full-suite load).
-    await waitFor(() => expect(launcher).toHaveTextContent("OpenAI · GPT-5 Mini"), {
+    await waitFor(() => expect(launcher).toHaveTextContent("OpenAI · GPT-6.1 Sol"), {
       timeout: 3000,
     });
     expect(launcher).toHaveTextContent("Active");
@@ -642,12 +642,12 @@ describe("EnhancementsSection", () => {
     await user.click(within(providersPanel).getByRole("button", { name: /close/i }));
     // Closing may already unmount the dialog; assert the user-visible result.
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(launcher).toHaveTextContent("OpenAI · GPT-5 Mini");
+    expect(launcher).toHaveTextContent("OpenAI · GPT-6.1 Sol");
     expect(launcher).toHaveTextContent("Active");
     await user.click(launcher);
     const reopenedPanel = await screen.findByRole("dialog");
     expect(within(reopenedPanel).getByRole("combobox", { name: "Model for OpenAI" })).toHaveValue(
-      "GPT-5 Mini",
+      "GPT-6.1 Sol",
     );
   });
 
@@ -674,7 +674,7 @@ describe("EnhancementsSection", () => {
         screen.getByRole("button", {
           name: "Choose provider and model",
         }),
-      ).toHaveTextContent("OpenAI · GPT-5 Mini");
+      ).toHaveTextContent("OpenAI · GPT-6.1 Sol");
     });
   });
 
@@ -757,7 +757,7 @@ describe("EnhancementsSection", () => {
     const previousModels = providerModels["claude-code"];
     const refreshedAccountModels = [
       { id: "", name: "Default", recommended: true, cliDefault: true },
-      { id: "sonnet-4-5", name: "Sonnet 4.5", recommended: false },
+      { id: "sonnet", name: "Sonnet 5.5", recommended: false },
     ];
     claudeCodeModelsRestore = () => {
       providerModels["claude-code"] = previousModels;
@@ -784,9 +784,9 @@ describe("EnhancementsSection", () => {
     await user.click(within(providersPanel).getByRole("button", { name: "Model for Claude Code" }));
     const picker = await screen.findByRole("dialog", { name: "Choose a Claude Code model" });
     expect(
-      within(picker).getByRole("button", { name: /^Sonnet 4\.5.*claude-code\/sonnet-4-5/i }),
+      within(picker).getByRole("button", { name: /^Sonnet 5\.5.*claude-code\/sonnet/i }),
     ).toBeInTheDocument();
-    expect(within(picker).queryByRole("button", { name: /^Haiku/i })).not.toBeInTheDocument();
+    expect(within(picker).queryByRole("button", { name: /^Fable/i })).not.toBeInTheDocument();
     expect(within(picker).queryByRole("button", { name: /^Opus/i })).not.toBeInTheDocument();
   });
 
@@ -820,7 +820,7 @@ describe("EnhancementsSection", () => {
 
     await user.click(within(providersPanel).getByRole("button", { name: "Model for Claude Code" }));
     const picker = await screen.findByRole("dialog", { name: "Choose a Claude Code model" });
-    expect(within(picker).getByRole("button", { name: /^Haiku/i })).toBeInTheDocument();
+    expect(within(picker).getByRole("button", { name: /^Fable/i })).toBeInTheDocument();
     expect(within(picker).getByRole("button", { name: /^Sonnet/i })).toBeInTheDocument();
     expect(within(picker).getByRole("button", { name: /^Opus/i })).toBeInTheDocument();
   });
@@ -996,7 +996,7 @@ describe("EnhancementsSection", () => {
       expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
         enabled: true,
         provider: "openai",
-        model: "gpt-5-mini",
+        model: "gpt-6.1-sol",
       });
       expect(invoke).toHaveBeenCalledWith("update_enhancement_options", {
         options: { preset: "CleanDictation" },
@@ -1010,8 +1010,8 @@ describe("EnhancementsSection", () => {
     aiSettingsResponse = {
       ...enabledAISettings,
       provider: "anthropic",
-      model: "claude-sonnet-4",
-      modelsByProvider: { anthropic: "claude-sonnet-4" },
+      model: "claude-sonnet-5-5",
+      modelsByProvider: { anthropic: "claude-sonnet-5-5" },
     };
     vi.mocked(hasApiKey).mockResolvedValue(false);
 
@@ -1024,7 +1024,7 @@ describe("EnhancementsSection", () => {
       });
       expect(polishSwitch).toBeChecked();
       expect(polishSwitch).not.toHaveAttribute("aria-disabled", "true");
-      expect(providerSummary).toHaveTextContent("Anthropic · Claude Sonnet 4");
+      expect(providerSummary).toHaveTextContent("Anthropic · Claude Sonnet 5.5");
       expect(providerSummary).toHaveTextContent("Active");
     });
   });
@@ -1063,7 +1063,7 @@ describe("EnhancementsSection", () => {
       const providerSummary = screen.getByRole("button", {
         name: "Choose provider and model",
       });
-      expect(providerSummary).toHaveTextContent("OpenAI · GPT-5 Mini");
+      expect(providerSummary).toHaveTextContent("OpenAI · GPT-6.1 Sol");
       expect(providerSummary).toHaveTextContent("Active");
       expect(screen.queryByText("Connect an AI to turn on Polish")).not.toBeInTheDocument();
     });
@@ -1687,7 +1687,7 @@ describe("EnhancementsSection", () => {
       ...enabledAISettings,
       enabled: false,
       modelsByProvider: {
-        openai: "gpt-5-mini",
+        openai: "gpt-6.1-sol",
         gemini: "gemini-1.5-flash",
       },
     };
@@ -1731,13 +1731,13 @@ describe("EnhancementsSection", () => {
       ),
     ).toBeInTheDocument();
     await user.click(within(providersPanel).getByRole("combobox", { name: "Model for OpenAI" }));
-    await user.click(await screen.findByRole("option", { name: /GPT-5 Mini/i }));
+    await user.click(await screen.findByRole("option", { name: /GPT-6.1 Sol/i }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
         enabled: true,
         provider: "openai",
-        model: "gpt-5-mini",
+        model: "gpt-6.1-sol",
       });
       expect(aiSettingsResponse.aiModelNeedsReselection).toBe(false);
     });
@@ -1884,21 +1884,21 @@ describe("EnhancementsSection", () => {
     aiSettingsResponse = {
       ...baseAISettings,
       provider: "pi",
-      model: "openai/gpt-5-mini",
-      modelsByProvider: { pi: "openai/gpt-5-mini" },
+      model: "openai/gpt-6.1-sol",
+      modelsByProvider: { pi: "openai/gpt-6.1-sol" },
     };
     const user = userEvent.setup();
     renderWithProviders();
     const providerSummary = await screen.findByRole("button", {
       name: "Choose provider and model",
     });
-    expect(providerSummary).toHaveTextContent("pi · GPT-5 Mini · Thinking off");
+    expect(providerSummary).toHaveTextContent("pi · GPT-6.1 Sol · Thinking off");
     const providersPanel = await getProviderSetupPanel();
 
     const piModel = await within(providersPanel).findByRole("button", {
       name: "Model for pi",
     });
-    expect(piModel).toHaveTextContent("GPT-5 Mini");
+    expect(piModel).toHaveTextContent("GPT-6.1 Sol");
     await user.click(piModel);
     await user.click(
       await screen.findByRole("button", {
@@ -1965,33 +1965,33 @@ describe("EnhancementsSection", () => {
     ).toBeInTheDocument();
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Opus 5.*droid\/claude-opus-5.*Reasoning/i,
+        name: /^Opus 5.5.*droid\/claude-opus-5-5.*Reasoning/i,
       }),
     ).toBeInTheDocument();
     await user.type(
       within(modelDialog).getByRole("textbox", { name: "Search Droid models" }),
-      "gpt-5.6",
+      "gpt-6.1",
     );
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-5.6 Sol.*droid\/gpt-5.6-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*droid\/gpt-6.1-sol.*Reasoning/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).queryByRole("button", {
-        name: /^Opus 5.*Reasoning/i,
+        name: /^Opus 5.5.*Reasoning/i,
       }),
     ).not.toBeInTheDocument();
     await user.click(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-5.6 Sol.*droid\/gpt-5.6-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*droid\/gpt-6.1-sol.*Reasoning/i,
       }),
     );
 
     expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
       enabled: false,
       provider: "droid",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
     });
   });
 

@@ -1,3 +1,4 @@
+use crate::ai::settings_migration::migrate_ai_settings_before_key_cache;
 use chrono::Local;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -19,7 +20,9 @@ mod commands;
 mod license;
 mod media;
 mod menu;
+mod observability;
 mod parakeet;
+mod pill;
 mod product_analytics;
 pub mod provider_capabilities;
 mod recognition;
@@ -288,9 +291,9 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 use audio::recorder::AudioRecorder;
 use commands::remote::load_remote_settings;
 use commands::telemetry::{
-    defer_privacy_consent_for_session, get_product_analytics_status, get_telemetry_status,
-    record_onboarding_completed, report_frontend_error, set_product_analytics_consent,
-    set_telemetry_consent,
+    defer_privacy_consent_for_session, get_product_analytics_status, get_report_diagnostics,
+    get_telemetry_status, record_observability_event, record_onboarding_completed,
+    report_frontend_error, set_product_analytics_consent, set_telemetry_consent,
 };
 use commands::{
     ai::{
@@ -343,6 +346,7 @@ use commands::{
     system_info::get_system_specs,
     text::*,
     updater::{check_for_app_update, install_app_update},
+    usage_stats::get_usage_stats,
     utils::{export_transcriptions, get_application_icon, save_transcript_file},
     window::*,
 };
@@ -585,9 +589,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app_context = tauri::generate_context!();
     let analytics_consent =
         product_analytics::read_consent(app_context.config().identifier.as_str());
-    let (telemetry_enabled, telemetry_install_id) =
-        telemetry::read_consent(app_context.config().identifier.as_str());
-    let _sentry_guard = telemetry::init(telemetry_enabled, telemetry_install_id);
     product_analytics::init(analytics_consent);
 
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
@@ -654,6 +655,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .setup(move |app| {
+            app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
             // Windows identity persistence must run after the single-instance
@@ -683,29 +685,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             ]);
 
             // Chain the previous panic hook instead of replacing it. Telemetry
-            // init installed sentry's panic hook (via the `panic` feature) to
+            // init installed PostHog's panic hook (via the `panic` feature) to
             // capture release panics as events; overwriting it here would
             // silently drop panic capture. Run our local diagnostics first, then
-            // forward to the prior hook so Sentry still records the event.
+            // forward to the prior hook so PostHog still records the event.
             let prev_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic_info| {
-                let location = panic_info.location()
-                    .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-                    .unwrap_or_else(|| "unknown location".to_string());
-
-                let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "Unknown panic payload".to_string()
-                };
-
-                log::error!("💥 CRITICAL PANIC at {}: {}", location, message);
+                let location = "panic";
+                let message = "panic";
+                log::error!("Application panic");
                 log_failed("PANIC", "Application panic occurred");
                 log_with_context(log::Level::Error, "Panic details", &[
-                    ("panic_location", &location),
-                    ("panic_message", &message),
+                    ("panic_location", location),
+                    ("panic_message", message),
                     ("severity", "critical")
                 ]);
                 eprintln!("Application panic at {}: {}", location, message);
@@ -713,12 +705,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Try to save panic info to a crash file for debugging
                 if let Ok(home_dir) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
                     let crash_file = std::path::Path::new(&home_dir).join(".voicetypr_crash.log");
-                    let _ = std::fs::write(&crash_file, format!(
-                        "Panic at {}: {}\nFull info: {:?}\nTime: {:?}",
-                        location, message, panic_info, chrono::Local::now()
-                    ));
+                    let record = crate::telemetry::local_panic_record(
+                        panic_info.location().map(|location| (location.file(), location.line())),
+                        &chrono::Utc::now().to_rfc3339(),
+                    );
+                    let _ = std::fs::write(&crash_file, record);
                 }
-                // Forward to the prior (Sentry) hook so panics are still captured.
+                // Forward to the prior (PostHog) hook so panics are still captured.
                 prev_hook(panic_info);
             }));
 
@@ -958,6 +951,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Initialize unified application state
             app.manage(AppState::new());
+            app.manage(crate::pill::hit_test::PointerState::default());
+            app.manage(crate::pill::icons::IconCache::default());
             log::info!("🧠 App state managed and ready");
 
             // Initialize window manager after app state is managed
@@ -1019,7 +1014,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 // Only show pill on startup if mode is "always"
-                if pill_mode == "always" {
+                if pill_mode == "always" && app_handle_for_pill.store("settings").ok().and_then(|store| store.get("onboarding_completed")).and_then(|v| v.as_bool()).unwrap_or(false) {
                     log::info!("Startup: Showing pill because mode is 'always'");
                     if let Err(e) = crate::commands::window::show_pill_widget(app_handle_for_pill).await {
                         log::warn!("Failed to show pill on startup: {}", e);
@@ -1063,7 +1058,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 audio::device_watcher::try_start_device_watcher_if_ready(&app_handle_for_watcher).await;
             });
 
-            // Create display watcher to reposition pill/toast on monitor changes
+            // Create display watcher to reposition pill on monitor changes
             let display_watcher = utils::display_watcher::DisplayWatcher::new(app.app_handle().clone());
             display_watcher.start();
             app.manage(display_watcher);
@@ -1079,7 +1074,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let tray_builder: TrayBuilder = Arc::new(move || -> Result<(), String> {
             let menu = tauri::async_runtime::block_on(build_tray_menu(&tray_app))
                 .map_err(|error| error.to_string())?;
-
+            crate::menu::runtime::install(&menu);
 
             // Bare-mark template icon for the menubar (no background; adapts to light/dark).
             let tray_icon = tauri::include_image!("icons/tray.png");
@@ -1090,192 +1085,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .tooltip("Voicetypr")
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
-                    log::info!("Tray menu event: {:?}", event.id);
-                    let event_id = event.id.as_ref().to_string();
-
-                    if event_id == "dashboard" {
-                        show_main_window(app);
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("navigate-to-overview", ());
-                        }
-                    } else if event_id == "quit" {
-                        app.exit(0);
-                    } else if event_id == "check_updates" {
-                        let _ = app.emit("tray-check-updates", ());
-                    } else if event_id.starts_with("model_") {
-                        // Handle model selection
-                        let model_name = match event_id.strip_prefix("model_") {
-                            Some(name) => name.to_string(),
-                            None => {
-                                log::warn!("Invalid model event_id format: {}", event_id);
-                                return; // Skip processing invalid model events
-                            }
-                        };
-                        let app_handle = app.app_handle().clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::set_model_from_tray(app_handle.clone(), model_name.clone()).await {
-                                Ok(_) => {
-                                    log::info!("Model changed from tray to: {}", model_name);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to set model from tray: {}", e);
-                                    // Emit error event so UI can show notification
-                                    let _ = app_handle.emit("tray-action-error", &format!("Failed to change model: {}", e));
-                                }
-                            }
-                        });
-                    } else if event_id == "microphone_default" {
-                        // Handle default microphone selection
-                        let app_handle = app.app_handle().clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::set_audio_device(app_handle.clone(), None).await {
-                                Ok(_) => {
-                                    log::info!("Microphone changed from tray to: System Default");
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to set default microphone from tray: {}", e);
-                                    let _ = app_handle.emit("tray-action-error", &format!("Failed to change microphone: {}", e));
-                                }
-                            }
-                        });
-                    } else if event_id.starts_with("microphone_") {
-                        // Handle specific microphone selection
-                        let device_name = match event_id.strip_prefix("microphone_") {
-                            Some(name) if name != "default" => Some(name.to_string()),
-                            _ => {
-                                // Already handled by microphone_default case above
-                                return;
-                            }
-                        };
-                        let app_handle = app.app_handle().clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::set_audio_device(app_handle.clone(), device_name.clone()).await {
-                                Ok(_) => {
-                                    log::info!("Microphone changed from tray to: {:?}", device_name);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to set microphone from tray: {}", e);
-                                    let _ = app_handle.emit("tray-action-error", &format!("Failed to change microphone: {}", e));
-                                }
-                            }
-                        });
-                    }
-                    else if event_id == "polish_on" || event_id == "polish_off" {
-                        let app_handle = app.app_handle().clone();
-                        let desired_enabled = event_id == "polish_on";
-                        tauri::async_runtime::spawn(async move {
-                            let current_enabled = app_handle
-                                .store("settings")
-                                .ok()
-                                .and_then(|store| store.get("ai_enabled"))
-                                .and_then(|value| value.as_bool())
-                                .unwrap_or(false);
-
-                            if current_enabled != desired_enabled {
-                                match crate::commands::shortcuts::toggle_ai_formatting(app_handle.clone()).await {
-                                    Ok(()) => {
-                                        log::info!("Polish toggled from tray to requested state: {}", desired_enabled);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to toggle Polish from tray: {}", e);
-                                        let _ = app_handle.emit("tray-action-error", &format!("Failed to change Polish: {}", e));
-                                    }
-                                }
-                            }
-
-                            if let Err(e) = crate::commands::settings::update_tray_menu(app_handle.clone()).await {
-                                log::warn!("Failed to refresh tray after Polish change: {}", e);
-                            }
-                        });
-                    }
-                    else if event_id == "copy_last_transcription" {
-                        let app_handle = app.app_handle().clone();
-                        tauri::async_runtime::spawn(async move {
-                            match app_handle.store("transcriptions") {
-                                Ok(store) => {
-                                    let mut entries: Vec<(String, serde_json::Value)> = Vec::new();
-                                    for key in store.keys() {
-                                        if let Some(value) = store.get(&key) {
-                                            entries.push((key.to_string(), value));
-                                        }
-                                    }
-
-                                    if let Some(timestamp) = crate::menu::latest_copyable_transcription_id(&entries) {
-                                        if let Some(text) = store
-                                            .get(&timestamp)
-                                            .and_then(|value| value.get("text").and_then(|text| text.as_str().map(str::to_string)))
-                                        {
-                                            if let Err(error) = crate::commands::text::copy_text_to_clipboard(text).await {
-                                                log::error!("Failed to copy last transcription: {}", error);
-                                                let _ = app_handle.emit("tray-action-error", &format!("Failed to copy: {}", error));
-                                            } else {
-                                                log::info!("Copied last transcription to clipboard");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(error) => {
-                                    log::error!("Failed to open transcriptions store: {}", error);
-                                }
-                            }
-                        });
-                    }
-                    // Recent transcriptions copy handler
-                    else if let Some(ts) = event_id.strip_prefix("recent_copy_") {
-                        let ts_owned = ts.to_string();
-                        let app_handle = app.app_handle().clone();
-                        tauri::async_runtime::spawn(async move {
-                            // Read text by timestamp and copy
-                            match app_handle.store("transcriptions") {
-                                Ok(store) => {
-                                    if let Some(val) = store.get(&ts_owned) {
-                                        if let Some(text) = val.get("text").and_then(|v| v.as_str()) {
-                                            if let Err(e) = crate::commands::text::copy_text_to_clipboard(text.to_string()).await {
-                                                log::error!("Failed to copy recent transcription: {}", e);
-                                                let _ = app_handle.emit("tray-action-error", &format!("Failed to copy: {}", e));
-                                            } else {
-                                                log::info!("Copied recent transcription to clipboard");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to open transcriptions store: {}", e);
-                                }
-                            }
-                        });
-                    }
-                    // Recording mode switchers
-                    else if event_id == "recording_mode_toggle" || event_id == "recording_mode_push_to_talk" {
-                        let app_handle = app.app_handle().clone();
-                        let mode = if event_id.ends_with("push_to_talk") { "push_to_talk" } else { "toggle" };
-                        tauri::async_runtime::spawn(async move {
-                            match crate::commands::settings::get_settings(app_handle.clone()).await {
-                                Ok(mut s) => {
-                                    s.recording_mode = mode.to_string();
-                                    match crate::commands::settings::save_settings(app_handle.clone(), s, None).await {
-                                        Err(e) => {
-                                            log::error!("Failed to save recording mode from tray: {}", e);
-                                            let _ = app_handle.emit("tray-action-error", &format!("Failed to change recording mode: {}", e));
-                                        }
-                                        Ok(()) => {
-                                            if let Err(e) = crate::commands::settings::update_tray_menu(app_handle.clone()).await {
-                                                log::warn!("Failed to refresh tray after mode change: {}", e);
-                                            }
-                                            // Notify frontend so SettingsContext refreshes
-                                            let _ = app_handle.emit("settings-changed", ());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to get settings for mode change: {}", e);
-                                }
-                            }
-                        });
-                    }
+                    crate::menu::actions::handle(app, event.id.as_ref());
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -1433,140 +1243,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            // Create pill (macOS) and toast (all platforms) windows at startup
-            {
-                use tauri::{WebviewUrl, WebviewWindowBuilder};
-
-                // On macOS, use the same saved placement and monitor work area as
-                // later repositioning so an always-visible pill starts clear of the Dock.
-                #[cfg(target_os = "macos")]
-                let ((pos_x, pos_y), (toast_x, toast_y)) = {
-                    let app_state = app.state::<AppState>();
-                    app_state
-                        .get_window_manager()
-                        .map(|manager| manager.current_floating_window_positions())
-                        .unwrap_or_else(|| {
-                            log::warn!("Window manager unavailable during floating window placement; using safe defaults");
-                            ((600.0, 842.0), (520.0, 754.0))
-                        })
-                };
-
-                // Preserve the established non-macOS startup behavior: primary
-                // monitor, bottom-center, with the fixed 10px edge offset.
-                #[cfg(not(target_os = "macos"))]
-                let ((pos_x, pos_y), (toast_x, toast_y)) = {
-                    let (screen_width, screen_height) =
-                        crate::utils::monitor::catch_monitor_panic(|| {
-                            let monitor = app.primary_monitor().ok().flatten()?;
-                            let size = monitor.size();
-                            let scale = monitor.scale_factor();
-                            Some((size.width as f64 / scale, size.height as f64 / scale))
-                        })
-                        .flatten()
-                        .unwrap_or((1440.0, 900.0));
-                    let pill_x = (screen_width - crate::window_manager::PILL_WIDTH) / 2.0;
-                    let pill_y = screen_height - crate::window_manager::PILL_HEIGHT - 10.0;
-                    let toast_x = pill_x
-                        + (crate::window_manager::PILL_WIDTH
-                            - crate::window_manager::TOAST_WIDTH)
-                            / 2.0;
-                    let toast_y = pill_y
-                        - crate::window_manager::TOAST_HEIGHT
-                        - crate::window_manager::FLOATING_WINDOW_GAP;
-                    ((pill_x, pill_y), (toast_x, toast_y))
-                };
-
-                // macOS: create pill window and convert to NSPanel
-                #[cfg(target_os = "macos")]
-                {
-                    // Properties aligned with window_manager.rs for consistency.
-                    let pill_builder = WebviewWindowBuilder::new(app, "pill", WebviewUrl::App("pill".into()))
-                        .title("Recording")
-                        .resizable(false)
-                        .maximizable(false)
-                        .minimizable(false)
-                        .decorations(false)
-                        .always_on_top(true)
-                        .visible_on_all_workspaces(true)
-                        .content_protected(true)
-                        .skip_taskbar(true)
-                        .transparent(true)
-                        .shadow(false)  // Prevent window shadow on macOS
-                        .inner_size(crate::window_manager::PILL_WIDTH, crate::window_manager::PILL_HEIGHT)
-                        .accept_first_mouse(true)
-                        .position(pos_x, pos_y)
-                        .visible(true)  // Always visible (controlled by show_pill_indicator setting)
-                        .focused(false);  // Don't steal focus
-
-                    // Disable context menu only in production builds
-                    #[cfg(not(debug_assertions))]
-                    let pill_builder = pill_builder.initialization_script("document.addEventListener('contextmenu', e => e.preventDefault());");
-
-                    #[cfg(debug_assertions)]
-                    let pill_builder = pill_builder;
-
-                    let pill_window = pill_builder.build()?;
-                    if let Err(error) = pill_window.set_ignore_cursor_events(true) {
-                        log::warn!("Failed to make pill window click-through: {}", error);
-                    }
-
-                    // Convert to NSPanel to prevent focus stealing
-                    use tauri_nspanel::WebviewWindowExt;
-                    pill_window.to_panel().map_err(|e| format!("Failed to convert to NSPanel: {:?}", e))?;
-
-                    // Store the pill window reference in WindowManager
-                    let app_state = app.state::<AppState>();
-                    if let Some(window_manager) = app_state.get_window_manager() {
-                        window_manager.set_pill_window(pill_window);
-                        log::info!("Created pill window as NSPanel and stored in WindowManager");
-                    } else {
-                        log::warn!("Could not store pill window reference - WindowManager not available");
-                    }
-                }
-
-                // Create toast window for feedback messages - all platforms
-                log::info!(
-                    "Toast window position: ({}, {}) relative to pill at ({}, {})",
-                    toast_x,
-                    toast_y,
-                    pos_x,
-                    pos_y
-                );
-
-                let toast_builder = WebviewWindowBuilder::new(app, "toast", WebviewUrl::App("toast".into()))
-                    .title("Feedback")
-                    .resizable(false)
-                    .decorations(false)
-                    .always_on_top(true)
-                    .skip_taskbar(true)
-                    .transparent(true)
-                    .shadow(false) // Prevent window shadow/outline on macOS
-                    .inner_size(
-                        crate::window_manager::TOAST_WIDTH,
-                        crate::window_manager::TOAST_HEIGHT,
-                    )
-                    .position(toast_x, toast_y)
-                    .visible(false); // Starts hidden
-
-                #[cfg(not(debug_assertions))]
-                let toast_builder = toast_builder.initialization_script("document.addEventListener('contextmenu', e => e.preventDefault());");
-
-                #[cfg(debug_assertions)]
-                let toast_builder = toast_builder;
-
-                #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-                let toast_window = toast_builder.build()?;
-
-                // macOS: Convert toast to NSPanel to match pill behavior
-                #[cfg(target_os = "macos")]
-                {
-                    use tauri_nspanel::WebviewWindowExt;
-                    toast_window.to_panel().map_err(|e| format!("Failed to convert toast to NSPanel: {:?}", e))?;
-                }
-
-                log::info!("Created toast window for feedback");
-            }
-
             // Sync autostart state on startup using shared logic
             {
                 let app_handle = app.app_handle().clone();
@@ -1598,6 +1274,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Hide main window on start (menu bar only)
             // Only a configured local/cloud model hides the main window immediately.
             // Remote-only sessions stay visible until startup checks verify the remote is available.
+            let observability_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move { observability::startup(observability_app).await; });
             let should_hide_main = if let Ok(store) = app.store("settings") {
                 let has_local_or_cloud_model = store
                     .get("current_model")
@@ -1629,6 +1307,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            recording::kept::retry_kept_dictation,
+            recording::kept::transcribe_anyway,
+            recording::kept::discard_kept_dictation,
+            recording::island::island_action,
+            menu::quick::island_quick_options,
+            menu::quick::island_quick_set,
             start_recording,
             stop_recording,
             cancel_recording,
@@ -1681,17 +1365,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             update_transcription,
             show_in_folder,
             get_transcription_history,
+            get_usage_stats,
             get_transcription_count,
             delete_transcription_entry,
             clear_all_transcriptions,
             export_transcriptions,
             save_transcript_file,
             get_application_icon,
+            crate::pill::hit_test::pill_set_hit_regions,
+            crate::pill::pill_get_geometry,
+            crate::pill::icons::pill_app_icon,
             show_pill_widget,
             hide_pill_widget,
             close_pill_widget,
             recreate_pill_widget,
-            hide_toast_window,
+            commands::pill_feedback::pill_feedback_visible,
+            commands::pill_feedback::pill_feedback_ready,
             focus_main_window,
             check_accessibility_permission,
             request_accessibility_permission,
@@ -1711,6 +1400,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             copy_image_to_clipboard,
             save_image_to_file,
             copy_text_to_clipboard,
+            commands::original::copy_last_original,
             get_ai_settings,
             get_ai_settings_for_provider,
             cache_ai_api_key,
@@ -1753,7 +1443,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             repair_cli_tool,
             uninstall_cli_tool,
             cli_tool_status,
-            // Independent privacy controls: GlitchTip diagnostics and PostHog
+            // Independent privacy controls: PostHog diagnostics and PostHog
             // product analytics.
             get_telemetry_status,
             set_telemetry_consent,
@@ -1762,6 +1452,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             defer_privacy_consent_for_session,
             record_onboarding_completed,
             report_frontend_error,
+            get_report_diagnostics,
+            record_observability_event,
             // Remote transcription commands
             refresh_active_remote_server_status,
             get_recognition_availability_snapshot,
@@ -1843,6 +1535,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 });
                 #[cfg(target_os = "macos")]
                 crate::commands::audio::cleanup_media_pause_on_exit();
+                recording::kept::cleanup();
                 product_analytics::shutdown();
             }
             #[cfg(target_os = "macos")]
@@ -1858,142 +1551,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     log_lifecycle_event("APPLICATION_READY", Some(app_version), None);
 
     Ok(())
-}
-
-fn migrate_ai_settings_before_key_cache(app: &tauri::AppHandle) {
-    let Ok(store) = app.store("settings") else {
-        log::warn!("AI settings migration skipped: settings store unavailable");
-        return;
-    };
-
-    const MIGRATION_KEYS: [&str; 6] = [
-        "ai_enabled",
-        "ai_provider",
-        "ai_model",
-        "ai_models_by_provider",
-        "ai_model_needs_reselection",
-        "enhancement_options",
-    ];
-    let mut values = serde_json::Map::new();
-    for key in MIGRATION_KEYS {
-        if let Some(value) = store.get(key) {
-            values.insert(key.to_string(), value.clone());
-        }
-    }
-    let original_values = values.clone();
-
-    if migrate_ai_settings_values(&mut values) {
-        for (key, value) in values {
-            store.set(key, value);
-        }
-        if let Err(error) = store.save() {
-            for key in MIGRATION_KEYS {
-                if let Some(value) = original_values.get(key) {
-                    store.set(key, value.clone());
-                } else {
-                    store.delete(key);
-                }
-            }
-            log::warn!("AI settings migration save failed: {}", error);
-        } else {
-            log::info!("AI settings migration applied");
-        }
-    }
-}
-
-fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::Value>) -> bool {
-    let mut changed = false;
-
-    let provider = values
-        .get("ai_provider")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let migrated_provider = if provider == "google" {
-        changed = true;
-        "gemini".to_string()
-    } else {
-        provider
-    };
-    if values
-        .get("ai_provider")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        != migrated_provider
-    {
-        values.insert(
-            "ai_provider".to_string(),
-            serde_json::Value::String(migrated_provider.clone()),
-        );
-        changed = true;
-    }
-
-    if let Some(models) = values
-        .get_mut("ai_models_by_provider")
-        .and_then(|value| value.as_object_mut())
-    {
-        if let Some(google_model) = models.remove("google") {
-            if !models.contains_key("gemini") {
-                models.insert("gemini".to_string(), google_model);
-            }
-            changed = true;
-        }
-    }
-
-    let current_model = values
-        .get("ai_model")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let ai_enabled = values
-        .get("ai_enabled")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if !current_model.is_empty()
-        && !ai_model_is_valid_for_provider(&migrated_provider, &current_model)
-    {
-        values.insert(
-            "ai_model".to_string(),
-            serde_json::Value::String(String::new()),
-        );
-        if ai_enabled {
-            values.insert(
-                "ai_model_needs_reselection".to_string(),
-                serde_json::Value::Bool(true),
-            );
-        }
-        changed = true;
-    }
-
-    if let Some(stored_options) = values.get("enhancement_options").cloned() {
-        let normalized = crate::ai::prompts::enhancement_options_for_ai_enabled(
-            Some(&stored_options),
-            ai_enabled,
-        )
-        .and_then(|options| {
-            serde_json::to_value(options)
-                .map_err(|error| format!("Failed to serialize Polish options: {error}"))
-        });
-        match normalized {
-            Ok(normalized) if normalized != stored_options => {
-                values.insert("enhancement_options".to_string(), normalized);
-                changed = true;
-            }
-            Ok(_) => {}
-            Err(error) => log::warn!("Polish settings migration skipped: {}", error),
-        }
-    }
-
-    changed
-}
-
-fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {
-    if provider == "custom" {
-        return !model.trim().is_empty();
-    }
-    crate::ai::providers::recommended_models(provider)
-        .iter()
-        .any(|candidate| candidate.model_id == model)
 }
 
 /// Perform essential startup checks
@@ -2304,169 +1861,6 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
         "✅ Startup checks COMPLETED in {}ms",
         checks_start.elapsed().as_millis()
     );
-}
-
-// AI settings migration tests live here because startup owns the migration call.
-#[cfg(test)]
-mod ai_settings_migration_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn values(
-        provider: &str,
-        model: &str,
-        models: serde_json::Value,
-    ) -> serde_json::Map<String, serde_json::Value> {
-        values_with_enabled(true, provider, model, models)
-    }
-
-    fn values_with_enabled(
-        enabled: bool,
-        provider: &str,
-        model: &str,
-        models: serde_json::Value,
-    ) -> serde_json::Map<String, serde_json::Value> {
-        let mut values = serde_json::Map::new();
-        values.insert("ai_enabled".to_string(), json!(enabled));
-        values.insert("ai_provider".to_string(), json!(provider));
-        values.insert("ai_model".to_string(), json!(model));
-        values.insert("ai_models_by_provider".to_string(), models);
-        values
-    }
-
-    #[test]
-    fn migrates_google_provider_and_model_memory_to_gemini() {
-        let mut values = values(
-            "google",
-            "gemini-2.5-flash",
-            json!({ "google": "gemini-2.5-flash" }),
-        );
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(values["ai_provider"], json!("gemini"));
-        assert_eq!(
-            values["ai_models_by_provider"],
-            json!({ "gemini": "gemini-2.5-flash" })
-        );
-        assert_eq!(values["ai_model"], json!("gemini-2.5-flash"));
-        assert_eq!(values.get("ai_model_needs_reselection"), None);
-    }
-
-    #[test]
-    fn migration_keeps_existing_gemini_model_memory() {
-        let mut values = values(
-            "google",
-            "gemini-2.5-flash",
-            json!({ "google": "gemini-3-flash-preview", "gemini": "gemini-2.5-flash" }),
-        );
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(
-            values["ai_models_by_provider"],
-            json!({ "gemini": "gemini-2.5-flash" })
-        );
-        assert_eq!(values.get("ai_model_needs_reselection"), None);
-    }
-
-    #[test]
-    fn migration_flags_enabled_invalid_model_for_reselection_without_substitution() {
-        let mut values = values("google", "text-bison", json!({ "google": "text-bison" }));
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(values["ai_enabled"], json!(true));
-        assert_eq!(values["ai_provider"], json!("gemini"));
-        assert_eq!(values["ai_model"], json!(""));
-        assert_eq!(values["ai_model_needs_reselection"], json!(true));
-    }
-
-    #[test]
-    fn migration_does_not_flag_disabled_invalid_model() {
-        let mut values = values_with_enabled(
-            false,
-            "google",
-            "text-bison",
-            json!({ "google": "text-bison" }),
-        );
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(values["ai_enabled"], json!(false));
-        assert_eq!(values["ai_provider"], json!("gemini"));
-        assert_eq!(values["ai_model"], json!(""));
-        assert_eq!(values.get("ai_model_needs_reselection"), None);
-    }
-
-    #[test]
-    fn migration_does_not_flag_empty_model() {
-        let mut values = values("google", "", json!({ "google": "" }));
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(values["ai_enabled"], json!(true));
-        assert_eq!(values["ai_provider"], json!("gemini"));
-        assert_eq!(values["ai_model"], json!(""));
-        assert_eq!(values.get("ai_model_needs_reselection"), None);
-    }
-
-    #[test]
-    fn migration_keeps_custom_free_text_model() {
-        let mut values = values("custom", "local-model", json!({ "custom": "local-model" }));
-
-        assert!(!migrate_ai_settings_values(&mut values));
-        assert_eq!(values["ai_model"], json!("local-model"));
-    }
-
-    #[test]
-    fn migration_normalizes_legacy_global_preset_for_enabled_polish() {
-        let mut values = values_with_enabled(
-            true,
-            "custom",
-            "local-model",
-            json!({ "custom": "local-model" }),
-        );
-        values.insert(
-            "enhancement_options".to_string(),
-            json!({ "preset": "Writing" }),
-        );
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(
-            values["enhancement_options"],
-            json!({ "preset": "CleanDictation" })
-        );
-    }
-
-    #[test]
-    fn migration_normalizes_legacy_global_preset_for_disabled_polish() {
-        let mut values = values_with_enabled(
-            false,
-            "custom",
-            "local-model",
-            json!({ "custom": "local-model" }),
-        );
-        values.insert(
-            "enhancement_options".to_string(),
-            json!({ "preset": "Writing" }),
-        );
-
-        assert!(migrate_ai_settings_values(&mut values));
-        assert_eq!(
-            values["enhancement_options"],
-            json!({ "preset": "PersonalDictation" })
-        );
-    }
-
-    #[test]
-    fn migration_is_idempotent_after_first_pass() {
-        let mut values = values(
-            "google",
-            "gemini-2.5-flash",
-            json!({ "google": "gemini-2.5-flash" }),
-        );
-
-        assert!(migrate_ai_settings_values(&mut values));
-        let first = values.clone();
-        assert!(!migrate_ai_settings_values(&mut values));
-        assert_eq!(values, first);
-    }
 }
 
 #[cfg(test)]

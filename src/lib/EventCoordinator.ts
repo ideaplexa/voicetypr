@@ -136,8 +136,10 @@ export class EventCoordinator {
     const routingRules: Record<string, WindowId | "all"> = {
       // Transcription events
       "transcription-complete": "pill", // Pill window handles paste/clipboard/save
+      "main-navigate": "main",
+      "island-navigate": "main",
       "history-updated": "main", // Main window reloads history
-      "audio-level": "pill",
+      "audio-level": "all", // pill wave + Recording screen mic meter
       "recording-state-changed": "all",
 
       // Model events should go to all windows (for onboarding support)
@@ -147,7 +149,7 @@ export class EventCoordinator {
       "download-cancelled": "all",
       "download-error": "all",
 
-      // Recording/transcription errors now use pill_toast() → FeedbackToast directly,
+      // Recording/transcription errors now use island problem events directly,
       // not as routed events. Only domain-specific main window errors are listed here.
       "parakeet-unavailable": "main",
 

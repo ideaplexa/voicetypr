@@ -10,15 +10,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { TELEMETRY_COPY, WhatsShared } from "@/components/WhatsShared";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("privacy-consent");
-
-interface DiagnosticsStatus {
-  enabled: boolean;
-  available: boolean;
-}
 
 interface AnalyticsStatus {
   enabled: boolean;
@@ -31,20 +27,15 @@ export function PrivacyConsentDialog() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(true);
-  const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
   const completedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      invoke<DiagnosticsStatus>("get_telemetry_status"),
-      invoke<AnalyticsStatus>("get_product_analytics_status"),
-    ])
-      .then(([diagnostics, analytics]) => {
+    invoke<AnalyticsStatus>("get_telemetry_status")
+      .then((status) => {
         if (cancelled) return;
-        setDiagnosticsEnabled(diagnostics.enabled);
-        setAnalyticsEnabled(analytics.enabled);
-        setOpen(analytics.consent_required);
+        setDiagnosticsEnabled(status.enabled);
+        setOpen(status.consent_required);
       })
       .catch((error) => {
         log.error("Failed to read privacy consent status:", error);
@@ -78,7 +69,6 @@ export function PrivacyConsentDialog() {
       // Save diagnostics first; analytics consent and its acknowledgement are
       // persisted atomically by the second command.
       await invoke("set_telemetry_consent", { enabled: diagnosticsEnabled });
-      await invoke("set_product_analytics_consent", { enabled: analyticsEnabled });
       completedRef.current = true;
       setOpen(false);
     } catch (error) {
@@ -97,49 +87,17 @@ export function PrivacyConsentDialog() {
         <DialogHeader>
           <DialogTitle>Help improve Voicetypr</DialogTitle>
           <DialogDescription>
-            Choose what anonymous information Voicetypr may send. Both options can be changed
+            Choose whether to share anonymous information. This choice can be changed
             anytime in Settings.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-card p-4">
-            <div className="min-w-0">
-              <p className="font-medium">Crash &amp; error reporting</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Sends scrubbed crash and error details to GlitchTip so bugs can be diagnosed.
-              </p>
-            </div>
-            <Switch
-              checked={diagnosticsEnabled}
-              disabled={saving}
-              onCheckedChange={setDiagnosticsEnabled}
-              aria-label="Enable crash and error reporting"
-              className="shrink-0"
-            />
-          </div>
-
-          <div className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-card p-4">
-            <div className="min-w-0">
-              <p className="font-medium">Usage analytics</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Sends anonymous feature usage, outcome, and performance buckets to PostHog.
-              </p>
-            </div>
-            <Switch
-              checked={analyticsEnabled}
-              disabled={saving}
-              onCheckedChange={setAnalyticsEnabled}
-              aria-label="Enable usage analytics"
-              className="shrink-0"
-            />
-          </div>
+        <div className="flex items-start gap-4">
+          <p className="text-sm">{TELEMETRY_COPY}</p>
+          <Switch checked={diagnosticsEnabled} disabled={saving} onCheckedChange={setDiagnosticsEnabled}
+            aria-label="Share anonymous crash reports and usage numbers" />
         </div>
-
-        <p className="text-xs text-muted-foreground">
-          Never includes audio, transcripts, clipboard contents, prompts, API keys, file paths,
-          window titles, or session replay.
-        </p>
+        <WhatsShared />
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => void defer()} disabled={saving}>

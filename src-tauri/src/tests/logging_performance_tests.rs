@@ -217,8 +217,9 @@ mod performance_tests {
         let result = benchmark.run(|i| {
             rt.block_on(async {
                 log_start(&format!("async_perf_test_{}", i));
-                // Simulate async work
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                // Simulate async work without depending on the OS timer
+                // resolution (about 15 ms on Windows).
+                tokio::task::yield_now().await;
                 log_complete(&format!("async_perf_test_{}", i), 1);
             });
         });

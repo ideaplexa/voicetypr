@@ -244,7 +244,7 @@ async fn log_http_body_for_provider(
 ) -> SttError {
     let status = resp.status();
     let mut err = classify_status(status);
-    // Body holds err_msg + a request id, never the key — safe to log, needed to diagnose.
+    // Parse only to classify quotas; provider bodies can echo arbitrary content.
     let body = resp.text().await.unwrap_or_default();
     // Soniox folds many distinct limits into one HTTP 429
     // `error_type: "limit_exceeded"` (per-minute request rate, concurrency,
@@ -262,13 +262,26 @@ async fn log_http_body_for_provider(
             err = SttError::LimitExceeded { file_storage };
         }
     }
-    let snippet: String = body.chars().take(500).collect();
-    if snippet.trim().is_empty() {
-        log::warn!("{label}: HTTP {status} (empty response body)");
-    } else {
-        log::warn!("{label}: HTTP {status}; response body: {snippet}");
-    }
+    log::warn!("{}", http_failure_log(label, status.as_u16(), &err));
     err
+}
+
+fn http_failure_log(label: &str, status: u16, error: &SttError) -> String {
+    let provider = ["Soniox", "Deepgram", "OpenAI", "Groq", "Cohere"]
+        .into_iter()
+        .find(|provider| label.starts_with(*provider))
+        .unwrap_or("unknown");
+    let code = match error {
+        SttError::Auth => "unauthorized",
+        SttError::ModelUnavailable => "model_unavailable",
+        SttError::RateLimited => "rate_limited",
+        SttError::LimitExceeded { .. } => "cloud_storage_limit",
+        SttError::Timeout => "timeout",
+        SttError::Network => "network",
+        SttError::Server => "unavailable",
+        SttError::BadResponse => "invalid_response",
+    };
+    format!("provider={provider} status={status} code={code}")
 }
 
 /// Parse a JSON response whose transcript lives at the top-level `text` field
@@ -1089,5 +1102,25 @@ mod tests {
             };
             assert_eq!(kind, (expected_label, expected_storage));
         }
+    }
+}
+
+#[cfg(test)]
+mod safe_log_tests {
+    use super::*;
+    #[test]
+    fn http_log_contains_only_closed_provider_status_and_classification() {
+        assert_eq!(
+            http_failure_log(
+                "Soniox upload private words",
+                429,
+                &SttError::LimitExceeded { file_storage: true }
+            ),
+            "provider=Soniox status=429 code=cloud_storage_limit"
+        );
+        assert_eq!(
+            http_failure_log("private response /Users/alice key", 500, &SttError::Server),
+            "provider=unknown status=500 code=unavailable"
+        );
     }
 }

@@ -3,11 +3,10 @@
 //! Tests the audio recording changes including:
 //! - Recording size validation
 //! - AudioRecorder state management
-//! - PillToastEventPayload serialization
+//! - Island feedback serialization lives in commands/island_notice.rs
 //! - Recording indicator mode logic
 
 use crate::audio::recorder::{AudioRecorder, RecordingSize};
-use crate::commands::audio::PillToastEventPayload;
 
 // ============================================================================
 // RecordingSize Tests
@@ -116,112 +115,6 @@ fn test_audio_recorder_get_devices() {
     let devices = AudioRecorder::get_devices();
     // but the call should return normally.
     drop(devices);
-}
-
-// ============================================================================
-// PillToastEventPayload Tests
-// ============================================================================
-
-#[test]
-fn test_pill_toast_payload_creation() {
-    let payload = PillToastEventPayload {
-        id: 1,
-        message: "Test message".to_string(),
-        duration_ms: 2000,
-        action: None,
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    assert_eq!(payload.id, 1);
-    assert_eq!(payload.message, "Test message");
-    assert_eq!(payload.duration_ms, 2000);
-}
-
-#[test]
-fn test_pill_toast_payload_serialization() {
-    let payload = PillToastEventPayload {
-        id: 42,
-        message: "Recording started".to_string(),
-        duration_ms: 1500,
-        action: None,
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    let json = serde_json::to_string(&payload).unwrap();
-    assert!(json.contains("\"id\":42"));
-    assert!(json.contains("\"message\":\"Recording started\""));
-    assert!(json.contains("\"duration_ms\":1500"));
-}
-
-#[test]
-fn test_pill_toast_payload_clone() {
-    let payload = PillToastEventPayload {
-        id: 1,
-        message: "Test".to_string(),
-        duration_ms: 1000,
-        action: None,
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    let cloned = payload.clone();
-    assert_eq!(cloned.id, payload.id);
-    assert_eq!(cloned.message, payload.message);
-    assert_eq!(cloned.duration_ms, payload.duration_ms);
-}
-
-#[test]
-fn test_pill_toast_payload_empty_message() {
-    let payload = PillToastEventPayload {
-        id: 0,
-        message: "".to_string(),
-        duration_ms: 0,
-        action: None,
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    let json = serde_json::to_string(&payload).unwrap();
-    assert!(json.contains("\"message\":\"\""));
-}
-
-#[test]
-fn test_pill_toast_payload_unicode_message() {
-    let payload = PillToastEventPayload {
-        id: 1,
-        message: "🎤 Recording...".to_string(),
-        duration_ms: 2000,
-        action: None,
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    let json = serde_json::to_string(&payload).unwrap();
-    // JSON should contain the emoji (possibly escaped)
-    assert!(json.contains("Recording"));
-}
-
-#[test]
-fn test_pill_toast_payload_long_duration() {
-    let payload = PillToastEventPayload {
-        id: 1,
-        message: "Long toast".to_string(),
-        duration_ms: u64::MAX,
-        action: None,
-        variant: None,
-        persistent: false,
-        suggestion: None,
-    };
-
-    let json = serde_json::to_string(&payload).unwrap();
-    assert!(json.contains(&u64::MAX.to_string()));
 }
 
 // ============================================================================

@@ -92,6 +92,8 @@ pub(crate) async fn transcribe_whisper_with_acceleration<F>(
 where
     F: Fn() -> bool + Clone + Send + 'static,
 {
+    #[cfg(target_os = "windows")]
+    let generation = crate::commands::audio::current_recording_generation();
     let speed_mode = speed_mode_override.unwrap_or_else(|| read_whisper_speed_mode(app));
 
     #[cfg(target_os = "windows")]
@@ -142,14 +144,18 @@ where
                     return Err("Transcription cancelled".to_string());
                 }
                 Err(error) => {
+                    crate::recording::island::note(
+                        app,
+                        generation,
+                        crate::recording::island::Note::GpuFallback {
+                            engine_short: "Whisper".into(),
+                        },
+                    );
                     preserve_gpu_status = true;
                     log::warn!(
                         "GPU sidecar failed, unloading sidecar before CPU fallback: {error}"
                     );
                     gpu_client.abort_active_process().await;
-                    if mode == "gpu" {
-                        crate::commands::audio::pill_toast(app, "GPU unavailable, using CPU", 4000);
-                    }
                 }
             }
         } else {

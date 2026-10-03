@@ -59,6 +59,7 @@ impl KeyEventSource for MacEventTap {
         let tx_cb = tx.clone();
         let own_pid = std::process::id() as i64;
         let consume_cb = Arc::clone(&consume);
+        let consumed_keys = RefCell::new(super::ConsumedKeys::default());
 
         let tap = CGEventTap::new(
             CGEventTapLocation::HID,
@@ -122,18 +123,23 @@ impl KeyEventSource for MacEventTap {
                             down,
                             is_repeat,
                         }));
-                        // Consume ONLY a non-repeat key-down (never a modifier,
-                        // never a key-up, never an auto-repeat) whose exact
-                        // (mods, key) is a registered combo/single: swallow it so
-                        // it never reaches the focused application. Key-ups,
-                        // repeats, and unbound keys fall through to pass-through.
-                        if down
+                        // Consume a non-repeat key-down (never a modifier, never
+                        // a key-up) whose exact (mods, key) is a registered
+                        // combo/single, plus that key's auto-repeats, so neither
+                        // reaches the focused application. Key-ups, other
+                        // repeats and unbound keys fall through to pass-through.
+                        let consume_first = down
                             && !is_repeat
                             && side.is_none()
                             && consume_cb
                                 .load()
-                                .consumes(key, flags_to_modset(event.get_flags()))
-                        {
+                                .consumes(key, flags_to_modset(event.get_flags()));
+                        if consumed_keys.borrow_mut().decide(
+                            u32::from(code),
+                            down,
+                            is_repeat,
+                            consume_first,
+                        ) {
                             // Consumed: do NOT forward the event to apps.
                             return None;
                         }

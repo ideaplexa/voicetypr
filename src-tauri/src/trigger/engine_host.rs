@@ -27,7 +27,7 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
         .iter()
         .filter(|b| b.enabled && mapping::is_engine_kind(b))
     {
-        match mapping::to_trigger(binding) {
+        match installed_trigger(binding) {
             Some(trigger) => {
                 new_bindings.push(EngineBinding {
                     id: binding.id.clone(),
@@ -78,7 +78,25 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
         Err(error) => log::error!("keytrigger: engine_bindings lock poisoned: {}", error),
     }
 
+    // Chord is an existing pass-through trigger, unlike SingleKey/ComboExact.
+    // Observe Escape for the non-key island without swallowing it in the target app.
+    triggers.push(("island-escape-observer".into(), island_escape_trigger()));
     app_state.trigger_engine.set_bindings(triggers);
+}
+
+fn installed_trigger(binding: &ShortcutBinding) -> Option<keytrigger::Trigger> {
+    if binding.id == "escape-cancel" {
+        Some(island_escape_trigger())
+    } else {
+        mapping::to_trigger(binding)
+    }
+}
+
+fn island_escape_trigger() -> keytrigger::Trigger {
+    keytrigger::Trigger::Chord {
+        mods: keytrigger::ModSet::empty(),
+        key: keytrigger::KeySpec::Named(keytrigger::NamedKey::Escape),
+    }
 }
 
 /// Old bindings that need a synthetic `Released` dispatched before the app-map
@@ -116,7 +134,7 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
         .as_ref()
         .and_then(|store| store.get("hotkey"))
         .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| "CommandOrControl+Shift+Space".to_string());
+        .unwrap_or_else(|| crate::commands::shortcuts::FALLBACK_PRIMARY.to_string());
     let recording_mode_str = store
         .as_ref()
         .and_then(|store| store.get("recording_mode"))
@@ -172,7 +190,13 @@ pub fn rebuild_engine_bindings(app: &AppHandle) {
 }
 
 fn escape_cancel_eligible(state: RecordingState) -> bool {
-    matches!(state, RecordingState::Starting | RecordingState::Recording)
+    matches!(
+        state,
+        RecordingState::Starting
+            | RecordingState::Recording
+            | RecordingState::Stopping
+            | RecordingState::Transcribing
+    )
 }
 
 /// Pure decision core for [`rebuild_engine_bindings`]. Given the persisted
@@ -269,7 +293,7 @@ fn plan_engine_bindings(
         // global-shortcut startup fell back to this same default for that
         // inconsistent state.
         let combo_hotkey = if hotkey.trim().is_empty() {
-            "CommandOrControl+Shift+Space".to_string()
+            crate::commands::shortcuts::FALLBACK_PRIMARY.to_string()
         } else {
             hotkey.to_string()
         };
@@ -296,16 +320,23 @@ fn plan_engine_bindings(
 
     if recording_mode == RecordingMode::PushToTalk && use_different_ptt_key {
         if let Some(ptt_hotkey) = ptt_hotkey.filter(|value| !value.trim().is_empty()) {
-            bindings.push(ShortcutBinding {
-                id: "ptt".to_string(),
-                action: ShortcutAction::HoldToRecord,
-                shortcut: ptt_hotkey.to_string(),
-                trigger: ShortcutTrigger::Hold,
-                enabled: true,
-                allow_risky_combo: false,
-                trigger_kind: TriggerKind::Combo,
-                modifier: None,
+            // A hold key equal to the primary is just the primary (already Hold).
+            let same_as_primary = bindings.iter().any(|binding| {
+                binding.id == "primary"
+                    && crate::trigger::mapping::same_shortcut(&binding.shortcut, ptt_hotkey)
             });
+            if !same_as_primary {
+                bindings.push(ShortcutBinding {
+                    id: "ptt".to_string(),
+                    action: ShortcutAction::HoldToRecord,
+                    shortcut: ptt_hotkey.to_string(),
+                    trigger: ShortcutTrigger::Hold,
+                    enabled: true,
+                    allow_risky_combo: false,
+                    trigger_kind: TriggerKind::Combo,
+                    modifier: None,
+                });
+            }
         } else {
             log::warn!(
                 "keytrigger: push-to-talk is set to use a different PTT key, but ptt_hotkey is empty — PTT will not arm"
@@ -394,11 +425,70 @@ mod tests {
     use crate::{RecordingMode, RecordingState};
 
     #[test]
+    fn complete_installed_bindings_never_consume_escape() {
+        for mode in [RecordingMode::Toggle, RecordingMode::PushToTalk] {
+            for state in [
+                RecordingState::Starting,
+                RecordingState::Recording,
+                RecordingState::Stopping,
+                RecordingState::Transcribing,
+            ] {
+                let (bindings, _) = plan_engine_bindings(
+                    &[],
+                    "Alt+Space",
+                    mode,
+                    true,
+                    Some("Control+Space"),
+                    escape_cancel_eligible(state),
+                );
+                let mut triggers: Vec<_> = bindings
+                    .iter()
+                    .filter(|b| b.enabled && super::mapping::is_engine_kind(b))
+                    .filter_map(|b| super::installed_trigger(b).map(|t| (b.id.clone(), t)))
+                    .collect();
+                assert!(triggers.iter().any(|(id, _)| id == "escape-cancel"));
+                triggers.push((
+                    "island-escape-observer".into(),
+                    super::island_escape_trigger(),
+                ));
+                let consume = keytrigger::ConsumeSet::from_bindings(&triggers);
+                assert!(!consume.consumes(
+                    keytrigger::KeySpec::Named(keytrigger::NamedKey::Escape),
+                    keytrigger::ModSet::empty()
+                ));
+            }
+        }
+    }
+    #[test]
+    fn a_hold_key_equal_to_the_primary_is_not_bound_twice() {
+        let (bindings, _) = plan_engine_bindings(
+            &[],
+            "Alt+Space",
+            RecordingMode::PushToTalk,
+            true,
+            Some("alt+space"),
+            false,
+        );
+        assert!(bindings.iter().any(|b| b.id == "primary"));
+        assert!(!bindings.iter().any(|b| b.id == "ptt"));
+    }
+    #[test]
+    fn island_escape_is_observed_without_consuming_target_app_keys() {
+        let trigger = super::island_escape_trigger();
+        let consume =
+            keytrigger::ConsumeSet::from_bindings(&[("island-escape-observer".into(), trigger)]);
+        assert!(!consume.consumes(
+            keytrigger::KeySpec::Named(keytrigger::NamedKey::Escape),
+            keytrigger::ModSet::empty()
+        ));
+    }
+    #[test]
     fn escape_cancel_is_eligible_during_starting_and_recording() {
         assert!(escape_cancel_eligible(RecordingState::Starting));
         assert!(escape_cancel_eligible(RecordingState::Recording));
         assert!(!escape_cancel_eligible(RecordingState::Idle));
-        assert!(!escape_cancel_eligible(RecordingState::Stopping));
+        assert!(escape_cancel_eligible(RecordingState::Stopping));
+        assert!(escape_cancel_eligible(RecordingState::Transcribing));
 
         let (starting_bindings, _) = plan_engine_bindings(
             &[],

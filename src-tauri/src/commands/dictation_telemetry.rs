@@ -38,6 +38,8 @@ fn recording_route(remote_online: bool, engine: &str, model: String) -> Dictatio
 pub(crate) struct DictationCompletionGuard {
     pub(crate) facts: crate::product_analytics::DictationFacts,
     stop_requested: Instant,
+    generation: u64,
+    _trace_lease: Option<crate::observability::TraceLease>,
 }
 
 impl DictationCompletionGuard {
@@ -45,8 +47,10 @@ impl DictationCompletionGuard {
         app: &AppHandle,
         stop_requested: Instant,
         metrics: Option<crate::audio::recorder::CaptureAudioMetrics>,
+        generation: u64,
     ) -> Self {
         use tauri_plugin_store::StoreExt;
+        let trace_lease = crate::observability::pin(generation);
         let app_state = app.state::<AppState>();
         let live_preview = app_state
             .recording_live_preview
@@ -83,13 +87,16 @@ impl DictationCompletionGuard {
             .ok()
             .and_then(|guard| guard.as_ref().map(crate::writing::classify))
             .unwrap_or(crate::writing::AppCategory::Other);
-        Self::from_snapshot(
+        let mut guard = Self::from_snapshot(
             stop_requested,
             metrics,
             (engine, model, transport),
             live_preview,
             app_category,
-        )
+        );
+        guard.generation = generation;
+        guard._trace_lease = trace_lease;
+        guard
     }
 
     fn from_snapshot(
@@ -118,6 +125,8 @@ impl DictationCompletionGuard {
                 app_category,
             },
             stop_requested,
+            generation: 0,
+            _trace_lease: None,
         }
     }
 
@@ -140,9 +149,10 @@ impl Drop for DictationCompletionGuard {
                 .as_millis()
                 .min(u128::from(u64::MAX)) as u64;
         }
-        crate::product_analytics::capture(crate::product_analytics::build_dictation_completed(
-            self.facts.clone(),
-        ));
+        crate::product_analytics::capture_at(
+            crate::product_analytics::build_dictation_completed(self.facts.clone()),
+            self.generation,
+        );
     }
 }
 

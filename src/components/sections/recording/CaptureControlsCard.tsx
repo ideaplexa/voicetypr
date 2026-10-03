@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import { HotkeyInput } from "@/components/HotkeyInput";
 import { KeyCaps } from "@/components/KeyCaps";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
@@ -43,8 +44,9 @@ export function CaptureControlsCard() {
         else unlisteners.push(unlisten);
       })
       .catch(() => undefined);
-    void listen<number>("audio-level", (event) => {
-      if (!disposed) setLevel(Math.max(0, Math.min(1, event.payload)));
+    void listen<number | { level: number }>("audio-level", (event) => {
+      const raw = typeof event.payload === "number" ? event.payload : event.payload.level;
+      if (!disposed) setLevel(Math.max(0, Math.min(1, raw)));
     })
       .then((unlisten) => {
         if (disposed) unlisten();
@@ -187,6 +189,7 @@ export function CaptureControlsCard() {
             onValueChange={async (deviceName) => {
               try {
                 await invoke("set_audio_device", { deviceName: deviceName || null });
+                recordEvent({ name: "quick_setting_changed", properties: { setting: "mic", source: "app" } });
                 toast.success(`Microphone changed to: ${deviceName || "Default"}`);
               } catch (error) {
                 log.error("Failed to set microphone:", error);

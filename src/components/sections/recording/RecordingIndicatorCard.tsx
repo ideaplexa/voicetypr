@@ -8,13 +8,16 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/contexts/SettingsContext";
-import type { PillIndicatorMode, PillIndicatorPosition, PillIndicatorStyle } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type PillIndicatorMode, type PillIndicatorPosition, type PillIndicatorStyle } from "@/types";
 
 export function RecordingIndicatorCard() {
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
   return (
-    <SettingsCard title="Recording pill" className="[&>div:first-child]:sr-only [&>div:last-child]:mt-0">
+    <SettingsCard
+      title="Recording pill"
+      className="[&>div:first-child]:sr-only [&>div:last-child]:mt-0"
+    >
       <div className="grid items-center gap-[18px] sm:grid-cols-[300px_minmax(0,1fr)]">
         <div className="flex h-[120px] items-center justify-center rounded-[10px] bg-muted p-4">
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-[#121316] px-3 py-2 text-white shadow-xl">
@@ -41,7 +44,7 @@ export function RecordingIndicatorCard() {
                   { value: "always", label: "Always" },
                   { value: "when_recording", label: "While recording" },
                 ]}
-                value={settings.pill_indicator_mode ?? "when_recording"}
+                value={settings.pill_indicator_mode ?? DEFAULT_PILL_INDICATOR_MODE}
                 onValueChange={(value) => {
                   if (value != null)
                     void updateSettings({ pill_indicator_mode: value as PillIndicatorMode });
@@ -75,7 +78,9 @@ export function RecordingIndicatorCard() {
                       value,
                       label: value
                         .split("-")
-                        .map((part) => part[0].toUpperCase() + part.slice(1))
+                        .map((part, index) =>
+                          index === 0 ? part[0].toUpperCase() + part.slice(1) : part,
+                        )
                         .join(" "),
                     }))}
                     value={settings.pill_indicator_position ?? "bottom-center"}
@@ -101,7 +106,9 @@ export function RecordingIndicatorCard() {
                         <SelectItem key={value} value={value}>
                           {value
                             .split("-")
-                            .map((part) => part[0].toUpperCase() + part.slice(1))
+                            .map((part, index) =>
+                              index === 0 ? part[0].toUpperCase() + part.slice(1) : part,
+                            )
                             .join(" ")}
                         </SelectItem>
                       ))}

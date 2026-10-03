@@ -336,6 +336,7 @@ pub(crate) fn smart_formatting_ai_context(
 }
 
 struct SmartFormattingRequest<'a> {
+    generation: u64,
     app: AppHandle,
     text: &'a str,
     transcript_language: Option<String>,
@@ -384,6 +385,8 @@ async fn run_smart_formatting(
         request.transcript_language.as_deref(),
         ai_context.as_deref(),
         app_category_hint.as_deref(),
+        request.needs_output_language_transform,
+        request.generation,
     )
     .await
     {
@@ -480,7 +483,7 @@ fn resolve_smart_formatting_outcome(
             });
 
             Ok(SmartFormattingOutcome {
-                text: library_text.to_string(),
+                text: crate::ai::polish::raw_fallback(library_text),
                 error: Some(error.error),
                 duration_ms: None,
                 execution,
@@ -492,6 +495,14 @@ fn resolve_smart_formatting_outcome(
 pub async fn process_transcription(
     app: AppHandle,
     transcription: TranscriptionResult,
+) -> Result<WritingResult, WritingError> {
+    process_transcription_at(app, transcription, 0).await
+}
+
+pub async fn process_transcription_at(
+    app: AppHandle,
+    transcription: TranscriptionResult,
+    generation: u64,
 ) -> Result<WritingResult, WritingError> {
     let settings = load_writing_settings(&app).map_err(WritingError::Config)?;
     let inputs = read_pipeline_config_inputs(&app).map_err(WritingError::Config)?;
@@ -621,6 +632,7 @@ pub async fn process_transcription(
     } else if should_run_ai {
         let ai_polish_started = std::time::Instant::now();
         let smart_formatting = run_smart_formatting(SmartFormattingRequest {
+            generation,
             app,
             text: &library_result.text,
             transcript_language: transcript_language.clone(),
@@ -742,7 +754,7 @@ mod tests {
         crate::commands::ai::AiPolishAttemptError {
             error,
             provider_id: "openai".to_string(),
-            model_id: "gpt-4.1-mini".to_string(),
+            model_id: "gpt-6-luna".to_string(),
         }
     }
 
@@ -822,7 +834,7 @@ mod tests {
             outcome.execution,
             Some(AiExecutionMetadata {
                 provider_id: "openai".to_string(),
-                model_id: "gpt-4.1-mini".to_string(),
+                model_id: "gpt-6-luna".to_string(),
             })
         );
         assert_eq!(warnings.len(), 1);

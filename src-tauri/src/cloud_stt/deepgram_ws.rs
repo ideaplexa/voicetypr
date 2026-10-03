@@ -206,8 +206,8 @@ async fn run_task<F>(
 
     let stream = match tokio_tungstenite::connect_async(request).await {
         Ok((stream, _response)) => stream,
-        Err(error) => {
-            log::warn!("Deepgram RT connect failed: {error}");
+        Err(_error) => {
+            log::warn!("provider=Deepgram status=unknown code=network");
             finish(&mut final_slot, Err(SttError::Network));
             return;
         }
@@ -303,8 +303,8 @@ async fn run_task<F>(
                 }
                 // Ping/Pong/Binary/Frame from the server: ignore.
                 Some(Ok(_)) => {}
-                Some(Err(error)) => {
-                    log::warn!("Deepgram RT read error: {error}");
+                Some(Err(_error)) => {
+                    log::warn!("provider=Deepgram status=unknown code=network");
                     finish(&mut final_slot, Err(SttError::Network));
                     return;
                 }

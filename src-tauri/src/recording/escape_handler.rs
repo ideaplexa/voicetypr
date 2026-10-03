@@ -1,12 +1,12 @@
 use crate::{cancel_recording, get_recording_state, AppState, RecordingState};
 use keytrigger::KeyPhase;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Handle ESC key press during recording
 ///
 /// Implements a double-tap system:
-/// 1. First ESC: Show toast "Press ESC again to cancel" for 2 seconds
+/// 1. First ESC: Show inline hint "Press ESC again to cancel" for 2 seconds
 /// 2. Second ESC within 2 seconds: Cancel recording
 /// 3. Timeout after 2 seconds: Reset to single-tap mode
 pub async fn handle_escape_key_press(
@@ -47,13 +47,25 @@ pub async fn handle_escape_key_press(
     }
 }
 
-/// Handle first ESC press: Show confirmation toast and start timeout
+/// Handle first ESC press: Show confirmation hint and start timeout
 async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
     log::info!("First ESC press detected during recording");
     app_state.esc_pressed_once.store(true, Ordering::SeqCst);
 
-    // Show pill toast for ESC warning (2 seconds)
-    crate::commands::audio::pill_toast(app_handle, "Press ESC again to cancel", 2000);
+    // Show inline hint for ESC warning (2 seconds)
+    crate::observability::emit(
+        "island_state",
+        vec![("state", "escape_hint".into())],
+        Some(crate::commands::audio::current_recording_generation()),
+    );
+    let phase = escape_phase(get_recording_state(app_handle));
+    let _ = app_handle.emit_to(
+        "pill",
+        "escape-hint",
+        serde_json::json!({
+            "generation": crate::commands::audio::current_recording_generation(), "phase": phase
+        }),
+    );
 
     // Set timeout to reset ESC state after 2 seconds
     let app_for_timeout = app_handle.clone();
@@ -82,11 +94,6 @@ async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
 async fn handle_second_esc_press(app_state: &AppState, app_handle: &AppHandle) {
     log::info!("Second ESC press detected, cancelling recording");
 
-    // Hide toast immediately
-    if let Some(toast_window) = app_handle.get_webview_window("toast") {
-        let _ = toast_window.hide();
-    }
-
     // Cancel timeout
     if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
         if let Some(handle) = timeout_guard.take() {
@@ -104,4 +111,21 @@ async fn handle_second_esc_press(app_state: &AppState, app_handle: &AppHandle) {
             log::error!("Failed to cancel recording: {}", e);
         }
     });
+}
+
+fn escape_phase(state: RecordingState) -> &'static str {
+    if state == RecordingState::Transcribing {
+        "transcribing"
+    } else {
+        "recording"
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn first_escape_names_the_transcribing_phase_including_polish() {
+        assert_eq!(escape_phase(RecordingState::Transcribing), "transcribing");
+        assert_eq!(escape_phase(RecordingState::Recording), "recording");
+    }
 }

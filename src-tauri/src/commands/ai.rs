@@ -7,6 +7,9 @@ use crate::ai::genai_runtime::AiKeyResolver;
 use crate::ai::providers::{
     launch_providers, AGENT_CLI_PROVIDER_IDS, PROVIDER_CUSTOM, PROVIDER_OPENROUTER,
 };
+pub(crate) use crate::ai::settings_selection::selected_ai_provider_and_model;
+#[cfg(test)]
+use crate::ai::settings_selection::selection_meets_model_requirement;
 use crate::ai::EnhancementOptions;
 use crate::commands::settings::{
     persist_settings_and_invalidate, FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
@@ -19,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 
 // In-memory cache for API keys to avoid system password prompts
@@ -40,6 +44,8 @@ const AGENT_CLI_FAST_MODE_KEY: &str = "ai_agent_cli_fast_mode_by_provider";
 fn default_agent_cli_reasoning(provider: &str) -> &'static str {
     if matches!(provider, "pi" | "omp") {
         "off"
+    } else if provider == "codex" {
+        "medium"
     } else {
         "low"
     }
@@ -95,10 +101,16 @@ fn load_agent_cli_fast_mode<R: tauri::Runtime>(
         .get(AGENT_CLI_FAST_MODE_KEY)
         .and_then(|value| serde_json::from_value::<HashMap<String, bool>>(value.clone()).ok())
         .unwrap_or_default();
-    for provider in AGENT_CLI_PROVIDER_IDS {
-        values.entry(provider.to_string()).or_insert(false);
-    }
+    apply_agent_cli_fast_mode_defaults(&mut values);
     values
+}
+
+fn apply_agent_cli_fast_mode_defaults(values: &mut HashMap<String, bool>) {
+    for provider in AGENT_CLI_PROVIDER_IDS {
+        values
+            .entry(provider.to_string())
+            .or_insert(*provider == "codex");
+    }
 }
 
 // One pooled reqwest::Client shared across the LLM enhancement path so the connection pool stays hot across calls.
@@ -194,15 +206,6 @@ fn check_has_api_key<R: tauri::Runtime>(
     } else {
         cache.contains_key(&format!("ai_api_key_{}", provider))
     }
-}
-
-/// Whether a selected (provider, model) pair satisfies the executor's model
-/// requirement. Agent-CLI runtimes (Claude Code) waive it — they carry no
-/// catalog model because the CLI selects its own; every other runtime requires
-/// a non-empty model. Shared by the readiness/selection guards below so the
-/// model-less-CLI exemption lives in exactly one place.
-fn selection_meets_model_requirement(provider: &str, model: &str) -> bool {
-    !model.is_empty() || catalog::runtime_kind(provider) == Some("agent_cli")
 }
 
 pub(crate) fn has_ai_model_and_key(app: &tauri::AppHandle) -> Result<bool, String> {
@@ -330,6 +333,7 @@ async fn run_openai_chat_probe(
         provider_id: PROVIDER_CUSTOM.to_string(),
         model_id: model.to_string(),
         input_text: "ping".to_string(),
+        needs_output_language_transform: false,
         reasoning_level: None,
         fast_mode: false,
         prompt: "Reply with OK.".to_string(),
@@ -405,7 +409,14 @@ pub async fn get_ai_settings(app: tauri::AppHandle) -> Result<AISettings, String
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "".to_string()); // Empty by default
 
-    let models_by_provider = load_models_by_provider(&store, &provider, &model);
+    let model = catalog::resolve_model(&provider, &model).unwrap_or(model);
+    let models_by_provider = load_models_by_provider(&store, &provider, &model)
+        .into_iter()
+        .map(|(provider, model)| {
+            let model = catalog::resolve_model(&provider, &model).unwrap_or(model);
+            (provider, model)
+        })
+        .collect();
     let reasoning_by_provider = load_agent_cli_reasoning(&store);
     let fast_mode_by_provider = load_agent_cli_fast_mode(&store);
 
@@ -456,7 +467,13 @@ pub async fn get_ai_settings_for_provider(
         .get("ai_model")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "".to_string()); // Empty by default
-    let models_by_provider = load_models_by_provider(&store, &current_provider, &current_model);
+    let models_by_provider = load_models_by_provider(&store, &current_provider, &current_model)
+        .into_iter()
+        .map(|(provider, model)| {
+            let model = catalog::resolve_model(&provider, &model).unwrap_or(model);
+            (provider, model)
+        })
+        .collect::<HashMap<_, _>>();
     let reasoning_by_provider = load_agent_cli_reasoning(&store);
     let fast_mode_by_provider = load_agent_cli_fast_mode(&store);
     let model = models_by_provider
@@ -588,7 +605,7 @@ fn configured_custom_model(app: &tauri::AppHandle) -> Option<String> {
 ///
 /// Prefer the explicit `model` arg, else the user's previously-configured
 /// custom model. The custom provider has no catalog models, so this NEVER
-/// falls back to `gpt-5-nano` (which would 404 against a local endpoint).
+/// falls back to `gpt-6-luna` (which would 404 against a local endpoint).
 fn resolve_custom_validation_model(
     explicit: Option<&str>,
     configured: Option<&str>,
@@ -633,19 +650,19 @@ pub async fn validate_ai_api_key(
     let validation_model = if provider == PROVIDER_CUSTOM {
         // The custom provider has no catalog models, so a model must be
         // supplied explicitly or already configured in settings. Never fall
-        // back to gpt-5-nano — that would 404 against a local endpoint.
+        // back to gpt-6-luna — that would 404 against a local endpoint.
         let configured = configured_custom_model(&app);
         resolve_custom_validation_model(model.as_deref(), configured.as_deref())?
     } else {
         model
             .filter(|candidate| !candidate.trim().is_empty())
             .or_else(|| {
-                catalog::recommended_models(&provider)
+                crate::ai::providers::recommended_models(&provider)
                     .into_iter()
                     .find(|candidate| candidate.recommended)
                     .map(|candidate| candidate.model_id)
             })
-            .unwrap_or_else(|| "gpt-5-nano".to_string())
+            .ok_or_else(|| user_facing_message(&AiProviderError::InvalidModel).to_string())?
     };
     let custom_base_url = if provider == PROVIDER_CUSTOM {
         base_url
@@ -696,6 +713,7 @@ pub async fn validate_ai_api_key(
         provider_id: provider.clone(),
         model_id: validation_model,
         input_text: "ok".to_string(),
+        needs_output_language_transform: false,
         reasoning_level: None,
         fast_mode: false,
         prompt: "Reply with exactly: ok".to_string(),
@@ -1039,6 +1057,7 @@ pub async fn update_enhancement_options(
     )
     .await?;
 
+    let _ = app.emit("polish-options-changed", ());
     log::info!("Enhancement options updated: preset={:?}", options.preset);
 
     Ok(())
@@ -1060,7 +1079,7 @@ pub async fn update_writing_settings(
     Ok(())
 }
 
-fn custom_base_url_from_settings(app: &tauri::AppHandle) -> Option<String> {
+fn custom_base_url_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     app.store("settings").ok().and_then(|store| {
         store
             .get(CUSTOM_BASE_URL_KEY)
@@ -1073,7 +1092,10 @@ fn custom_base_url_from_settings(app: &tauri::AppHandle) -> Option<String> {
     })
 }
 
-fn custom_no_auth_from_settings(app: &tauri::AppHandle, has_key: bool) -> bool {
+fn custom_no_auth_from_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    has_key: bool,
+) -> bool {
     app.store("settings")
         .ok()
         .and_then(|store| {
@@ -1205,26 +1227,6 @@ pub(crate) async fn prefetch_ai_provider(app: tauri::AppHandle, provider_id: Str
     }
 }
 
-fn selected_ai_provider_and_model(
-    app: &tauri::AppHandle,
-) -> Result<(String, String), AiProviderError> {
-    let store = app
-        .store("settings")
-        .map_err(|_| AiProviderError::Internal)?;
-    let provider = store
-        .get("ai_provider")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    let model = store
-        .get("ai_model")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    if provider.is_empty() || !selection_meets_model_requirement(&provider, &model) {
-        return Err(AiProviderError::InvalidModel);
-    }
-    Ok((provider, model))
-}
-
 #[derive(Debug)]
 pub(crate) struct AiPolishAttemptError {
     pub error: AiProviderError,
@@ -1254,8 +1256,8 @@ impl AiPolishAttemptError {
         self
     }
 }
-fn executor_for_provider(
-    app: &tauri::AppHandle,
+fn executor_for_provider<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     selected_provider: &str,
 ) -> Result<(AiExecutor, String), AiPolishAttemptError> {
     let cache = API_KEY_CACHE.lock().map_err(|_| {
@@ -1394,15 +1396,17 @@ fn executor_for_provider(
     ))
 }
 
-async fn polish_text_with_prompt_result_typed(
-    app: &tauri::AppHandle,
-    text: &str,
-    model: String,
-    provider: String,
-    prompt: String,
-) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
-    let (executor, runtime_provider) =
-        executor_for_provider(app, &provider).map_err(|error| error.with_model(model.clone()))?;
+pub(crate) fn prepare_polish_runtime<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    provider: &str,
+    model: &str,
+) -> Result<crate::ai::polish::PolishRuntime, AiPolishAttemptError> {
+    let (executor, runtime_provider) = executor_for_provider(app, provider)
+        .map_err(|error| error.with_model(model.to_string()))?;
+    let resolved_model = catalog::resolve_model(&runtime_provider, model).ok_or_else(|| {
+        AiPolishAttemptError::for_provider(AiProviderError::InvalidModel, &runtime_provider)
+    })?;
+    let model = resolved_model.as_str();
     // The subprocess runtime owns provider-specific local-agent budgets; reuse
     // that value here so the executor cannot cancel a healthy child first.
     let timeout_ms = if catalog::runtime_kind(&runtime_provider) == Some("agent_cli") {
@@ -1414,7 +1418,7 @@ async fn polish_text_with_prompt_result_typed(
     let (reasoning_level, fast_mode) = if is_agent_cli {
         let store = app.store("settings").map_err(|_| {
             AiPolishAttemptError::for_provider(AiProviderError::Internal, runtime_provider.clone())
-                .with_model(model.clone())
+                .with_model(model.to_string())
         })?;
         (
             Some(
@@ -1429,33 +1433,17 @@ async fn polish_text_with_prompt_result_typed(
     } else {
         (None, false)
     };
-    let request = AiPolishRequest {
-        provider_id: runtime_provider.clone(),
-        model_id: model.clone(),
+    Ok(crate::ai::polish::PolishRuntime {
+        executor,
+        provider: runtime_provider,
+        model: model.to_string(),
         reasoning_level,
         fast_mode,
-        input_text: text.to_string(),
-        prompt,
         timeout_ms,
-    };
-    let result = executor
-        .polish(request, tokio_util::sync::CancellationToken::new())
-        .await
-        .map_err(|error| AiPolishAttemptError {
-            error,
-            provider_id: runtime_provider,
-            model_id: model,
-        })?;
-    log::info!(
-        "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
-        result.provider_id,
-        text.len(),
-        result.output_text.len(),
-        result.duration_ms
-    );
-    Ok(result)
+    })
 }
 
+#[allow(clippy::too_many_arguments)] // single caller (writing pipeline); mirrors its request fields
 pub async fn polish_text_typed(
     app: &tauri::AppHandle,
     text: &str,
@@ -1464,17 +1452,125 @@ pub async fn polish_text_typed(
     transcript_language: Option<&str>,
     context: Option<&str>,
     app_category_hint: Option<&str>,
+    needs_output_language_transform: bool,
+    generation: u64,
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
+    crate::observability::update(
+        generation,
+        "polish_keep_words",
+        serde_json::json!(crate::ai::keep_words::read(app)),
+    );
+    crate::observability::update(
+        generation,
+        "polish_style",
+        serde_json::json!(match options.preset {
+            crate::ai::prompts::EnhancementPreset::PersonalDictation => "off",
+            crate::ai::prompts::EnhancementPreset::CleanDictation => "clean",
+            crate::ai::prompts::EnhancementPreset::Writing => "writing",
+            crate::ai::prompts::EnhancementPreset::Notes => "notes",
+            crate::ai::prompts::EnhancementPreset::Message => "message",
+            crate::ai::prompts::EnhancementPreset::Code => "code",
+        }),
+    );
     let (provider, model) =
         selected_ai_provider_and_model(app).map_err(AiPolishAttemptError::unattributed)?;
-    let prompt = crate::ai::prompts::build_enhancement_prompt_for_transcript_language(
-        context,
+    // Zero-wait: already-clean text needs no model call. The caller decides
+    // eligibility (no translation pending), since engines may omit a language.
+    if !needs_output_language_transform && crate::ai::skip::should_skip(text, options.preset) {
+        crate::observability::update(generation, "polish_skip_used", serde_json::json!(true));
+        return Ok(crate::ai::contract::AiPolishResult {
+            output_text: text.to_string(),
+            provider_id: provider,
+            model_id: model,
+            duration_ms: 0,
+        });
+    }
+    let prompt = crate::ai::polish::assemble_prompt(
         options,
         output_language,
         transcript_language,
+        context,
         app_category_hint,
+        crate::ai::keep_words::read(app),
     );
-    polish_text_with_prompt_result_typed(app, text, model, provider, prompt).await
+    let runtime = prepare_polish_runtime(app, &provider, &model).inspect_err(|error| {
+        let provider = crate::telemetry::PROVIDERS
+            .iter()
+            .copied()
+            .find(|p| *p == error.provider_id)
+            .unwrap_or("unknown");
+        let code = match &error.error {
+            AiProviderError::MissingApiKey | AiProviderError::InvalidApiKey => "unauthorized",
+            AiProviderError::InvalidModel => "model_unavailable",
+            _ => "unknown",
+        };
+        crate::telemetry::capture_error(
+            "polish_provider_failed",
+            crate::telemetry::ErrorContext {
+                generation: Some(generation),
+                provider: Some(provider),
+                provider_code: Some(code),
+                ..Default::default()
+            },
+        );
+    })?;
+    let mut timings = crate::ai::polish::PolishTimings::default();
+    let result = crate::ai::polish::execute_prompt(
+        &runtime,
+        text,
+        prompt,
+        &mut timings,
+        needs_output_language_transform,
+    )
+    .await
+    .map_err(|error| {
+        let provider = crate::telemetry::PROVIDERS
+            .iter()
+            .copied()
+            .find(|p| *p == runtime.provider)
+            .unwrap_or("unknown");
+        let code = match &error {
+            crate::ai::error::AiProviderError::Timeout => "timeout",
+            crate::ai::error::AiProviderError::RateLimited => "rate_limited",
+            crate::ai::error::AiProviderError::Network => "network",
+            crate::ai::error::AiProviderError::InvalidApiKey
+            | crate::ai::error::AiProviderError::MissingApiKey => "unauthorized",
+            crate::ai::error::AiProviderError::ServiceUnavailable => "unavailable",
+            crate::ai::error::AiProviderError::Canceled => "cancelled",
+            crate::ai::error::AiProviderError::BadResponse => "invalid_response",
+            crate::ai::error::AiProviderError::OutputGuard(reason) => {
+                crate::observability::update(
+                    generation,
+                    "polish_guard_reason",
+                    serde_json::json!(reason.code()),
+                );
+                "invalid_response"
+            }
+            _ => "unknown",
+        };
+        crate::telemetry::capture_error(
+            "polish_provider_failed",
+            crate::telemetry::ErrorContext {
+                generation: Some(generation),
+                provider: Some(provider),
+                provider_code: Some(code),
+                ..Default::default()
+            },
+        );
+        AiPolishAttemptError {
+            error,
+            provider_id: runtime.provider,
+            model_id: model,
+        }
+    })?;
+    log::info!(
+        "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
+        result.provider_id,
+        text.len(),
+        result.output_text.len(),
+        result.duration_ms
+    );
+    Ok(result)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1717,10 +1813,10 @@ mod tests {
         assert!(!selection_meets_model_requirement("gemini", ""));
         assert!(selection_meets_model_requirement(
             "gemini",
-            "gemini-2.5-flash"
+            "gemini-3.8-flash"
         ));
         assert!(!selection_meets_model_requirement("openai", ""));
-        assert!(selection_meets_model_requirement("openai", "gpt-5-nano"));
+        assert!(selection_meets_model_requirement("openai", "gpt-6-luna"));
         assert!(!selection_meets_model_requirement("unknown-provider", ""));
     }
 
@@ -1740,7 +1836,7 @@ mod tests {
         assert!(validate_agent_cli_reasoning("opencode", "low").is_ok());
         assert_eq!(default_agent_cli_reasoning("pi"), "off");
         assert_eq!(default_agent_cli_reasoning("omp"), "off");
-        assert_eq!(default_agent_cli_reasoning("codex"), "low");
+        assert_eq!(default_agent_cli_reasoning("codex"), "medium");
         assert!(validate_agent_cli_reasoning("pi", "medium").is_ok());
         assert!(validate_agent_cli_reasoning("pi", "high").is_err());
         assert_eq!(normalize_agent_cli_reasoning("pi", "high"), "medium");
@@ -1862,20 +1958,20 @@ mod tests {
     fn test_provider_models_are_contract_backed() {
         let openai_models = provider_models("openai");
         assert!(openai_models.len() >= 2);
-        assert!(openai_models.iter().any(|m| m.id == "gpt-5-nano"));
-        assert!(openai_models.iter().any(|m| m.id == "gpt-5-mini"));
+        assert!(openai_models.iter().any(|m| m.id == "gpt-6-luna"));
+        assert!(openai_models.iter().any(|m| m.id == "gpt-6.1-sol"));
 
         let gemini_models = provider_models("gemini");
         assert!(!gemini_models.is_empty());
-        assert!(gemini_models.iter().any(|m| m.id == "gemini-2.5-flash"));
+        assert!(gemini_models.iter().any(|m| m.id == "gemini-3.8-flash"));
         assert!(gemini_models
             .iter()
-            .any(|m| m.id == "gemini-2.5-flash-lite"));
+            .any(|m| m.id == "gemini-3.5-flash-lite"));
 
         let anthropic_models = provider_models("anthropic");
         assert!(!anthropic_models.is_empty());
-        assert!(anthropic_models.iter().any(|m| m.id == "claude-haiku-4-5"));
-        assert!(anthropic_models.iter().any(|m| m.id == "claude-sonnet-4-5"));
+        assert!(anthropic_models.iter().any(|m| m.id == "claude-sonnet-5-5"));
+        assert!(anthropic_models.iter().any(|m| m.id == "claude-opus-5-5"));
 
         assert!(provider_models("custom").is_empty());
         assert!(provider_models("unknown").is_empty());
@@ -1932,12 +2028,12 @@ mod tests {
     fn remember_provider_model_preserves_explicit_cli_default_selection() {
         let mut models = HashMap::from([
             ("claude-code".to_string(), "sonnet".to_string()),
-            ("openai".to_string(), "gpt-5-nano".to_string()),
+            ("openai".to_string(), "gpt-6-luna".to_string()),
         ]);
 
         remember_provider_model(&mut models, "claude-code", "");
         assert_eq!(models.get("claude-code"), Some(&String::new()));
-        assert_eq!(models.get("openai"), Some(&"gpt-5-nano".to_string()));
+        assert_eq!(models.get("openai"), Some(&"gpt-6-luna".to_string()));
 
         remember_provider_model(&mut models, "openai", "");
         assert!(!models.contains_key("openai"));
@@ -1953,7 +2049,7 @@ mod tests {
     fn valid_cli_default_selection_clears_model_reselection() {
         assert!(selection_clears_model_reselection("pi", ""));
         assert!(selection_clears_model_reselection("omp", ""));
-        assert!(selection_clears_model_reselection("openai", "gpt-5-mini"));
+        assert!(selection_clears_model_reselection("openai", "gpt-6.1-sol"));
         assert!(!selection_clears_model_reselection("openai", ""));
     }
 
@@ -1996,7 +2092,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enhancement_options_for_ai_enabled_normalizes_global_preset() {
+    fn test_enhancement_options_for_ai_enabled_preserves_selected_style() {
         use crate::ai::prompts::{enhancement_options_for_ai_enabled, EnhancementPreset};
 
         let writing = serde_json::json!({ "preset": "Writing" });
@@ -2004,7 +2100,7 @@ mod tests {
         assert_eq!(disabled.preset, EnhancementPreset::PersonalDictation);
 
         let enabled = enhancement_options_for_ai_enabled(Some(&writing), true).unwrap();
-        assert_eq!(enabled.preset, EnhancementPreset::CleanDictation);
+        assert_eq!(enabled.preset, EnhancementPreset::Writing);
 
         let clean = serde_json::json!({ "preset": "CleanDictation" });
         let enabled_clean = enhancement_options_for_ai_enabled(Some(&clean), true).unwrap();
@@ -2149,7 +2245,7 @@ mod tests {
         // No explicit model and no configured model -> clear error, never a probe.
         let err = resolve_custom_validation_model(None, None).unwrap_err();
         assert!(err.contains("Select a model"), "got: {}", err);
-        assert!(!err.to_lowercase().contains("gpt-5-nano"));
+        assert!(!err.to_lowercase().contains("gpt-6-luna"));
 
         // Explicit model wins.
         assert_eq!(
@@ -2165,3 +2261,7 @@ mod tests {
         assert!(resolve_custom_validation_model(Some("   "), Some("  ")).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "ai_defaults_tests.rs"]
+mod defaults_tests;

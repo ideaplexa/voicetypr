@@ -5,8 +5,7 @@
   "platforms": ["windows"],
   "windows": [
     "main",
-    "pill",
-    "toast"
+    "pill"
   ],
   "permissions": [
     "core:default",

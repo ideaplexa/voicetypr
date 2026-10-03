@@ -121,12 +121,38 @@ export function generateReportId(): string {
   return `VT-${Array.from(bytes, (byte) => REPORT_ALPHABET[byte & 31]).join("")}`;
 }
 
-export function formatManualReportMessage(reportId: string, message: string): string {
+export interface ReportDiagnostics {
+  app_version: string;
+  os: string;
+  arch: string;
+  install_id: string | null;
+  dictation_ids: string[];
+  engine: string;
+  pill_mode: string;
+}
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export function formatDiagnostics(data: ReportDiagnostics): string {
+  const choice = (value: string, allowed: readonly string[]) => allowed.includes(value) ? value : "unknown";
+  const version = /^\d+\.\d+\.\d+(?:-(?:beta|rc|alpha|dev)(?:\.\d+(?:\.\d+)*)?)?$/i.test(data.app_version) ? data.app_version : "unknown";
+  return [
+    "Diagnostics",
+    `App version: ${version}`,
+    `OS: ${choice(data.os, ["macos", "windows", "linux"])}`,
+    `Arch: ${choice(data.arch, ["aarch64", "x86_64", "arm", "x86"])}`,
+    ...(data.install_id && UUID_V4.test(data.install_id) ? [`Anonymous install ID: ${data.install_id}`] : []),
+    `Dictation IDs: ${data.dictation_ids.filter(id => UUID_V4.test(id)).slice(-5).join(", ") || "none"}`,
+    `Engine: ${choice(data.engine, ["whisper", "parakeet", "cloud", "remote", "none", "Whisper", "Whisper Tiny", "Whisper Base", "Whisper Small", "Whisper Medium", "Whisper Large", "Whisper Turbo", "Parakeet", "Parakeet V2", "Parakeet Unified", "Nemotron", "Network", "Soniox", "Deepgram", "OpenAI", "Groq", "Cohere"])}`,
+    `Pill mode: ${choice(data.pill_mode, ["always", "when_recording", "never"])}`,
+  ].join("\n");
+}
+export function formatManualReportMessage(reportId: string, message: string, diagnostics?: ReportDiagnostics): string {
   const prefix = `Report ID: ${reportId}\n\n`;
-  return prefix + message.slice(0, MANUAL_MESSAGE_LIMIT - prefix.length);
+  const suffix = diagnostics ? `\n\n${formatDiagnostics(diagnostics)}` : "";
+  return prefix + message.slice(0, Math.max(0, MANUAL_MESSAGE_LIMIT - prefix.length - suffix.length)) + suffix;
 }
 
 export interface ManualReportData {
+  diagnostics?: ReportDiagnostics;
   reportId: string;
   name?: string;
   email?: string;
@@ -173,6 +199,7 @@ export async function gatherManualReportData(
   currentModel?: string | null,
 ): Promise<ManualReportData> {
   const reportId = generateReportId();
+  const diagnostics = await invoke<ReportDiagnostics>("get_report_diagnostics").catch(() => undefined);
   const [appVer, deviceId, logAttachment, systemSpecsResult, trayStatus] = await Promise.all([
     getVersion().catch(() => "Unknown"),
     invoke<string>("get_device_id").catch(() => "Unknown"),
@@ -197,6 +224,8 @@ export async function gatherManualReportData(
 
   return {
     reportId,
+    diagnostics: diagnostics ?? { app_version: appVer, os, arch: architecture, install_id: null,
+      dictation_ids: [], engine: "none", pill_mode: "unknown" },
     ...(name ? { name } : {}),
     ...(email ? { email } : {}),
     message,
@@ -232,7 +261,7 @@ export function buildReportBody(data: ManualReportData): string {
   }
 
   parts.push("### Message");
-  parts.push(formatManualReportMessage(data.reportId, data.message));
+  parts.push(formatManualReportMessage(data.reportId, data.message, data.diagnostics));
   parts.push("");
 
   parts.push("## Environment");
@@ -375,7 +404,7 @@ export function buildManualReportPayload(data: ManualReportData): BugReportPaylo
     kind: "manual",
     ...(data.name ? { name: data.name } : {}),
     ...(data.email ? { email: data.email } : {}),
-    message: formatManualReportMessage(data.reportId, data.message),
+    message: formatManualReportMessage(data.reportId, data.message, data.diagnostics),
     environment: buildEnvironmentPayload(data),
     latestLog: buildLatestLogPayload(data),
   };

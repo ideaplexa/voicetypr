@@ -198,7 +198,7 @@ vi.mock("./tabs/TabContainer", () => ({
       <button onClick={() => onNavigate("transcription")}>Open Transcription</button>
       <button onClick={() => onNavigate("home")}>Open Home</button>
       <button onClick={() => onSettingsPaneChange("advanced")}>Open Troubleshooting</button>
-      {activeSection === "settings" && <div>Settings pane: {settingsPane ?? "general"}</div>}
+      {settingsPane && <div>Settings pane: {settingsPane}</div>}
       {activeSection === "transcription" && (
         <div data-testid="transcription">
           Source filter: {sourceFilter ?? "automatic"}
@@ -286,10 +286,11 @@ describe("AppContainer", () => {
     });
   });
 
-  it("shows hotkey and no-speech notices while their settings tab is unmounted", async () => {
+  it("shows hotkey notices without the dead no-speech listener", async () => {
     render(<AppContainer />);
     await waitFor(() => {
-      expect((window as any).__testEventCallbacks?.["no-speech-detected"]).toBeInstanceOf(Function);
+      expect((window as any).__testEventCallbacks?.["hotkey-registration-failed"]).toBeInstanceOf(Function);
+      expect((window as Window & { __testEventCallbacks?: Record<string, unknown> }).__testEventCallbacks?.["no-speech-detected"]).toBeUndefined();
     });
     expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: home");
 
@@ -297,21 +298,13 @@ describe("AppContainer", () => {
       (window as any).__testEventCallbacks["hotkey-registration-failed"]({
         suggestion: "Shortcut is occupied",
       });
-      (window as any).__testEventCallbacks["no-speech-detected"]({
-        title: "No Speech Detected",
-        message: "Check your microphone",
-        severity: "warning",
-      });
     });
 
     expect(toastErrorMock).toHaveBeenCalledWith("Hotkey Registration Failed", {
       description: "Shortcut is occupied",
       duration: 10000,
     });
-    expect(toastWarningMock).toHaveBeenCalledWith("No Speech Detected", {
-      description: "Check your microphone",
-      duration: 5000,
-    });
+
   });
 
   it("shows AI error notices and updates Polish error state while Polish is unmounted", async () => {
@@ -370,7 +363,7 @@ describe("AppContainer", () => {
   });
 
   it.each([false, true])(
-    "opens License with one toast when focus fails: %s",
+    "opens License with one toast without requesting focus: %s",
     async (focusFails) => {
       if (focusFails) {
         const originalImplementation = mockInvoke.getMockImplementation();
@@ -392,12 +385,13 @@ describe("AppContainer", () => {
         });
       });
 
-      expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: license");
+      expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: home");
+      expect(screen.getByText("Settings pane: license")).toBeInTheDocument();
       expect(toastErrorMock).toHaveBeenCalledWith("License Required", {
         description: "Restore your license",
         duration: 5000,
       });
-      expect(mockInvoke).toHaveBeenCalledWith("focus_main_window");
+      expect(mockInvoke).not.toHaveBeenCalledWith("focus_main_window");
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 250));
       });
@@ -443,7 +437,7 @@ describe("AppContainer", () => {
   it("opens the Troubleshooting pane through the new Settings destination", () => {
     render(<AppContainer />);
     fireEvent.click(screen.getByRole("button", { name: "Open Troubleshooting" }));
-    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: settings");
+    expect(screen.getByTestId("tab-container")).toHaveTextContent("Current Tab: home");
     expect(screen.getByText("Settings pane: advanced")).toBeInTheDocument();
   });
 

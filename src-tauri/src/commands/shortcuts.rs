@@ -201,7 +201,12 @@ pub fn get_shortcut_settings(app: AppHandle) -> Result<ShortcutSettings, String>
     load_shortcut_settings(&app)
 }
 
-const FALLBACK_PRIMARY: &str = "CommandOrControl+Shift+Space";
+/// Two-key default for new installs. Not Alt+Space on Windows: once the hook
+/// swallows Space, the app sees a lone Alt tap and opens its menu bar.
+#[cfg(target_os = "windows")]
+pub(crate) const FALLBACK_PRIMARY: &str = "Control+Space";
+#[cfg(not(target_os = "windows"))]
+pub(crate) const FALLBACK_PRIMARY: &str = "Alt+Space";
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -647,7 +652,10 @@ pub async fn toggle_ai_formatting(app: AppHandle) -> Result<(), String> {
                 std::convert::identity,
             )
             .await?;
-            crate::commands::audio::pill_toast(&app, "Polish on", 2500);
+            crate::commands::island_notice::notice(
+                &app,
+                crate::commands::island_notice::NoticeKind::PolishOn,
+            );
             let _ = crate::emit_to_window(&app, "main", "ai-enabled-changed", true);
         }
         Some(false) => {
@@ -661,14 +669,16 @@ pub async fn toggle_ai_formatting(app: AppHandle) -> Result<(), String> {
                 std::convert::identity,
             )
             .await?;
-            crate::commands::audio::pill_toast(&app, "Polish off", 2500);
+            crate::commands::island_notice::notice(
+                &app,
+                crate::commands::island_notice::NoticeKind::PolishOff,
+            );
             let _ = crate::emit_to_window(&app, "main", "ai-enabled-changed", false);
         }
         None => {
-            crate::commands::audio::pill_toast(
+            crate::commands::island_notice::notice(
                 &app,
-                "Set up an AI model in Settings to use Polish",
-                3500,
+                crate::commands::island_notice::NoticeKind::PolishSetup,
             );
         }
     }
@@ -846,7 +856,10 @@ pub(crate) fn load_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettings
 
             if should_notice {
                 let message = "Formatting-mode shortcuts were retired.";
-                crate::commands::audio::pill_toast(app, message, 3500);
+                crate::commands::island_notice::notice(
+                    app,
+                    crate::commands::island_notice::NoticeKind::ShortcutsRetired,
+                );
                 let _ = app.emit("shortcut-bindings-retired", message);
             }
 
@@ -941,7 +954,7 @@ fn current_existing_shortcuts(app: &AppHandle) -> ExistingShortcutStrings {
         Ok(store) => store,
         Err(_) => {
             return ExistingShortcutStrings {
-                primary_hotkey: Some("CommandOrControl+Shift+Space".to_string()),
+                primary_hotkey: Some(FALLBACK_PRIMARY.to_string()),
                 ptt_hotkey: None,
             }
         }
@@ -950,7 +963,7 @@ fn current_existing_shortcuts(app: &AppHandle) -> ExistingShortcutStrings {
     let primary_hotkey = store
         .get("hotkey")
         .and_then(|value| value.as_str().map(str::to_string))
-        .or_else(|| Some("CommandOrControl+Shift+Space".to_string()));
+        .or_else(|| Some(FALLBACK_PRIMARY.to_string()));
 
     let recording_mode = store
         .get("recording_mode")
@@ -1040,7 +1053,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::CancelRecording,
-            label: "Cancel recording",
+            label: "Cancel dictation",
             description: "Cancel the current recording.",
             section: "Recording",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1048,7 +1061,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::CopyLastTranscription,
-            label: "Copy last transcription",
+            label: "Copy last transcript",
             description: "Copy the latest finished transcription to the clipboard.",
             section: "History",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1056,7 +1069,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::PasteLastTranscription,
-            label: "Paste last transcription",
+            label: "Paste last transcript",
             description: "Paste the latest finished transcription into the active app.",
             section: "History",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1064,7 +1077,7 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::ToggleAiFormatting,
-            label: "Toggle Polish",
+            label: "Polish on / off",
             description: "Turn Polish on or off.",
             section: "Polish",
             recommended_trigger: ShortcutTrigger::Pressed,
@@ -1072,9 +1085,9 @@ fn shortcut_action_definitions() -> Vec<ShortcutActionDefinition> {
         },
         ShortcutActionDefinition {
             action: ShortcutAction::OpenDashboard,
-            label: "Open dashboard",
-            description: "Focus the Voicetypr dashboard.",
-            section: "Dashboard",
+            label: "Open Voicetypr",
+            description: "Open the Voicetypr main window.",
+            section: "App",
             recommended_trigger: ShortcutTrigger::Pressed,
             allows_single_key: true,
         },

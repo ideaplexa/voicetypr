@@ -56,7 +56,10 @@ fn handle_toggle_mode(
     };
 
     if should_throttle {
-        crate::commands::audio::pill_toast(app, "Hold on...", 1000);
+        crate::commands::island_notice::notice(
+            app,
+            crate::commands::island_notice::NoticeKind::ShortcutThrottled,
+        );
         return;
     }
 
@@ -66,7 +69,7 @@ fn handle_toggle_mode(
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 let recorder_state = app_handle.state::<RecorderState>();
-                match start_recording(app_handle.clone(), recorder_state).await {
+                match start_recording(app_handle.clone(), recorder_state, None).await {
                     Ok(_) => log::info!("Toggle: Recording started successfully"),
                     Err(e) => {
                         log::error!("Toggle: Error starting recording: {}", e);
@@ -95,6 +98,12 @@ fn handle_toggle_mode(
         }
         RecordingState::Starting => {
             log::info!("Toggle: stop requested while starting; will stop after start completes");
+        }
+        RecordingState::Stopping | RecordingState::Transcribing => {
+            crate::commands::island_notice::notice(
+                app,
+                crate::commands::island_notice::NoticeKind::Finishing,
+            );
         }
         _ => log::debug!("Toggle: Ignoring hotkey in state {:?}", current_state),
     }
@@ -156,6 +165,15 @@ fn handle_ptt_mode(
     current_state: RecordingState,
     event_state: KeyPhase,
 ) {
+    if app_state.pointer_recording.load(Ordering::SeqCst)
+        && matches!(
+            current_state,
+            RecordingState::Starting | RecordingState::Recording
+        )
+    {
+        handle_toggle_mode(app, app_state, current_state, event_state);
+        return;
+    }
     match event_state {
         KeyPhase::Pressed => {
             log::info!("PTT: Key pressed");
@@ -166,7 +184,7 @@ fn handle_ptt_mode(
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let recorder_state = app_handle.state::<RecorderState>();
-                    match start_recording(app_handle.clone(), recorder_state).await {
+                    match start_recording(app_handle.clone(), recorder_state, None).await {
                         Ok(_) => log::info!("PTT: Recording started successfully"),
                         Err(e) if e == PTT_START_ABORTED_AFTER_RELEASE => {
                             log::info!("PTT: Recording start cancelled after key release");

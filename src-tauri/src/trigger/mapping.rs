@@ -125,6 +125,15 @@ fn side(kind: SideKind) -> Side {
 /// Parse a normalized combo string (e.g. "CommandOrControl+Shift+Space") into a
 /// `ComboExact` (>=1 modifier) or `SingleKey` (no modifier) trigger. Errors on an
 /// unknown token or when there is not exactly one non-modifier key.
+/// Two shortcut strings name the same physical combo (spelling, case and
+/// modifier order ignored).
+pub(crate) fn same_shortcut(a: &str, b: &str) -> bool {
+    match (parse_combo(a), parse_combo(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => normalize_shortcut_keys(a).eq_ignore_ascii_case(&normalize_shortcut_keys(b)),
+    }
+}
+
 pub(crate) fn parse_combo(shortcut: &str) -> Result<Trigger, String> {
     let normalized = normalize_shortcut_keys(shortcut);
     let mut mods = ModSet::empty();
@@ -321,7 +330,22 @@ fn numpad_named(token: &str) -> Option<NamedKey> {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_recording_engine_binding, is_engine_kind, parse_combo, to_trigger, validate};
+    use super::{
+        has_recording_engine_binding, is_engine_kind, parse_combo, same_shortcut, to_trigger,
+        validate,
+    };
+
+    #[test]
+    fn same_shortcut_ignores_spelling_case_and_modifier_order() {
+        // "Ctrl" means Cmd/Ctrl: the same physical combo only off macOS.
+        assert_eq!(
+            same_shortcut("Control+Space", "Ctrl+Space"),
+            !cfg!(target_os = "macos")
+        );
+        assert!(same_shortcut("alt+space", "Alt+Space"));
+        assert!(same_shortcut("Shift+Alt+K", "Alt+Shift+K"));
+        assert!(!same_shortcut("Alt+Space", "Control+Space"));
+    }
     use crate::commands::shortcuts::{
         ModifierKind, ModifierSpec, ShortcutAction, ShortcutBinding, ShortcutTrigger, SideKind,
         TriggerKind,

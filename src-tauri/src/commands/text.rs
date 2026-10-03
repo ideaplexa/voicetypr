@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 // rdev keyboard simulation (Linux paste only; macOS uses core-graphics, Windows uses Win32 SendInput).
@@ -91,15 +91,16 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
 
 #[tauri::command]
 pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    insert_text_with_generation(app, text, None).await
+    insert_text_with_generation(app, text, None, false).await
 }
 
 pub(crate) async fn insert_dictation_text(
     app: tauri::AppHandle,
     text: String,
     generation: u64,
+    polished: bool,
 ) -> Result<(), String> {
-    let result = insert_text_with_generation(app.clone(), text, Some(generation)).await;
+    let result = insert_text_with_generation(app.clone(), text, Some(generation), polished).await;
     if result.is_err() {
         // A permission outcome already owns its 2.5 s timeout. Other errors
         // have no terminal feedback; release the window immediately.
@@ -112,6 +113,7 @@ async fn insert_text_with_generation(
     app: tauri::AppHandle,
     text: String,
     generation: Option<u64>,
+    polished: bool,
 ) -> Result<(), String> {
     // Check if already inserting text
     if IS_INSERTING.swap(true, Ordering::SeqCst) {
@@ -145,27 +147,44 @@ async fn insert_text_with_generation(
 
     let words = text.split_whitespace().count() as u32;
     let outcome_app = app.clone();
+    let outcome_app_for_commit = app.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         // Apply trailing sentence space only at the insertion boundary,
         // so stored transcription history remains clean.
         let insertable_text = ensure_trailing_sentence_space(&text);
         // Always use clipboard method for reliability and to prevent duplicate insertion
         // This function handles both copying to clipboard and pasting at cursor
-        insert_via_clipboard(
-            insertable_text,
-            has_accessibility_permission,
-            Some(app),
-            keep_transcription_in_clipboard,
-        )
+        let commit = || {
+            insert_via_clipboard(
+                insertable_text,
+                has_accessibility_permission,
+                Some(app),
+                keep_transcription_in_clipboard,
+                generation,
+            )
+        };
+        if let Some(generation) = generation {
+            let state = outcome_app_for_commit.state::<crate::AppState>();
+            crate::commands::audio::persist_if_current(&state, generation, commit)
+                .ok_or_else(|| "Dictation discarded".to_string())?
+        } else {
+            commit()
+        }
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))??;
-    let _ = outcome_app.emit("paste-outcome", paste_outcome_payload(&outcome, words));
+    let payload = paste_outcome_payload(&outcome, words, polished);
+    let _ = outcome_app.emit_to("main", "paste-outcome", payload.clone());
+    super::pill_feedback::send(
+        &outcome_app,
+        "paste-outcome",
+        serde_json::to_value(payload).unwrap(),
+    );
     if let Some(generation) = generation {
         super::pill_feedback::schedule_terminal_hide(
             &outcome_app,
             generation,
-            paste_outcome_payload(&outcome, words).outcome,
+            paste_outcome_payload(&outcome, words, polished).outcome,
         );
     }
     if outcome == PasteOutcome::NoPermission {
@@ -188,6 +207,33 @@ pub async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     .await
     .map_err(|e| format!("Task failed: {}", e))?
 }
+pub(crate) async fn copy_dictation_text_to_clipboard(
+    app: tauri::AppHandle,
+    text: String,
+    generation: u64,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let mut guard = CLIPBOARD_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let state = app.state::<crate::AppState>();
+        let mut clipboard = Clipboard::new().map_err(|_| "Clipboard unavailable".to_string())?;
+        let current = || {
+            if crate::commands::audio::delivery_aborted(
+                state.is_cancellation_requested(),
+                generation,
+            ) {
+                Err("Dictation discarded".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        write_clipboard_if_current(&mut clipboard, &text, &current)?;
+        *guard = None;
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Clipboard copy failed".to_string())?
+}
+
 /// Minimal clipboard seam so insertion sequencing is unit-testable.
 trait ClipboardOps {
     fn get_text(&mut self) -> Result<String, String>;
@@ -216,9 +262,14 @@ enum PasteOutcome {
 struct PasteOutcomePayload {
     outcome: &'static str,
     words: u32,
+    polished: bool,
 }
 
-fn paste_outcome_payload(outcome: &PasteOutcome, words: u32) -> PasteOutcomePayload {
+fn paste_outcome_payload(
+    outcome: &PasteOutcome,
+    words: u32,
+    polished: bool,
+) -> PasteOutcomePayload {
     PasteOutcomePayload {
         outcome: match outcome {
             PasteOutcome::Pasted => "pasted",
@@ -226,13 +277,19 @@ fn paste_outcome_payload(outcome: &PasteOutcome, words: u32) -> PasteOutcomePayl
             PasteOutcome::NoPermission => "no_permission",
         },
         words,
+        polished,
     }
 }
 
 // None means the dictation copy was skipped; false means it failed. Manual
 // copy commands keep using copy_text_to_clipboard and never enter this seam.
-fn dictation_copy_payload(succeeded: Option<bool>, words: u32) -> Option<PasteOutcomePayload> {
-    (succeeded == Some(true)).then(|| paste_outcome_payload(&PasteOutcome::LeftInClipboard, words))
+fn dictation_copy_payload(
+    succeeded: Option<bool>,
+    words: u32,
+    polished: bool,
+) -> Option<PasteOutcomePayload> {
+    (succeeded == Some(true))
+        .then(|| paste_outcome_payload(&PasteOutcome::LeftInClipboard, words, polished))
 }
 
 pub(crate) fn emit_dictation_copy_outcome(
@@ -240,9 +297,15 @@ pub(crate) fn emit_dictation_copy_outcome(
     succeeded: Option<bool>,
     words: u32,
     generation: u64,
+    polished: bool,
 ) {
-    if let Some(payload) = dictation_copy_payload(succeeded, words) {
-        let _ = app.emit("paste-outcome", payload.clone());
+    if let Some(payload) = dictation_copy_payload(succeeded, words, polished) {
+        let _ = app.emit_to("main", "paste-outcome", payload.clone());
+        super::pill_feedback::send(
+            app,
+            "paste-outcome",
+            serde_json::to_value(&payload).unwrap(),
+        );
         super::pill_feedback::schedule_terminal_hide(app, generation, payload.outcome);
     }
 }
@@ -403,15 +466,24 @@ fn spawn_deferred_clipboard_restore(generation: u64) {
 /// Set the clipboard to `text`, let it settle, then paste, returning the paste
 /// outcome. Capturing the previous clipboard and scheduling a restore is the
 /// caller's responsibility, so it can serialize that against deferred restores.
+fn write_clipboard_if_current(
+    clipboard: &mut dyn ClipboardOps,
+    text: &str,
+    current: &dyn Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    current()?;
+    clipboard
+        .set_text(text)
+        .map_err(|_| "Clipboard copy failed".to_string())
+}
 fn run_clipboard_insertion(
     clipboard: &mut dyn ClipboardOps,
     paste: &mut dyn FnMut() -> PasteOutcome,
     sleep: &mut dyn FnMut(Duration),
     text: &str,
+    current: &dyn Fn() -> Result<(), String>,
 ) -> Result<PasteOutcome, String> {
-    clipboard
-        .set_text(text)
-        .map_err(|e| format!("Failed to set clipboard: {}", e))?;
+    write_clipboard_if_current(clipboard, text, current)?;
 
     log::info!("Set clipboard content ({} chars)", text.chars().count());
 
@@ -424,6 +496,7 @@ fn run_clipboard_insertion(
         );
     }
 
+    current()?;
     Ok(paste())
 }
 
@@ -432,7 +505,20 @@ fn insert_via_clipboard(
     has_accessibility_permission: bool,
     app_handle: Option<tauri::AppHandle>,
     keep_transcription_in_clipboard: bool,
+    dictation_generation: Option<u64>,
 ) -> Result<PasteOutcome, String> {
+    let check_app = app_handle.clone();
+    let current = || {
+        if let (Some(app), Some(generation)) = (&check_app, dictation_generation) {
+            if crate::commands::audio::delivery_aborted(
+                app.state::<crate::AppState>().is_cancellation_requested(),
+                generation,
+            ) {
+                return Err("Dictation discarded".to_string());
+            }
+        }
+        Ok(())
+    };
     // This function handles both copying text to clipboard AND pasting it at cursor
     // Initialize clipboard
     let mut clipboard =
@@ -451,7 +537,7 @@ fn insert_via_clipboard(
         // Add delay since pill was just hidden
 
         // First try with rdev, fallback to AppleScript if it fails
-        let rdev_result = try_paste_with_rdev();
+        let rdev_result = try_paste_with_rdev(&current);
 
         match rdev_result {
             Ok(_) => {
@@ -463,7 +549,7 @@ fn insert_via_clipboard(
 
                 // Fallback to AppleScript
                 let paste_result =
-                    panic::catch_unwind(AssertUnwindSafe(try_paste_with_applescript));
+                    panic::catch_unwind(AssertUnwindSafe(|| try_paste_with_applescript(&current)));
 
                 match paste_result {
                     Ok(Ok(_)) => {
@@ -472,16 +558,7 @@ fn insert_via_clipboard(
                     }
                     Ok(Err(e)) => {
                         log::warn!("AppleScript paste failed: {}, text remains in clipboard", e);
-                        // Notify user through pill toast that paste failed but text is in clipboard
-                        if let Some(app) = &app_handle {
-                            crate::commands::audio::pill_toast_with_suggestion(
-                                app,
-                                "Text copied",
-                                "Grant Accessibility permission to enable auto-paste",
-                                1500,
-                                None,
-                            );
-                        }
+                        // Notify user through island feedback that paste failed but text is in clipboard
                         // Don't fail - text is still in clipboard for manual paste
                         PasteOutcome::LeftInClipboard
                     }
@@ -490,16 +567,7 @@ fn insert_via_clipboard(
                             "PANIC during paste: {:?}, text remains in clipboard",
                             panic_err
                         );
-                        // Notify user through pill toast about the failure
-                        if let Some(app) = &app_handle {
-                            crate::commands::audio::pill_toast_with_suggestion(
-                                app,
-                                "Text copied",
-                                "Grant Accessibility permission to enable auto-paste",
-                                1500,
-                                None,
-                            );
-                        }
+                        // Notify user through island feedback about the failure
                         // Don't fail - text is still in clipboard for manual paste
                         PasteOutcome::LeftInClipboard
                     }
@@ -532,8 +600,9 @@ fn insert_via_clipboard(
         resolve_original_to_restore(&guard, current.as_deref())
     };
 
-    let outcome = run_clipboard_insertion(&mut clipboard, &mut paste, &mut sleep, &text)?;
+    let outcome = run_clipboard_insertion(&mut clipboard, &mut paste, &mut sleep, &text, &current)?;
 
+    current()?;
     log::debug!("clipboard insertion outcome: {:?}", outcome);
 
     // Every outcome supersedes any prior pending restore: we either record our
@@ -587,7 +656,8 @@ fn insert_via_clipboard(
     Ok(outcome)
 }
 
-fn try_paste_with_applescript() -> Result<(), String> {
+fn try_paste_with_applescript(current: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
+    current()?;
     // Use AppleScript on macOS
     #[cfg(target_os = "macos")]
     {
@@ -635,6 +705,10 @@ fn try_paste_with_applescript() -> Result<(), String> {
             .key(Key::Control, Press)
             .map_err(|e| format!("Failed to press Control: {:?}", e))?;
         thread::sleep(Duration::from_millis(20));
+        if let Err(error) = current() {
+            let _ = enigo.key(Key::Control, Release);
+            return Err(error);
+        }
         enigo
             .key(Key::Unicode('v'), Click)
             .map_err(|e| format!("Failed to click V: {:?}", e))?;
@@ -680,7 +754,7 @@ fn send_key_event(event_type: &EventType) -> Result<(), SimulateError> {
 }
 
 // rdev implementation for more reliable paste
-fn try_paste_with_rdev() -> Result<(), String> {
+fn try_paste_with_rdev(current: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
     let paste_start = std::time::Instant::now();
     log::info!("=== PASTE CHAIN START ===");
     log::debug!("Platform: {}", std::env::consts::OS);
@@ -694,20 +768,21 @@ fn try_paste_with_rdev() -> Result<(), String> {
         thread::sleep(RDEV_PRE_PASTE_DELAY);
     }
 
+    current()?;
     let result = {
         #[cfg(target_os = "macos")]
         {
-            paste_mac()
+            paste_mac(current)
         }
 
         #[cfg(target_os = "windows")]
         {
-            paste_windows()
+            paste_windows(current)
         }
 
         #[cfg(target_os = "linux")]
         {
-            paste_linux().map_err(|e| format!("Failed to paste on Linux: {:?}", e))
+            paste_linux(current).map_err(|e| format!("Failed to paste on Linux: {:?}", e))
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -734,7 +809,7 @@ fn try_paste_with_rdev() -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn paste_mac() -> Result<(), String> {
+fn paste_mac(current: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
@@ -757,6 +832,7 @@ fn paste_mac() -> Result<(), String> {
     let key_down = CGEvent::new_keyboard_event(source.clone(), VK_V, true)
         .map_err(|_| "Failed to create Cmd+V key-down event".to_string())?;
     key_down.set_flags(cmd);
+    current()?;
     key_down.post(CGEventTapLocation::HID);
 
     thread::sleep(Duration::from_millis(15));
@@ -771,7 +847,7 @@ fn paste_mac() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn paste_windows() -> Result<(), String> {
+fn paste_windows(current: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
         VIRTUAL_KEY, VK_CONTROL, VK_V,
@@ -815,6 +891,7 @@ fn paste_windows() -> Result<(), String> {
     thread::sleep(Duration::from_millis(50));
 
     // SAFETY: `inputs` is a valid, correctly-sized slice of INPUT for the call.
+    current()?;
     let sent = unsafe { SendInput(&inputs, cb) } as usize;
     if sent == inputs.len() {
         log::debug!("Windows paste injected {} events", sent);
@@ -827,6 +904,7 @@ fn paste_windows() -> Result<(), String> {
     if sent == 0 {
         log::warn!("Windows paste blocked (0 events); retrying once");
         thread::sleep(Duration::from_millis(50));
+        current()?;
         let retry = unsafe { SendInput(&inputs, cb) } as usize;
         if retry == inputs.len() {
             return Ok(());
@@ -841,12 +919,18 @@ fn paste_windows() -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-fn paste_linux() -> Result<(), SimulateError> {
+fn paste_linux(current: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
     log::debug!("Starting Linux paste simulation with rdev");
-    send_key_event(&EventType::KeyPress(RdevKey::ControlLeft))?;
-    send_key_event(&EventType::KeyPress(RdevKey::KeyV))?;
-    send_key_event(&EventType::KeyRelease(RdevKey::KeyV))?;
-    send_key_event(&EventType::KeyRelease(RdevKey::ControlLeft))?;
+    current()?;
+    send_key_event(&EventType::KeyPress(RdevKey::ControlLeft)).map_err(|_| "Paste failed")?;
+    let result = current().and_then(|()| {
+        send_key_event(&EventType::KeyPress(RdevKey::KeyV)).map_err(|_| "Paste failed".into())
+    });
+    if result.is_ok() {
+        let _ = send_key_event(&EventType::KeyRelease(RdevKey::KeyV));
+    }
+    let _ = send_key_event(&EventType::KeyRelease(RdevKey::ControlLeft));
+    result?;
     log::debug!("Linux paste simulation completed");
     Ok(())
 }
@@ -908,6 +992,78 @@ mod clipboard_insertion {
         }
     }
 
+    #[test]
+    fn cancel_or_new_generation_during_clipboard_wait_prevents_write() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        for cancelled in [true, false] {
+            let mut clipboard = MockClipboard::new("previous", events.clone());
+            let mut paste = || panic!("must not paste");
+            let mut sleep = |_| {};
+            // Inject the state observed after waiting for CLIPBOARD_GUARD.
+            let active_generation = std::cell::Cell::new(if cancelled { 1 } else { 2 });
+            let check = || {
+                if cancelled || active_generation.get() != 1 {
+                    Err("discarded".into())
+                } else {
+                    Ok(())
+                }
+            };
+            assert!(run_clipboard_insertion(
+                &mut clipboard,
+                &mut paste,
+                &mut sleep,
+                "transcription",
+                &check
+            )
+            .is_err());
+            assert!(clipboard.history.is_empty());
+        }
+    }
+    #[test]
+    fn copy_only_checks_after_injected_clipboard_wait() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut clipboard = MockClipboard::new("previous", events);
+        let cancelled = std::cell::Cell::new(false);
+        let generation = std::cell::Cell::new(1);
+        let check = || {
+            if cancelled.get() || generation.get() != 1 {
+                Err("discarded".into())
+            } else {
+                Ok(())
+            }
+        };
+        // A clipboard lock/open delay overlaps Escape or a new take.
+        cancelled.set(true);
+        assert!(write_clipboard_if_current(&mut clipboard, "transcription", &check).is_err());
+        cancelled.set(false);
+        generation.set(2);
+        assert!(write_clipboard_if_current(&mut clipboard, "transcription", &check).is_err());
+        assert!(clipboard.history.is_empty());
+    }
+    #[test]
+    fn escape_during_settle_prevents_paste_dispatch() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut clipboard = MockClipboard::new("previous", events);
+        let cancelled = std::cell::Cell::new(false);
+        let mut paste = || panic!("Escape during settle must prevent paste");
+        let mut sleep = |_| cancelled.set(true);
+        let current = || {
+            if cancelled.get() {
+                Err("discarded".into())
+            } else {
+                Ok(())
+            }
+        };
+        assert!(run_clipboard_insertion(
+            &mut clipboard,
+            &mut paste,
+            &mut sleep,
+            "transcription",
+            &current
+        )
+        .is_err());
+        assert_eq!(clipboard.history, ["transcription"]);
+    }
     // --- run_clipboard_insertion tests (set -> settle -> paste; no restore here) ---
 
     #[test]
@@ -924,9 +1080,14 @@ mod clipboard_insertion {
         };
         let mut sleep = sleep_recorder(events.clone(), sleeps.clone());
 
-        let outcome =
-            run_clipboard_insertion(&mut clipboard, &mut paste, &mut sleep, "transcription")
-                .unwrap();
+        let outcome = run_clipboard_insertion(
+            &mut clipboard,
+            &mut paste,
+            &mut sleep,
+            "transcription",
+            &|| Ok(()),
+        )
+        .unwrap();
 
         assert_eq!(outcome, PasteOutcome::Pasted);
         assert_eq!(clipboard.current, "transcription");
@@ -952,9 +1113,14 @@ mod clipboard_insertion {
         let mut paste = || PasteOutcome::LeftInClipboard;
         let mut sleep = sleep_recorder(events, sleeps);
 
-        let outcome =
-            run_clipboard_insertion(&mut clipboard, &mut paste, &mut sleep, "transcription")
-                .unwrap();
+        let outcome = run_clipboard_insertion(
+            &mut clipboard,
+            &mut paste,
+            &mut sleep,
+            "transcription",
+            &|| Ok(()),
+        )
+        .unwrap();
 
         assert_eq!(outcome, PasteOutcome::LeftInClipboard);
         assert_eq!(clipboard.current, "transcription");
@@ -969,9 +1135,14 @@ mod clipboard_insertion {
         let mut sleep = sleep_recorder(events, sleeps);
 
         // The Err mapping now lives in the caller; the core just reports outcome.
-        let outcome =
-            run_clipboard_insertion(&mut clipboard, &mut paste, &mut sleep, "transcription")
-                .unwrap();
+        let outcome = run_clipboard_insertion(
+            &mut clipboard,
+            &mut paste,
+            &mut sleep,
+            "transcription",
+            &|| Ok(()),
+        )
+        .unwrap();
 
         assert_eq!(outcome, PasteOutcome::NoPermission);
         assert_eq!(clipboard.current, "transcription");
@@ -1146,12 +1317,12 @@ mod tests {
 
     #[test]
     fn only_successful_dictation_copy_emits_content_free_copied_outcome() {
-        assert!(dictation_copy_payload(None, 38).is_none());
-        assert!(dictation_copy_payload(Some(false), 38).is_none());
-        let payload = dictation_copy_payload(Some(true), 38).unwrap();
+        assert!(dictation_copy_payload(None, 38, false).is_none());
+        assert!(dictation_copy_payload(Some(false), 38, false).is_none());
+        let payload = dictation_copy_payload(Some(true), 38, false).unwrap();
         assert_eq!(
             serde_json::to_value(payload).unwrap(),
-            serde_json::json!({ "outcome": "copied", "words": 38 })
+            serde_json::json!({ "outcome": "copied", "words": 38, "polished": false })
         );
     }
 
@@ -1162,7 +1333,7 @@ mod tests {
             (PasteOutcome::LeftInClipboard, "copied"),
             (PasteOutcome::NoPermission, "no_permission"),
         ] {
-            let payload = paste_outcome_payload(&outcome, 38);
+            let payload = paste_outcome_payload(&outcome, 38, false);
             let value = serde_json::to_value(payload).unwrap();
             assert_eq!(value["outcome"], expected);
             assert_eq!(value["words"], 38);
@@ -1172,8 +1343,24 @@ mod tests {
                 .keys()
                 .map(String::as_str)
                 .collect();
-            assert_eq!(keys, vec!["outcome", "words"]);
+            assert_eq!(keys, vec!["outcome", "polished", "words"]);
             assert!(value.get("text").is_none());
+        }
+    }
+
+    #[test]
+    fn polished_provenance_survives_every_delivery_outcome() {
+        for outcome in [
+            PasteOutcome::Pasted,
+            PasteOutcome::LeftInClipboard,
+            PasteOutcome::NoPermission,
+        ] {
+            for polished in [true, false] {
+                let value =
+                    serde_json::to_value(paste_outcome_payload(&outcome, 1, polished)).unwrap();
+                assert_eq!(value["polished"], polished);
+                assert_eq!(value.as_object().unwrap().len(), 3);
+            }
         }
     }
 

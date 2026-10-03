@@ -4,8 +4,7 @@
   "description": "Cross-platform default permissions",
   "windows": [
     "main",
-    "pill",
-    "toast"
+    "pill"
   ],
   "permissions": [
     "core:default",

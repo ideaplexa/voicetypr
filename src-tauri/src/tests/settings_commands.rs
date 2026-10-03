@@ -14,7 +14,10 @@ mod tests {
     fn test_settings_default() {
         let settings = Settings::default();
 
-        assert_eq!(settings.hotkey, "CommandOrControl+Shift+Space");
+        assert_eq!(
+            settings.hotkey,
+            crate::commands::shortcuts::FALLBACK_PRIMARY
+        );
         assert_eq!(settings.current_model, ""); // Empty means auto-select
         assert_eq!(settings.speech_language, "en");
         assert_eq!(settings.transcription_task, TRANSCRIPTION_TASK_TRANSCRIBE);
@@ -38,6 +41,8 @@ mod tests {
     #[test]
     fn test_settings_serialization() {
         let settings = Settings {
+            polish_keep_words: false,
+            telemetry_enabled: true,
             hotkey: "CommandOrControl+A".to_string(),
             current_model: "base".to_string(),
             current_model_engine: "whisper".to_string(),
@@ -60,6 +65,8 @@ mod tests {
             play_sound_on_transcription_complete: true,
             play_sound_on_paste_success: true,
             pill_indicator_mode: "when_recording".to_string(),
+            island_start_details: "changed".into(),
+            island_start_details_shown: 0,
             pill_indicator_style: "full".to_string(),
             pill_indicator_position: "bottom-center".to_string(),
             pill_indicator_offset: 10,
@@ -128,6 +135,8 @@ mod tests {
     #[test]
     fn test_settings_clone() {
         let settings = Settings {
+            polish_keep_words: false,
+            telemetry_enabled: true,
             hotkey: "CommandOrControl+B".to_string(),
             current_model: "tiny".to_string(),
             current_model_engine: "whisper".to_string(),
@@ -150,6 +159,8 @@ mod tests {
             play_sound_on_transcription_complete: false,
             play_sound_on_paste_success: false,
             pill_indicator_mode: "never".to_string(),
+            island_start_details: "changed".into(),
+            island_start_details_shown: 0,
             pill_indicator_style: "compact".to_string(),
             pill_indicator_position: "top-center".to_string(),
             pill_indicator_offset: 25,
@@ -280,7 +291,10 @@ mod tests {
             "onboarding_completed": settings.onboarding_completed,
         });
 
-        assert_eq!(value["hotkey"], "CommandOrControl+Shift+Space");
+        assert_eq!(
+            value["hotkey"],
+            crate::commands::shortcuts::FALLBACK_PRIMARY
+        );
         assert_eq!(value["current_model"], "");
         assert_eq!(value["speech_language"], "en");
         assert_eq!(value["transcription_task"], "transcribe");
@@ -358,7 +372,7 @@ mod tests {
     #[test]
     fn test_pill_indicator_mode_default() {
         let settings = Settings::default();
-        assert_eq!(settings.pill_indicator_mode, "when_recording");
+        assert_eq!(settings.pill_indicator_mode, "always");
     }
 
     #[test]
@@ -600,7 +614,8 @@ mod tests {
     fn test_ptt_settings_defaults() {
         let settings = Settings::default();
         assert!(!settings.use_different_ptt_key);
-        assert_eq!(settings.ptt_hotkey, Some("Alt+Space".to_string()));
+        // Empty until the user picks a separate hold key.
+        assert_eq!(settings.ptt_hotkey, None);
     }
 
     #[test]
@@ -862,6 +877,8 @@ mod tests {
     #[test]
     fn test_settings_full_round_trip() {
         let original = Settings {
+            polish_keep_words: false,
+            telemetry_enabled: true,
             hotkey: "CommandOrControl+Alt+V".to_string(),
             current_model: "large-v3".to_string(),
             current_model_engine: "whisper".to_string(),
@@ -884,6 +901,8 @@ mod tests {
             play_sound_on_transcription_complete: false,
             play_sound_on_paste_success: false,
             pill_indicator_mode: "always".to_string(),
+            island_start_details: "changed".into(),
+            island_start_details_shown: 0,
             pill_indicator_style: "compact".to_string(),
             pill_indicator_position: "top-left".to_string(),
             pill_indicator_offset: 42,

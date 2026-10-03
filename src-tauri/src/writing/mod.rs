@@ -9,7 +9,7 @@ pub use app_category::{category_label, category_prompt_hint, classify, AppCatego
 #[allow(unused_imports)]
 pub use pipeline::{
     capture_active_app_context, effective_personal_dictation_mode, effective_pipeline_config,
-    process_transcription, resolve_pipeline_config, PipelineAiState,
+    process_transcription, process_transcription_at, resolve_pipeline_config, PipelineAiState,
 };
 #[allow(unused_imports)]
 pub use settings::{

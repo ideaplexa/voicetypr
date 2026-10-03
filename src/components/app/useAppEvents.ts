@@ -1,3 +1,4 @@
+import { markSettingsSource } from "@/lib/observability";
 import {
   useEffect,
   useRef,
@@ -11,8 +12,13 @@ import {
   isPermissionGranted,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { invoke } from "@tauri-apps/api/core";
-import type { ScreenId } from "../navigation";
+import type { ScreenId, SettingsPane } from "@/components/navigation";
+import {
+  islandDestination,
+  routeMainNavigation,
+  type MainNavigate,
+  type IslandNavigate,
+} from "@/components/app/mainNavigation";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import { updateService } from "@/services/updateService";
 import { createLogger } from "@/lib/logger";
@@ -35,6 +41,7 @@ interface ErrorEventPayload {
 }
 
 interface UseAppEventsOptions {
+  openSettingsPane?: (pane: SettingsPane) => void;
   checkModels: () => Promise<{ hasModels: boolean | null }>;
   setActiveSection: Dispatch<SetStateAction<ScreenId>>;
   setSourceFilter: (filter: SourceFilter) => void;
@@ -44,6 +51,7 @@ interface UseAppEventsOptions {
 
 export function useAppEvents({
   checkModels,
+  openSettingsPane,
   setActiveSection,
   setSourceFilter,
   setForceShowOnboarding,
@@ -82,20 +90,26 @@ export function useAppEvents({
           setActiveSection("home");
         });
 
+        const navigate = (destination: MainNavigate) => {
+          markSettingsSource(destination.telemetry_source);
+          routeMainNavigation(destination, setActiveSection, setSourceFilter, openSettingsPane);
+        };
+        await register<MainNavigate>("main-navigate", navigate);
+        await register<IslandNavigate>("island-navigate", (action) => {
+          navigate(islandDestination(action));
+        });
+        await register<string | undefined>("navigate-to-settings", (pane) => {
+          navigate({ screen: "settings", pane });
+        });
+        await register<string>("navigate-to-section", (screen) => {
+          navigate({ screen });
+        });
+
         await register<ErrorEventPayload>("hotkey-registration-failed", (data) => {
           log.error("Hotkey registration failed:", data);
           toast.error("Hotkey Registration Failed", {
             description: data.suggestion || "The hotkey is in use by another application",
             duration: 10000,
-          });
-        });
-
-        await register<ErrorEventPayload>("no-speech-detected", (data) => {
-          log.warn("No speech detected:", data);
-          const toastFn = data.severity === "error" ? toast.error : toast.warning;
-          toastFn(data.title || "No Speech Detected", {
-            description: data.message || "Please check your microphone and speak clearly",
-            duration: data.severity === "error" ? 8000 : 5000,
           });
         });
 
@@ -204,14 +218,6 @@ export function useAppEvents({
               description: data.message || "Please purchase or restore a license to continue",
               duration: 5000,
             });
-
-            // Focus the main window after navigation.
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            try {
-              await invoke("focus_main_window");
-            } catch (error) {
-              log.error("Failed to focus window:", error);
-            }
           },
         );
 
@@ -267,6 +273,7 @@ export function useAppEvents({
     };
   }, [
     registerEvent,
+    openSettingsPane,
     setActiveSection,
     setSourceFilter,
     setForceShowOnboarding,

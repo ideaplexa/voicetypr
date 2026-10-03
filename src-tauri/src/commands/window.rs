@@ -147,17 +147,6 @@ pub async fn close_pill_widget(app: AppHandle) -> Result<(), String> {
 // Note: update_pill_position has been removed since pill position is now fixed at center-bottom
 // This was a design decision made during security review to simplify the codebase
 
-/// Hide the toast feedback window (called by frontend after message duration as backup)
-/// Backend also auto-hides via show_toast_feedback, but frontend can call this as safety net
-#[tauri::command]
-pub async fn hide_toast_window(app: AppHandle) -> Result<(), String> {
-    if let Some(toast_window) = app.get_webview_window("toast") {
-        toast_window.hide().map_err(|e| e.to_string())?;
-        log::debug!("Toast window hidden by frontend request");
-    }
-    Ok(())
-}
-
 /// Force recreate the pill widget window
 /// Use this when the pill window exists but isn't rendering properly
 #[tauri::command]

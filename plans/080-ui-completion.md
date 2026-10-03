@@ -1,0 +1,305 @@
+# Plan 080 — UI completion (2.1.0-beta.4)
+
+Status: SPEC — Claude 2026-09-29. It follows plan 079 (main window, pill and onboarding redesign, shipped in beta.3). The founder asked for the whole experience "from pill indicator to dashboard": every surface a user sees must match the 2.1 design language on macOS and Windows.
+
+Process (founder cadence):
+- One phase of 10 tasks.
+- Each surface is designed in `design/voicetypr-2.1.pen` first, with its spec exported to `design/specs/` and a PNG to `design/exports/`.
+- gpt-6.1-sol (medium) builds each task to spec.
+- `pnpm ui:preview` screenshots are checked against the design.
+- ONE gpt-6.1-sol (high) review at the end of the phase, one fix round verified by Claude, then the real-app E2E run, the PR and beta.4.
+
+## Tasks
+
+1. **Pill focus safety.** Make the pill provably non-activating:
+   - macOS: a non-activating panel style mask, `canBecomeKeyWindow` NO (patch or replace the pinned tauri-nspanel behaviour).
+   - Windows: `focusable(false)`, `WS_EX_NOACTIVATE`, SWP_NOACTIVATE on show.
+   Proven recipe, from Handy's overlay (`voicetypr-archive/2026-09-29/handy-teardown/02-overlay-ux.md`):
+   - macOS NSPanel: `can_become_key_window: false`, `is_floating_panel: true`, style mask `borderless().nonactivating_panel()`, `PanelLevel::Status`, `can_join_all_spaces` + `full_screen_auxiliary`, `no_activate(true)`.
+   - Windows/Linux: `focusable(false)`, `focused(false)`, `skip_taskbar(true)`, `always_on_top`, `accept_first_mouse(true)` (the cancel button works on the first click), and re-assert `SetWindowPos(HWND_TOPMOST, …, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW)` after every show.
+   - Also copy Handy's discipline: ONE reused overlay window, and deliver audio level only to the pill window label (`emit_to`).
+   Then turn on the gated deferred terminal hide from plan 079 so "Pasted · N words" / "Copied" show in the default `when_recording` mode. Gate: E2E back-to-back and focus runs on macOS; Windows needs a CI or VM check.
+2. **Pill redesign (alive + techy).**
+   - Directions:
+     - Round 1 (A Living Capsule, B Aura, C Morphing Island) was judged too safe.
+     - Round 2 (D Segment dot-matrix, E Trace oscilloscope, F Halo tick ring) lives in `design/voicetypr-2.1.pen`, with live motion in `design/prototypes/pill-lab.html`, also embedded on the canvas.
+     - The founder picks one direction or a mix, then build it.
+   - Shared rules:
+     - Honest level meter.
+     - Level attack 30 ms / release 180 ms, peak-hold 300 ms.
+     - Interruptible springs for every size change (k≈300, ζ≈0.78).
+     - One accent with meaning: sage = done, amber = needs you.
+     - No idle loops in ready/pasted/needs-you.
+     - prefers-reduced-motion fallback.
+     - Canvas at 2× DPR.
+   - Performance and constraints:
+     - Draw only while active.
+     - Stays vanilla DOM + canvas (AGENTS.md invariant 8).
+   - Research sources are cited in the lab page.
+3. **Tray / menu-bar menu** (`design/exports/tray-menu-mac.png`, `tray-menu-win.png`). It stays a native Tauri menu (`menu/tray.rs`, `CheckMenuItem`/`Submenu`). The founder wants power users to be able to drive everything from it. Order:
+   - **Status line** (disabled):
+     - "● Ready · <engine> · on this Mac/PC"
+     - amber + "Fix…" when the mic, model, license or permission blocks recording
+   - **Start Dictation**, showing the user's effective shortcut.
+   - **Quick settings:**
+     - Polish ▸ Off / Clean / Writing / Notes / Message / Code / Per-app styles…
+     - Engine ▸ downloaded local models, cloud engines, network servers, Download more models…
+     - Microphone ▸ System default + devices
+     - Mode ▸ Hold to talk / Press to start-stop
+     - Live Preview ✓
+     - Each shows its current value next to the label.
+   - **History:** Copy Last Transcript, Recent ▸.
+   - **App:** Open Voicetypr, Insights, Settings… (⌘, / Ctrl+,), Check for Updates…, Help & Feedback.
+   - **Quit Voicetypr.**
+   - Windows uses the same order, with Windows 11 menu metrics and leading icons.
+   - Drop "Dashboard" and "Remote Voicetypr" headers. Network servers live inside Engine ▸.
+   - The island peek's quick settings and this menu write the same settings through the same commands.
+4. **Menu-bar icon + app icon.** Menu-bar template icon states (idle / recording / processing) and a refreshed app icon, designed in Pencil and exported to all the required sizes.
+5. **Polish dialogs:** ProviderSetupDialog and AgentModelPickerDialog on the kit (provider cards, key field, model picker, test result).
+6. **Transcription dialogs:** cloud ApiKeyModal (finish), OpenAICompatConfigModal, AddServerModal.
+7. **Share stats:** ShareStatsModal and the share card render in the new style (sage accent, Geist).
+8. **What's new + Crash report + Privacy consent dialogs** on the kit. "What's new" reads the real release notes.
+9. **Toast window** (FeedbackToast, the native toast): the pill-family dark surface or a light card per theme, the same icons, and consistent copy.
+10. **Windows visual pass.** Capture the real Windows app in CI (a screenshot job on windows-latest running the debug build with ui-preview fixtures, or a Windows VM). Fix title bar, scrollbar, font rendering, focus rings and Alt/Ctrl labels. Add the empty/error states that are still missing.
+
+## Non-goals
+
+- Functional changes. Those go to beta.5: Deepgram realtime default, Nova-3 multi, Polish upgrades, quantized Whisper, learned words, dictionary import, Windows CI smoke, Parakeet on Windows slice 5, 070b.
+
+## Gates
+
+- Frontend: typecheck, lint, vitest, build.
+- Rust: cargo test, clippy, fmt (tasks 1, 3, 4, 9 touch Rust/native).
+- `pnpm ui:preview` on both platforms and themes.
+- E2E harness run before the PR.
+- No transcript or content in logs/events.
+
+## Product gaps found by the Island Lab scenario agents (2026-09-30)
+
+The scenario agents read the real code. These are real behaviours, not prototype issues:
+
+1. **A cloud failure loses the dictation.** When a cloud engine fails and `save_recordings` is off (the default), `finalize_in_flight_audio` deletes the temp WAV, so the words are gone. Keep the failed clip in temp until the user picks **Retry with <local engine>** or **Discard**. Offer that retry in the island through the existing `transcribe_audio_file` path. *(beta.4 island + backend)*
+2. **Esc semantics.** The real app cancels on Esc twice within 2 s (`recording/escape_handler.rs`) and shows a "Press ESC again" toast in a separate window. The island should show that hint inline, since the stack is tucked while dictating. *(beta.4)*
+3. **Dead listener.** `useAppEvents.ts` listens for `no-speech-detected`, but the backend never emits it. The real path is the pill toast from the speech-evidence gate. Wire one event, or remove the listener. *(beta.4)*
+4. **One toast at a time.** FeedbackToast shows only the latest message. The island stack replaces this: newest in front, FIFO for timed items, sticky blockers, ×N merge, and timers paused while tucked. *(beta.4)*
+5. **Toggle-mode copy.** "Too short — hold a bit longer" is wrong in toggle mode; use "talk a bit longer". *(beta.4)*
+6. **Focus steal.** license-required calls `focus_main_window`. Show a license island state instead of stealing focus. Licenses are lifetime, so nothing expires and there is no "Renew". The real blockers are `RecordingLicenseState::VerificationRequired` / `CheckFailed` (`commands/audio.rs`): "Couldn't verify your license · Connect to the internet, then recheck" with **Recheck** (revalidate). *(beta.4)*
+7. **Raw error strings.** For a missing mic, the pill flashes the raw `payload.error` string. Use the designed "No microphone · Choose mic" state. *(beta.4)*
+8. **Timing mismatch.** The native terminal hide (pasted 1.2 s) must be aligned with the island's done card (3.2 s, with Undo/Original/Retry) once focus safety lands (task 1). *(beta.4)*
+9. **Retry / Undo / Original need backend support.** There is no re-transcribe-and-replace-last-paste yet. Design "replace last paste" carefully: only do it if the target field still ends with our text, otherwise copy it. *(beta.5)*
+
+### More gaps from the pill-coverage audit (2026-10-02, read-only, cites real code)
+
+**Focus stealing during dictation (beta.4, with task 1):**
+
+10. `focus_main_window` runs from dictation paths. Every case below becomes an island card instead:
+    - `commands/audio.rs`: 4711 (remote/model missing at stop), 4884 (no engine), 4906/4920 (license check), 4935 (trial)
+    - `cloud_stt/soniox.rs:1136` (storage limit)
+    - `useAppEvents.ts:211` focuses the window a second time for license
+11. The toast window is built without `.focused(false)` (`lib.rs:1536-1549`), and only the pill gets `WS_EX_NOACTIVATE` (`window_manager.rs:379`). The toast can appear before the paste. The toast window goes away with the island stack (gap 4); until then, make it non-activating. NEEDS-SMOKE on Windows.
+
+**Words lost (beta.4 backend; nothing the user said may be silently deleted):**
+
+12. Audio is deleted when:
+    - the network PC or the local model is missing at stop (`audio.rs:4701`)
+    - the integrity check fails (6218)
+    - the stop doesn't finalize (6243-6255)
+
+    Keep the clip, and offer **Use <local engine>** / **Discard** (same mechanism as gap 1).
+13. The pre-engine speech gate is live and deletes audio (`audio.rs:6373`, 6398). AGENTS.md says "failing to detect speech is not proof of silence". Either put it back into shadow mode or keep the clip for Retry. Pure-zero input (6395-6410) shows nothing today; show "Your mic sent silence — is it muted?".
+14. A failed translation pastes nothing (`audio.rs:7397-7409`). Paste or copy the original and say so.
+15. Pressing Esc twice while *transcribing* throws away a finished recording (`recording/escape_handler.rs:31-37`). Show the inline hint in the transcribing state too, and say "discard" rather than "cancel".
+16. A dropped mic mid-recording (6209-6256) is silent or deletes the audio. Transcribe what was captured and say so ("Mic disconnected · using the 0:42 we got").
+
+**Dead or missing wiring (beta.4):**
+
+17. Events that are emitted or listened for with no partner:
+    - `recording-too-short`: the pill listens (`pill.tsx:790`) but the backend never emits it
+    - `model-fallback` (`audio.rs:6626`): no pill listener
+    - `license-loading` (4952): no listener
+    - `pill-widget-error` (6012): no listener
+18. The "copied" toast says "Grant Accessibility…" even when the permission is granted, and lasts 1.5 s. Use the island's sticky "Copied — press ⌘V". The no-permission case gets its own sticky card, "Allow Accessibility to paste automatically" [Open Settings].
+
+**New island states:**
+
+19. The lab covers these as of v3.1:
+    - trial ended [Activate]
+    - mic busy in another app
+    - mic access off [Open Settings]
+    - no voice engine set up [Set up]
+    - cloud key rejected [Fix key]
+    - GPU → CPU
+    - still listening after a long pause
+    - auto-stop after 5 min of silence
+    - starting up
+    - Polish skipped
+    - network PC offline (recording kept)
+
+    Each needs a content-free backend event the pill can render.
+20. Hotkey pressed while the previous dictation is finishing: today it's ignored silently (`hotkeys.rs:99`), while the lab shows a new dictation starting. Decide in task 2: start the new one (preferred, back-to-back), or show "Finishing the last one…".
+
+## Founder feedback, 2026-10-02 (Island Lab review + using beta.3)
+
+### Island v3 (supersedes the v2 listening layout; `design/prototypes/island-lab.html` is the motion spec)
+
+- **The rest dot is not dead.**
+  - At rest it breathes subtly. This must be a compositor-only CSS opacity animation on one element: no JS or canvas loop, and off under reduced motion. This amends task 2's "no idle loops" rule for the rest state only.
+  - Hover opens a one-row *peek*:
+    - left: a ready mark (sage), amber when the mic is missing
+    - center: the shortcut hint with key caps
+    - right: today's word count
+  - Clicking the peek starts a dictation. The panel is non-activating, so the caret stays in the target app.
+  - A mic problem turns the peek into "No microphone · Fix".
+- **Three zones, the full width.**
+  - Listening and live share one layout: app icon bottom-left, waveform in the center (it flexes to fill), timer bottom-right.
+  - Live words span the full width above that row.
+  - Rule for every state: left = identity, center = main content, right = meta or action. Fixed-width states never leave an empty side.
+- **WhatsApp-style scrolling waveform.**
+  - A new bar is born at the right about every 70 ms, sized to that slice's peak level. The strip slides left continuously, older bars dim, and silence shows dot-bars.
+  - It replaces the 9 static bars.
+  - On stop it still converges into the progress arc (one shared element).
+
+### Main window
+
+11. **Sidebar fixes** (`design/specs/sidebar.html`, `design/exports/sidebar.png`).
+    - **Active item is white.** Today `data-active:bg-sidebar-accent` in `components/ui/sidebar.tsx` outranks our `bg-card`, so the selected item renders beige.
+      - Fix it in `Sidebar.tsx` with `data-[active=true]:` overrides (`bg-card`, `text-foreground`, `font-semibold`). Never edit `ui/*`.
+    - **Drop the "Setup" label.** A hairline divider separates Home / History / Insights from Transcription / Polish / Dictionary / Recording.
+    - **Add Insights** after History.
+    - **Collapsed sidebar = a 76 px icon rail** (founder chose option A, 2026-10-02; canvas: "Sidebar — collapsed A: icon rail", next to "Sidebar — expanded").
+      - Today's 48 px icon mode lets the macOS traffic lights (about 12–80 px) straddle the rail's border, and the toggle floats over the page title.
+      - Rail (macOS), top to bottom:
+        - 44 px for the traffic lights
+        - the brand mark
+        - 40×34 icon buttons for Home / History / Insights, a hairline, then Transcription / Polish / Dictionary / Recording, a spacer, Settings / Help, and the license badge
+        - active = white with a sage icon, the same as expanded
+        - each item shows a tooltip with its name on hover
+      - Windows: the same rail with no traffic-light inset.
+      - **The toggle never moves.** It sits in the 36 px title strip at x≈80 (right of the traffic lights) in both states. Its icon is `panel-left-close` when expanded and `panel-left-open` when collapsed. ⌘B / Ctrl+B still toggles, and the state persists.
+      - Implement by composition in `Sidebar.tsx` / `AppShell.tsx`: set `--sidebar-width-icon: 76px` on the provider and restyle the icon-mode items. Never edit `ui/*`.
+      - Keep the `data-tauri-drag-region` strip.
+      - Gate: `pnpm ui:preview` in both states on mac and Windows. The traffic lights sit fully inside the sidebar or rail, and nothing overlaps the page title.
+
+12. **Insights page** (`design/specs/insights.html`, `design/exports/insights.png`). This is the gamified "what you've done" page.
+    - Header: Week / Month / All time, plus **Share**.
+    - Hero:
+      - words dictated
+      - time saved vs typing at 40 wpm
+      - streak (current and best)
+      - speaking pace in wpm (words ÷ `audio_duration_ms`)
+      - dictations and average length
+    - A 43-week activity calendar.
+    - "Where you talk": top apps by words, from `writing.context_hint.app_name`. Only the app name, never window titles.
+    - Milestones: word, streak and dictation thresholds and first Polish, plus a "Next" progress bar.
+    - Data rules:
+      - Extend `computeOverviewStats`. Every number is derived from local history, and no transcript text leaves the device.
+      - Check first whether history is paged or pruned. If all-time totals can't come from the loaded rows, add one Rust aggregate command.
+    - Home keeps its small weekly card and links to Insights.
+13. **Share card** (replaces task 7's scope; `design/specs/share-card.html`, `design/exports/share-card.png`).
+    - A 1200×630 dark card: total words, time saved, streak, pace, a 14-week mini calendar, voicetypr.com.
+    - Rendered by `shareCardRenderer.ts`; ShareStatsModal previews it with Copy image / Save / Share to X.
+    - Numbers only.
+14. **Settings as a modal** (`design/specs/settings-modal.html`, `design/exports/settings-modal.png`). The founder's idea, Notion-style.
+    - Settings opens over the current page from the sidebar's Settings item and ⌘, / Ctrl+,.
+    - Left list: General, Shortcuts, Privacy, Storage | Advanced: Network sharing, CLI & API, Troubleshooting | Account: License, About & updates.
+    - Esc or ✕ closes it.
+    - Existing deep links (`resolveScreen` panes, the home status chip, the license chip) open the modal at that pane.
+    - Below a 760 px window width it becomes a full-window sheet.
+    - The Settings screen route goes away. Transcription, Polish, Dictionary and Recording stay as pages because people tune them often.
+
+### Phasing (founder cadence: a phase of about 8–10 tasks, then one review)
+
+- **Phase A (beta.4):**
+  - 1 focus safety
+  - 2 Island v3, with gaps 1–8
+  - 9 toast → island stack
+  - 3 tray
+  - 11 sidebar
+  - 12 Insights
+  - 13 share card
+  - 14 Settings modal
+- **Phase B (beta.4, second review):**
+  - 4 icons
+  - 5 Polish dialogs
+  - 6 transcription dialogs
+  - 8 What's new / crash / privacy
+  - 10 Windows pass. Also fix the mixed-DPI pill position: `window_manager.rs` computes the position with the destination monitor's scale but sets a `LogicalPosition`, which Tao converts with the pill's current scale. Moving between 100 % and 200 % monitors can misplace the pill. Use physical coordinates. This predates 2.1 (Codex review of `0f59233d`) and needs a two-monitor Windows smoke test.
+  - Windows hold-to-talk: auto-repeats of the held Ctrl+Space still reach the app (no text is typed; IDE suggestions may pop up). The macOS tap swallows repeats of a swallowed hotkey, but the Windows LL hook infers repeats from its down-set, and a missed key-up (secure desktop) would make it swallow a real press. Needs a missed-key-up-safe repeat signal first.
+  - Island chip picks, click-to-dictate and the tray menu on a real build via cua-driver: hover and the peek were checked on 2026-10-03; the rest waits for an idle machine.
+
+## Opus 5.5 design reviews, 2026-10-03 (island + main window)
+
+**Founder decision on the start card:** it becomes a user setting in Recording → Island: "Show details when you start dictating: Always · When something changes (default) · Never".
+- "When something changes" means the per-app Polish style, mic, engine or key status differs from the previous dictation, plus the first 5 dictations.
+- The card shows for 0.8 s, not 1.2 s.
+- With Never, the dot goes straight to the slim row; the ✦ badge still shows the Polish state.
+
+**Island review: accepted, folded into Island Lab v3.2 and P2/P3.**
+
+P0:
+- The peek's record button sits exactly on the dot's anchor (chips row on top, record row at the bottom), and clicking the empty panel dictates.
+- Windows positioning uses `monitor.work_area()` of the foreground window's or cursor's monitor. Today it uses the full monitor, so the island lands on the taskbar.
+- "No speech heard" offers [Transcribe anyway], with the clip kept for 30 s (gap 13).
+
+P1:
+- The width holds at 236 px from listening through polishing.
+- No dip when opening from the dot; the spring starts on frame 1 (response 0.34, bounce 0.22).
+- The wave draws elapsed bars only, with no fake silence strip.
+- The pasted card: neutral buttons, Retry only when a second engine exists, actions on hover.
+- Pick lists open with the ✓ row over the chip, with a 250 ms click guard.
+- Dot hover intent: 450 ms dwell with a slow pointer; ignore clicks within 120 ms of entry; a 20 px target that extends upward.
+- AI badge: 12 px disc, 7 px SVG star, "!" for amber.
+- The style chip opens the same list everywhere.
+- The peek's 4th chip becomes **Language** instead of Mode.
+- Copy rules:
+  - "Retry with X"
+  - × = dismiss, nothing lost
+  - Discard = audio deleted
+  - "Choose mic"
+  - "· not polished"
+  - "Open System Settings" on macOS, "Open Privacy settings" on Windows
+- The cloud-key card gains Discard.
+- Polish skipped reads "Pasted unpolished · Polish timed out" with [Undo] [Polish now].
+- A failed translation auto-pastes the original.
+- Starting up reads "Getting ready…" while already capturing; auto-stop says what happened to the audio.
+- A press while finishing shows "Finishing…" (600 ms). Starting a new recording instead stays a later backend change.
+- The island morphs into a stack card in place.
+- Top anchors grow downward.
+- Double hairline border (inset rgba(255,255,255,.16) plus outer rgba(0,0,0,.45)).
+- Every outcome is announced once.
+
+P2:
+- 26 px targets.
+- Tentative alpha .52.
+- One SVG glyph set.
+- Mic busy is red.
+- Short engine names; generic mic prefixes stripped.
+- Peek hint "Hold ⌥ Space to talk".
+- A stationary meter under reduced motion.
+
+**Main-window review: accepted, slice M4.**
+- Settings nav beige hover override (P0).
+- Dark scrim lightening the page (P0).
+- Shortcuts pane layout and sentence-case labels (P0).
+- Contrast tokens.
+- One bare-row pane style.
+- License: "Voicetypr Pro · lifetime", Recheck, Deactivate.
+- About gets the update rows.
+- Insights bars normalised to the top app, 128 px names.
+- Post on X copies the image first.
+- Focus rings.
+- History "…" menu.
+- Home single keycap.
+- Share modal shell.
+
+**Tray (task 3) additions from the review:**
+- a Language ▸ submenu
+- Transcribe a file…
+- Paste last transcript
+- Start / Stop Dictation toggles, with the status line "Recording · 0:07"
+- Engine ▸ grouped under disabled "On this Mac/PC / Cloud / Network" headers
+- spec text as "Polish: Clean"
+- the Windows mock uses Ctrl+Alt+Space (Alt+Space is the system window menu)
+- Recent ▸ shows about 40 characters plus the time
+
+**Open question for the founder:** onboarding's crash/analytics consent is pre-ticked checkboxes below the CTA. GDPR needs unticked boxes. Proposal: unticked switches above the CTA.

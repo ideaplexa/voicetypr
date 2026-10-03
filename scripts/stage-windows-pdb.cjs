@@ -3,7 +3,7 @@
 //
 // MSVC keeps debug symbols in a separate voicetypr.pdb (never embedded in the
 // .exe), so without it shipped, release crash stacks in Bugsink are all
-// `<unknown>`. The Sentry SDK resolves frames in-process at capture via dbghelp,
+// `<unknown>`. The PostHog SDK resolves frames in-process at capture via dbghelp,
 // which finds symbols in the module's own directory — so the .pdb must end up
 // next to voicetypr.exe on the user's machine.
 //

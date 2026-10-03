@@ -45,7 +45,8 @@ describe("UI preview platform", () => {
     const keys = renderToStaticMarkup(<>{formatHotkey(shortcut)}</>);
     expect(keys).toContain(platform === "macos" ? "⌥" : "Ctrl");
     expect(keys).toContain("Space");
-    if (platform === "windows") expect(keys).toContain("Alt");
+    // Two-key defaults: ⌥ Space on macOS, Ctrl+Space on Windows.
+    expect(keys).not.toContain(platform === "macos" ? "⇧" : "Alt");
 
     const history = renderToStaticMarkup(
       <RecentRecordingsHeader

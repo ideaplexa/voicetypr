@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
@@ -472,6 +473,7 @@ export function useAiProviderSettings({
         model: aiSettings.model,
       });
 
+      recordEvent({ name: "quick_setting_changed", properties: { setting: "polish", source: "app" } });
       setAISettings((prev) => ({ ...prev, enabled }));
 
       await onPolishToggled(enabled);

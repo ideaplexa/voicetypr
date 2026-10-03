@@ -39,10 +39,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     onBareModifier,
     onHoldToTalkChange,
     telemetryOptIn,
-    analyticsOptIn,
     isSavingCompletion,
     onTelemetryChange,
-    onAnalyticsChange,
     completeOnboarding,
   } = useOnboardingDesktop(props);
 
@@ -194,10 +192,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               holdToTalk={holdToTalk}
               hotkey={hotkey}
               telemetryOptIn={telemetryOptIn}
-              analyticsOptIn={analyticsOptIn}
               isSavingCompletion={isSavingCompletion || savingShortcut || currentStep !== "success"}
               onTelemetryChange={onTelemetryChange}
-              onAnalyticsChange={onAnalyticsChange}
               onComplete={completeOnboarding}
               onChangeShortcut={() => {
                 setEditingShortcut(true);

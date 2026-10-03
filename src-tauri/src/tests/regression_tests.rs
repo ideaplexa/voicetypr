@@ -124,4 +124,32 @@ mod tests {
              never app.state::<WindowManager>() (panics: 'state() called before manage()')"
         );
     }
+
+    /// Regression guard for beta.4: the island's device and window lookups ran
+    /// before the mic opened and delayed first audio by 50–200 ms. They must stay
+    /// after the readiness decision in `start_recording`.
+    #[test]
+    fn island_context_is_resolved_after_first_audio() {
+        // Windows checkouts use CRLF line endings.
+        let src = include_str!("../commands/audio.rs").replace("\r\n", "\n");
+        let start = src
+            .find("pub async fn start_recording(")
+            .expect("start_recording exists");
+        let body = &src[start..];
+        let body = &body[..body.find("\n}\n").expect("start_recording ends")];
+        let readiness = body
+            .find("decide_start_readiness(")
+            .expect("readiness decision");
+        let context = body
+            .find("spawn_island_context(")
+            .expect("island context is spawned");
+        assert!(
+            readiness < context,
+            "island context must follow first audio"
+        );
+        assert!(
+            !body.contains("pill::context::capture") && !body.contains("positioning::snapshot"),
+            "device/window lookups must not run inline on the start path"
+        );
+    }
 }

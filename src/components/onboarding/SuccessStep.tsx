@@ -1,3 +1,4 @@
+import { TELEMETRY_COPY, WhatsShared } from "@/components/WhatsShared";
 import type { BareModifierSpec } from "@/components/HotkeyInput";
 import { formatBareModifierLabel } from "@/components/onboarding/onboardingTypes";
 import { Button } from "@/components/settings/SettingsButton";
@@ -16,10 +17,8 @@ export function SuccessStep({
   holdToTalk,
   hotkey,
   telemetryOptIn,
-  analyticsOptIn,
   isSavingCompletion,
   onTelemetryChange,
-  onAnalyticsChange,
   onComplete,
 }: {
   editor?: ReactNode;
@@ -28,10 +27,8 @@ export function SuccessStep({
   holdToTalk: boolean;
   hotkey: string;
   telemetryOptIn: boolean;
-  analyticsOptIn: boolean;
   isSavingCompletion: boolean;
   onTelemetryChange: (checked: boolean) => void;
-  onAnalyticsChange: (checked: boolean) => void;
   onComplete: () => void | Promise<void>;
 }) {
   const [text, setText] = useState("");
@@ -81,6 +78,14 @@ export function SuccessStep({
           </p>
         ) : null}
       </div>
+      <div className="flex w-full flex-col gap-3 text-left text-sm">
+        <label className="flex items-start gap-3 rounded-[14px] border border-border bg-card p-4">
+          <input type="checkbox" checked={telemetryOptIn} onChange={(event) => onTelemetryChange(event.target.checked)}
+            className="mt-0.5 size-4 shrink-0 accent-[var(--sage)]" />
+          <span className="text-muted-foreground">{TELEMETRY_COPY}</span>
+        </label>
+        <WhatsShared />
+      </div>
       <div className="flex items-center gap-[10px]">
         <Button
           variant="outline"
@@ -97,37 +102,6 @@ export function SuccessStep({
         >
           {isSavingCompletion ? <Spinner /> : null}Start using Voicetypr
         </Button>
-      </div>
-      <div className="flex w-full flex-col gap-3 text-left text-sm">
-        <label className="flex items-start gap-3 rounded-[14px] border border-border bg-card p-4">
-          <input
-            type="checkbox"
-            checked={telemetryOptIn}
-            onChange={(event) => onTelemetryChange(event.target.checked)}
-            className="mt-0.5 size-4 shrink-0 accent-[var(--sage)]"
-          />
-          <span className="text-muted-foreground">
-            <strong className="block font-medium text-foreground">
-              Crash &amp; error reporting
-            </strong>
-            Anonymous crash details go to GlitchTip. No audio, transcripts, clipboard contents, or
-            prompts.
-          </span>
-        </label>
-
-        <label className="flex items-start gap-3 rounded-[14px] border border-border bg-card p-4">
-          <input
-            type="checkbox"
-            checked={analyticsOptIn}
-            onChange={(event) => onAnalyticsChange(event.target.checked)}
-            className="mt-0.5 size-4 shrink-0 accent-[var(--sage)]"
-          />
-          <span className="text-muted-foreground">
-            <strong className="block font-medium text-foreground">Usage analytics</strong>
-            Anonymous feature usage, outcomes, and performance buckets with PostHog. No session
-            replay.
-          </span>
-        </label>
       </div>
     </section>
   );

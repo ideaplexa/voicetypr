@@ -20,7 +20,6 @@ export default defineConfig(async () => ({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         pill: path.resolve(__dirname, 'pill.html'),
-        toast: path.resolve(__dirname, 'toast.html'),
       },
     },
   },

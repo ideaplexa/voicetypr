@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
 import { SettingsPaneCard } from "@/components/settings/settings-ui";
 import { useSettings } from "@/contexts/SettingsContext";
@@ -16,6 +17,7 @@ export function MicrophoneCheck() {
           onValueChange={async (deviceName) => {
             try {
               await invoke("set_audio_device", { deviceName: deviceName || null });
+                recordEvent({ name: "quick_setting_changed", properties: { setting: "mic", source: "app" } });
               await refreshSettings();
             } catch {
               toast.error("Failed to change microphone");

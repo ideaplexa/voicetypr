@@ -1,4 +1,5 @@
 use super::agent_cli::AgentCliRuntime;
+use super::catalog;
 use super::contract::{AiPolishRequest, AiPolishResult};
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::genai_runtime::{AiKeyResolver, GenaiRuntime};
@@ -78,6 +79,23 @@ impl AiExecutor {
         request: AiPolishRequest,
         cancellation_token: CancellationToken,
     ) -> Result<AiPolishResult, AiProviderError> {
+        self.polish_with_timings(
+            request,
+            cancellation_token,
+            &mut super::polish::PolishTimings::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn polish_with_timings(
+        &self,
+        request: AiPolishRequest,
+        cancellation_token: CancellationToken,
+        timings: &mut super::polish::PolishTimings,
+    ) -> Result<AiPolishResult, AiProviderError> {
+        let mut request = request;
+        request.model_id = catalog::resolve_model(&request.provider_id, &request.model_id)
+            .ok_or(AiProviderError::UnsupportedProvider)?;
         let start = Instant::now();
         let budget = Duration::from_millis(request.timeout_ms);
         let deadline = start + budget;
@@ -87,22 +105,33 @@ impl AiExecutor {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
                 .ok_or(AiProviderError::Timeout)?;
+            let request_start = Instant::now();
             let result = self
                 .run_with_budget(&request, cancellation_token.clone(), remaining)
                 .await;
+            timings.request += super::polish::elapsed_ms(request_start);
 
             match result {
                 Ok(output_text) => {
+                    let validate_start = Instant::now();
                     let (cleaned, truncated) =
                         sanitize_ai_output(&output_text, request.input_text.len());
                     let validation = if truncated {
                         Err(AiProviderError::BadResponse)
                     } else {
-                        validate_ai_output(&cleaned, &request.input_text)
+                        validate_ai_output_with_intent(
+                            &cleaned,
+                            &request.input_text,
+                            request.needs_output_language_transform,
+                        )
                     };
+                    timings.validate += super::polish::elapsed_ms(validate_start);
                     let validated = match validation {
                         Ok(output) => output,
-                        Err(error) if attempt == 0 => {
+                        Err(error)
+                            if attempt == 0
+                                && !matches!(error, AiProviderError::OutputGuard(_)) =>
+                        {
                             attempt += 1;
                             log::warn!(
                                 "AI cleanup response failed validation; retrying once category={:?}",
@@ -185,19 +214,28 @@ fn should_retry(error: &AiProviderError) -> bool {
     )
 }
 
+#[cfg(test)]
 fn validate_ai_output(output: &str, input: &str) -> Result<String, AiProviderError> {
-    let cleaned = strip_wrapping_quotes(
-        strip_known_preamble(
-            strip_wrapping_quotes(strip_markdown_fence(output).trim(), input),
-            input,
-        ),
-        input,
-    )
-    .trim()
-    .to_string();
+    validate_ai_output_with_intent(output, input, false)
+}
 
-    if cleaned.is_empty()
-        || starts_with_refusal_or_commentary(&cleaned)
+fn validate_ai_output_with_intent(
+    output: &str,
+    input: &str,
+    translation: bool,
+) -> Result<String, AiProviderError> {
+    let output = strip_wrapping_quotes(strip_markdown_fence(output).trim(), input);
+    let output = strip_known_preamble(output, input);
+    let output = super::output_guard::strip_inline_wrapper(output, input);
+    let cleaned = strip_wrapping_quotes(output, input).trim().to_string();
+
+    if cleaned.is_empty() {
+        return Err(AiProviderError::BadResponse);
+    }
+    super::output_guard::check_with_intent(input, &cleaned, translation)
+        .map_err(AiProviderError::OutputGuard)?;
+
+    if super::output_guard::starts_with_refusal_or_commentary(&cleaned, input)
         || has_anomalous_cleanup_length(&cleaned, input)
     {
         Err(AiProviderError::BadResponse)
@@ -318,14 +356,6 @@ fn strip_known_preamble<'a>(output: &'a str, input: &str) -> &'a str {
     }
 }
 
-fn starts_with_refusal_or_commentary(output: &str) -> bool {
-    let lower = output.trim_start().to_ascii_lowercase();
-    lower.starts_with("i can't")
-        || lower.starts_with("i cannot")
-        || lower.starts_with("i'm sorry")
-        || lower.starts_with("i am sorry")
-}
-
 fn has_anomalous_cleanup_length(output: &str, input: &str) -> bool {
     let input_len = input.trim().len();
     let output_len = output.trim().len();
@@ -443,9 +473,20 @@ mod tests {
     }
 
     #[test]
+    fn empty_question_response_keeps_bad_response_validation() {
+        assert_eq!(
+            validate_ai_output("   ", "could you send the draft"),
+            Err(AiProviderError::BadResponse)
+        );
+    }
+
+    #[test]
     fn validate_rejects_refusal_commentary() {
         let error = validate_ai_output("I'm sorry, I can't do that.", "hello").unwrap_err();
-        assert!(matches!(error, AiProviderError::BadResponse));
+        assert!(matches!(
+            error,
+            AiProviderError::OutputGuard(super::super::output_guard::OutputGuardReason::MetaReply)
+        ));
     }
 
     #[test]
@@ -510,10 +551,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_identity_guard_does_not_bypass_refusal_check() {
+    fn validate_preserves_dictated_refusal() {
         let refusal = "I'm sorry, I can't help with that.";
-        let error = validate_ai_output(refusal, refusal).unwrap_err();
-        assert!(matches!(error, AiProviderError::BadResponse));
+        assert_eq!(validate_ai_output(refusal, refusal).unwrap(), refusal);
     }
 
     #[test]

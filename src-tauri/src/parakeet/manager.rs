@@ -524,6 +524,20 @@ impl ParakeetManager {
         model_name: &str,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<(), ParakeetError> {
+        let result = self
+            .load_model_with_cancel_inner(app, model_name, cancel_flag)
+            .await;
+        if result.is_err() {
+            crate::telemetry::capture_model_load_failure(model_name);
+        }
+        result
+    }
+    async fn load_model_with_cancel_inner(
+        &self,
+        app: &AppHandle,
+        model_name: &str,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    ) -> Result<(), ParakeetError> {
         let load_start = Instant::now();
         let Some(definition) = self.get_model_definition(model_name) else {
             return Err(ParakeetError::SpawnError(format!(

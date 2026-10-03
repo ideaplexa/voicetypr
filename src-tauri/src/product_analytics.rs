@@ -1,16 +1,10 @@
-//! Consent-gated, personless product analytics (PostHog Cloud EU).
-//!
-//! This module is deliberately separate from `telemetry`: PostHog receives only
-//! closed product events, while GlitchTip remains the sole owner of errors,
-//! crashes, logs, traces, and symbolication. There is no frontend SDK,
-//! autocapture, replay, identify call, feature-flag evaluation, or error tracking.
-
+//! Consent-gated analytics and Error Tracking through one PostHog EU client.
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 
 use parking_lot::RwLock;
 
-use posthog_rs::{Client, ClientOptionsBuilder, Event};
+use posthog_rs::{ClientOptionsBuilder, Event};
 use serde_json::Value;
 
 use crate::release_channel::RELEASE_CHANNEL;
@@ -19,7 +13,7 @@ const SETTINGS_STORE_FILE: &str = "settings";
 pub const KEY_ANALYTICS_ENABLED: &str = "analytics_enabled";
 pub const KEY_ANALYTICS_INSTALL_ID: &str = "analytics_install_id";
 pub const KEY_PRIVACY_CONSENT_VERSION: &str = "privacy_consent_version";
-pub const PRIVACY_CONSENT_VERSION: u64 = 1;
+pub const PRIVACY_CONSENT_VERSION: u64 = 2;
 pub const ANALYTICS_DEFAULT_ENABLED: bool = true;
 
 const POSTHOG_HOST: &str = "https://eu.i.posthog.com";
@@ -44,7 +38,6 @@ static RUNTIME: LazyLock<RwLock<RuntimeState>> = LazyLock::new(|| {
         install_id: None,
     })
 });
-static CLIENT: OnceLock<Client> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredAnalyticsConsent {
@@ -301,6 +294,10 @@ impl From<crate::ai::prompts::EnhancementPreset> for PolishPreset {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProductEvent {
     AppStarted,
+    Observability {
+        name: &'static str,
+        properties: Vec<(&'static str, Value)>,
+    },
     OnboardingCompleted,
     RecordingStarted,
     RecordingStopped {
@@ -339,13 +336,14 @@ pub enum ProductEvent {
 impl ProductEvent {
     const fn name(&self) -> &'static str {
         match self {
-            Self::AppStarted => "app.started",
+            Self::AppStarted => "app_started",
+            Self::Observability { name, .. } => name,
             Self::OnboardingCompleted => "onboarding.completed",
             Self::RecordingStarted => "recording.started",
             Self::RecordingStopped { .. } => "recording.stopped",
             Self::StageFinished { .. } => "transcription.stage_finished",
             Self::PolishFinished { .. } => "polish.finished",
-            Self::DictationCompleted { .. } => "dictation.completed",
+            Self::DictationCompleted { .. } => "dictation_completed",
         }
     }
 }
@@ -354,8 +352,7 @@ pub fn is_available() -> bool {
     POSTHOG_PROJECT_TOKEN.is_some_and(|token| !token.trim().is_empty())
 }
 
-#[cfg(test)]
-fn is_enabled() -> bool {
+pub fn is_enabled() -> bool {
     RUNTIME.read().enabled
 }
 
@@ -381,18 +378,18 @@ pub fn read_consent_from_path(path: &Path) -> StoredAnalyticsConsent {
     consent_from_value(value.as_ref())
 }
 
-fn consent_from_value(value: Option<&Value>) -> StoredAnalyticsConsent {
+pub(crate) fn consent_from_value(value: Option<&Value>) -> StoredAnalyticsConsent {
     let version = value
         .and_then(|root| root.get(KEY_PRIVACY_CONSENT_VERSION))
         .and_then(Value::as_u64)
         .unwrap_or(0);
     let consent_required = version < PRIVACY_CONSENT_VERSION;
-    let enabled = value
-        .and_then(|root| root.get(KEY_ANALYTICS_ENABLED))
-        .and_then(Value::as_bool)
-        .unwrap_or(ANALYTICS_DEFAULT_ENABLED);
+    let enabled = crate::telemetry::migrated_consent(value);
     let install_id = value
-        .and_then(|root| root.get(KEY_ANALYTICS_INSTALL_ID))
+        .and_then(|root| {
+            root.get(KEY_ANALYTICS_INSTALL_ID)
+                .or_else(|| root.get(crate::telemetry::KEY_TELEMETRY_INSTALL_ID))
+        })
         .and_then(Value::as_str)
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .map(|value| value.to_string());
@@ -431,14 +428,24 @@ pub fn init(consent: StoredAnalyticsConsent) {
         .max_queue_size(256)
         .flush_interval_ms(5_000)
         .shutdown_timeout_ms(2_000)
+        .error_tracking(
+            posthog_rs::ErrorTrackingOptionsBuilder::default()
+                .capture_panics(true)
+                .in_app_exclude_paths(vec!["/.cargo/".into(), "/rustc/".into(), "registry".into()])
+                .build()
+                .expect("static error tracking options"),
+        )
         .before_send(scrub_event);
     let Ok(options) = options.build() else {
         log::warn!("Product analytics client configuration was rejected");
         return;
     };
-    let _ = CLIENT.set(posthog_rs::client(options));
-
-    capture(ProductEvent::AppStarted);
+    // Default Rust panic printing can include arbitrary payload text. Preserve
+    // only a fixed local notice, then install SDK capture plus our coded bridge.
+    std::panic::set_hook(Box::new(|_| eprintln!("Application panic")));
+    if posthog_rs::init_global(options).is_ok() {
+        crate::telemetry::install_coded_panic_hook();
+    }
 }
 
 /// Enables analytics with a persisted anonymous installation id. Call only
@@ -452,10 +459,25 @@ pub fn enable(install_id: String) {
 /// Stops new egress, invalidates queued events, and forgets the in-memory id.
 /// The store command deletes the persisted id separately.
 pub fn disable() {
+    revoke_with_flush(posthog_rs::flush);
+}
+
+fn revoke_with_flush(flush: impl FnOnce()) {
     let mut state = RUNTIME.write();
     state.enabled = false;
     state.generation = state.generation.wrapping_add(1);
     state.install_id = None;
+    drop(state);
+    crate::observability::clear_peeks();
+    // The SDK has no pre-HTTP hook. Drain synchronously while the gate is off:
+    // buffered events are rejected by before_send; a batch already prepared
+    // by the worker can finish its single attempt (bounded by request timeout).
+    flush();
+}
+
+pub(crate) fn consent_epoch() -> Option<u64> {
+    let state = RUNTIME.read();
+    state.enabled.then_some(state.generation)
 }
 
 fn configure_runtime(enabled: bool, install_id: Option<String>) {
@@ -465,18 +487,43 @@ fn configure_runtime(enabled: bool, install_id: Option<String>) {
 }
 
 pub fn shutdown() {
-    if let Some(client) = CLIENT.get() {
-        client.shutdown();
-    }
+    crate::observability::flush_peeks();
+    posthog_rs::shutdown();
 }
 
 pub fn capture(event: ProductEvent) {
-    let Some(client) = CLIENT.get() else {
-        return;
-    };
+    capture_at(
+        event,
+        crate::commands::audio::current_recording_generation(),
+    );
+}
+pub fn capture_at(event: ProductEvent, dictation_generation: u64) {
+    capture_at_epoch(event, dictation_generation, None);
+}
+
+pub(crate) fn capture_at_epoch(event: ProductEvent, dictation_generation: u64, epoch: Option<u64>) {
+    capture_with_trace(event, dictation_generation, epoch, None);
+}
+
+pub(crate) fn capture_with_trace(
+    event: ProductEvent,
+    dictation_generation: u64,
+    epoch: Option<u64>,
+    trace_id: Option<String>,
+) {
+    #[cfg(test)]
+    TEST_CAPTURES.with(|captures| {
+        captures.borrow_mut().push((
+            event.name().to_string(),
+            dictation_generation,
+            trace_id
+                .clone()
+                .or_else(|| crate::observability::trace_id(dictation_generation)),
+        ))
+    });
     let (install_id, generation) = {
         let state = RUNTIME.read();
-        if !state.enabled {
+        if !state.enabled || epoch.is_some_and(|epoch| epoch != state.generation) {
             return;
         }
         let Some(install_id) = state.install_id.clone() else {
@@ -487,8 +534,26 @@ pub fn capture(event: ProductEvent) {
 
     let mut posthog_event = Event::new(event.name().to_string(), install_id);
     insert_base_properties(&mut posthog_event, generation);
+    let completed = matches!(&event, ProductEvent::DictationCompleted { .. });
     insert_event_properties(&mut posthog_event, event);
-    client.capture(posthog_event);
+    if completed {
+        for (key, value) in crate::observability::completion_properties(dictation_generation) {
+            let _ = posthog_event.insert_prop(key, value);
+        }
+    }
+    if let Some(id) = trace_id.or_else(|| crate::observability::trace_id(dictation_generation)) {
+        let _ = posthog_event.insert_prop("dictation_id", id);
+    }
+    posthog_rs::capture(posthog_event);
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CAPTURES: std::cell::RefCell<Vec<(String, u64, Option<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+#[cfg(test)]
+pub(crate) fn take_test_captures() -> Vec<(String, u64, Option<String>)> {
+    TEST_CAPTURES.with(|captures| std::mem::take(&mut *captures.borrow_mut()))
 }
 
 fn insert_base_properties(event: &mut Event, generation: u64) {
@@ -503,9 +568,17 @@ fn insert_base_properties(event: &mut Event, generation: u64) {
 
 fn insert_event_properties(event: &mut Event, product_event: ProductEvent) {
     match product_event {
-        ProductEvent::AppStarted
-        | ProductEvent::OnboardingCompleted
-        | ProductEvent::RecordingStarted => {}
+        ProductEvent::Observability { properties, .. } => {
+            for (key, value) in properties {
+                let _ = event.insert_prop(key, value);
+            }
+        }
+        ProductEvent::AppStarted => {
+            for (key, value) in crate::observability::startup_properties() {
+                let _ = event.insert_prop(key, value);
+            }
+        }
+        ProductEvent::OnboardingCompleted | ProductEvent::RecordingStarted => {}
         ProductEvent::RecordingStopped { duration_ms } => {
             if let Some(duration_ms) = duration_ms {
                 let _ = event.insert_prop("duration_bucket", duration_bucket(duration_ms));
@@ -616,7 +689,25 @@ fn safe_model_id(provider_id: &str, model_id: &str) -> String {
     }
 }
 
+const SDK_ENRICHMENT_KEYS: &[&str] = &[
+    "$os",
+    "$os_version",
+    "$lib",
+    "$lib_version",
+    "$lib_version__major",
+    "$lib_version__minor",
+    "$lib_version__patch",
+];
+
 fn scrub_event(mut event: Event) -> Option<Event> {
+    // Exactly the enrichment applied by pinned posthog-rs 0.22 V0 pipeline.
+    // Never accept an arbitrary dollar-prefixed property.
+    for key in SDK_ENRICHMENT_KEYS {
+        event.remove_prop(key);
+    }
+    if event.event_name() == "$exception" {
+        return crate::telemetry::scrub_exception_event(event);
+    }
     let generation = event
         .properties()
         .get(INTERNAL_GENERATION_PROPERTY)
@@ -628,6 +719,13 @@ fn scrub_event(mut event: Event) -> Option<Event> {
     drop(state);
     event.remove_prop(INTERNAL_GENERATION_PROPERTY);
 
+    let trace_id = event
+        .properties()
+        .get("dictation_id")
+        .and_then(Value::as_str)
+        .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        .filter(|id| id.get_version_num() == 4);
+    event.remove_prop("dictation_id");
     let dynamic = validated_dynamic_properties(&event)?;
     let keys: Vec<String> = event.properties().keys().cloned().collect();
     for key in keys {
@@ -640,6 +738,9 @@ fn scrub_event(mut event: Event) -> Option<Event> {
     let _ = event.insert_prop("release_channel", RELEASE_CHANNEL);
     let _ = event.insert_prop("os", std::env::consts::OS);
     let _ = event.insert_prop("arch", std::env::consts::ARCH);
+    if let Some(id) = trace_id {
+        let _ = event.insert_prop("dictation_id", id.to_string());
+    }
     for (key, value) in dynamic {
         let _ = event.insert_prop(key, value);
     }
@@ -647,12 +748,15 @@ fn scrub_event(mut event: Event) -> Option<Event> {
 }
 
 fn validated_dynamic_properties(event: &Event) -> Option<Vec<(&'static str, Value)>> {
+    if crate::observability::schema(event.event_name()).is_some() {
+        return crate::observability::validated(event);
+    }
     let properties = event.properties();
     let string = |key: &str| properties.get(key).and_then(Value::as_str);
     let allowed = |value: &str, values: &[&str]| values.contains(&value);
 
     match event.event_name() {
-        "app.started" | "onboarding.completed" | "recording.started" => Some(Vec::new()),
+        "app_started" | "onboarding.completed" | "recording.started" => Some(Vec::new()),
         "recording.stopped" => match string("duration_bucket") {
             Some(value) if allowed(value, DURATION_BUCKETS) => {
                 Some(vec![("duration_bucket", Value::String(value.to_string()))])
@@ -717,8 +821,20 @@ fn validated_dynamic_properties(event: &Event) -> Option<Vec<(&'static str, Valu
                 ("model", Value::String(model.to_string())),
             ])
         }
-        "dictation.completed" => {
+        "dictation_completed" => {
             const DYNAMIC_KEYS: &[&str] = &[
+                "start_source",
+                "mode",
+                "start_card_shown",
+                "island_start_details",
+                "language",
+                "polish_skip_used",
+                "polish_guard_reason",
+                "polish_keep_words",
+                "polish_style",
+                "recovery_kind",
+                "recovery_resolution",
+                "focus_safe",
                 "outcome",
                 "engine",
                 "model",
@@ -822,6 +938,16 @@ fn validated_dynamic_properties(event: &Event) -> Option<Vec<(&'static str, Valu
                     Value::from(integer("start_to_first_audio_ms", 10_000)?),
                 ));
             }
+            for (key, vocabulary) in crate::observability::COMPLETION_SCHEMA {
+                if let Some(value) = properties.get(*key) {
+                    if vocabulary.is_empty() {
+                        value.as_bool()?;
+                    } else if !vocabulary.contains(&value.as_str()?) {
+                        return None;
+                    }
+                    safe.push((*key, value.clone()));
+                }
+            }
             Some(safe)
         }
         _ => None,
@@ -836,6 +962,45 @@ const DURATION_BUCKETS: &[&str] = &[
     "15000_59999ms",
     "gte_60000ms",
 ];
+
+pub(crate) fn exception_options(
+    code: &str,
+    generation: Option<u64>,
+) -> Option<posthog_rs::CaptureExceptionOptions> {
+    let state = RUNTIME.read();
+    if !state.enabled {
+        return None;
+    }
+    let mut options = posthog_rs::CaptureExceptionOptions::new()
+        .distinct_id(state.install_id.clone()?)
+        .fingerprint(code)
+        .level("error")
+        .property("code", code)
+        .ok()?
+        .property("_voicetypr_consent_generation", state.generation)
+        .ok()?;
+    if let Some(id) = generation.and_then(crate::observability::trace_id) {
+        options = options.property("dictation_id", id).ok()?;
+    }
+    Some(options)
+}
+pub(crate) fn exception_allowed(event: &Event) -> bool {
+    let state = RUNTIME.read();
+    state.enabled
+        && event
+            .properties()
+            .get("_voicetypr_consent_generation")
+            .and_then(Value::as_u64)
+            .is_some_and(|generation| generation == state.generation)
+}
+pub fn install_id() -> Option<String> {
+    let state = RUNTIME.read();
+    if state.enabled {
+        state.install_id.clone()
+    } else {
+        None
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -861,12 +1026,13 @@ mod tests {
     }
 
     fn dictation_event() -> Event {
-        let mut event = Event::new("dictation.completed".to_string(), "install-id".to_string());
+        let mut event = Event::new("dictation_completed".to_string(), "install-id".to_string());
         insert_event_properties(&mut event, build_dictation_completed(dictation_facts()));
         event
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_exact_property_set_and_rounding() {
         let event = dictation_event();
         let mut keys: Vec<&str> = event.properties().keys().map(String::as_str).collect();
@@ -897,7 +1063,7 @@ mod tests {
         no_first_audio.start_to_first_audio_ms = None;
         no_first_audio.recording_ms = u64::MAX;
         no_first_audio.stop_to_text_ms = u64::MAX;
-        let mut event = Event::new("dictation.completed".to_string(), "install-id".to_string());
+        let mut event = Event::new("dictation_completed".to_string(), "install-id".to_string());
         insert_event_properties(&mut event, build_dictation_completed(no_first_audio));
         assert!(!event.properties().contains_key("start_to_first_audio_ms"));
         assert_eq!(event.properties()["recording_ms"], Value::from(600_000));
@@ -905,6 +1071,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_builder_covers_outcomes_and_privacy() {
         for outcome in [
             DictationOutcome::Delivered,
@@ -916,7 +1083,7 @@ mod tests {
             let mut facts = dictation_facts();
             facts.outcome = outcome;
             facts.model = "private/custom/model".to_string();
-            let mut event = Event::new("dictation.completed".to_string(), "install-id".to_string());
+            let mut event = Event::new("dictation_completed".to_string(), "install-id".to_string());
             insert_event_properties(&mut event, build_dictation_completed(facts));
             assert_eq!(event.properties()["outcome"], Value::from(outcome.as_str()));
             assert_eq!(event.properties()["model"], Value::from("other"));
@@ -931,6 +1098,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_validator_drops_bad_values_and_extra_keys() {
         for (key, wrong_type) in [
             ("outcome", serde_json::json!(true)),
@@ -1014,6 +1182,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn dictation_completed_scrubber_keeps_only_closed_properties() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1021,13 +1190,169 @@ mod tests {
             state.enabled = true;
             state.generation
         };
-        let mut event = event_with_generation("dictation.completed", generation);
+        let mut event = event_with_generation("dictation_completed", generation);
         insert_event_properties(&mut event, build_dictation_completed(dictation_facts()));
         let scrubbed = scrub_event(event).expect("closed dictation event accepted");
         assert_eq!(scrubbed.properties()["outcome"], Value::from("delivered"));
         assert!(!scrubbed
             .properties()
             .contains_key(INTERNAL_GENERATION_PROPERTY));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(analytics_runtime)]
+    async fn sdk_batch_enrichment_and_revocation_use_real_worker() {
+        use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let host = server.uri();
+        let enriched = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = enriched.clone();
+        tokio::task::spawn_blocking(move || {
+            configure_runtime(true, Some(uuid::Uuid::new_v4().to_string()));
+            let epoch = consent_epoch().unwrap();
+            let mut options = ClientOptionsBuilder::default();
+            options
+                .api_key("test-token".to_string())
+                .host(host)
+                .is_server(false)
+                .flush_at(100usize)
+                .max_batch_size(20usize)
+                .flush_interval_ms(60_000u64)
+                .max_capture_attempts(1u32)
+                .before_send(move |event: Event| {
+                    for key in SDK_ENRICHMENT_KEYS {
+                        assert!(
+                            event.properties().contains_key(*key),
+                            "missing enrichment {key}"
+                        );
+                    }
+                    observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Some(event)
+                })
+                .before_send(scrub_event);
+            let client = posthog_rs::client(options.build().unwrap());
+            let mut completed = event_with_generation("dictation_completed", epoch);
+            insert_event_properties(&mut completed, build_dictation_completed(dictation_facts()));
+            client.capture(completed);
+            client.capture(event_with_generation("recording.started", epoch));
+            client.capture(event_with_generation("onboarding.completed", epoch));
+            client.flush();
+            // Accepted in the worker queue, then revoked before dispatch.
+            client.capture(event_with_generation("recording.started", epoch));
+            let mut exception = event_with_generation("$exception", epoch);
+            exception.insert_prop("code", "retry_failed").unwrap();
+            client.capture(exception);
+            revoke_with_flush(|| client.flush());
+            assert!(consent_epoch().is_none());
+            // A capture that raced revoke/enqueue cannot revive after opt-in.
+            configure_runtime(true, Some(uuid::Uuid::new_v4().to_string()));
+            client.capture(event_with_generation("recording.started", epoch));
+            client.flush();
+            client.shutdown();
+            configure_runtime(false, None);
+        })
+        .await
+        .unwrap();
+        assert_eq!(enriched.load(std::sync::atomic::Ordering::SeqCst), 6);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "revoked events or exceptions escaped");
+        let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let batch = body["batch"].as_array().unwrap();
+        assert_eq!(batch.len(), 3);
+        for (event, name) in batch.iter().zip([
+            "dictation_completed",
+            "recording.started",
+            "onboarding.completed",
+        ]) {
+            assert_eq!(event["event"], name);
+            for key in SDK_ENRICHMENT_KEYS {
+                assert!(event["properties"].get(*key).is_none());
+            }
+            assert!(event["properties"]
+                .get(INTERNAL_GENERATION_PROPERTY)
+                .is_none());
+        }
+        assert_eq!(batch[0]["properties"]["outcome"], "delivered");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial(analytics_runtime)]
+    async fn revocation_waits_for_prepared_batch_and_drops_the_remaining_queue() {
+        use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let host = server.uri();
+        tokio::task::spawn_blocking(move || {
+            configure_runtime(true, Some(uuid::Uuid::new_v4().to_string()));
+            let epoch = consent_epoch().unwrap();
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release_rx = std::sync::Mutex::new(release_rx);
+            let mut options = ClientOptionsBuilder::default();
+            options
+                .api_key("test-token".to_string())
+                .host(host)
+                .is_server(false)
+                .flush_at(1usize)
+                .max_capture_attempts(1u32)
+                .before_send(scrub_event)
+                .before_send(move |event: Event| {
+                    // Pause after the final consent check: this is the SDK's
+                    // unavoidable prepared-batch window, before HTTP starts.
+                    entered_tx.send(()).unwrap();
+                    release_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(std::time::Duration::from_secs(5))
+                        .unwrap();
+                    Some(event)
+                });
+            let client = std::sync::Arc::new(posthog_rs::client(options.build().unwrap()));
+            client.capture(event_with_generation("recording.started", epoch));
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            let revoking_client = client.clone();
+            let (disabled_tx, disabled_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let revocation = std::thread::spawn(move || {
+                revoke_with_flush(|| {
+                    disabled_tx.send(()).unwrap();
+                    revoking_client.flush();
+                });
+                done_tx.send(()).unwrap();
+            });
+            disabled_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            assert!(
+                done_rx
+                    .recv_timeout(std::time::Duration::from_millis(10))
+                    .is_err(),
+                "revocation returned before the accepted batch drained"
+            );
+            client.capture(event_with_generation("recording.started", epoch));
+            let mut exception = event_with_generation("$exception", epoch);
+            exception.insert_prop("code", "retry_failed").unwrap();
+            client.capture(exception);
+            release_tx.send(()).unwrap();
+            revocation.join().unwrap();
+            client.shutdown();
+            configure_runtime(false, None);
+        })
+        .await
+        .unwrap();
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "pending events or retries escaped");
+        let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["batch"].as_array().unwrap().len(), 1);
     }
 
     static CONSENT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
@@ -1039,6 +1364,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn debug_build_is_inert_even_when_enabled() {
         let _guard = CONSENT_TEST_LOCK.lock();
         assert!(!is_available());
@@ -1048,6 +1374,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn missing_consent_version_requires_acknowledgement_and_blocks_egress() {
         let value = serde_json::json!({
             KEY_ANALYTICS_ENABLED: true,
@@ -1059,6 +1386,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn explicit_opt_out_remains_disabled_after_acknowledgement() {
         let value = serde_json::json!({
             KEY_PRIVACY_CONSENT_VERSION: PRIVACY_CONSENT_VERSION,
@@ -1071,6 +1399,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn event_scrubber_rebuilds_properties_and_drops_unknown_fields() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1101,6 +1430,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn unknown_event_names_are_rejected() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1113,6 +1443,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn stale_generation_is_rejected_after_revocation() {
         let _guard = CONSENT_TEST_LOCK.lock();
         let generation = {
@@ -1120,12 +1451,13 @@ mod tests {
             state.enabled = true;
             state.generation
         };
-        let event = event_with_generation("app.started", generation);
+        let event = event_with_generation("app_started", generation);
         RUNTIME.write().generation = generation.wrapping_add(1);
         assert!(scrub_event(event).is_none());
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn invalid_stored_install_id_is_never_used() {
         let value = serde_json::json!({
             KEY_PRIVACY_CONSENT_VERSION: PRIVACY_CONSENT_VERSION,
@@ -1138,12 +1470,14 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn arbitrary_provider_and_model_values_are_bucketed() {
         assert_eq!(safe_provider_id("secret-provider"), "unknown");
         assert_eq!(safe_model_id("unknown", "private-model-name"), "custom");
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn polish_attempts_include_fallbacks_but_not_disabled_events() {
         for (outcome, expected) in [
             (PolishOutcome::Fallback, true),
@@ -1170,6 +1504,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(analytics_runtime)]
     fn duration_values_are_bounded_into_closed_buckets() {
         assert_eq!(duration_bucket(499), "lt_500ms");
         assert_eq!(duration_bucket(500), "500_1499ms");

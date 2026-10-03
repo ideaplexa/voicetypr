@@ -1,21 +1,21 @@
 import { getOnboardingPreview } from "@/components/onboarding/onboardingPreview";
 import { useCallback, useRef, useState, type SetStateAction } from "react";
-import { AppErrorBoundary } from "./ErrorBoundary";
-import { AppShell } from "./AppShell";
-import { resolveScreen, type ScreenId, type SettingsPane } from "./navigation";
-import { OnboardingDesktop } from "./onboarding/OnboardingDesktop";
-import { UpdateAnnouncementDialog } from "./UpdateAnnouncementDialog";
-import { PrivacyConsentDialog } from "./PrivacyConsentDialog";
+import { AppErrorBoundary } from "@/components/ErrorBoundary";
+import { AppShell } from "@/components/AppShell";
+import { resolveScreen, type ScreenId, type SettingsPane } from "@/components/navigation";
+import { OnboardingDesktop } from "@/components/onboarding/OnboardingDesktop";
+import { UpdateAnnouncementDialog } from "@/components/UpdateAnnouncementDialog";
+import { PrivacyConsentDialog } from "@/components/PrivacyConsentDialog";
 import { useReadiness } from "@/contexts/ReadinessContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useInAppRecordingHotkey } from "@/hooks/useInAppRecordingHotkey";
 import { useModelManagementContext } from "@/contexts/ModelManagementContext";
 import { useModelAvailabilityContext } from "@/contexts/ModelAvailabilityContext";
-import { useAppBootstrap } from "./app/useAppBootstrap";
-import { useAppEvents } from "./app/useAppEvents";
-import { useOnboardingRecovery } from "./app/useOnboardingRecovery";
+import { useAppBootstrap } from "@/components/app/useAppBootstrap";
+import { useAppEvents } from "@/components/app/useAppEvents";
+import { useOnboardingRecovery } from "@/components/app/useOnboardingRecovery";
 
-import type { SourceFilter } from "./sections/models/types";
+import type { SourceFilter } from "@/components/sections/models/types";
 
 export function AppContainer() {
   const [{ activeSection, sourceFilter, settingsPane }, setNavigation] = useState<{
@@ -26,6 +26,10 @@ export function AppContainer() {
   const setActiveSection = useCallback((action: SetStateAction<ScreenId>) => {
     setNavigation((current) => {
       const next = typeof action === "function" ? action(current.activeSection) : action;
+      const destination = resolveScreen(next);
+      if (destination.screen === "settings") {
+        return { ...current, settingsPane: destination.pane ?? "general" };
+      }
       // Destinations apply to one Transcription visit; returning derives the latest source.
       return {
         activeSection: next,
@@ -39,7 +43,7 @@ export function AppContainer() {
     setNavigation((current) => ({ ...current, sourceFilter: filter }));
   }, []);
   const openSettingsPane = useCallback((pane: SettingsPane) => {
-    setNavigation({ activeSection: "settings", settingsPane: pane });
+    setNavigation((current) => ({ ...current, settingsPane: pane }));
   }, []);
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
   const { settings, refreshSettings } = useSettings();
@@ -60,6 +64,7 @@ export function AppContainer() {
   const { justUpdatedVersion, setJustUpdatedVersion } = useAppBootstrap(settings);
 
   useAppEvents({
+    openSettingsPane,
     checkModels: modelAvailability.checkModels,
     setActiveSection,
     setSourceFilter,
@@ -119,6 +124,9 @@ export function AppContainer() {
         onSectionChange={setActiveSection}
         settingsPane={settingsPane}
         onSettingsPaneChange={openSettingsPane}
+        onSettingsClose={() =>
+          setNavigation((current) => ({ ...current, settingsPane: undefined }))
+        }
         sourceFilter={sourceFilter}
         onSourceFilterChange={setSourceFilter}
       />

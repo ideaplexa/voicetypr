@@ -1,10 +1,11 @@
 import { Brandmark } from "@/components/Brandmark";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   footerNavScreens,
   licenseScreen,
   mainNavScreens,
   resolveScreen,
-  setupNavScreens,
+  tuningNavScreens,
   type ScreenDefinition,
   type ScreenId,
 } from "@/components/navigation";
@@ -14,7 +15,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
+  useSidebar,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -26,6 +27,9 @@ import type { LicenseStatus } from "@/types";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
+
+const railTooltipClass =
+  "rounded-[6px] px-[9px] py-[5px] text-[12px] leading-[normal] font-medium shadow-[0_4px_12px_#00000026] [&>[aria-hidden=true]]:hidden";
 
 interface SidebarProps {
   activeSection: ScreenId;
@@ -46,9 +50,13 @@ function licenseState(status: LicenseStatus | null, daysLeft: number) {
 
 export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const { status } = useLicense();
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
   const [version, setVersion] = useState("—");
   const license = licenseState(status, status?.trial_days_left ?? -1);
-  const current = resolveScreen(activeSection).screen;
+  const destination = resolveScreen(activeSection);
+  const current = destination.screen;
+  const licenseActive = destination.pane === "license";
   useEffect(() => {
     void getVersion()
       .then(setVersion)
@@ -59,38 +67,67 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
     <SidebarPrimitive
       collapsible="icon"
       data-pencil-name="Sidebar"
-      className={cn("bg-sidebar border-r border-border", isMacOS ? "pt-[44px]" : "pt-4")}
+      className={cn("bg-sidebar border-r border-border", isMacOS ? "pt-[44px]" : "pt-9")}
     >
-      <SidebarHeader className="px-[10px] pb-[14px] pt-1 group-data-[collapsible=icon]:px-2">
-        <button
-          type="button"
-          onClick={() => onSectionChange("home")}
-          aria-label="Voicetypr Home"
-          title="Voicetypr Home"
-          className="flex w-full items-center gap-2 rounded-[8px] px-2 py-0 text-left hover:bg-sidebar-accent group-data-[collapsible=icon]:justify-center"
-        >
-          <Brandmark className="size-[22px] shrink-0 text-sage" />
-          <span className="truncate text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
-            Voicetypr
-          </span>
-        </button>
+      <SidebarHeader
+        className={cn("gap-0", collapsed ? "items-center px-0 pb-3 pt-0" : "px-[18px] pb-4 pt-1")}
+      >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => onSectionChange("home")}
+                aria-label="Voicetypr Home"
+                className={cn(
+                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex items-center gap-2 rounded-[8px] p-0 text-left hover:bg-sidebar-accent",
+                  collapsed ? "size-9 justify-center" : "w-full",
+                )}
+              />
+            }
+          >
+            <Brandmark className="size-[22px] shrink-0 text-sage" />
+            <span
+              className={collapsed ? "sr-only" : "truncate text-sm leading-[normal] font-semibold"}
+            >
+              Voicetypr
+            </span>
+          </TooltipTrigger>
+          <TooltipContent
+            role="tooltip"
+            side="right"
+            sideOffset={8}
+            hidden={!collapsed}
+            className={railTooltipClass}
+          >
+            Voicetypr Home
+          </TooltipContent>
+        </Tooltip>
       </SidebarHeader>
-      <SidebarContent className="overflow-hidden px-[10px]">
+      <SidebarContent className={cn("gap-0 overflow-y-auto", collapsed ? "px-0" : "px-[10px]")}>
         <nav aria-label="Main navigation">
           <NavGroup
             items={mainNavScreens}
             activeSection={current}
             onSectionChange={onSectionChange}
           />
+          <div
+            data-pencil-name="Divider"
+            className={cn(
+              "mx-auto",
+              collapsed ? "w-10 px-2 py-[9px]" : "w-full px-[10px] py-[11px]",
+            )}
+          >
+            <div role="separator" className="h-px bg-border" />
+          </div>
           <NavGroup
-            label="Setup"
-            items={setupNavScreens}
+            items={tuningNavScreens}
             activeSection={current}
             onSectionChange={onSectionChange}
           />
         </nav>
       </SidebarContent>
-      <SidebarFooter className="gap-0.5 px-[10px] pb-3">
+      <SidebarFooter className={cn("gap-0.5 pb-3", collapsed ? "items-center px-0" : "px-[10px]")}>
         <nav aria-label="Support navigation">
           <NavGroup
             items={footerNavScreens}
@@ -98,25 +135,46 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
             onSectionChange={onSectionChange}
           />
         </nav>
-        <button
-          type="button"
-          onClick={() => onSectionChange("license")}
-          aria-label={`${license.label}. Open License`}
-          aria-current={current === "license" ? "page" : undefined}
-          title="Open License"
-          className={cn(
-            "flex w-full items-center gap-2 rounded-[8px] border border-border bg-card px-[10px] py-2 text-left shadow-sm group-data-[collapsible=icon]:justify-center",
-            current === "license" && "ring-1 ring-sage",
-          )}
-        >
-          <licenseScreen.icon className={cn("size-4 shrink-0", license.color)} />
-          <span className="min-w-0 truncate text-[12.5px] leading-[normal] font-semibold group-data-[collapsible=icon]:hidden">
-            {license.label}
-          </span>
-          <span className="ml-auto text-[11.5px] text-text-3 group-data-[collapsible=icon]:hidden">
-            {version}
-          </span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={() => onSectionChange("license")}
+                aria-label={`${license.label}. Open License`}
+                aria-current={licenseActive ? "page" : undefined}
+                className={cn(
+                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex items-center gap-2 rounded-[8px] bg-card text-left ring-1 ring-inset ring-border",
+                  collapsed ? "h-[34px] w-10 justify-center p-0" : "w-full px-[10px] py-2",
+                  licenseActive && "ring-1 ring-sage",
+                )}
+              />
+            }
+          >
+            <licenseScreen.icon className={cn("size-4 shrink-0", collapsed && "size-[17px]", license.color)} />
+            <span
+              className={
+                collapsed
+                  ? "sr-only"
+                  : "min-w-0 truncate text-[12.5px] leading-[normal] font-semibold"
+              }
+            >
+              {license.label}
+            </span>
+            <span className={collapsed ? "sr-only" : "text-[11.5px] leading-[normal] text-muted-foreground"}>
+              {version}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent
+            role="tooltip"
+            side="right"
+            sideOffset={8}
+            hidden={!collapsed}
+            className={railTooltipClass}
+          >
+            {license.label} · License
+          </TooltipContent>
+        </Tooltip>
       </SidebarFooter>
     </SidebarPrimitive>
   );
@@ -124,22 +182,15 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
 
 function NavGroup({
   items,
-  label,
   activeSection,
   onSectionChange,
 }: {
   items: ScreenDefinition[];
-  label?: string;
   activeSection: string;
   onSectionChange: (section: ScreenId) => void;
 }) {
   return (
     <SidebarGroup className="p-0">
-      {label ? (
-        <SidebarGroupLabel className="h-auto px-[10px] pt-[14px] pb-1 text-[10.5px] leading-[normal] font-semibold uppercase tracking-[0.6px] text-text-3 group-data-[collapsible=icon]:hidden">
-          {label}
-        </SidebarGroupLabel>
-      ) : null}
       <SidebarGroupContent>
         <SidebarMenu className="gap-0.5 group-data-[collapsible=icon]:items-center">
           {items.map((item) => (
@@ -166,23 +217,30 @@ function SidebarNavItem({
   onSelect: (section: ScreenId) => void;
 }) {
   const Icon = item.icon;
+  const { state } = useSidebar();
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
         size="sm"
-        tooltip={item.description}
+        tooltip={{
+          role: "tooltip",
+          children: item.label,
+          sideOffset: 8,
+          className: railTooltipClass,
+        }}
+        aria-label={item.label}
         isActive={active}
         aria-current={active ? "page" : undefined}
         onClick={() => onSelect(item.id)}
         className={cn(
-          "h-auto gap-[10px] rounded-[8px] px-[10px] py-[7px] text-[13px] leading-[normal] font-medium [&>svg]:size-4 text-muted-foreground transition-colors [&>svg]:text-muted-foreground",
+          "group-data-[collapsible=icon]:size-[40px]! group-data-[collapsible=icon]:h-[34px]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 h-auto gap-[10px] rounded-[8px] px-[10px] py-[7px] text-[13px] leading-[normal] font-medium [&>svg]:size-4 group-data-[collapsible=icon]:[&>svg]:size-[17px] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 text-muted-foreground transition-colors [&>svg]:text-muted-foreground",
           active
-            ? "bg-card font-semibold text-foreground shadow-sm hover:bg-card [&>svg]:text-sage"
+            ? "data-active:bg-card data-active:font-semibold data-active:text-foreground data-active:shadow-[0_1px_2px_#0000000f] data-active:hover:bg-card dark:data-active:bg-[#2A2A2D] dark:data-active:hover:bg-[#2A2A2D] dark:data-active:shadow-[inset_0_0_0_1px_#FFFFFF0F] data-active:[&>svg]:text-sage"
             : "hover:bg-sidebar-accent hover:text-foreground",
         )}
       >
         <Icon />
-        <span>{item.label}</span>
+        <span className={state === "collapsed" ? "sr-only" : undefined}>{item.label}</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );

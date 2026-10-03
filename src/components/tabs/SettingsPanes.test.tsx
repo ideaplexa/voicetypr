@@ -51,17 +51,18 @@ describe("Settings pane controls", () => {
   });
 
   it("renders General's real appearance, startup, update and tray controls", async () => {
-    render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+    const view = render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByText("Open at login")).toBeInTheDocument();
-    expect(screen.getByText("Updates")).toBeInTheDocument();
-    expect(await screen.findByText("Update channel")).toBeInTheDocument();
-    expect(screen.getByText("Menu bar icon")).toBeInTheDocument();
+    expect(screen.queryByText("Updates")).not.toBeInTheDocument();
+    expect(screen.queryByText("Menu bar icon")).not.toBeInTheDocument();
     screen.getByRole("button", { name: "Dark" }).focus();
     await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ theme: "dark" }));
     fireEvent.click(screen.getByRole("switch", { name: "Open at login" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_autostart", { enabled: true }));
+    view.rerender(<SettingsTab pane="about" onPaneChange={vi.fn()} />);
+    expect(await screen.findByText("Update channel")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Updates" }));
     await waitFor(() =>
       expect(updateSettings).toHaveBeenCalledWith({ check_updates_automatically: true }),
@@ -72,22 +73,22 @@ describe("Settings pane controls", () => {
   it("renders shortcut actions and opens Recording for the primary shortcut", async () => {
     const onNavigate = vi.fn();
     render(<SettingsTab pane="shortcuts" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
-    expect(await screen.findByText("Cancel Recording")).toBeInTheDocument();
-    expect(screen.getByText("Copy Last Transcription")).toBeInTheDocument();
+    expect(await screen.findByText("Cancel dictation")).toBeInTheDocument();
+    expect(screen.getByText("Copy last transcript")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Manage in Recording" }));
     expect(onNavigate).toHaveBeenCalledWith("recording");
   });
 
   it("renders Privacy's real switches and persists analytics consent", async () => {
     render(<SettingsTab pane="privacy" onPaneChange={vi.fn()} />);
-    const analytics = await screen.findByRole("switch", { name: "Enable usage analytics" });
+    const analytics = await screen.findByRole("switch", { name: "Share anonymous crash reports and usage numbers" });
     expect(
-      screen.getByRole("switch", { name: "Enable crash and error reporting" }),
+      screen.getByRole("switch", { name: "Share anonymous crash reports and usage numbers" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Audio, transcripts, clipboard contents/)).toBeInTheDocument();
+    expect(screen.getByText(/never your words, audio or app content/)).toBeInTheDocument();
     fireEvent.click(analytics);
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("set_product_analytics_consent", { enabled: false }),
+      expect(invoke).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false }),
     );
   });
 
@@ -140,24 +141,43 @@ describe("Settings pane controls", () => {
     vi.mocked(invoke).mockImplementation((command: string) => {
       if (command === "stop_sharing") sharingEnabled = false;
       if (command === "start_sharing") sharingEnabled = true;
-      if (command === "get_sharing_status") return Promise.resolve({ ...(fixtures.get_sharing_status as Record<string, unknown>), enabled: sharingEnabled });
+      if (command === "get_sharing_status")
+        return Promise.resolve({
+          ...(fixtures.get_sharing_status as Record<string, unknown>),
+          enabled: sharingEnabled,
+        });
       return Promise.resolve(fixtures[command]);
     });
     render(<SettingsTab pane="network" onPaneChange={vi.fn()} />);
     const toggle = await screen.findByRole("switch", { name: "Share this Voicetypr" });
     await userEvent.click(screen.getByRole("button", { name: "Change" }));
-    fireEvent.change(screen.getByLabelText("Password (Optional)"), { target: { value: "cancelled-secret" } });
+    fireEvent.change(screen.getByLabelText("Password (Optional)"), {
+      target: { value: "cancelled-secret" },
+    });
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await userEvent.click(toggle);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("stop_sharing"));
     await userEvent.click(toggle);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("start_sharing", expect.anything()));
-    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "start_sharing"))
-      .not.toEqual(expect.arrayContaining([["start_sharing", expect.objectContaining({ password: "cancelled-secret" })]]));
+    expect(
+      vi.mocked(invoke).mock.calls.filter(([command]) => command === "start_sharing"),
+    ).not.toEqual(
+      expect.arrayContaining([
+        ["start_sharing", expect.objectContaining({ password: "cancelled-secret" })],
+      ]),
+    );
   });
 
   it("gives every switch in each Settings pane an accessible name", async () => {
-    for (const pane of ["general", "shortcuts", "privacy", "storage", "network", "agent", "advanced"] as const) {
+    for (const pane of [
+      "general",
+      "shortcuts",
+      "privacy",
+      "storage",
+      "network",
+      "agent",
+      "advanced",
+    ] as const) {
       const view = render(<SettingsTab pane={pane} onPaneChange={vi.fn()} />);
       if (pane === "network") await screen.findByRole("switch", { name: "Share this Voicetypr" });
       for (const control of screen.queryAllByRole("switch")) {

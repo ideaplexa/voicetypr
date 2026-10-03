@@ -41,6 +41,7 @@ pub struct AppState {
     pub current_recording_path: Arc<Mutex<Option<PathBuf>>>,
     pub transcription_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub recording_mode: Arc<Mutex<RecordingMode>>,
+    pub pointer_recording: AtomicBool,
     pub ptt_key_held: Arc<AtomicBool>,
     pub toggle_key_held: Arc<AtomicBool>,
     pub active_custom_hold_bindings: Arc<Mutex<HashSet<String>>>,
@@ -77,6 +78,7 @@ impl AppState {
             current_recording_path: Arc::new(Mutex::new(None)),
             transcription_task: Arc::new(Mutex::new(None)),
             recording_mode: Arc::new(Mutex::new(RecordingMode::Toggle)),
+            pointer_recording: AtomicBool::new(false),
             ptt_key_held: Arc::new(AtomicBool::new(false)),
             toggle_key_held: Arc::new(AtomicBool::new(false)),
             active_custom_hold_bindings: Arc::new(Mutex::new(HashSet::new())),
@@ -267,6 +269,7 @@ pub fn update_recording_state(
         "error": error
     });
 
+    crate::menu::runtime::recording_changed(app, final_state);
     let _ = app.emit("recording-state-changed", payload);
 }
 
@@ -283,6 +286,10 @@ pub fn emit_to_window(
     event: &str,
     payload: impl serde::Serialize,
 ) -> Result<(), String> {
+    crate::commands::usage_stats::invalidate_on_event(app, event);
+    if event == "history-updated" {
+        crate::menu::runtime::refresh(app);
+    }
     let app_state = app.state::<AppState>();
     app_state.emit_to_window(window, event, payload)
 }
@@ -293,6 +300,7 @@ pub fn emit_to_all(
     event: &str,
     payload: impl serde::Serialize + Clone,
 ) -> Result<(), String> {
+    crate::commands::usage_stats::invalidate_on_event(app, event);
     app.emit(event, payload)
         .map_err(|e| format!("Failed to emit to all windows: {}", e))
 }

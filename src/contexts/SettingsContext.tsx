@@ -1,3 +1,4 @@
+import { recordEvent } from "@/lib/observability";
 import {
   createContext,
   useContext,
@@ -80,6 +81,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             ? { updateChannelExplicit: true }
             : {}),
         });
+
+        const changed: ["mode" | "live_preview" | "language" | "engine" | "mic", keyof AppSettings][] = [
+          ["engine", "current_model"], ["mic", "selected_microphone"],
+          ["mode", "recording_mode"], ["live_preview", "transcription_mode"], ["language", "speech_language"],
+        ];
+        for (const [setting, key] of changed) {
+          if (key in updates && updates[key] !== prev[key]) {
+            recordEvent({ name: "quick_setting_changed", properties: { setting, source: "app" } });
+          }
+        }
 
         if (publishAfterSave) {
           // Onboarding completion controls which application tree is mounted.
