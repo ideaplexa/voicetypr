@@ -78,13 +78,14 @@ try {
   }
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
-      for (const state of ["rest", "start", "listening", "listening-amber", "listening-no-badge", "live", "transcribing", "polishing", "pasted", "copied", "no_permission", "error", "too_short", "nospeech", "esc-hint", "top-anchor-live", "stack3", "morph-end", "pasted-original", "finishing",
+      for (const state of ["rest", "start", "peek", "peek-nomic", "pick-polish", "pick-engine", "pick-mic", "pick-language", "start-pick",
+        ...["peek", "peek-nomic", "pick-polish", "pick-engine", "pick-mic", "pick-language", "start-pick"].map(kind=>`top-anchor-${kind}`), "listening", "listening-amber", "listening-no-badge", "live", "transcribing", "polishing", "pasted", "copied", "no_permission", "error", "too_short", "nospeech", "esc-hint", "top-anchor-live", "stack3", "morph-end", "pasted-original", "finishing",
         ...["trial_ended","license_check_failed","license_verify_required","no_engine","cloud_key_missing","cloud_key_rejected","soniox_storage_full","mic_permission_denied","mic_missing","mic_busy","accessibility_off","starting_up"].map(kind=>`blocked-${kind}`),
         ...["cloud_failed","network_offline","model_missing","remote_offline","integrity","no_speech","mic_dropped_empty"].map(kind=>`recovery-${kind}`),
         ...["mic_dropped","mic_silent","translate_failed","model_fallback","gpu_fallback",...['timeout','rate_limited','network','guard','error'].map(reason=>`polish_skipped-${reason}`)].map(kind=>`note-${kind}`)]) {
         const name = `pill-${state}`;
         if (!shouldCapture(platform, theme, name)) continue;
-        const page = await browser.newPage({ viewport: { width: 440, height: 420 }, deviceScaleFactor: 2 });
+        const page = await browser.newPage({ viewport: { width: 462, height: 442 }, deviceScaleFactor: 2 });
         page.on("pageerror", (error) => errors.push(`${platform}/${theme}/${name}: ${error.stack ?? error}`));
         await page.goto(`${baseUrl}/pill-preview.html?platform=${platform}&theme=${theme}&state=${state}`, { waitUntil: "networkidle" });
         await page.waitForSelector('html[data-pill-preview-ready="true"]');

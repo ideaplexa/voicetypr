@@ -78,7 +78,17 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
         Err(error) => log::error!("keytrigger: engine_bindings lock poisoned: {}", error),
     }
 
+    // Chord is an existing pass-through trigger, unlike SingleKey/ComboExact.
+    // Observe Escape for the non-key island without swallowing it in the target app.
+    triggers.push(("island-escape-observer".into(), island_escape_trigger()));
     app_state.trigger_engine.set_bindings(triggers);
+}
+
+fn island_escape_trigger() -> keytrigger::Trigger {
+    keytrigger::Trigger::Chord {
+        mods: keytrigger::ModSet::empty(),
+        key: keytrigger::KeySpec::Named(keytrigger::NamedKey::Escape),
+    }
 }
 
 /// Old bindings that need a synthetic `Released` dispatched before the app-map
@@ -399,6 +409,16 @@ mod tests {
     use crate::trigger::EngineBinding;
     use crate::{RecordingMode, RecordingState};
 
+    #[test]
+    fn island_escape_is_observed_without_consuming_target_app_keys() {
+        let trigger = super::island_escape_trigger();
+        let consume =
+            keytrigger::ConsumeSet::from_bindings(&[("island-escape-observer".into(), trigger)]);
+        assert!(!consume.consumes(
+            keytrigger::KeySpec::Named(keytrigger::NamedKey::Escape),
+            keytrigger::ModSet::empty()
+        ));
+    }
     #[test]
     fn escape_cancel_is_eligible_during_starting_and_recording() {
         assert!(escape_cancel_eligible(RecordingState::Starting));

@@ -1,6 +1,7 @@
 use crate::recording::island::{BlockedKind, IslandAction};
 use std::{sync::Mutex, time::Instant};
 use tauri::AppHandle;
+use tauri_plugin_store::StoreExt;
 #[derive(Default)]
 struct Status {
     started: Option<Instant>,
@@ -103,17 +104,38 @@ pub fn recording_changed(app: &AppHandle, state: crate::RecordingState) {
 }
 pub fn shortcut_text(app: &AppHandle) -> String {
     let primary = crate::commands::shortcuts::get_effective_primary_shortcut(app.clone()).ok();
-    let raw = primary
-        .and_then(|p| {
-            p.hotkey.or_else(|| {
-                p.binding.map(|b| {
-                    if !b.shortcut.is_empty() {
-                        b.shortcut
-                    } else if let Some(modifier) = b.modifier {
-                        format!("{:?} {:?}", modifier.side, modifier.modifier)
-                    } else {
-                        "Recording shortcut".into()
-                    }
+    let ptt = app.store("settings").ok().and_then(|store| {
+        let hold = store
+            .get("recording_mode")
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .as_deref()
+            == Some("push_to_talk");
+        let separate = store
+            .get("use_different_ptt_key")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        (hold && separate)
+            .then(|| {
+                store
+                    .get("ptt_hotkey")
+                    .and_then(|v| v.as_str().map(str::to_owned))
+            })
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+    });
+    let raw = ptt
+        .or_else(|| {
+            primary.and_then(|p| {
+                p.hotkey.or_else(|| {
+                    p.binding.map(|b| {
+                        if !b.shortcut.is_empty() {
+                            b.shortcut
+                        } else if let Some(modifier) = b.modifier {
+                            format!("{:?} {:?}", modifier.side, modifier.modifier)
+                        } else {
+                            "Recording shortcut".into()
+                        }
+                    })
                 })
             })
         })

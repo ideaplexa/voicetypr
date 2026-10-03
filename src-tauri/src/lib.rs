@@ -1320,6 +1320,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             recording::kept::transcribe_anyway,
             recording::kept::discard_kept_dictation,
             recording::island::island_action,
+            menu::quick::island_quick_options,
+            menu::quick::island_quick_set,
             start_recording,
             stop_recording,
             cancel_recording,

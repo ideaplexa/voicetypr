@@ -38,7 +38,8 @@ export interface IslandActions {
   transcribeAnyway?: (id: string) => Promise<unknown>;
   card?: (call: import('@/pill/feedback').CardCommand) => Promise<unknown>;
   feedbackVisible?: (visible: boolean) => Promise<unknown>;
-  quickSetting?: (kind: 'polish' | 'mic' | 'engine' | 'language') => void;
+  quickSet?: (kind: import('@/pill/quick-settings').QuickKind, id: string) => Promise<unknown>;
+  openSettings?: () => Promise<unknown>;
   feedback?: (kind: string) => void;
 }
 export const emptyContext = (): DictationContext => ({

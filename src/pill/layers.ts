@@ -1,6 +1,6 @@
 import { clamp, ease } from '@/pill/spring';
 import type { LayerName } from '@/pill/island';
-export const layerNames: readonly LayerName[] = ['start', 'words', 'row', 'hint', 'work', 'done', 'notice', 'note', 'peek'];
+export const layerNames: readonly LayerName[] = ['start', 'words', 'row', 'hint', 'work', 'done', 'notice', 'note', 'peek', 'pick'];
 class Layer {
   on = false; alpha = 0; from = 0; time = 0; secondTime = 0;
   private second: HTMLElement | null;

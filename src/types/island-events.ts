@@ -3,7 +3,7 @@ export type RecoveryKind =
   | "cloud_failed" | "network_offline" | "model_missing" | "remote_offline"
   | "no_speech" | "integrity" | "mic_dropped_empty";
 export type IslandAction =
-  | "recheck_license" | "open_license" | "open_models" | "open_cloud_keys"
+  | "open_settings" | "recheck_license" | "open_license" | "open_models" | "open_cloud_keys"
   | "open_storage" | "open_mic_settings" | "choose_mic" | "open_accessibility";
 export type BlockedKind =
   | "license_check_failed" | "license_verify_required" | "trial_ended" | "no_engine"

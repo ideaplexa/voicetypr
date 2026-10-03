@@ -121,10 +121,15 @@ pub(crate) fn latest_copyable_transcription_id(
 pub async fn build_tray_menu(
     app: &tauri::AppHandle,
 ) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-    use std::time::Instant;
-    let build_start = Instant::now();
-    log::debug!("⏱️ [TRAY BUILD TIMING] build_tray_menu called");
+    let snapshot = snapshot(app, true).await?;
+    Ok(render(app, &super::model::build(&snapshot))?)
+}
 
+/// Shared tray/island data; quick settings never read transcript history.
+pub(super) async fn snapshot(
+    app: &tauri::AppHandle,
+    include_history: bool,
+) -> Result<super::model::Snapshot, Box<dyn std::error::Error>> {
     let (current_model, selected_microphone, onboarding_done, polish_enabled) = {
         match app.store("settings") {
             Ok(store) => {
@@ -148,25 +153,13 @@ pub async fn build_tray_menu(
             Err(_) => ("".to_string(), None, false, false),
         }
     };
-    log::debug!(
-        "⏱️ [TRAY BUILD TIMING] Settings loaded (+{}ms)",
-        build_start.elapsed().as_millis()
-    );
 
     // Get remote server info (active connection and saved connections)
     // Use CACHED data - do NOT make HTTP calls here (that would block tray menu for seconds)
     // The frontend/background tasks handle status polling separately
     let (effective_active_id, _active_remote_display, active_remote_model, remote_connections) = {
         if let Some(remote_state) = app.try_state::<AsyncMutex<RemoteSettings>>() {
-            log::debug!(
-                "⏱️ [TRAY BUILD TIMING] Acquiring remote_settings lock... (+{}ms)",
-                build_start.elapsed().as_millis()
-            );
             let settings = remote_state.lock().await;
-            log::debug!(
-                "⏱️ [TRAY BUILD TIMING] remote_settings lock acquired (+{}ms)",
-                build_start.elapsed().as_millis()
-            );
             // Build connections list using cached data (no HTTP calls!)
             // Include all servers with cached model info - let the user see what's available
             let mut connections: Vec<(String, String, Option<String>)> = Vec::new();
@@ -175,11 +168,6 @@ pub async fn build_tray_menu(
                     connections.push((conn.id.clone(), conn.display_name(), conn.model.clone()));
                 }
             }
-            log::debug!(
-                "⏱️ [TRAY BUILD TIMING] Loaded {} cached connections (+{}ms)",
-                connections.len(),
-                build_start.elapsed().as_millis()
-            );
 
             let effective_active_id =
                 effective_active_remote_id(settings.active_connection_id.as_deref(), &connections);
@@ -201,10 +189,6 @@ pub async fn build_tray_menu(
             (None, None, None, Vec::new())
         }
     };
-    log::debug!(
-        "⏱️ [TRAY BUILD TIMING] Remote server info collected (+{}ms)",
-        build_start.elapsed().as_millis()
-    );
 
     let (available_models, _whisper_models_info) = {
         // Store (name, display_name, accuracy_score, speed_score) for sorting to match UI order
@@ -329,7 +313,10 @@ pub async fn build_tray_menu(
         crate::cloud_stt::CloudProvider::from_id(&engine_hint).map(|p| p.selected_model(app).id);
     let languages = super::languages::supported(effective_model, &engine_hint, cloud_model);
     let mut recent = Vec::new();
-    if let Ok(store) = app.store("transcriptions") {
+    if let Some(store) = include_history
+        .then(|| app.store("transcriptions").ok())
+        .flatten()
+    {
         let mut entries = store
             .keys()
             .into_iter()
@@ -395,12 +382,7 @@ pub async fn build_tray_menu(
         recent,
         updates: !crate::commands::distribution::is_store_install(),
     };
-    let menu = render(app, &super::model::build(&snapshot))?;
-    log::debug!(
-        "⏱️ [TRAY BUILD TIMING] build_tray_menu COMPLETE - total: {}ms",
-        build_start.elapsed().as_millis()
-    );
-    Ok(menu)
+    Ok(snapshot)
 }
 
 fn render<R: tauri::Runtime>(

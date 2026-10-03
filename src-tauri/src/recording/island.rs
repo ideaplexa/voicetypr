@@ -48,6 +48,7 @@ pub enum BlockedKind {
 #[serde(rename_all = "snake_case")]
 pub enum IslandAction {
     RecheckLicense,
+    OpenSettings,
     OpenLicense,
     OpenModels,
     OpenCloudKeys,
@@ -157,6 +158,7 @@ pub fn too_short<R: Runtime>(app: &AppHandle<R>, generation: u64, hold: bool) {
 #[tauri::command]
 pub async fn island_action(app: AppHandle, action: IslandAction) -> Result<(), String> {
     match action {
+        IslandAction::OpenSettings => crate::menu::actions::run(app, "nav_settings").await,
         IslandAction::RecheckLicense => {
             crate::commands::license::revalidate_license(app.clone()).await?;
             crate::menu::runtime::clear_blocked();

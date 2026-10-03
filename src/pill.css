@@ -139,3 +139,29 @@ button:focus-visible { outline:2px solid var(--sage);outline-offset:-2px }
 .feedback-card.single-row { padding-top:3px;padding-bottom:3px }
 .feedback-card.back { padding-top:10px;align-content:start;align-items:start }
 .pill-root[data-state="pasted"] .pill-surface,.pill-root[data-state="copied"] .pill-surface,.pill-root[data-state="no_permission"] .pill-surface,.pill-root[data-state="error"] .pill-surface { max-width:360px }
+/* P5: the peek record centre is positioned from native geometry, independent of rows. */
+.peek-row { position:static;height:32px }
+.peek-row .record { right:auto }
+.peek .peek-gear { position:absolute;left:10px;bottom:3px }
+.peek-hint { position:absolute;left:calc(50% + 21px);bottom:8px;max-width:calc(50% - 31px);white-space:nowrap }
+.peek-chips .chip { flex:1 1 0;min-height:22px;justify-content:center }
+.peek-mic.bad { color:#ff8c79;background:rgba(242,139,122,.13) }
+.pill-root[data-pill-position$="-right"] .peek-hint { left:44px;right:44px;max-width:none;margin:0;text-align:right }
+.pill-root[data-pill-position$="-left"] .peek-hint { left:44px;right:44px;max-width:none;margin:0 }
+.pill-root[data-pill-position$="-left"] .peek .peek-gear { left:auto;right:10px }
+.pill-root[data-pill-position^="top-"] .peek-hint { bottom:auto;top:8px }
+.pill-root[data-pill-position^="top-"] .peek .peek-gear { bottom:auto;top:3px }
+.pill-root[data-state="idle"] .pill-surface::after { left:-5px;right:-5px;top:-9px;bottom:0 }
+.pill-root[data-state="idle"][data-pill-position^="top-"] .pill-surface::after { top:-9px;bottom:0 }
+.pick { inset:0;display:flex;flex-direction:column;align-items:stretch;padding:8px 10px;white-space:normal }
+.pick-header { display:flex;align-items:center;gap:7px;height:30px;flex:none;margin-bottom:8px }
+.pick-title { font-size:12.5px }
+.pick-back { font-size:24px }
+.pick-list { overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;flex:1;min-height:0 }
+.pick-option { width:100%;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;border:0;border-radius:6px;background:transparent;color:inherit;text-align:left;cursor:pointer }
+.pick-option.hov,.pick-option:hover { background:rgba(255,255,255,.09) }
+.pick-option:disabled { color:var(--t2);cursor:default }
+.pick-check { color:var(--sage);margin-left:8px }
+.pick-error { font-size:11px;color:#ff8c79;padding:4px 8px }
+.quick-label { min-width:0;overflow:hidden;text-overflow:ellipsis }
+.quick-icon,.quick-chevron { display:inline-flex;flex:none }

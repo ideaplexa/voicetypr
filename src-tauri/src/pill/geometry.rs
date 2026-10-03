@@ -1,6 +1,9 @@
 //! Canvas geometry preserves the old 260×64 pill's visible edge (6px inset).
-pub const CANVAS_WIDTH: f64 = 440.0;
-pub const CANVAS_HEIGHT: f64 = 420.0;
+// Transparent margin lets the 26px peek button grow around the 12px dot
+// without clipping at canvas edges. canvas_origin preserves its screen position.
+const QUICK_MARGIN: f64 = 11.0;
+pub const CANVAS_WIDTH: f64 = 440.0 + QUICK_MARGIN * 2.0;
+pub const CANVAS_HEIGHT: f64 = 420.0 + QUICK_MARGIN * 2.0;
 pub const LEGACY_WIDTH: f64 = 260.0;
 pub const LEGACY_HEIGHT: f64 = 64.0;
 
@@ -21,16 +24,16 @@ impl Geometry {
         Self {
             anchor: position.to_owned(),
             anchor_x: if position.ends_with("-left") {
-                0.0
+                QUICK_MARGIN
             } else if position.ends_with("-right") {
-                CANVAS_WIDTH
+                CANVAS_WIDTH - QUICK_MARGIN
             } else {
                 CANVAS_WIDTH / 2.0
             },
             anchor_y: if position.starts_with("top-") {
-                6.0
+                6.0 + QUICK_MARGIN
             } else {
-                CANVAS_HEIGHT - 6.0
+                CANVAS_HEIGHT - 6.0 - QUICK_MARGIN
             },
         }
     }
@@ -56,6 +59,35 @@ impl Geometry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn peek_record_fits_around_the_dot_on_every_canvas_edge() {
+        for position in [
+            "top-left",
+            "top-center",
+            "top-right",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right",
+        ] {
+            let g = Geometry::new(position);
+            let x = g.anchor_x
+                + if position.ends_with("-left") {
+                    6.0
+                } else if position.ends_with("-right") {
+                    -6.0
+                } else {
+                    0.0
+                };
+            let y = g.anchor_y
+                + if position.starts_with("top-") {
+                    6.0
+                } else {
+                    -6.0
+                };
+            assert!(x - 13.0 >= 0.0 && x + 13.0 <= CANVAS_WIDTH);
+            assert!(y - 13.0 >= 0.0 && y + 13.0 <= CANVAS_HEIGHT);
+        }
+    }
     #[test]
     fn all_anchors_preserve_legacy_screen_coordinates_at_both_scales() {
         for scale in [1.0, 2.0] {

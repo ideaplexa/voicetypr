@@ -1,6 +1,8 @@
 /** The v3.2 island glyph set. Static markup only; user text is always textContent. */
-export type IslandIcon = 'star' | 'bang' | 'chevron' | 'close' | 'clock' | 'mic' | 'engine' | 'globe' | 'mic-off' | 'clipboard' | 'quiet' | 'cpu';
+export type IslandIcon = 'star' | 'bang' | 'chevron' | 'close' | 'clock' | 'mic' | 'engine' | 'globe' | 'mic-off' | 'clipboard' | 'quiet' | 'cpu' | 'gear' | 'back';
 const paths: Record<IslandIcon,string> = {
+  back: '<path d="M10 3.5 5.5 8 10 12.5"/>',
+  gear: '<path d="m6.5 1.5-.5 2-1.5.9-2-.5-1.5 2.6 1.5 1.4v1.8L1 11.1l1.5 2.6 2-.5 1.5.9.5 2h3l.5-2 1.5-.9 2 .5 1.5-2.6-1.5-1.4V7.9L15 6.5l-1.5-2.6-2 .5-1.5-.9-.5-2Z"/><circle cx="8" cy="8.5" r="2.3"/>',
   star: '<path d="M8 1.4C8.6 5.5 10.5 7.4 14.6 8 10.5 8.6 8.6 10.5 8 14.6 7.4 10.5 5.5 8.6 1.4 8 5.5 7.4 7.4 5.5 8 1.4Z"/>',
   bang: '<path d="M8 2.6v6.6"/><circle cx="8" cy="12.9" r=".9" fill="currentColor" stroke="none"/>',
   chevron: '<path d="M4.4 6.2 8 9.8l3.6-3.6"/>',

@@ -1,12 +1,18 @@
 //! Route `keytrigger::TriggerEvent`s to the shared shortcut dispatch path.
 
 use keytrigger::TriggerEvent;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::state::app_state::AppState;
 
 /// Invoked on the engine dispatcher thread for every emitted trigger event.
 pub fn on_engine_event(app: &AppHandle, ev: TriggerEvent) {
+    if ev.id == "island-escape-observer" {
+        if ev.phase == keytrigger::KeyPhase::Pressed {
+            let _ = app.emit_to("pill", "island-escape", ());
+        }
+        return;
+    }
     let app_state = app.state::<AppState>();
 
     let binding = match app_state.engine_bindings.lock() {

@@ -65,6 +65,13 @@ fn submenu(id: &str, label: impl Into<String>, items: Vec<Item>) -> Item {
         items,
     }
 }
+/// The tray shows eight common choices; the island scrolls the same complete model.
+pub(super) fn language_options(s: &Snapshot) -> Vec<Item> {
+    s.languages
+        .iter()
+        .map(|(code, name)| check(&format!("language_{code}"), name, code == &s.language))
+        .collect()
+}
 pub fn recording_label(seconds: u64) -> String {
     format!("● Recording · {}:{:02}", seconds / 60, seconds % 60)
 }
@@ -173,12 +180,7 @@ pub fn build(s: &Snapshot) -> Vec<Item> {
         .find(|(code, _)| code == &s.language)
         .map(|(_, name)| name.as_str())
         .unwrap_or(&s.language);
-    let mut languages = s
-        .languages
-        .iter()
-        .take(8)
-        .map(|(code, name)| check(&format!("language_{code}"), name, code == &s.language))
-        .collect::<Vec<_>>();
+    let mut languages = language_options(s).into_iter().take(8).collect::<Vec<_>>();
     if s.languages.len() > 8 {
         languages.push(action("nav_transcription", "More…"));
     }

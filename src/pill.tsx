@@ -1,3 +1,4 @@
+import type { QuickOptions } from '@/pill/quick-settings';
 import type { DictationBlocked, DictationRecovery, DictationNote, RecordingTooShort, EscapeHint, IslandNotice } from '@/types/island-events';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -24,7 +25,7 @@ interface RecordingPillDeps {
 /** Only event transport and startup hydration live here. The pill has no React runtime. */
 export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps = {}): RecordingPillController {
   const call = deps.invoke ?? invoke, on = deps.listen ?? listen;
-  let destroyed = false, settingsRevision = 0, recordingEventReceived = false;
+  let destroyed = false, settingsRevision = 0, recordingEventReceived = false, geometryReceived = false;
   const subscriptions: Promise<void>[] = [];
   const unlisteners: Array<() => void> = [];
   type Regions = Array<{ x: number; y: number; width: number; height: number }>;
@@ -57,6 +58,8 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       original: () => call('copy_last_original'),
       card: c => call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}),
       feedbackVisible,
+      quickSet: async (kind, id) => { await call('island_quick_set', { kind, id }); await readQuick(); },
+      openSettings: () => call('island_action', { action: 'open_settings' }),
       openPrivacySettings: () => call('open_accessibility_settings'),
     },
     icon: key => call<string | null>('pill_app_icon', { iconKey: key }),
@@ -78,6 +81,11 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       if (destroyed || !streamEnabled) stop(); else streamUnlisten = stop;
     }).catch(() => { streamPending = false; });
   };
+  let quickRevision = 0;
+  const readQuick = async () => {
+    const revision = ++quickRevision;
+    try { const options = await call<QuickOptions>('island_quick_options'); if (!destroyed && revision === quickRevision) island.quickOptions(options); } catch { /* Change events retry without logging IDs. */ }
+  };
   const readSettings = async () => {
     const revision = ++settingsRevision;
     try {
@@ -87,9 +95,9 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       island.settings(settings); syncStream();
       // Geometry events are authoritative; this fallback also supports old settings fixtures.
       const anchor = isMacOS ? settings.pill_indicator_position ?? 'bottom-center' : 'bottom-right';
-      island.geometry({ anchor, anchorX: anchor.endsWith('-left') ? 0 : anchor.endsWith('-right') ? 440 : 220, anchorY: anchor.startsWith('top-') ? 6 : 414 });
+      if (!geometryReceived) island.geometry({ anchor, anchorX: anchor.endsWith('-left') ? 11 : anchor.endsWith('-right') ? 451 : 231, anchorY: anchor.startsWith('top-') ? 17 : 425 });
       const geometry = await call<PillGeometry>('pill_get_geometry');
-      if (!destroyed && revision === settingsRevision && geometry?.anchor) island.geometry(geometry);
+      if (!destroyed && revision === settingsRevision && geometry?.anchor) { geometryReceived = true; island.geometry(geometry); }
     } catch { /* Subsequent settings/geometry events recover without sensitive logs. */ }
   };
   const recordingState = (payload: RecordingStatePayload) => {
@@ -101,7 +109,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       else if (!['error', 'too_short', 'nospeech'].includes(island.machine.state)) island.rest();
     }
   };
-  subscribe<PillGeometry>('pill-geometry', value => island.geometry(value));
+  subscribe<PillGeometry>('pill-geometry', value => { geometryReceived = true; island.geometry(value); });
   subscribe<PillPointer>('pill-pointer', value => island.pointer(value));
   subscribe<DictationContext>('dictation-context', value => island.context(value));
   subscribe<PillAudioLevel>('audio-level', value => island.level(value));
@@ -119,19 +127,22 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   subscribe<{id:string}>('kept-dictation-expired', value => island.expired(value.id));
   subscribe<{kind: IslandNotice['kind']}>('island-notice-clear', value => island.clearNotice(value.kind));
   subscribe<PasteOutcomePayload>('paste-outcome', value => island.outcome(value));
-  subscribe('settings-changed', () => { void readSettings(); });
+  subscribe('settings-changed', () => { void readSettings(); void readQuick(); });
+  for (const event of ['model-changed', 'audio-device-changed', 'polish-options-changed', 'ai-enabled-changed', 'sharing-status-changed', 'shortcut-settings-changed']) subscribe(event, () => { void readQuick(); });
+  subscribe('island-escape', () => island.closeQuick());
   void Promise.resolve().then(async () => {
     await Promise.all(subscriptions);
     await call('pill_feedback_ready').catch(() => {});
     const statePromise = call<RecordingStatePayload>('get_current_recording_state');
     void readSettings();
+    void readQuick();
     try {
       const state = await statePromise;
       // Hydration cannot overwrite an event received while the command was in flight.
       if (!destroyed && !recordingEventReceived && state?.state) recordingState(state);
     } catch { /* Real events remain authoritative. */ }
   });
-  return { destroy() { destroyed = true; settingsRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop()); island.destroy(); } };
+  return { destroy() { destroyed = true; settingsRevision++; quickRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop()); island.destroy(); } };
 }
 const root = document.getElementById('root');
 if (root) createRecordingPill(root);

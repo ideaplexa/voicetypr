@@ -2,7 +2,7 @@ import type { TranscriptionStreamEvent } from '@/types/streaming';
 import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import { emptyContext, type DictationContext } from '@/pill/contracts';
 export type IslandState = 'rest' | 'peek' | 'start' | 'listening' | 'live' | 'transcribing' | 'polishing' | 'pasted' | 'copied' | 'no_permission' | 'too_short' | 'nospeech' | 'error';
-export type LayerName = 'start' | 'words' | 'row' | 'hint' | 'work' | 'done' | 'notice' | 'note' | 'peek';
+export type LayerName = 'start' | 'words' | 'row' | 'hint' | 'work' | 'done' | 'notice' | 'note' | 'peek' | 'pick';
 export class IslandMachine {
   state: IslandState = 'rest';
   context = emptyContext();

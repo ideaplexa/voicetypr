@@ -1,6 +1,7 @@
 pub(crate) mod actions;
 mod languages;
 mod model;
+pub(crate) mod quick;
 pub(crate) mod runtime;
 mod tray;
 

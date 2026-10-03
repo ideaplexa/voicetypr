@@ -83,7 +83,7 @@ pub fn handle(app: &AppHandle, id: &str) {
         }
     });
 }
-async fn run(app: AppHandle, id: &str) -> Result<(), String> {
+pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
     if let Some(destination) = destination(id) {
         crate::commands::window::focus_main_window(app.clone()).await?;
         return app
@@ -118,7 +118,7 @@ async fn run(app: AppHandle, id: &str) -> Result<(), String> {
     }
     if id == "fix" {
         if let Some(action) = super::runtime::fix_action() {
-            crate::recording::island::island_action(app, action).await?;
+            Box::pin(crate::recording::island::island_action(app, action)).await?;
         }
         return Ok(());
     }
