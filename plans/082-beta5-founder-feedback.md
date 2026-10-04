@@ -203,6 +203,22 @@ The island appears later, and the audio bars sometimes stutter. 2.0.7 felt insta
 - **Done means** the numbers match or beat 2.0.7.
 - Snapshot: the founder's installed beta.4 idles at about 1% CPU and 251 MB footprint after 16 h.
 
+### F0 baseline (2026-10-04)
+
+Run: debug build, Parakeet v3, 15 back-to-back takes, from `.tmp/e2e/2026-10-04T20-48-39.639Z`.
+
+- **Hotkey → island visible (take 1, pill hidden): 381 ms.**
+  - hotkey → Starting: 13 ms
+  - Starting → Recording (mic open): **278 ms**
+  - Recording → pill shown: 38 ms
+  - shown → first visible frame: 52 ms
+
+  The island waits for the mic. Fix: show it on keypress (Starting).
+  The takes 2+ metric is invalid: the window was still visible from the previous take. Measure only from a hidden pill.
+- **Frames while recording:** p50 17 ms, p95 18 ms, max 26–58 ms, at most one frame over 33 ms per take. Smooth when the machine is idle; the founder's stutter likely happens under load. Making it compositor-only (F6) hardens it.
+- **Audio level gaps:** p95 20 ms. DOM is stable at 141 nodes, so there's no pill DOM leak.
+- **Main process RSS: 157.7 → 194.8 MB over 15 takes (+~2.7 MB per take).** Run a longer soak and profile before calling it a leak.
+
 ### F. Audit result (2026-10-04, static; React Doctor local-only: 64 warnings, 11 perf)
 
 Ranked:
