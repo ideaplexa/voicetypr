@@ -10,6 +10,11 @@ use tauri::Emitter;
 /// True while the main window's Recording screen mic meter is mounted.
 static MAIN_METER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+/// Clear the flag when the main page (re)loads, since React cleanup is skipped then.
+pub fn reset_main_meter() {
+    MAIN_METER_ACTIVE.store(false, Ordering::Relaxed);
+}
+
 #[tauri::command]
 pub fn set_audio_meter_active(window: tauri::WebviewWindow, active: bool) -> Result<(), String> {
     if window.label() != "main" {
@@ -59,4 +64,16 @@ pub fn spawn(app: tauri::AppHandle, receiver: Receiver<f64>, generation: u64) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_reload_clears_meter_flag() {
+        MAIN_METER_ACTIVE.store(true, Ordering::Relaxed);
+        reset_main_meter();
+        assert!(!MAIN_METER_ACTIVE.load(Ordering::Relaxed));
+    }
 }

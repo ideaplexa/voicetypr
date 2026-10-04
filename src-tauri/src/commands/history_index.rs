@@ -1,8 +1,8 @@
 //! Sorted key index over the `transcriptions` store, so paging history does not
 //! clone and re-sort every key on each call.
 //!
-//! Built lazily, updated on add/delete, and self-healing: if its length ever
-//! disagrees with the store (a writer that did not notify it), it rebuilds.
+//! Built lazily, updated on add/delete, and self-healing: if its length or key
+//! set ever disagrees with the store (a writer that did not notify it), it rebuilds.
 use std::{cmp::Ordering, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
@@ -31,15 +31,21 @@ pub struct HistoryIndex {
 
 impl HistoryIndex {
     /// First `limit` keys, newest first. `store_len` is the store's current
-    /// length; `all_keys` is only called when the index must be (re)built.
+    /// length; `has_key` checks membership in the store; `all_keys` is only called
+    /// when the index must be (re)built. Equal length alone is not enough (an add
+    /// and a delete can both land before their notifications), so every indexed key
+    /// is verified: same length plus all indexed keys present means the same set.
     pub fn page(
         &self,
         store_len: usize,
+        has_key: impl Fn(&str) -> bool,
         all_keys: impl FnOnce() -> Vec<String>,
         limit: usize,
     ) -> Vec<String> {
         let mut guard = self.sorted.lock().unwrap_or_else(|e| e.into_inner());
-        let stale = guard.as_ref().is_none_or(|keys| keys.len() != store_len);
+        let stale = guard
+            .as_ref()
+            .is_none_or(|keys| keys.len() != store_len || !keys.iter().all(|key| has_key(key)));
         if stale {
             let mut keys = all_keys();
             keys.sort_unstable_by(|a, b| compare_history_keys(a, b));
@@ -138,7 +144,12 @@ mod tests {
         let index = HistoryIndex::default();
         for limit in [0, 1, 5, 50, 500] {
             assert_eq!(
-                index.page(keys.len(), || keys.clone(), limit),
+                index.page(
+                    keys.len(),
+                    |k| keys.iter().any(|x| x == k),
+                    || keys.clone(),
+                    limit
+                ),
                 page_history_keys(keys.clone(), limit),
                 "limit {limit}"
             );
@@ -149,14 +160,24 @@ mod tests {
     fn incremental_add_and_remove_match_full_resort() {
         let mut keys = sample_keys();
         let index = HistoryIndex::default();
-        index.page(keys.len(), || keys.clone(), 10);
+        index.page(
+            keys.len(),
+            |k| keys.iter().any(|x| x == k),
+            || keys.clone(),
+            10,
+        );
 
         let added = "2026-10-04T09:30:00+00:00".to_string();
         keys.push(added.clone());
         index.insert(&added);
         index.insert(&added); // duplicate insert is a no-op
         assert_eq!(
-            index.page(keys.len(), || panic!("must not rebuild"), 500),
+            index.page(
+                keys.len(),
+                |k| keys.iter().any(|x| x == k),
+                || panic!("must not rebuild"),
+                500
+            ),
             page_history_keys(keys.clone(), 500)
         );
 
@@ -164,7 +185,12 @@ mod tests {
         keys.retain(|k| k != &removed);
         index.remove(&removed);
         assert_eq!(
-            index.page(keys.len(), || panic!("must not rebuild"), 500),
+            index.page(
+                keys.len(),
+                |k| keys.iter().any(|x| x == k),
+                || panic!("must not rebuild"),
+                500
+            ),
             page_history_keys(keys.clone(), 500)
         );
     }
@@ -173,16 +199,71 @@ mod tests {
     fn rebuilds_when_store_length_disagrees() {
         let mut keys = sample_keys();
         let index = HistoryIndex::default();
-        index.page(keys.len(), || keys.clone(), 10);
+        index.page(
+            keys.len(),
+            |k| keys.iter().any(|x| x == k),
+            || keys.clone(),
+            10,
+        );
         keys.push("2026-10-05T00:00:00+00:00".to_string());
         assert_eq!(
-            index.page(keys.len(), || keys.clone(), 500),
+            index.page(
+                keys.len(),
+                |k| keys.iter().any(|x| x == k),
+                || keys.clone(),
+                500
+            ),
             page_history_keys(keys.clone(), 500)
         );
         index.invalidate();
         assert_eq!(
-            index.page(keys.len(), || keys.clone(), 3),
+            index.page(
+                keys.len(),
+                |k| keys.iter().any(|x| x == k),
+                || keys.clone(),
+                3
+            ),
             page_history_keys(keys.clone(), 3)
+        );
+    }
+
+    #[test]
+    fn add_and_delete_before_notifications_still_rebuilds() {
+        let mut keys = sample_keys();
+        let index = HistoryIndex::default();
+        index.page(
+            keys.len(),
+            |k| keys.iter().any(|x| x == k),
+            || keys.clone(),
+            10,
+        );
+
+        // Store: add B, delete A. Length is unchanged; no notification yet.
+        let a = "2026-10-03T08:15:30.123456789+00:00".to_string();
+        let b = "2026-10-04T09:30:00+00:00".to_string();
+        keys.retain(|k| k != &a);
+        keys.push(b.clone());
+        let page = index.page(
+            keys.len(),
+            |k| keys.iter().any(|x| x == k),
+            || keys.clone(),
+            500,
+        );
+        assert_eq!(page, page_history_keys(keys.clone(), 500));
+        assert_eq!(page[0], b);
+        assert!(!page.contains(&a));
+
+        // Late notifications are harmless.
+        index.insert(&b);
+        index.remove(&a);
+        assert_eq!(
+            index.page(
+                keys.len(),
+                |k| keys.iter().any(|x| x == k),
+                || panic!("must not rebuild"),
+                500
+            ),
+            page_history_keys(keys.clone(), 500)
         );
     }
 }

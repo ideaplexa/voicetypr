@@ -1487,6 +1487,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_remote_transcription_control,
             update_remote_transcription_control,
         ])
+        .on_page_load(|webview, payload| {
+            // A reload or crash recovery skips React cleanup; drop the meter flag.
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                crate::pill::level::reset_main_meter();
+            }
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Only hide the window instead of closing it (except for pill)

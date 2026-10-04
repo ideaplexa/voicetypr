@@ -7928,7 +7928,7 @@ fn history_page_keys(
     limit: usize,
 ) -> Vec<String> {
     match app.try_state::<crate::commands::history_index::HistoryIndex>() {
-        Some(index) => index.page(store.length(), || store.keys(), limit),
+        Some(index) => index.page(store.length(), |key| store.has(key), || store.keys(), limit),
         None => page_history_keys(store.keys(), limit),
     }
 }

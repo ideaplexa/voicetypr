@@ -11,13 +11,16 @@ let queued: Promise<ModelStatusResponse> | null = null;
 
 const run = (): Promise<ModelStatusResponse> => {
   joinable = true;
-  // Callers in the same tick (several hooks reacting to one event) share this call.
-  setTimeout(() => {
-    joinable = false;
-  }, 0);
-  const request = invoke<ModelStatusResponse>("get_model_status").finally(() => {
+  // The backend call starts on the next timer tick, so callers reacting to the
+  // same event share it, and any later caller gets a trailing request.
+  const request: Promise<ModelStatusResponse> = new Promise((resolve, reject) => {
+    setTimeout(() => {
+      joinable = false;
+      invoke<ModelStatusResponse>("get_model_status").then(resolve, reject);
+    }, 0);
+  }).finally(() => {
     if (current === request) current = null;
-  });
+  }) as Promise<ModelStatusResponse>;
   current = request;
   return request;
 };

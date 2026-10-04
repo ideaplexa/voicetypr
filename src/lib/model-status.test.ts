@@ -36,4 +36,21 @@ describe("fetchModelStatus", () => {
     await fetchModelStatus();
     expect(mockInvoke).toHaveBeenCalledTimes(2);
   });
+
+  it("schedules a trailing call for a refresh arriving after the backend call started", async () => {
+    vi.useFakeTimers();
+    let release: (value: { models: never[] }) => void = () => undefined;
+    mockInvoke.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    const first = fetchModelStatus();
+    const sameTick = fetchModelStatus();
+    expect(sameTick).toBe(first);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    const late = fetchModelStatus();
+    expect(late).not.toBe(first);
+    release({ models: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all([first, late]);
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+  });
 });
