@@ -162,3 +162,39 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
    - The island keeps its waveform and timer; the hint never replaces the island content.
    - This is the same live-card path as the recording-time mic warnings (A1).
    - It keeps the 2 s countdown, and the drain animation lives on the card.
+
+### F. Audit result (2026-10-04, static; React Doctor local-only: 64 warnings, 11 perf)
+
+Ranked:
+1. **`audio-level`** is emitted at 60 Hz to `main` even when it's hidden or on another screen, and it drives `setLevel`.
+   - Emit to `main` only while the Recording screen's meter is mounted.
+   - On the frontend, keep the level in a ref and write it in rAF.
+2. **SettingsContext reload** sets `isLoading` and `error` on every settings, model, language or device event, so all 47 consumers re-render twice.
+   - Set `isLoading` only on the first load, and skip updates when the value is equal.
+   - `get_settings` takes the consent lock: check the cost.
+3. **ModelManagement, Readiness and ModelAvailability provider values** are not memoised, and `sortModels` runs on every render.
+   - Memoise the values.
+   - Keep per-model download progress in a small external store.
+4. **No code splitting:** every screen and SettingsTab load eagerly.
+   - Use `React.lazy` for the secondary screens.
+   - Mount the SettingsModal only when it's open.
+5. **`get_model_status`** runs twice per event, holds a write lock and does filesystem checks on the async runtime.
+   - Share one result, cache it, and move the filesystem work to `spawn_blocking`.
+   - Stabilise the 7 listeners.
+6. **The pill animates layout properties** (width, height, left, top, radius) and calls `getBoundingClientRect` every frame.
+   - Use transform plus clip.
+   - Cache rects and compare them numerically.
+   - Hover from cached rects.
+   - This goes with section G (after the A fix round).
+7. **History reads all keys and sorts them on every call.** Keep a key index and count in managed state, and load in `spawn_blocking`.
+8. **Icon PNG encoding** runs on the main thread. Add a disk cache, or encode off the main thread.
+9. **History rows:**
+   - memoised rows with stable callbacks
+   - format time once
+   - `content-visibility` or virtualisation
+10. **Small items:**
+    - Dictionary `useMemo`
+    - hoist the `Intl` formatter
+    - module-level empty default props
+    - the TabContainer keydown effect deps
+    - `exhaustive-deps` and loading-flag findings
