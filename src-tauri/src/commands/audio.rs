@@ -3101,6 +3101,40 @@ mod tests {
     }
 
     #[test]
+    fn early_pill_is_hidden_only_when_nothing_needs_it() {
+        use super::early_pill_unneeded;
+        assert!(early_pill_unneeded(
+            "when_recording",
+            RecordingState::Idle,
+            false
+        ));
+        assert!(early_pill_unneeded(
+            "when_recording",
+            RecordingState::Error,
+            false
+        ));
+        // A card owns the window, or a newer take is already starting or recording.
+        assert!(!early_pill_unneeded(
+            "when_recording",
+            RecordingState::Idle,
+            true
+        ));
+        assert!(!early_pill_unneeded(
+            "when_recording",
+            RecordingState::Starting,
+            false
+        ));
+        assert!(!early_pill_unneeded(
+            "when_recording",
+            RecordingState::Recording,
+            false
+        ));
+        // `always` keeps the window; `never` never showed it early.
+        assert!(!early_pill_unneeded("always", RecordingState::Idle, false));
+        assert!(!early_pill_unneeded("never", RecordingState::Idle, false));
+    }
+
+    #[test]
     fn should_hide_pill_when_idle_for_never() {
         assert!(should_hide_pill_when_idle("never"));
     }
@@ -4983,6 +5017,88 @@ impl Drop for RebuildBindingsOnExit {
     }
 }
 
+/// The island appears on keypress: it is shown as soon as `Starting` is
+/// published, in the background, so the start path never waits on the window.
+/// Dropping it unconsumed (the start failed, was cancelled or went stale before
+/// `Recording`) hides a window that no recording or card needs any more.
+struct EarlyPillShow {
+    app: AppHandle,
+    handle: Option<tauri::async_runtime::JoinHandle<Result<(), String>>>,
+}
+
+impl EarlyPillShow {
+    fn spawn(app: &AppHandle, generation: u64) -> Self {
+        crate::perf::mark(generation, crate::perf::Stage::PillShowCalled);
+        let task_app = app.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            if crate::perf::enabled() {
+                // Only a take that starts from a hidden window measures hotkey -> island.
+                let visible = task_app
+                    .get_webview_window("pill")
+                    .and_then(|window| window.is_visible().ok())
+                    .unwrap_or(false);
+                crate::perf::note_window_hidden(generation, !visible);
+            }
+            let result = crate::commands::window::show_pill_widget(task_app).await;
+            crate::perf::mark(generation, crate::perf::Stage::PillShown);
+            result
+        });
+        Self {
+            app: app.clone(),
+            handle: Some(handle),
+        }
+    }
+
+    /// The take reached `Recording`: keep the window and report how the show went.
+    async fn consume(mut self) -> Result<(), String> {
+        match self.handle.take() {
+            Some(handle) => handle.await.map_err(|error| error.to_string())?,
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for EarlyPillShow {
+    fn drop(&mut self) {
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Never hide before the show settled, or the window would stay up.
+            let _ = handle.await;
+            hide_unneeded_early_pill(&app);
+        });
+    }
+}
+
+/// A card (blocked, error, recovery) or a newer take still needs the window.
+fn early_pill_unneeded(mode: &str, state: RecordingState, feedback_owned: bool) -> bool {
+    mode == "when_recording"
+        && !feedback_owned
+        && matches!(state, RecordingState::Idle | RecordingState::Error)
+}
+
+fn hide_unneeded_early_pill(app: &AppHandle) {
+    let hide_app = app.clone();
+    // Decide on the native UI thread, where a newer take's show is also serialized.
+    let _ = app.run_on_main_thread(move || {
+        if !early_pill_unneeded(
+            &crate::commands::pill_feedback::pill_mode(&hide_app),
+            crate::get_recording_state(&hide_app),
+            crate::commands::pill_feedback::feedback_owned(),
+        ) {
+            return;
+        }
+        if let Some(window) = hide_app.get_webview_window("pill") {
+            crate::pill::hit_test::stop(&hide_app);
+            if let Err(error) = window.hide() {
+                log::error!("Failed to hide unused early pill window: {}", error);
+            }
+        }
+    });
+}
+
 #[tauri::command]
 /// Returns `true` when THIS call started the recording, `false` when it was a
 /// redundant no-op on an already starting/active recording (idempotent
@@ -5225,6 +5341,10 @@ pub async fn start_recording(
         config.ai_enabled,
         config.current_model
     );
+    // Show the island now (non-blocking); the mic opening below must not delay it.
+    let should_show_pill = config.show_pill_widget && config.pill_indicator_mode != "never";
+    let early_pill =
+        should_show_pill.then(|| EarlyPillShow::spawn(&app, current_recording_generation()));
     // Warm the active cloud provider's connection so the first transcription skips the handshake (skipped when a remote handles dispatch).
     if let Some(provider) = crate::cloud_stt::CloudProvider::from_id(&config.current_engine) {
         let app = app.clone();
@@ -5720,18 +5840,16 @@ pub async fn start_recording(
         crate::pill::level::spawn(app.clone(), audio_level_rx, recording_generation);
     }
 
-    // Show pill widget if enabled and mode is not "never" (graceful degradation)
-    let should_show_pill = config.show_pill_widget && config.pill_indicator_mode != "never";
+    // The island was shown when Starting was published; settle that show now that
+    // we are Recording (graceful degradation if it failed).
     log::info!(
         "pill_visibility: start_recording show_pill_widget={} pill_indicator_mode='{}' should_show={}",
         config.show_pill_widget,
         config.pill_indicator_mode,
         should_show_pill
     );
-    if should_show_pill {
-        crate::perf::mark(recording_generation, crate::perf::Stage::PillShowCalled);
-        let pill_result = crate::commands::window::show_pill_widget(app.clone()).await;
-        crate::perf::mark(recording_generation, crate::perf::Stage::PillShown);
+    if let Some(early_pill) = early_pill {
+        let pill_result = early_pill.consume().await;
         if recording_generation_is_stale(recording_generation) {
             return Ok(false);
         }

@@ -18,6 +18,8 @@ export class IslandMachine {
   error = '';
   startedAt = 0;
   frozenSeconds = 0;
+  /** Starting is published but the mic is not open yet: the island is up, the take is not live. */
+  pending = false;
   get recording() { return this.state === 'start' || this.state === 'listening' || this.state === 'live'; }
   get processing() { return this.state === 'transcribing' || this.state === 'polishing'; }
   get terminal() { return this.state === 'pasted' || this.state === 'copied' || this.state === 'no_permission'; }
@@ -52,7 +54,20 @@ export class IslandMachine {
     if (generation < this.generation || generation < this.observedGeneration) return false;
     this.observedGeneration = generation; return true;
   }
+  /** Show the island on keypress. The take is live only once `start` confirms it. */
+  arm(now: number) {
+    if (this.recording) return false;
+    this.clearStream(); this.words = 0;
+    this.startedAt = now; this.frozenSeconds = 0;
+    this.state = 'listening'; this.pending = true;
+    return true;
+  }
   start(now: number) {
+    if (this.pending) {
+      // Recording began: the clock and the bars start now, not at the keypress.
+      this.pending = false; this.startedAt = now; this.frozenSeconds = 0;
+      return true;
+    }
     if (this.recording) return false;
     this.clearStream(); this.words = 0;
     this.startedAt = now; this.frozenSeconds = 0;
@@ -62,15 +77,15 @@ export class IslandMachine {
   }
   foldStart() { if (this.state === 'start') this.state = this.committed || this.tentative ? 'live' : 'listening'; }
   work(state: 'transcribing' | 'polishing', now: number) {
-    if (this.recording) this.frozenSeconds = Math.floor((now - this.startedAt) / 1000);
-    this.clearStream(); this.state = state;
+    if (this.recording) this.frozenSeconds = this.pending ? 0 : Math.floor((now - this.startedAt) / 1000);
+    this.pending = false; this.clearStream(); this.state = state;
   }
   outcome(payload: PasteOutcomePayload) {
     if (this.recording || payload.generation !== undefined && !this.observeGeneration(payload.generation)) return false;
     this.clearStream(); this.words = payload.words; this.state = payload.outcome;
     return true;
   }
-  rest() { this.state = 'rest'; this.clearStream(); }
+  rest() { this.state = 'rest'; this.pending = false; this.clearStream(); }
   clearStream() { this.committed = this.tentative = ''; this.session = -1; this.revision = -1; }
   stream(event: TranscriptionStreamEvent) {
     if (!this.recording) return false;

@@ -1,9 +1,9 @@
 import { icon } from '@/pill/icons';
 export function createIslandDom(host: HTMLElement) {
   const root = document.createElement('div'); root.className = 'pill-root';
-  root.innerHTML = `<div class="pill-surface" hidden>
+  root.innerHTML = `<i class="pill-shadow" aria-hidden="true" hidden></i><div class="pill-surface" hidden>
     <i class="pill-rest-dot" data-testid="pill-rest-dot" aria-label="Recording idle"><i class="core"></i></i>
-    <div class="appico" aria-hidden="true"><span class="letter"></span><img hidden alt="" /></div>
+    <div class="pill-content"><div class="appico" aria-hidden="true"><span class="letter"></span><img hidden alt="" /></div>
     <i class="aibadge" aria-hidden="true" hidden></i>
     <canvas class="glyph" data-testid="pill-bars" aria-hidden="true"></canvas>
     <div class="layer start" data-layer="start"><div class="start-row"><span></span><span class="mono start-time">0:00</span></div><div class="chips"><button class="chip style-chip" type="button"><span class="style-icon">${icon("star",10)}</span><span class="style-name"></span><span class="style-chevron">${icon("chevron",9)}</span></button><span class="chip mic-chip">${icon("mic",10)}<span class="mic-name"></span><i class="mic-dot"></i></span><span class="chip engine-chip"></span></div></div>
@@ -15,10 +15,11 @@ export function createIslandDom(host: HTMLElement) {
     <div class="layer fill" data-layer="note"><div class="row note-row"><span class="note-clock dim">${icon("clock",14)}</span><span class="note-text dim"></span><button class="round note-dismiss" type="button" aria-label="Dismiss no speech note" hidden>${icon("close",12)}</button></div></div>
     <div class="layer fill peek" data-layer="peek"><div class="chips peek-chips"><button class="chip peek-style" type="button"><span class="quick-icon">${icon("star",10)}</span><span class="quick-label"></span><span class="quick-chevron">${icon("chevron",9)}</span></button><button class="chip peek-engine" type="button"><span class="quick-icon">${icon("engine",10)}</span><span class="quick-label"></span><span class="quick-chevron">${icon("chevron",9)}</span></button><button class="chip peek-mic" type="button"><span class="quick-icon">${icon("mic",10)}</span><span class="quick-label"></span><span class="quick-chevron">${icon("chevron",9)}</span></button><button class="chip peek-language" type="button"><span class="quick-icon">${icon("globe",10)}</span><span class="quick-label"></span><span class="quick-chevron">${icon("chevron",9)}</span></button></div><div class="peek-row"><button class="round peek-gear" aria-label="Open Voicetypr Settings" type="button">${icon("gear",14)}</button><span class="peek-hint dim"></span><button class="round record" aria-label="Start dictation" type="button">${icon("mic",16)}</button></div></div>
   <div class="layer fill pick" data-layer="pick"><div class="pick-header"><button class="round pick-back" type="button" aria-label="Back">${icon("back",12)}</button><strong class="pick-title"></strong></div><div class="pick-list" role="listbox"></div><span class="pick-error" role="status" hidden>Could not change setting. Try again.</span></div>
-  </div><div class="pill-announcement" role="status" aria-live="polite" aria-atomic="true"></div>`;
+  </div></div><div class="pill-announcement" role="status" aria-live="polite" aria-atomic="true"></div>`;
   host.replaceChildren(root);
   const get = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
   return { root, surface: get<HTMLDivElement>('.pill-surface'), get,
+    shadow: get<HTMLElement>('.pill-shadow'), content: get<HTMLElement>('.pill-content'),
     canvas: get<HTMLCanvasElement>('.glyph'), icon: get<HTMLDivElement>('.appico'), badge: get<HTMLElement>('.aibadge'),
     committed: get<HTMLSpanElement>('.pill-committed'), tentative: get<HTMLSpanElement>('.pill-tentative'),
     announcement: get<HTMLDivElement>('.pill-announcement') };

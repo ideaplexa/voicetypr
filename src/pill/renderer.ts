@@ -8,7 +8,8 @@ import { formatKeyForDisplay } from '@/lib/keyboard-normalizer';
 import { createIslandDom } from '@/pill/dom';
 import { Crossfade } from '@/pill/crossfade';
 import { Words } from '@/pill/words';
-import { Layers } from '@/pill/layers';
+import { Layers, layerNames } from '@/pill/layers';
+import { boxFor, newBox, sameRects, type Box, type Rect } from '@/pill/shape';
 import { Spring, clamp } from '@/pill/spring';
 import { AppIcon } from '@/pill/app-icon';
 import { Badge } from '@/pill/badge';
@@ -61,8 +62,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let lastState = machine.state, startTimer: number | undefined, feedbackTimer: number | undefined, hoverTimer: number | undefined;
   let slowSince = 0;
   let perf: PerfProbe | undefined; // debug-only measurement (VOICETYPR_PERF=1); undefined otherwise
-  const endTake = () => { if (machine.recording) perf?.end(machine.generation); };
+  // A start that never went live (cancelled or failed while pending) reports no frames.
+  const endTake = () => { if (machine.pending) perf?.abort(); else if (machine.recording) perf?.end(machine.generation); };
   let entered = 0, pointerX = 0, pointerY = 0, pointerTime = 0;
+  let buttonRects: Array<{ button: HTMLButtonElement; rect: DOMRect }> | undefined, lastLayoutKey = '';
   let closeHold = 0;
   let waveSeconds = 0, cancelPending = false, stopPending = false;
   let enabledStream = false, displayedSeconds = -1;
@@ -78,61 +81,109 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const width = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect().width : 0;
     range.detach(); return width;
   };
-  let regionSignature = '';
-  const hit = () => {
-    const b = dom.surface.getBoundingClientRect();
-    let x=b.x,y=b.y,width=b.width,height=b.height;
-    if(machine.state==='rest') {x-=4;width+=8;y-=8;height=20;}
-    const rects = [...(dom.surface.hidden ? [] : [{x,y,width,height}]),...stack.rects()];
-    const signature=JSON.stringify(rects);
-    if(signature!==regionSignature){regionSignature=signature;deps.hitRegions(rects);}
+  // Hit regions come from the spring values, never from the DOM, and are sent only when they change.
+  let sentRects: Rect[] = [];
+  const hit = (settled = true) => {
+    const rects: Rect[] = [];
+    if (!dom.surface.hidden) {
+      const b = shapeNow();
+      if (machine.state === 'rest') rects.push({ x: b.left - 4, y: b.top - 8, width: b.width + 8, height: 20 });
+      else rects.push({ x: b.left, y: b.top, width: b.width, height: b.height });
+    }
+    for (const rect of stack.rects()) rects.push(rect);
+    // Sub-pixel jitter is not worth an IPC while moving; the settled shape is always sent exactly.
+    if (sameRects(rects, sentRects, settled ? 0 : .01)) return;
+    sentRects = rects; deps.hitRegions(rects);
   };
   const wake = () => { if (!deps.staticPreview && !destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
   const syncTime = (now: number) => {
     if (machine.recording) waveSeconds = Math.max(0, (now - machine.startedAt) / 1000);
-    const seconds = Math.floor(machine.recording ? waveSeconds : machine.frozenSeconds);
+    // While starting the clock waits at 0:00; the bars idle on the same time base.
+    const seconds = machine.pending ? 0 : Math.floor(machine.recording ? waveSeconds : machine.frozenSeconds);
     if (seconds === displayedSeconds) return; displayedSeconds = seconds;
     const t = elapsed(seconds);
     for (const el of timerElements) if (el.textContent !== t) el.textContent = t;
   };
-  const place = () => {
-    dom.surface.style.width = `${Math.max(12, W.x)}px`; dom.surface.style.height = `${Math.max(12, H.x)}px`; dom.surface.style.borderRadius = `${Math.max(6, R.x)}px`;
+  // ---- Geometry (plan 082 F6) ----
+  // `layout()` runs on state change only: it sizes the fixed target box that holds the content and places
+  // the shadow. `paint()` runs per spring frame: it resizes the surface (the clip, which has no
+  // size-dependent descendants) and moves content by translate/scale only. Nothing here measures the DOM.
+  const target = newBox(), cur = newBox();
+  let boxPanel = false, dotAt = dotCentre(geometry), iconSide = 18, peekShift = 0;
+  interface Pose { w: number; h: number; poff: number; ix: number; iy: number; is: number; gx: number; gy: number }
+  const targetPose: Pose = { w: 12, h: 12, poff: 0, ix: 0, iy: 0, is: 0, gx: 0, gy: 0 }, nowPose: Pose = { ...targetPose };
+  const fillPose = (p: Pose, goal: boolean) => {
+    const v = (spring: Spring) => goal ? spring.to : spring.x;
+    p.w = Math.max(12, v(W)); p.h = Math.max(12, v(H)); p.poff = v(POFF); p.ix = v(IX); p.iy = v(IY); p.is = Math.max(0, v(IS)); p.gx = v(GX); p.gy = v(GY);
+  };
+  const iconCentreY = (p: Pose) => top ? p.iy : p.h - 2 - p.iy;
+  const glyphTop = (p: Pose) => top ? p.gy : p.h - 2 - p.gy - 24;
+  const rowEdge = (p: Pose) => Math.max(0, p.iy - 16);
+  /** Top-hugging layers keep their distance from the shape's top edge; the rest keep it from the bottom edge (see pill.css). */
+  const huggingTop = (name: string) => top ? name !== 'start' && name !== 'notice' : name === 'start' || name === 'notice' || name === 'done';
+  const put = (el: HTMLElement, name: string, value: string) => { if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value); };
+  const nudge = (el: HTMLElement, x: number, y: number) => put(el, 'translate', `${x}px ${y}px`);
+  /** The live shape in viewport px, from the current spring values. Shared by paint, hit regions and hover. */
+  const shapeNow = (): Box => {
+    fillPose(nowPose, false);
+    return boxFor(geometry, boxPanel, dotAt, top, nowPose.w, nowPose.h, nowPose.poff, cur);
+  };
+  const layout = () => {
     const panel = machine.state === 'peek' || !!pick;
-    const dot = dotCentre(geometry);
+    boxPanel = panel; dotAt = dotCentre(geometry);
+    fillPose(targetPose, true);
+    boxFor(geometry, panel, dotAt, top, targetPose.w, targetPose.h, targetPose.poff, target);
+    // Content is laid out at the target padding box (surface minus its 1px border) and never resized per frame.
+    dom.content.style.width = `${Math.max(0, targetPose.w - 2)}px`; dom.content.style.height = `${Math.max(0, targetPose.h - 2)}px`;
+    const shadow = dom.shadow.style;
+    shadow.left = `${target.left}px`; shadow.top = `${target.top}px`; shadow.width = `${target.width}px`; shadow.height = `${target.height}px`;
+    shadow.borderRadius = `${Math.max(6, R.to)}px`;
+    if (IS.to > .5) iconSide = IS.to;
+    const icon = dom.icon.style;
+    icon.width = icon.height = `${iconSide}px`;
+    icon.left = `${targetPose.ix - iconSide / 2}px`; icon.top = `${iconCentreY(targetPose) - iconSide / 2}px`;
+    icon.borderRadius = `${Math.max(3, iconSide * (deps.mac ? .28 : .22))}px`;
+    dom.canvas.style.left = `${targetPose.gx}px`; dom.canvas.style.top = `${glyphTop(targetPose)}px`;
+    dom.canvas.style.width = '260px'; dom.canvas.style.height = '24px';
+    rowEl.style.width = `${Math.max(0, W.to - 2)}px`; rowEl.style.paddingRight = `${12 + HC.to}px`;
+    ctlEl.style.left = `${Math.max(0, W.to - HC.to - 14)}px`; ctlEl.inert = HC.to === 0;
+    const edge = rowEdge(targetPose);
+    for (const el of rowLayers) { el.style.left = `${targetPose.ix - 21}px`; el.style[top ? 'top' : 'bottom'] = `${edge}px`; el.style[top ? 'bottom' : 'top'] = ''; }
     if (panel) {
-      const insetX = Math.min(17, W.x / 2), insetY = Math.min(17, H.x / 2);
-      const left = geometry.anchor.endsWith('-left') ? dot.x - insetX : geometry.anchor.endsWith('-right') ? dot.x - W.x + insetX : dot.x - W.x / 2;
-      const y = (top ? dot.y - insetY : dot.y - H.x + insetY) + POFF.x;
-      dom.surface.style.transform = 'none';
-      dom.surface.style.left = `${left}px`; dom.surface.style.top = `${y}px`;
       const record = dom.get<HTMLElement>('.record');
-      record.style.left = `${dot.x - left - 14}px`;
-      record.style.top = `${dot.y - y - 14}px`;
-      record.style.transform = 'none';
-    } else {
-      dom.surface.style.transform = ''; dom.surface.style.left = ''; dom.surface.style.top = '';
+      record.style.left = `${dotAt.x - target.left - 14}px`; record.style.top = `${dotAt.y - target.top - 14}px`; record.style.transform = 'none';
     }
-    const size = Math.max(0, IS.x);
-    dom.icon.style.width = dom.icon.style.height = `${size}px`;
-    dom.icon.style.left = `${IX.x - size / 2}px`;
-    // IY tracks distance from the anchored edge; card icons follow their title row.
-    const cy = top ? IY.x : H.x - 2 - IY.x;
-    dom.icon.style.top = `${cy - size / 2}px`; dom.icon.style.opacity = String(clamp(size / 18));
-    dom.icon.style.borderRadius = `${Math.max(3, size * (deps.mac ? .28 : .22))}px`;
-    dom.icon.hidden = size < .1 || panel;
-    dom.canvas.style.left = `${GX.x}px`;
-    const gy = top ? GY.x : H.x - 2 - GY.x - 24;
-    dom.canvas.style.top = `${gy}px`; dom.canvas.style.width = '260px'; dom.canvas.style.height = '24px';
-    rowEl.style.width = `${Math.max(0, W.x - 2)}px`;
-    ctlEl.style.width = `${Math.max(0, HC.x)}px`; ctlEl.style.opacity = String(clamp(HC.x / 62)); ctlEl.inert = HC.to === 0;
-    const edge = Math.max(0, IY.x - 16);
-    for (const el of rowLayers) { el.style.left = `${IX.x - 21}px`; el.style[top ? 'top' : 'bottom'] = `${edge}px`; el.style[top ? 'bottom' : 'top'] = ''; }
+  };
+  const paint = () => {
+    shapeNow();
+    const surface = dom.surface;
+    put(surface, 'width', `${nowPose.w}px`); put(surface, 'height', `${nowPose.h}px`); put(surface, 'border-radius', `${Math.max(6, R.x)}px`);
+    if (boxPanel) {
+      put(surface, 'transform', 'none'); put(surface, 'left', `${cur.left}px`); put(surface, 'top', `${cur.top}px`);
+    } else { put(surface, 'transform', ''); put(surface, 'left', ''); put(surface, 'top', ''); }
+    // The shadow keeps its target-sized box and follows the shape by transform.
+    dom.shadow.style.transform = `translate(${cur.left - target.left}px,${cur.top - target.top}px) scale(${cur.width / target.width},${cur.height / target.height})`;
+    const grow = nowPose.h - targetPose.h, edgeShift = rowEdge(nowPose) - rowEdge(targetPose), ixShift = nowPose.ix - targetPose.ix;
+    for (const name of layerNames) {
+      const el = layers.entries[name].el;
+      if (name === 'row' || name === 'work' || name === 'note') nudge(el, ixShift, top ? edgeShift : grow - edgeShift);
+      else nudge(el, 0, huggingTop(name) ? 0 : grow);
+    }
+    peekShift = huggingTop('peek') ? 0 : grow;
+    // The record button stays on the native dot while its panel morphs.
+    if (boxPanel) nudge(dom.get<HTMLElement>('.record'), target.left - cur.left, target.top - cur.top - peekShift);
+    const size = nowPose.is;
+    nudge(dom.icon, ixShift, iconCentreY(nowPose) - iconCentreY(targetPose));
+    put(dom.icon, 'scale', String(size / iconSide)); dom.icon.style.opacity = String(clamp(size / 18));
+    dom.icon.hidden = size < .1 || boxPanel;
+    nudge(dom.canvas, nowPose.gx - targetPose.gx, glyphTop(nowPose) - glyphTop(targetPose));
+    ctlEl.style.opacity = String(clamp(HC.x / 62));
   };
   function tick(now: number) {
     frame = undefined;
     if (destroyed) return;
     const dt = Math.min(.05, Math.max(0, (now - last) / 1000)); last = now;
-    if (perf && machine.recording && !reduced) perf.frame(now);
+    if (perf && machine.recording && !machine.pending && !reduced) perf.frame(now);
     let moving = false, shapeMoving = false;
     if (closeHold > 0 && !reduced) { closeHold = Math.max(0, closeHold - dt); moving = true; }
     else for (const spring of springs) { const before = spring.x; shapeMoving = spring.step(dt, reduced) || spring.x !== before || shapeMoving; }
@@ -146,12 +197,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     moving = glyph.step(dt, reduced) || moving;
     const size = Math.max(0, IS.x), badgeY = Math.max(IY.x - size / 2 - 2, 8);
     moving = badge.step(dt, IX.x + size / 2 - 4, top ? badgeY - 6 : H.x - 2 - badgeY - 6, reduced, badgeFromX, badgeFromY) || moving;
-    if (shapeMoving) place(); glyph.draw(waveSeconds, Math.max(0, GW.x), reduced);
+    if (shapeMoving) paint();
+    if (moving) buttonRects = undefined;
+    glyph.draw(waveSeconds, Math.max(0, GW.x), reduced);
     const landed = machine.state === 'rest' && W.x < 12.5 && H.x < 12.5;
     stack.tuck(mode === 'never' || !landed);
     stack.setGeometry(machine.recording || machine.processing ? {...geometry,anchorY:geometry.anchorY+(top ? 1 : -1)*Math.max(0,H.x-12)} : geometry);
     moving = stack.step(dt,reduced,landed,mode !== "never") || moving;
-    hit();
+    hit(!moving);
     if (!deps.staticPreview && (moving || (!dom.surface.hidden && machine.recording && !reduced))) frame = requestAnimationFrame(tick);
     else dom.surface.style.willChange = 'auto';
   }
@@ -170,6 +223,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const rest = state === 'rest';
     dom.root.dataset.state = pick ? 'pick' : rest ? 'idle' : state;
     dom.root.dataset.preview = String(state === 'live');
+    dom.root.dataset.starting = String(machine.pending);
     dom.root.dataset.platform = deps.mac ? 'macos' : 'windows';
     dom.root.dataset.reducedMotion = String(reduced);
     dom.surface.hidden = mode === 'never' || (rest && mode !== 'always' && !stack.present);
@@ -245,11 +299,18 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     ITOP.to = state === 'start' ? 26 : 16; GTOP.to = state === 'start' ? 38 : 28;
     if (farRow(state)) { IY.to = H.to - 2 - ITOP.to; GY.to = H.to - 2 - GTOP.to; }
     syncTime(performance.now());
+    const layoutKey = `${state}|${pick ? 1 : 0}|${W.to}|${H.to}|${HC.to}`;
+    if (layoutKey !== lastLayoutKey) { lastLayoutKey = layoutKey; buttonRects = undefined; }
+    dom.shadow.hidden = dom.surface.hidden;
     if (dom.surface.hidden && !stack.present) {
       if (frame !== undefined) cancelAnimationFrame(frame); frame = undefined; words.clear(); crossfade.clear();
-      for (const spring of springs) spring.snap(); layers.step(1, true); glyph.step(1, true); place(); hit();
+      for (const spring of springs) spring.snap(); layers.step(1, true); glyph.step(1, true); layout(); paint(); hit();
     }
-    else { if (reduced) { for (const spring of springs) spring.snap(); if (farRow(state)) { IY.x = H.x - 2 - ITOP.x; GY.x = H.x - 2 - GTOP.x; } place(); } dom.surface.style.willChange = 'width,height'; wake(); }
+    else {
+      if (reduced) { for (const spring of springs) spring.snap(); if (farRow(state)) { IY.x = H.x - 2 - ITOP.x; GY.x = H.x - 2 - GTOP.x; } }
+      // New targets, same live springs: content is re-expressed against the new box so nothing jumps.
+      layout(); paint(); dom.surface.style.willChange = 'width,height'; wake();
+    }
   };
   const announce = (value: string) => { dom.announcement.textContent = value; };
   const contextText = () => {
@@ -279,13 +340,36 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const foldStart = () => { if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = deps.setTimeout(() => { startTimer = undefined; if (!pick) machine.foldStart(); sync(); }, 800); };
   const rest = () => { endTake(); stack.dropLive(); pick = undefined; timers(); machine.rest(); cancelPending = stopPending = false; sync(); };
   const flash = (kind: 'too_short' | 'nospeech' | 'error', message = '') => {
-    endTake(); stack.dropLive();
+    endTake(); machine.pending = false; stack.dropLive();
     if (machine.state === kind && machine.error === message) return;
     timers(); machine.clearStream(); machine.state = kind; machine.error = message;
     announce(kind === 'too_short' ? shortCopy(machine.context) : kind === 'nospeech' ? 'No speech heard' : message);
     feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, kind === 'error' ? 1500 : kind === 'too_short' ? 1400 : 30000); sync();
   };
+  /** Keypress: Starting was published, the mic is not open yet. Show the idle listening layout at 0:00. */
+  const starting = () => {
+    if (machine.recording) return;
+    stack.dropLive();
+    if (machine.state === 'copied' || machine.state === 'no_permission') {
+      const permission=machine.state==='no_permission';
+      stack.push({key:machine.state,title:permission ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac),sub:permission ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : `${machine.context.app.name || 'The app'} didn't accept the paste`,tone:'amber',glyph:'clipboard',duration:null,actions:permission ? [{label:deps.mac ? 'Open System Settings' : 'Open Privacy settings',call:{command:'island_action',action:'open_accessibility'}}] : []},undefined,false);
+    }
+    pick = undefined;
+    stack.tuck(true);
+    if (!machine.arm(performance.now())) return;
+    timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
+    sync();
+    perf?.begin();
+  };
   const start = () => {
+    if (machine.pending) {
+      // Recording began. Clock and bars go live from here; a context that already arrived keeps its start card.
+      if (!machine.start(performance.now())) return;
+      glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
+      if (machine.state === 'start') foldStart();
+      sync();
+      return;
+    }
     if (machine.recording) return;
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
@@ -308,9 +392,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const pointer = (p: PillPointer) => {
     const now = performance.now();
     if (dom.surface.hidden && !stack.present) { hovering = false; if (hoverTimer !== undefined) deps.clearTimeout(hoverTimer); hoverTimer = undefined; return; }
-    const bounds = dom.surface.getBoundingClientRect();
-    // P1 coordinates are logical webview coordinates. Never depend on DOM mousemove.
-    const inside = p.inside && (p.x === undefined || p.y === undefined || (p.x >= bounds.left - (machine.state === 'rest' ? 4 : 0) && p.x <= bounds.right + (machine.state === 'rest' ? 4 : 0) && p.y >= bounds.top - (machine.state === 'rest' ? 8 : 0) && p.y <= bounds.bottom));
+    // P1 coordinates are logical webview coordinates. Never depend on DOM mousemove or measure the DOM.
+    const bounds = shapeNow(), slack = machine.state === 'rest';
+    const inside = p.inside && (p.x === undefined || p.y === undefined || (p.x >= bounds.left - (slack ? 4 : 0) && p.x <= bounds.left + bounds.width + (slack ? 4 : 0) && p.y >= bounds.top - (slack ? 8 : 0) && p.y <= bounds.top + bounds.height));
     const speed = pointerTime && p.x !== undefined && p.y !== undefined ? Math.hypot(p.x - pointerX, p.y - pointerY) / Math.max(4, now - pointerTime) * 1000 : 0;
     if (pick && p.x !== undefined && p.y !== undefined) pickGuard.pointer(p.x, p.y);
     pointerX = p.x ?? pointerX; pointerY = p.y ?? pointerY; pointerTime = now;
@@ -331,8 +415,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       sync();
     }
     if (machine.recording) sync();
-    const buttons = dom.surface.querySelectorAll<HTMLButtonElement>('button');
-    for (const button of buttons) { const b = button.getBoundingClientRect(); button.classList.toggle('hov', inside && p.x !== undefined && p.y !== undefined && p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom); }
+    // Button rects are cached and re-measured only after a layout or motion change.
+    buttonRects ??= [...dom.surface.querySelectorAll<HTMLButtonElement>('button')].map(button => ({ button, rect: button.getBoundingClientRect() }));
+    for (const { button, rect: b } of buttonRects) button.classList.toggle('hov', inside && p.x !== undefined && p.y !== undefined && p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom);
   };
   const closePick = () => {
     if (pickTimer !== undefined) deps.clearTimeout(pickTimer); pickTimer = undefined;
@@ -438,7 +523,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (!deps.staticPreview) return;
       const now = performance.now();
       for (let i = 0; i < 20; i++) tick(now + i * 50);
-      place();
+      paint();
     },
     quickOptions(value: QuickOptions) { if (!value?.polish || !value.engine || !value.shortcut_caps) return; quick = value;
       if (machine.recording && value.polish_context?.generation === machine.context.generation) {
@@ -469,7 +554,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     expired(id: string) { stack.remove(`recovery:${id}`); },
     clearNotice(kind: IslandNotice['kind']) { stack.remove(`notice:${kind}`); },
     geometry(value: PillGeometry) { geometry = value; stack.setGeometry(value); top = value.anchor.startsWith('top-'); applyPillGeometry(dom.root, value); sync(); },
-    context, pointer, start, rest, flash,
+    context, pointer, start, starting, rest, flash,
     /** Debug-only: the backend reports VOICETYPR_PERF=1 on a debug build. */
     attachPerf(enabled: boolean, sink: PerfSink) {
       perf?.destroy();
@@ -481,7 +566,8 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       });
     },
     level(value: PillAudioLevel) {
-      if (!machine.recording || !machine.observeGeneration(value.generation)) return;
+      // No audio can belong to a take whose mic has not opened.
+      if (!machine.recording || machine.pending || !machine.observeGeneration(value.generation)) return;
       perf?.level(performance.now(), value.generation);
       glyph.wave.sample(value.level);
       if (reduced) { glyph.wave.advance((performance.now() - machine.startedAt) / 1000, 1 / 60); syncTime(performance.now()); glyph.draw(waveSeconds, GW.x, true); }

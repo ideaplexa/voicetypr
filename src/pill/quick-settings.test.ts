@@ -28,10 +28,11 @@ describe('P5 quick settings',()=>{
     await h.settle(329);expect(h.island.machine.state).toBe('rest');await h.settle(1);expect(h.island.machine.state).toBe('peek');
   });
   it('fast motion resets slow dwell and stationary native events can open',async()=>{
-    const h=renderer();vi.spyOn(h.get('.pill-surface'),'getBoundingClientRect').mockReturnValue(new DOMRect(100,100,12,12));
-    h.island.pointer({inside:true,x:101,y:101});await h.settle(300);
-    h.island.pointer({inside:true,x:111,y:101});await h.settle(10);
-    h.island.pointer({inside:true,x:101,y:101});await h.settle(449);expect(h.island.machine.state).toBe('rest');await h.settle(1);expect(h.island.machine.state).toBe('peek');
+    // The rest dot is anchored bottom-centre at (231, 425), so it spans x 225..237, y 413..425.
+    const h=renderer();
+    h.island.pointer({inside:true,x:226,y:414});await h.settle(300);
+    h.island.pointer({inside:true,x:236,y:414});await h.settle(10);
+    h.island.pointer({inside:true,x:226,y:414});await h.settle(449);expect(h.island.machine.state).toBe('rest');await h.settle(1);expect(h.island.machine.state).toBe('peek');
   });
   it('closes exactly 400ms after leaving and cancels close on reentry',async()=>{
     const h=renderer();await h.peek();h.island.pointer({inside:false});await h.settle(399);expect(h.island.machine.state).toBe('peek');
@@ -118,8 +119,8 @@ describe('P5 quick settings',()=>{
     expect(h.get('.pill-root').dataset.pillPosition).toBe('top-right');expect(h.get('.pill-root').style.getPropertyValue('--pill-anchor-x')).toBe('451px');
   });
   it('hit target extends only upward and includes every expanded shape',async()=>{
-    const h=renderer();vi.spyOn(h.get('.pill-surface'),'getBoundingClientRect').mockReturnValue(new DOMRect(100,100,12,12));await h.settle();
-    expect(h.regions).toHaveBeenLastCalledWith([{x:96,y:92,width:20,height:20}]);await h.peek();expect(h.regions).toHaveBeenLastCalledWith([{x:100,y:100,width:12,height:12}]);
+    const h=renderer();await h.settle();
+    expect(h.regions).toHaveBeenLastCalledWith([{x:221,y:405,width:20,height:20}]);await h.peek();await h.settle(1500);expect(h.regions).toHaveBeenLastCalledWith([{x:42,y:366,width:378,height:70}]);
   });
   it('settled peek and rest do not maintain requestAnimationFrame loops',async()=>{
     const h=renderer();const raf=vi.spyOn(window,'requestAnimationFrame');await h.peek();await h.settle(2000);raf.mockClear();await h.settle(500);expect(raf).not.toHaveBeenCalled();h.island.rest();await h.settle(2000);raf.mockClear();await h.settle(500);expect(raf).not.toHaveBeenCalled();

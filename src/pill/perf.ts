@@ -108,6 +108,8 @@ export class PerfProbe {
     if (this.lastLevel >= 0 && this.gaps.length < MAX_SAMPLES) this.gaps.push(now - this.lastLevel);
     this.lastLevel = now;
   }
+  /** A start that never went live (cancelled or failed before Recording): drop it without a summary. */
+  abort() { this.active = false; this.cancelVisible(); }
   /** The take left its recording state: send one summary. Idempotent. */
   end(fallbackGeneration: number) {
     if (!this.active) return;

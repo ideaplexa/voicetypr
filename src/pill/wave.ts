@@ -44,14 +44,20 @@ export class WaveBuffer {
         this.gradient.addColorStop(fade, `rgba(255,255,255,${.45 + .55 * fade})`); this.gradient.addColorStop(1, '#fff');
       }
       g.fillStyle = this.gradient;
-      for (let i = 0; i < this.count; i++) {
-        const ix = (this.head - 1 - i + CAPACITY) % CAPACITY;
-        const age = Math.max(0, seconds - this.times[ix]);
-        const x0 = width - 2.2 - age * BAR_PITCH / BAR_SECONDS;
-        if (x0 < -2) break;
-        const x = x0 + (11 - x0) * arc, lv = this.levels[ix];
-        const h = 2 + this.heights[ix] * ease(age / .06) * (1 - arc);
-        g.globalAlpha = alpha * (lv > .02 ? .93 : .34); g.beginPath(); g.roundRect(x - 1.2, 12 - h / 2, 2.4, h, 1.2); g.fill();
+      // One path and one fill per alpha class (voiced / silent) instead of one per bar; bars never overlap.
+      for (let pass = 0; pass < 2; pass++) {
+        const voiced = pass === 0;
+        g.globalAlpha = alpha * (voiced ? .93 : .34); g.beginPath();
+        for (let i = 0; i < this.count; i++) {
+          const ix = (this.head - 1 - i + CAPACITY) % CAPACITY;
+          if ((this.levels[ix] > .02) !== voiced) continue;
+          const age = Math.max(0, seconds - this.times[ix]);
+          const x0 = width - 2.2 - age * BAR_PITCH / BAR_SECONDS;
+          if (x0 < -2) break;
+          const x = x0 + (11 - x0) * arc, h = 2 + this.heights[ix] * ease(age / .06) * (1 - arc);
+          g.roundRect(x - 1.2, 12 - h / 2, 2.4, h, 1.2);
+        }
+        g.fill();
       }
     }
     g.restore();

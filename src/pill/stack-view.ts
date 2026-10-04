@@ -125,7 +125,21 @@ export class StackView {
     if(wasPresent && !this.present) this.deps.changed();
     return moving;
   }
-  rects():Rect[] { return this.container.inert ? [] : [...this.views.values()].filter(v=>!v.el.hidden).map(v=>{const b=v.el.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};}); }
-  pointer(x?:number,y?:number) { for(const b of this.container.querySelectorAll('button')) {const r=b.getBoundingClientRect();b.classList.toggle('hov',x!==undefined&&y!==undefined&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom);} }
+  /** Card rectangles from the spring values and the CSS anchor rules; never measured from the DOM. */
+  rects():Rect[] {
+    if(this.container.inert)return [];
+    const top=this.geometry.anchor.startsWith('top-'),centre=this.geometry.anchor.endsWith('-center'),right=this.geometry.anchor.endsWith('-right');
+    const cx=this.geometry.anchorX,cy=this.geometry.anchorY+(top ? 24 : -24);
+    const out:Rect[]=[];
+    for(const v of this.views.values()) {
+      if(v.el.hidden)continue;
+      // Boxes hug the container's corner; scale pivots on the anchored edge, translateY is unscaled.
+      const w=Math.max(12,v.w.x),h=Math.max(12,v.h.x),s=v.scale.x,sw=w*s,sh=h*s;
+      const left=centre ? cx-w/2 : right ? cx-w : cx,boxTop=top ? cy : cy-h;
+      out.push({x:left+w/2-sw/2,y:(top ? boxTop : boxTop+h-sh)+v.y.x,width:sw,height:sh});
+    }
+    return out;
+  }
+  pointer(x?:number,y?:number) { if(this.container.inert&&!this.views.size)return; for(const b of this.container.querySelectorAll('button')) {const r=b.getBoundingClientRect();b.classList.toggle('hov',x!==undefined&&y!==undefined&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom);} }
   destroy(){if(this.timer!==undefined)this.deps.clearTimeout(this.timer);this.container.remove();}
 }

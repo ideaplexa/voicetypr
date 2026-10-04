@@ -84,6 +84,16 @@ test("perf report columns derive hotkey→island and pick the last take with pil
   assert.equal(perfColumns([]).hotkey_to_island_ms, null);
 });
 
+test("island metric keeps hidden-start and already-visible takes apart", () => {
+  const hidden = perfColumns(["[PERF] take=1 hotkey_ms=1000 recording_ms=1100", "[PERF] take=1 island_visible_ms=1040"]);
+  assert.equal(hidden.hotkey_to_island_ms, 40);
+  assert.equal(hidden.hotkey_to_island_already_visible_ms, null);
+  const warm = perfColumns(["[PERF] take=2 hotkey_ms=2000 recording_ms=2100", "[PERF] take=2 island_already_visible_ms=2016"]);
+  assert.equal(warm.hotkey_to_island_ms, null);
+  assert.equal(warm.hotkey_to_island_already_visible_ms, 16);
+  assert.equal(perfColumns([]).hotkey_to_island_already_visible_ms, null);
+});
+
 test("soak growth flags DOM growth and large RSS growth, and ignores flat runs", () => {
   const make = (dom, rss) => ({ case: "regular", engine: "parakeet", model: "m", language: "en", mode: "regular", pill_dom_nodes: dom, rss_mb: rss });
   const [flat] = soakGrowth([make(200, 300), make(200, 305), make(200, 310)]);

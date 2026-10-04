@@ -111,13 +111,23 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       if (!destroyed && revision === settingsRevision && geometry?.anchor) { geometryReceived = true; island.geometry(geometry); }
     } catch { /* Subsequent settings/geometry events recover without sensitive logs. */ }
   };
+  // True while the window was shown for a Starting that has not reached Recording yet.
+  let shownForStart = false;
   const recordingState = (payload: RecordingStatePayload) => {
-    if (payload.state === 'starting' || payload.state === 'recording') island.start();
+    // Starting shows the island at once (mic still opening); Recording makes it live.
+    if (payload.state === 'starting') { shownForStart = true; island.starting(); }
+    else if (payload.state === 'recording') { shownForStart = false; island.start(); }
     else if (payload.state === 'stopping' || payload.state === 'transcribing') {
       if (island.machine.state !== 'polishing') island.work('transcribing');
     } else if (!island.machine.terminal) {
-      if (payload.state === 'error' && !island.feedbackActive) island.flash('error', 'Recording failed');
+      // A start that failed before Recording shows no flash: the window folds away as it did before the early show.
+      if (payload.state === 'error' && !island.feedbackActive && !island.machine.pending) island.flash('error', 'Recording failed');
       else if (!['error', 'too_short', 'nospeech'].includes(island.machine.state)) island.rest();
+      // A start that ended before Recording leaves nothing to show: let the backend hide the window it opened early.
+      if (payload.state === 'idle' && shownForStart) {
+        shownForStart = false;
+        if (!island.feedbackActive) void call('pill_feedback_visible', { visible: false }).catch(() => {});
+      }
     }
   };
   subscribe<PillGeometry>('pill-geometry', value => { geometryReceived = true; island.geometry(value); });

@@ -3,7 +3,12 @@ body { font-family:"Geist Variable",Geist,system-ui,sans-serif }
 button { font:inherit }
 .pill-root { position:fixed;inset:0;pointer-events:none;color:rgba(255,255,255,.92);font-size:12.5px;line-height:normal;--sage:#8FD1A8;--amber:#F2B35B;--t2:rgba(255,255,255,.55) }
 .pill-root * { box-sizing:border-box }
-.pill-surface { position:absolute;left:var(--pill-anchor-x,220px);top:var(--pill-anchor-y,414px);transform:translate(-50%,-100%);pointer-events:auto;background:#121316;border:1px solid rgba(0,0,0,.45);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 12px 34px rgba(0,0,0,.30);overflow:clip;user-select:none;transition:box-shadow .2s ease,background-color .2s ease }
+.pill-surface { position:absolute;left:var(--pill-anchor-x,220px);top:var(--pill-anchor-y,414px);transform:translate(-50%,-100%);pointer-events:auto;background:#121316;border:1px solid rgba(0,0,0,.45);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);overflow:clip;user-select:none;transition:box-shadow .2s ease,background-color .2s ease }
+/* Plan 082 F6: the surface is the clip. Its content lives in a fixed target-sized box (.pill-content) and moves only by
+   translate/scale, so resizing the surface never relays out a descendant. The drop shadow is its own element and
+   scales with the shape. */
+.pill-content { position:absolute;left:0;top:0 }
+.pill-shadow { position:absolute;pointer-events:none;box-shadow:0 12px 34px rgba(0,0,0,.30);transform-origin:0 0 }
 .pill-root[data-pill-position^="top-"] .pill-surface { transform:translate(-50%,0) }
 .pill-root[data-pill-position$="-left"] .pill-surface { transform:translate(0,-100%) }
 .pill-root[data-pill-position$="-right"] .pill-surface { transform:translate(-100%,-100%) }
@@ -24,8 +29,8 @@ button { font:inherit }
 .appico { position:absolute;display:flex;align-items:center;justify-content:center;background:#35383b;overflow:hidden;font-size:11px;font-weight:600 }
 .appico.has-image { background:transparent;box-shadow:none;overflow:visible }
 .appico img { position:absolute;inset:0;width:100%;height:100%;object-fit:contain }
-.glyph { position:absolute;width:260px;height:24px;pointer-events:none }
-.aibadge { position:absolute;width:12px;height:12px;border-radius:50%;background:var(--sage);color:#17271d;box-shadow:0 0 0 2px #121316;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;pointer-events:none;font-style:normal }
+.glyph { position:absolute;left:0;top:0;width:260px;height:24px;pointer-events:none }
+.aibadge { position:absolute;left:0;top:0;width:12px;height:12px;border-radius:50%;background:var(--sage);color:#17271d;box-shadow:0 0 0 2px #121316;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;pointer-events:none;font-style:normal }
 .aibadge.amber { background:var(--amber);color:#372711 }
 .row { height:32px;display:flex;align-items:center;gap:8px }
 .mono { font-family:"Geist Mono Variable",monospace;font-size:12px;color:var(--t2);font-variant-numeric:tabular-nums }
@@ -42,7 +47,10 @@ button { font:inherit }
 .listening-row { padding:0 12px 0 42px }
 .wslot { flex:1;min-width:0 }
 .pill-timer { flex:none }
-.ctl { display:inline-flex;gap:4px;overflow:hidden;margin-left:-8px;flex:none }
+/* Starting: the island is up but the mic is not open yet, so the clock waits at 0:00. */
+.pill-root[data-starting="true"] .pill-timer { opacity:.55 }
+.listening-row { position:relative }
+.ctl { position:absolute;top:0;bottom:0;display:inline-flex;align-items:center;gap:4px }
 .ctl .round:first-child { margin-left:6px }
 .round { width:26px;height:26px;border-radius:13px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:0;color:rgba(255,255,255,.92);cursor:pointer;padding:0;flex:none;font-size:16px;line-height:1 }
 .round:hover,.round.hov { background:rgba(255,255,255,.2) }
@@ -83,8 +91,8 @@ button { font:inherit }
 .pill-announcement { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);pointer-events:none }
 button:focus-visible { outline:2px solid var(--sage);outline-offset:-2px }
 @media(prefers-reduced-motion:reduce) { .core,.hold i,.drain i { animation:none } .pill-surface,.chip { transition:none } }
-.pill-surface.amber { box-shadow:inset 0 0 0 1px rgba(242,179,91,.66),0 12px 34px rgba(0,0,0,.30) }
-.pill-surface.red { box-shadow:inset 0 0 0 1px rgba(242,139,122,.66),0 12px 34px rgba(0,0,0,.30);background:#24151A }
+.pill-surface.amber { box-shadow:inset 0 0 0 1px rgba(242,179,91,.66) }
+.pill-surface.red { box-shadow:inset 0 0 0 1px rgba(242,139,122,.66);background:#24151A }
 .notice-title { flex:1;min-width:0 }
 .notice-count { margin-left:auto;padding-left:12px;flex:none }
 .pill-timer,.start-time,.work-time,.hint-time { min-width:4ch;text-align:right }

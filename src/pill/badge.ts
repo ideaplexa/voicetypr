@@ -22,8 +22,8 @@ export class Badge {
     if (this.lastFlight !== f) { this.el.style.transform = f < 1 ? `scale(${1.45 - .45 * f})` : ''; this.lastFlight = f; }
     if (this.lastAlpha !== this.alpha) { this.el.hidden = this.alpha === 0; this.el.style.opacity = String(this.alpha); this.lastAlpha = this.alpha; }
     const px = fromX + (x - fromX) * f, py = fromY + (y - fromY) * f;
-    if (this.lastX !== px) { this.el.style.left = `${px}px`; this.lastX = px; }
-    if (this.lastY !== py) { this.el.style.top = `${py}px`; this.lastY = py; }
+    // Positioned with translate (origin 0,0 in CSS), so a moving badge never lays out.
+    if (this.lastX !== px || this.lastY !== py) { this.el.style.translate = `${px}px ${py}px`; this.lastX = px; this.lastY = py; }
     return this.alpha !== this.to || this.flight < 1;
   }
 }

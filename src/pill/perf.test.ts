@@ -79,6 +79,12 @@ describe('perf probe', () => {
     const s = sink.summary.mock.calls[0][0] as PerfSummary;
     expect(s).toMatchObject({ generation: 7, frames: 3, max_ms: 50, over33: 1, over50: 0, level_events: 3, level_gap_p95_ms: 84, pill_dom_nodes: 42, stack_items: 2, longtasks: 0 });
   });
+  it('drops a start that never went live without a summary or a visible stamp', () => {
+    const { deps, sink, callbacks } = make(() => false);
+    const probe = createPerfProbe(true, deps)!;
+    probe.begin(); probe.abort(); callbacks[0]?.(10); probe.end(5);
+    expect(sink.visible).not.toHaveBeenCalled(); expect(sink.summary).not.toHaveBeenCalled();
+  });
   it('reports unsupported long-task observation as null and falls back to the machine generation', () => {
     const { deps, sink } = make();
     const probe = createPerfProbe(true, { ...deps, observeLongTasks: () => null })!;

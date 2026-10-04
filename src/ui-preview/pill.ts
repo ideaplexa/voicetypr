@@ -43,6 +43,7 @@ if (root) {
   context.show_start_card=state==='start' || state.endsWith('start-pick');
   emit('dictation-context',context);
   const active=state.endsWith('start-pick') || ['start','listening','listening-amber','listening-no-badge','live','preview','esc-hint','esc-hint-live','top-anchor-esc-hint','top-anchor-live'].includes(state);
+  if(state==='starting') emit('recording-state-changed',{state:'starting',error:null});
   if(active) emit('recording-started');
   if(['live','preview','esc-hint-live','top-anchor-live'].includes(state)) {
     const partial: TranscriptionStreamEvent={type:'partial',session_id:1,revision:1,committed:"…and I'll send the notes before the call ",tentative:'tomorrow'};

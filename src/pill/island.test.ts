@@ -12,4 +12,22 @@ describe('Island state machine', () => {
   it('ignores old stream starts, sessions, and revisions', () => { const m = new IslandMachine(); m.start(0); m.stream({type:'started',session_id:2,revision:0,engine:'test'}); expect(m.stream({type:'started',session_id:1,revision:0,engine:'test'})).toBe(false); expect(m.stream({type:'partial',session_id:2,revision:1,committed:'one',tentative:''})).toBe(true); expect(m.stream({type:'partial',session_id:2,revision:1,committed:'duplicate',tentative:''})).toBe(false); });
   it('cannot overwrite a running take with an uncorrelated paste outcome', () => { const m = new IslandMachine(); m.start(0); expect(m.outcome({outcome:'pasted',words:2,polished:false})).toBe(false); expect(m.state).toBe('listening'); });
   it('ignores context and levels older than an observed audio generation', () => { const m = new IslandMachine(); m.start(0); expect(m.observeGeneration(8)).toBe(true); expect(m.contextEvent({...emptyContext(),generation:7})).toBe(false); expect(m.observeGeneration(7)).toBe(false); expect(m.contextEvent({...emptyContext(),generation:8})).toBe(true); });
+  it('arms on keypress as an idle listening layout, then goes live on Recording', () => {
+    const m = new IslandMachine();
+    expect(m.arm(1000)).toBe(true); expect(m.state).toBe('listening'); expect(m.pending).toBe(true); expect(m.layers).toEqual(['row']);
+    expect(m.arm(1100)).toBe(false); // a second Starting is a no-op
+    expect(m.start(1280)).toBe(true); expect(m.pending).toBe(false); expect(m.startedAt).toBe(1280); expect(m.frozenSeconds).toBe(0);
+    expect(m.start(1300)).toBe(false); expect(m.startedAt).toBe(1280);
+    m.work('transcribing', 3280); expect(m.frozenSeconds).toBe(2);
+    m.outcome({ outcome: 'pasted', words: 2, polished: false }); expect(m.layers).toEqual(['done']);
+  });
+  it('folds a pending start back without ever going live', () => {
+    const m = new IslandMachine(); m.arm(0); m.rest(); expect(m.state).toBe('rest'); expect(m.pending).toBe(false); expect(m.layers).toEqual([]);
+    m.arm(10); m.work('transcribing', 400); expect(m.pending).toBe(false); expect(m.frozenSeconds).toBe(0);
+  });
+  it('lets a start-card context that arrives while pending take effect', () => {
+    const m = new IslandMachine(); m.arm(0); m.contextEvent({ ...emptyContext(), generation: 1, show_start_card: true }); expect(m.state).toBe('start'); expect(m.pending).toBe(true);
+    m.start(300); expect(m.state).toBe('start'); expect(m.pending).toBe(false);
+  });
+  it('cannot be overwritten by an uncorrelated paste outcome while pending', () => { const m = new IslandMachine(); m.arm(0); expect(m.outcome({ outcome: 'pasted', words: 2, polished: false })).toBe(false); expect(m.pending).toBe(true); });
 });

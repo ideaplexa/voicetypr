@@ -49,6 +49,8 @@ struct Take {
     show_called_ms: u64,
     shown_ms: u64,
     island_ms: u64,
+    /// Whether the pill window started this take hidden; `None` until the show ran.
+    window_hidden: Option<bool>,
     timing_logged: bool,
     ended: bool,
 }
@@ -63,6 +65,7 @@ impl Take {
             show_called_ms: 0,
             shown_ms: 0,
             island_ms: 0,
+            window_hidden: None,
             timing_logged: false,
             ended: false,
         }
@@ -203,21 +206,44 @@ pub fn on_state(state: RecordingState) {
     }
 }
 
+/// Record whether the pill window was hidden when this take asked to show it.
+pub fn note_window_hidden(generation: u64, hidden: bool) {
+    if !enabled() {
+        return;
+    }
+    if let Ok(mut take) = TAKE.lock() {
+        if take.generation == generation {
+            take.window_hidden = Some(hidden);
+        }
+    }
+}
+
+/// Log key for the first visible frame. Only a take that started from a hidden
+/// window measures hotkey -> island; a window left up by the previous take is a
+/// separate field so the two are never mixed.
+fn island_field(window_hidden: Option<bool>) -> &'static str {
+    if window_hidden == Some(false) {
+        "island_already_visible_ms"
+    } else {
+        "island_visible_ms"
+    }
+}
+
 /// The pill reports the unix ms of the first frame showing the recording state.
 pub fn island_visible(unix_ms: f64) {
     if !enabled() || !unix_ms.is_finite() || unix_ms <= 0.0 {
         return;
     }
     let ms = unix_ms.round() as u64;
-    let generation = {
+    let (generation, field) = {
         let Ok(mut take) = TAKE.lock() else { return };
         if take.generation == 0 || take.island_ms != 0 {
             return;
         }
         take.island_ms = ms;
-        take.generation
+        (take.generation, island_field(take.window_hidden))
     };
-    log::info!("[PERF] take={generation} island_visible_ms={ms}");
+    log::info!("[PERF] take={generation} {field}={ms}");
 }
 
 /// Numbers the pill sends at take end. Field names are the wire format.
@@ -303,6 +329,13 @@ mod tests {
         assert!(!enabled_from(Some("0"), true));
         assert!(!enabled_from(Some("true"), true));
         assert!(!enabled_from(None, true));
+    }
+
+    #[test]
+    fn island_metric_only_counts_takes_that_started_hidden() {
+        assert_eq!(island_field(Some(true)), "island_visible_ms");
+        assert_eq!(island_field(None), "island_visible_ms");
+        assert_eq!(island_field(Some(false)), "island_already_visible_ms");
     }
 
     #[test]

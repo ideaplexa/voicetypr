@@ -141,10 +141,13 @@ export function perfColumns(lines) {
   const takes = parsePerfLines(lines);
   const take = [...takes].reverse().find((item) => item.frames != null) ?? takes.at(-1);
   if (!take) {
-    return { hotkey_to_island_ms: null, frame_p50_ms: null, frame_p95_ms: null, frame_max_ms: null, frame_over33: null, level_gap_p95_ms: null, pill_dom_nodes: null, rss_mb: null };
+    return { hotkey_to_island_ms: null, hotkey_to_island_already_visible_ms: null, frame_p50_ms: null, frame_p95_ms: null, frame_max_ms: null, frame_over33: null, level_gap_p95_ms: null, pill_dom_nodes: null, rss_mb: null };
   }
   return {
+    // Only a take that started from a hidden pill measures hotkey -> island; a window
+    // left up by the previous take reports its own field so the two never mix.
     hotkey_to_island_ms: diff(take.island_visible_ms, take.hotkey_ms),
+    hotkey_to_island_already_visible_ms: diff(take.island_already_visible_ms, take.hotkey_ms),
     hotkey_to_recording_ms: diff(take.recording_ms, take.hotkey_ms),
     frame_p50_ms: take.p50_ms ?? null,
     frame_p95_ms: take.p95_ms ?? null,
