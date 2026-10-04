@@ -607,7 +607,7 @@ pub async fn get_model_status(
     let whisper_models_map = {
         let mut manager = whisper_state.write().await;
         manager.refresh_downloaded_status();
-        manager.get_models_status()
+        manager.get_listed_models()
     };
 
     let mut models: Vec<UnifiedModelInfo> = whisper_models_map

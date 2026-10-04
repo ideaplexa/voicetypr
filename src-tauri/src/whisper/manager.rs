@@ -68,6 +68,11 @@ pub struct WhisperManager {
     models: HashMap<String, ModelInfo>,
 }
 
+/// Whether a catalog model is offered in the UI list. Pure so both platforms are testable.
+pub(crate) fn is_model_listed(name: &str, downloaded: bool, is_macos: bool) -> bool {
+    !(is_macos && name == "small.en" && !downloaded)
+}
+
 impl WhisperManager {
     /// Validate model name to prevent path traversal and ensure it's a known model
     fn is_valid_model_name(&self, model_name: &str) -> bool {
@@ -546,6 +551,19 @@ impl WhisperManager {
         self.models.clone()
     }
 
+    /// Catalog entries to show in the model list. On macOS, Whisper small.en is
+    /// hidden unless already downloaded (Parakeet covers that tier); elsewhere
+    /// every entry is listed.
+    pub fn get_listed_models(&self) -> HashMap<String, ModelInfo> {
+        self.models
+            .iter()
+            .filter(|(name, info)| {
+                is_model_listed(name, info.downloaded, cfg!(target_os = "macos"))
+            })
+            .map(|(name, info)| (name.clone(), info.clone()))
+            .collect()
+    }
+
     pub fn get_models_status_mut(&mut self) -> &mut HashMap<String, ModelInfo> {
         &mut self.models
     }
@@ -730,5 +748,32 @@ impl WhisperManager {
         let mut manager = Self { models, models_dir };
         manager.check_downloaded_models();
         manager
+    }
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+
+    #[test]
+    fn macos_hides_small_en_unless_downloaded() {
+        assert!(!is_model_listed("small.en", false, true));
+        assert!(is_model_listed("small.en", true, true));
+        assert!(is_model_listed("base.en", false, true));
+    }
+
+    #[test]
+    fn windows_always_lists_small_en() {
+        assert!(is_model_listed("small.en", false, false));
+        assert!(is_model_listed("small.en", true, false));
+    }
+
+    #[test]
+    fn listed_models_follow_platform_for_undownloaded_small_en() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = WhisperManager::new(dir.path().to_path_buf());
+        let listed = manager.get_listed_models();
+        assert_eq!(listed.contains_key("small.en"), !cfg!(target_os = "macos"));
+        assert!(manager.get_models_status().contains_key("small.en"));
     }
 }
