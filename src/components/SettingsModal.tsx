@@ -1,10 +1,13 @@
 import { recordEvent, takeSettingsSource } from "@/lib/observability";
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
-import { SettingsTab } from "@/components/tabs/SettingsTab";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
 import "@/components/settings/settings-modal.css";
+
+const SettingsTab = lazy(() =>
+  import("@/components/tabs/SettingsTab").then((m) => ({ default: m.SettingsTab })),
+);
 
 export function SettingsModal({
   pane,
@@ -41,12 +44,15 @@ export function SettingsModal({
           finalFocus={returnFocus}
           className="settings-modal bg-card text-foreground"
         >
-          <SettingsTab
-            modal
-            pane={pane ?? "general"}
-            onPaneChange={onPaneChange}
-            onNavigate={onNavigate}
-          />
+          {/* Content mounts only while the dialog is open; the empty fallback fills the popup. */}
+          <Suspense fallback={<div className="h-full w-full" />}>
+            <SettingsTab
+              modal
+              pane={pane ?? "general"}
+              onPaneChange={onPaneChange}
+              onNavigate={onNavigate}
+            />
+          </Suspense>
         </DialogPrimitive.Popup>
       </DialogPortal>
     </Dialog>

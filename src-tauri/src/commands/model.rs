@@ -597,15 +597,20 @@ pub struct ParakeetVocabularyStatusResponse {
 ///
 /// Parakeet models are excluded anywhere Apple Neural Engine support is unavailable.
 #[tauri::command]
-pub async fn get_model_status(
-    whisper_state: State<'_, RwLock<WhisperManager>>,
-    parakeet_manager: State<'_, ParakeetManager>,
-    app: tauri::AppHandle,
-) -> Result<ModelStatusResponse, String> {
+pub async fn get_model_status(app: tauri::AppHandle) -> Result<ModelStatusResponse, String> {
+    // Filesystem and keychain checks run off the async runtime; the whisper
+    // write lock is held only while its downloaded flags are refreshed.
+    tauri::async_runtime::spawn_blocking(move || collect_model_status(&app))
+        .await
+        .map_err(|e| format!("Model status task failed: {e}"))
+}
+
+fn collect_model_status(app: &AppHandle) -> ModelStatusResponse {
     log::debug!("[GET_MODEL_STATUS] Refreshing downloaded status...");
 
     let whisper_models_map = {
-        let mut manager = whisper_state.write().await;
+        let whisper_state = app.state::<RwLock<WhisperManager>>();
+        let mut manager = whisper_state.blocking_write();
         manager.refresh_downloaded_status();
         manager.get_models_status()
     };
@@ -615,11 +620,12 @@ pub async fn get_model_status(
         .map(|(name, info)| convert_whisper_model(name, info))
         .collect();
 
+    let parakeet_manager = app.state::<ParakeetManager>();
     let parakeet_models = parakeet_manager.list_models();
     models.extend(parakeet_models.into_iter().map(convert_parakeet_model));
 
     // Inject cloud providers (e.g., Soniox)
-    models.extend(collect_cloud_models(&app));
+    models.extend(collect_cloud_models(app));
 
     // Sort with local models first (by size), cloud models afterwards
     models.sort_by(|a, b| {
@@ -630,7 +636,7 @@ pub async fn get_model_status(
 
     log::debug!("[GET_MODEL_STATUS] Returning {} models", models.len());
 
-    Ok(ModelStatusResponse { models })
+    ModelStatusResponse { models }
 }
 
 #[tauri::command]

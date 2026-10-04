@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, useMemo, ReactNode } from "react";
 import { useAppReadiness } from "@/hooks/useAppReadiness";
 
 type ReadinessContextType = ReturnType<typeof useAppReadiness>;
@@ -6,7 +6,34 @@ type ReadinessContextType = ReturnType<typeof useAppReadiness>;
 const ReadinessContext = createContext<ReadinessContextType | null>(null);
 
 export function ReadinessProvider({ children }: { children: ReactNode }) {
-  const readinessState = useAppReadiness();
+  const r = useAppReadiness();
+  // useAppReadiness returns a fresh object each render; keep the provided value
+  // referentially stable until a field actually changes.
+  const readinessState = useMemo(
+    () => r,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fields listed explicitly below
+    [
+      r.hasAccessibilityPermission,
+      r.hasMicrophonePermission,
+      r.hasModels,
+      r.selectedModelAvailable,
+      r.licenseValid,
+      r.licenseStatus,
+      r.remoteSelected,
+      r.remoteAvailable,
+      r.remoteStatus,
+      r.canRecord,
+      r.canAutoInsert,
+      r.isFullyReady,
+      r.isLoading,
+      r.requestAccessibilityPermission,
+      r.requestMicrophonePermission,
+      r.checkAccessibilityPermission,
+      r.checkMicrophonePermission,
+      r.checkModels,
+      r.checkLicense,
+    ],
+  );
 
   return <ReadinessContext.Provider value={readinessState}>{children}</ReadinessContext.Provider>;
 }

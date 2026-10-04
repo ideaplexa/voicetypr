@@ -1,17 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ModelInfo, isCloudModel } from "../types";
 import { useEventCoordinator } from "./useEventCoordinator";
 import { getModelDisplayName } from "@/lib/model-display";
 import { createLogger } from "@/lib/logger";
+import { fetchModelStatus } from "@/lib/model-status";
+import {
+  createDownloadProgressStore,
+  useDownloadProgressStore,
+} from "@/lib/download-progress-store";
 
 const log = createLogger("models");
 
 interface UseModelManagementOptions {
   windowId?: "main" | "pill" | "onboarding";
   showToasts?: boolean;
+  /** Re-render this hook's owner on every progress tick. The context provider turns it off. */
+  trackProgress?: boolean;
 }
 
 const CLOUD_SPEED_FALLBACK = 8;
@@ -73,7 +80,7 @@ export function sortModels(
 }
 
 export function useModelManagement(options: UseModelManagementOptions = {}) {
-  const { windowId = "main", showToasts = true } = options;
+  const { windowId = "main", showToasts = true, trackProgress = true } = options;
   const { registerEvent } = useEventCoordinator(windowId);
 
   // Track active downloads to prevent duplicates
@@ -84,7 +91,9 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
   const modelsRef = useRef<Record<string, ModelInfo>>({});
 
   const [models, setModels] = useState<Record<string, ModelInfo>>({});
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+  const [progressStore] = useState(createDownloadProgressStore);
+  const setDownloadProgress = progressStore.update;
+  const downloadProgress = useDownloadProgressStore(trackProgress ? progressStore : null);
   const [downloadPhases, setDownloadPhases] = useState<Record<string, string>>({});
   const [verifyingModels, setVerifyingModels] = useState<Set<string>>(new Set());
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({});
@@ -128,7 +137,7 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
     try {
       setIsLoading(true);
       log.debug("[useModelManagement] Calling get_model_status...");
-      const response = await invoke<{ models: ModelInfo[] }>("get_model_status");
+      const response = await fetchModelStatus();
       log.debug("model status loaded", { count: response.models.length });
 
       if (!response || !Array.isArray(response.models)) {
@@ -618,14 +627,15 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
   }, [loadModels]);
 
   // Derive model order from sorted models
-  const sortedModelsArray = sortModels(Object.entries(models), "accuracy");
-  const modelOrder = sortedModelsArray.map(([name]) => name);
+  const sortedModelsArray = useMemo(() => sortModels(Object.entries(models), "accuracy"), [models]);
+  const modelOrder = useMemo(() => sortedModelsArray.map(([name]) => name), [sortedModelsArray]);
 
   return {
     // State
     models,
     modelOrder,
     downloadProgress,
+    progressStore,
     verifyingModels,
     downloadPhases,
     downloadErrors,

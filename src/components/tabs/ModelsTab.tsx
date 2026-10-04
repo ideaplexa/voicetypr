@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import { ModelsSection } from "../sections/ModelsSection";
 import { useSettings } from "@/contexts/SettingsContext";
-import { useModelManagementContext } from "@/contexts/ModelManagementContext";
+import { useDownloadProgress, useModelManagementContext } from "@/contexts/ModelManagementContext";
 import { AppSettings } from "@/types";
 import { createLogger } from "@/lib/logger";
 
@@ -14,8 +14,8 @@ export function ModelsTab(sourceFilterProps: SourceFilterProps) {
   const { settings, updateSettings } = useSettings();
 
   // Use the model management context
+  const downloadProgress = useDownloadProgress();
   const {
-    downloadProgress,
     downloadPhases,
     verifyingModels,
     downloadErrors,

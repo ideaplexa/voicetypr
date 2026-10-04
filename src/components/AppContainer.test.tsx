@@ -106,6 +106,7 @@ vi.mock("@/contexts/ReadinessContext", () => ({
 
 // Mock ModelManagementContext that AppContainer actually uses
 vi.mock("@/contexts/ModelManagementContext", () => ({
+  useDownloadProgress: (select?: (p: Record<string, number>) => unknown) => select ? select({}) : {},
   useModelManagementContext: () => ({
     models: {},
     downloadProgress: {},

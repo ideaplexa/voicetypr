@@ -1,9 +1,24 @@
 //! The wave uses sqrt(peak), a perceptual amplitude curve, clamped to [0, 1].
 use std::{
-    sync::mpsc::{Receiver, RecvTimeoutError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, RecvTimeoutError},
+    },
     time::{Duration, Instant},
 };
 use tauri::Emitter;
+/// True while the main window's Recording screen mic meter is mounted.
+static MAIN_METER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+pub fn set_audio_meter_active(window: tauri::WebviewWindow, active: bool) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Main window required".into());
+    }
+    MAIN_METER_ACTIVE.store(active, Ordering::Relaxed);
+    Ok(())
+}
+
 #[derive(Clone, serde::Serialize)]
 struct Level {
     generation: u64,
@@ -35,7 +50,9 @@ pub fn spawn(app: tauri::AppHandle, receiver: Receiver<f64>, generation: u64) {
                     };
                     // The pill draws the wave; the main window's Recording screen shows a mic meter.
                     let _ = app.emit_to("pill", "audio-level", level.clone());
-                    let _ = app.emit_to("main", "audio-level", level);
+                    if MAIN_METER_ACTIVE.load(Ordering::Relaxed) {
+                        let _ = app.emit_to("main", "audio-level", level);
+                    }
                     peak = 0.0;
                     deadline = Instant::now() + interval;
                 }

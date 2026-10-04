@@ -26,17 +26,18 @@ vi.mock("sonner", () => ({
   },
 }));
 
+// The real useEventCoordinator returns a stable registerEvent (useCallback).
+const stableRegisterEvent = vi.fn(
+  async (eventName: string, handler: (payload: unknown) => void | Promise<void>) => {
+    eventHandlers.set(eventName, handler);
+    return () => {
+      eventHandlers.delete(eventName);
+    };
+  },
+);
+
 vi.mock("./useEventCoordinator", () => ({
-  useEventCoordinator: () => ({
-    registerEvent: vi.fn(
-      async (eventName: string, handler: (payload: unknown) => void | Promise<void>) => {
-        eventHandlers.set(eventName, handler);
-        return () => {
-          eventHandlers.delete(eventName);
-        };
-      },
-    ),
-  }),
+  useEventCoordinator: () => ({ registerEvent: stableRegisterEvent }),
 }));
 
 const parakeetModel = {

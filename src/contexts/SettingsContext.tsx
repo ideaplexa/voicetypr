@@ -29,6 +29,20 @@ interface SettingsContextType {
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
 
+function settingsEqual(a: AppSettings | null, b: AppSettings): boolean {
+  if (!a) return false;
+  const left = a as unknown as Record<string, unknown>;
+  const right = b as unknown as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((key) => Object.is(left[key], right[key]) || isEqualJson(left[key], right[key]));
+}
+
+function isEqualJson(a: unknown, b: unknown): boolean {
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -39,17 +53,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const loadSettings = useCallback(async () => {
     try {
-      setIsLoading(true);
-      setError(null);
       const appSettings = await invoke<AppSettings>("get_settings");
-      setSettings(appSettings);
-      settingsRef.current = appSettings;
+      // Refreshes keep the previous object (and every consumer's render) when
+      // nothing changed; `isLoading` only ever covers the first load.
+      if (!settingsEqual(settingsRef.current, appSettings)) {
+        setSettings(appSettings);
+        settingsRef.current = appSettings;
+      }
+      setError((current) => (current === null ? current : null));
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Failed to load settings");
       setError(error);
       log.error("[SettingsContext] Failed to load settings:", error);
     } finally {
-      setIsLoading(false);
+      setIsLoading((current) => (current ? false : current));
     }
   }, []);
 

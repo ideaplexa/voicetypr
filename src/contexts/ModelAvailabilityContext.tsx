@@ -5,6 +5,7 @@ import type { ModelAvailability } from "@/hooks/useModelAvailability";
 const ModelAvailabilityContext = createContext<ModelAvailability | null>(null);
 
 export function ModelAvailabilityProvider({ children }: { children: ReactNode }) {
+  // useModelAvailability memoises its result; the provider just forwards it.
   const modelAvailability = useModelAvailability();
 
   return (

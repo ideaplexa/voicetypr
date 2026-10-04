@@ -22,7 +22,7 @@ const mock = vi.hoisted(() => ({
 vi.mock("@/contexts/ReadinessContext", () => ({ useReadiness: () => mock.readiness }));
 vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => ({ settings: mock.settings }) }));
 vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () => ({ history: mock.history, totalCount: mock.history.length, isLoading: mock.isLoading, loadError: mock.loadError, refreshHistory: vi.fn() }) }));
-vi.mock("@/contexts/ModelManagementContext", () => ({ useModelManagementContext: () => ({ downloadProgress: mock.downloadProgress }) }));
+vi.mock("@/contexts/ModelManagementContext", () => ({ useDownloadProgress: (select?: (p: Record<string, number>) => unknown) => select ? select(mock.downloadProgress) : mock.downloadProgress }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_usage_stats" ? {...createUsageFixture(), total_words: mock.usageWords} : command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));

@@ -22,10 +22,11 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 
+const settingsMock = vi.hoisted(() => ({ model: "local-model" }));
 vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({
     settings: {
-      current_model: "local-model",
+      current_model: settingsMock.model,
     },
   }),
 }));
@@ -289,5 +290,28 @@ describe("useModelAvailability", () => {
     });
 
     expect(mockInvoke).not.toHaveBeenCalledWith("refresh_active_remote_server_status");
+  });
+
+  it("subscribes its event listeners once and still re-checks when the selected model changes", async () => {
+    const { listen } = await import("@tauri-apps/api/event");
+    mockInvoke.mockImplementation(async (command: string) =>
+      command === "get_model_status" ? { models: [] } : null,
+    );
+    settingsMock.model = "local-model";
+    vi.mocked(listen).mockClear();
+    const { rerender } = renderHook(() => useModelAvailability());
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_model_status"));
+    const subscriptions = () =>
+      vi.mocked(listen).mock.calls.filter(([name]) => name === "model-downloaded").length;
+    expect(subscriptions()).toBe(1);
+
+    const statusCalls = () =>
+      mockInvoke.mock.calls.filter(([command]) => command === "get_model_status").length;
+    const before = statusCalls();
+    settingsMock.model = "other-model";
+    rerender();
+    await waitFor(() => expect(statusCalls()).toBeGreaterThan(before));
+    expect(subscriptions()).toBe(1);
+    settingsMock.model = "local-model";
   });
 });

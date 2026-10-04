@@ -104,10 +104,10 @@ describe("TabContainer destinations", () => {
     ["settings", "Settings"],
     ["help", "Help screen"],
     ["license", "License screen"],
-  ])("opens %s with its existing content", (id, heading) => {
+  ])("opens %s with its existing content", async (id, heading) => {
     render(<TabContainer activeSection={id} />);
     expect(
-      screen.getByRole("heading", { name: heading, level: heading === "Settings" ? 1 : undefined }),
+      await screen.findByRole("heading", { name: heading, level: heading === "Settings" ? 1 : undefined }),
     ).toBeInTheDocument();
   });
 
@@ -122,10 +122,10 @@ describe("TabContainer destinations", () => {
     ["agent", "Settings"],
     ["advanced", "Settings"],
     ["report-problem", "Help screen"],
-  ])("keeps the %s alias reachable", (id, heading) => {
+  ])("keeps the %s alias reachable", async (id, heading) => {
     render(<TabContainer activeSection={id} />);
     expect(
-      screen.getByRole("heading", { name: heading, level: heading === "Settings" ? 1 : undefined }),
+      await screen.findByRole("heading", { name: heading, level: heading === "Settings" ? 1 : undefined }),
     ).toBeInTheDocument();
   });
 
@@ -139,19 +139,22 @@ describe("TabContainer destinations", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("passes Cloud filter to Transcription", () => {
+  it("passes Cloud filter to Transcription", async () => {
     render(<TabContainer activeSection="transcription" sourceFilter="cloud" />);
-    expect(screen.getByRole("heading", { name: "Transcription screen cloud" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Transcription screen cloud" })).toBeInTheDocument();
   });
 
   it("applies an alias after an inner Settings pane click", async () => {
     const user = userEvent.setup();
     const view = render(<TabContainer activeSection="settings" />);
-    await user.click(screen.getByRole("button", { name: "Shortcuts" }));
-    expect(screen.getByText("Shortcut controls")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Shortcuts" }));
+    expect(await screen.findByText("Shortcut controls")).toBeInTheDocument();
     view.rerender(<TabContainer activeSection="general" />);
-    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("General controls")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "General" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(await screen.findByText("General controls")).toBeInTheDocument();
   });
 
   it("reports inner Settings pane clicks to navigation", async () => {
@@ -163,7 +166,7 @@ describe("TabContainer destinations", () => {
         onSettingsPaneChange={onSettingsPaneChange}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Shortcuts" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Shortcuts" }));
     expect(onSettingsPaneChange).toHaveBeenCalledWith("shortcuts");
   });
 
@@ -188,9 +191,9 @@ describe("TabContainer destinations", () => {
       return <TabContainer activeSection={activeSection} onNavigate={setActiveSection} />;
     }
     render(<Shell />);
-    await userEvent.click(screen.getByRole("button", { name: label }));
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByText(controls)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: label }));
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(await screen.findByText(controls)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
   });
   it.each([
@@ -219,8 +222,8 @@ describe("TabContainer destinations", () => {
         );
       }
       render(<Shell />);
-      await userEvent.click(screen.getByRole("button", { name: label }));
-      expect(screen.getByText(controls)).toBeInTheDocument();
+      await userEvent.click(await screen.findByRole("button", { name: label }));
+      expect(await screen.findByText(controls)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
       expect(onNavigate).not.toHaveBeenCalled();
     },

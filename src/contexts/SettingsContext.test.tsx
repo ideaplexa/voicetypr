@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings } from "@/types";
 
@@ -138,5 +139,44 @@ describe("SettingsContext update channel persistence", () => {
     rejectCompletion = false;
     fireEvent.click(screen.getByRole("button", { name: "Complete onboarding" }));
     expect(await screen.findByText("complete")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsContext refresh", () => {
+  it("causes no consumer re-render when refreshed settings are unchanged", async () => {
+    const renders = { count: 0 };
+    const latest: { refresh: () => Promise<void>; loading: boolean } = {
+      refresh: async () => undefined,
+      loading: false,
+    };
+    let current = { ...initialSettings };
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "get_settings") return { ...current };
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    function Consumer() {
+      const ctx = useSettings();
+      useEffect(() => {
+        latest.refresh = ctx.refreshSettings;
+        latest.loading = ctx.isLoading;
+        renders.count += 1; // runs after every commit of this consumer
+      });
+      return <span>{ctx.settings?.theme ?? "none"}</span>;
+    }
+    render(
+      <SettingsProvider>
+        <Consumer />
+      </SettingsProvider>,
+    );
+    await screen.findByText("system");
+    const settled = renders.count;
+    await act(async () => latest.refresh());
+    expect(renders.count).toBe(settled);
+    expect(latest.loading).toBe(false);
+
+    current = { ...current, theme: "dark" };
+    await act(async () => latest.refresh());
+    await screen.findByText("dark");
+    expect(renders.count).toBe(settled + 1);
   });
 });

@@ -1,17 +1,11 @@
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import type { MainNavigate } from "@/components/app/mainNavigation";
-import { useEffect, useState } from "react";
-import { InsightsTab } from "@/components/tabs/InsightsTab";
-import { EnhancementsTab } from "@/components/tabs/EnhancementsTab";
-import { DictionarySection } from "@/components/sections/DictionarySection";
-import { ModelsTab } from "@/components/tabs/ModelsTab";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { OverviewTab } from "@/components/tabs/OverviewTab";
 import { RecordingsTab } from "@/components/tabs/RecordingsTab";
-import { RecordingTab } from "@/components/tabs/RecordingTab";
 import { SettingsModal } from "@/components/SettingsModal";
 import { isMacOS } from "@/lib/platform";
 import { AudioUploadSection } from "@/components/sections/AudioUploadSection";
-import { ReportProblemSection } from "@/components/sections/ReportProblemSection";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +15,32 @@ import {
 } from "@/components/ui/dialog";
 import { resolveScreen, type ScreenId, type SettingsPane } from "@/components/navigation";
 import type { SourceFilterProps } from "@/components/sections/models/types";
+
+const InsightsTab = lazy(() =>
+  import("@/components/tabs/InsightsTab").then((m) => ({ default: m.InsightsTab })),
+);
+const EnhancementsTab = lazy(() =>
+  import("@/components/tabs/EnhancementsTab").then((m) => ({ default: m.EnhancementsTab })),
+);
+const DictionarySection = lazy(() =>
+  import("@/components/sections/DictionarySection").then((m) => ({ default: m.DictionarySection })),
+);
+const ModelsTab = lazy(() =>
+  import("@/components/tabs/ModelsTab").then((m) => ({ default: m.ModelsTab })),
+);
+const RecordingTab = lazy(() =>
+  import("@/components/tabs/RecordingTab").then((m) => ({ default: m.RecordingTab })),
+);
+const ReportProblemSection = lazy(() =>
+  import("@/components/sections/ReportProblemSection").then((m) => ({
+    default: m.ReportProblemSection,
+  })),
+);
+
+/** Same-size empty slot while a secondary screen's chunk loads (no layout jump). */
+function ScreenFallback() {
+  return <div className="flex-1" />;
+}
 
 interface TabContainerProps extends SourceFilterProps {
   activeSection: ScreenId;
@@ -143,7 +163,7 @@ export function TabContainer({
   }
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {content}
+      <Suspense fallback={<ScreenFallback />}>{content}</Suspense>
       <SettingsModal
         pane={onSettingsClose ? settingsPane : route.pane}
         onPaneChange={openPane}

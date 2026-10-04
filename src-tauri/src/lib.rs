@@ -953,6 +953,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             app.manage(AppState::new());
             app.manage(crate::pill::hit_test::PointerState::default());
             app.manage(crate::pill::icons::IconCache::default());
+            app.manage(crate::commands::history_index::HistoryIndex::default());
             log::info!("🧠 App state managed and ready");
 
             // Initialize window manager after app state is managed
@@ -1375,6 +1376,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_application_icon,
             crate::pill::hit_test::pill_set_hit_regions,
             crate::pill::pill_get_geometry,
+            crate::pill::level::set_audio_meter_active,
             crate::pill::icons::pill_app_icon,
             show_pill_widget,
             hide_pill_widget,
