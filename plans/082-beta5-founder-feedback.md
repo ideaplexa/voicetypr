@@ -4,6 +4,28 @@ Worktree `worktrees/voicetypr-beta5`, branch `feat/2.1-beta5`, from main `70c904
 Roles: Codex gpt-6.1-sol medium implements. gpt-6.1-sol high or medium reviews. Opus 5.5 does design in Pencil. Sonnet 5.5 researches.
 Releases need Windows CI green before merging (it caught 3 Windows-only breaks in beta.4).
 
+## ★ Island track: priority #1 (founder, 2026-10-04)
+
+The island is the most frequent touchpoint. Every everyday interaction must feel instant and smooth.
+
+| Moment | Target |
+|---|---|
+| Hotkey press | Visible response in under 50 ms, before the mic is ready. Show a "starting" state on keypress; it no longer waits for first audio. |
+| Talking | Bars at a steady 60 fps (no frame over 33 ms); smooth timer. |
+| Stop | "Transcribing" shows immediately, with a richer animation (G2). |
+| Polish | A distinct, calm polishing animation (G2). |
+| Pasted | Centred, balanced content (G3), auto-leaves. |
+| Esc, problems, warnings | Live cards above the island; never inside it (G4 done). |
+| Hover, click and peek | Smooth open; pick lists respond on the first click. |
+| Timed cards | The outline drains as the countdown (G1). |
+
+Order:
+1. F0 measurement.
+2. Instant appearance.
+3. Smoothness (F6: transform/clip only, cached rects, canvas bars fed from a ring buffer).
+4. G1–G3.
+5. Prove it with before/after numbers plus a cua-driver screenshot pass of every state (debug build with `VOICETYPR_E2E_CAPTURE_PILL`).
+
 ## A. Bugs (no decisions needed)
 
 1. **Stale "mic sent silence" card after a good take.**
