@@ -219,6 +219,20 @@ Run: debug build, Parakeet v3, 15 back-to-back takes, from `.tmp/e2e/2026-10-04T
 - **Audio level gaps:** p95 20 ms. DOM is stable at 141 nodes, so there's no pill DOM leak.
 - **Main process RSS: 157.7 → 194.8 MB over 15 takes (+~2.7 MB per take).** Run a longer soak and profile before calling it a leak.
 
+### F0 after instant island and compositor motion (commit 404c8c7d, run 2026-10-04T22-12-17.840Z)
+
+- **Hotkey → island, cold first take: 381 → 187 ms.**
+  - Show at Starting: 13 ms.
+  - Pill window creation and first show: 129 ms. The window is lazily created on the first recording.
+  - First frame: 45 ms.
+- **Warm (hidden window): about 60 ms**, of which about 49 ms is the native window show.
+- **Frames:** max 18–25 ms (was 26–58); over33 = 0 (was 2). p95 18 ms.
+- **RSS growth unchanged** (+36.6 MB over 15 takes), so it's not the island. Investigate the main process.
+- **Next:**
+  1. Pre-create the pill window shortly after startup (idle).
+  2. Keep the panel ordered in, invisible and click-through, when idle (as the "always" mode does), so the show is just a repaint (target ~15 ms).
+  3. Run a 40-take soak plus `leaks` and `vmmap` on the main process to find the RSS growth.
+
 ### F. Audit result (2026-10-04, static; React Doctor local-only: 64 warnings, 11 perf)
 
 Ranked:
