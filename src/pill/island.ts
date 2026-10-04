@@ -2,7 +2,7 @@ import type { TranscriptionStreamEvent } from '@/types/streaming';
 import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import { emptyContext, type DictationContext } from '@/pill/contracts';
 export type IslandState = 'rest' | 'peek' | 'start' | 'listening' | 'live' | 'transcribing' | 'polishing' | 'pasted' | 'copied' | 'no_permission' | 'too_short' | 'nospeech' | 'error';
-export type LayerName = 'start' | 'words' | 'row' | 'hint' | 'work' | 'done' | 'notice' | 'note' | 'peek' | 'pick';
+export type LayerName = 'start' | 'words' | 'row' | 'work' | 'done' | 'notice' | 'note' | 'peek' | 'pick';
 export class IslandMachine {
   state: IslandState = 'rest';
   context = emptyContext();
@@ -14,7 +14,6 @@ export class IslandMachine {
   session = -1;
   lastSession = -1;
   revision = -1;
-  hint = false;
   words = 0;
   error = '';
   startedAt = 0;
@@ -27,9 +26,9 @@ export class IslandMachine {
       case 'rest': return [];
       case 'peek': return ['peek'];
       case 'start': return ['start'];
-      case 'live': return this.hint ? ['words', 'hint'] : ['words', 'row'];
-      case 'listening': return [this.hint ? 'hint' : 'row'];
-      case 'transcribing': case 'polishing': return [this.hint ? 'hint' : 'work'];
+      case 'live': return ['words', 'row'];
+      case 'listening': return ['row'];
+      case 'transcribing': case 'polishing': return ['work'];
       case 'pasted': return ['done'];
       case 'copied': case 'no_permission': case 'error': return ['notice'];
       case 'nospeech': case 'too_short': return ['note'];
@@ -55,7 +54,7 @@ export class IslandMachine {
   }
   start(now: number) {
     if (this.recording) return false;
-    this.clearStream(); this.hint = false; this.words = 0;
+    this.clearStream(); this.words = 0;
     this.startedAt = now; this.frozenSeconds = 0;
     this.state = this.context.generation > this.consumedContext && this.context.show_start_card ? 'start' : 'listening';
     this.consumedContext = this.context.generation;
@@ -67,11 +66,11 @@ export class IslandMachine {
     this.clearStream(); this.state = state;
   }
   outcome(payload: PasteOutcomePayload) {
-    if (this.recording) return false;
-    this.clearStream(); this.hint = false; this.words = payload.words; this.state = payload.outcome;
+    if (this.recording || payload.generation !== undefined && !this.observeGeneration(payload.generation)) return false;
+    this.clearStream(); this.words = payload.words; this.state = payload.outcome;
     return true;
   }
-  rest() { this.state = 'rest'; this.hint = false; this.clearStream(); }
+  rest() { this.state = 'rest'; this.clearStream(); }
   clearStream() { this.committed = this.tentative = ''; this.session = -1; this.revision = -1; }
   stream(event: TranscriptionStreamEvent) {
     if (!this.recording) return false;

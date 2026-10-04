@@ -1,6 +1,6 @@
 import { clamp, ease } from '@/pill/spring';
 import type { LayerName } from '@/pill/island';
-export const layerNames: readonly LayerName[] = ['start', 'words', 'row', 'hint', 'work', 'done', 'notice', 'note', 'peek', 'pick'];
+export const layerNames: readonly LayerName[] = ['start', 'words', 'row', 'work', 'done', 'notice', 'note', 'peek', 'pick'];
 class Layer {
   on = false; alpha = 0; from = 0; time = 0; secondTime = 0;
   private second: HTMLElement | null;
@@ -51,7 +51,7 @@ export class Layers {
   step(dt: number, reduced: boolean, width = Infinity, targetWidth = 0, height = Infinity, targetHeight = 0) {
     let moving = false;
     for (const name of layerNames) {
-      const fits = name === 'start' ? height >= 49 : name === 'words' ? height >= targetHeight - 6 : name === 'peek' ? height >= targetHeight - 1 : name === 'row' || name === 'hint' || width >= targetWidth - 4;
+      const fits = name === 'start' ? height >= 49 : name === 'words' ? height >= targetHeight - 6 : name === 'peek' ? height >= targetHeight - 1 : name === 'row' || width >= targetWidth - 4;
       moving = this.entries[name].step(dt, reduced, name !== 'start' || width >= targetWidth - 16, fits) || moving;
     }
     for (let i = this.swaps.length - 1; i >= 0; i--) {

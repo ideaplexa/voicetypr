@@ -36,7 +36,7 @@ export class StackView {
     this.schedule();this.deps.changed();this.deps.wake();
   }
   remove(key:string) { this.stack.remove(key);this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
-  dropLive() { this.stack.dropLive();this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
+  dropLive(generation?:number) { this.stack.dropLive(generation);this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
   tuck(tucked:boolean) { if(tucked===this.stack.tucked)return; this.stack.tuck(tucked,performance.now());this.sync();this.schedule();this.deps.wake(); }
   private schedule() {
     if(this.timer!==undefined)this.deps.clearTimeout(this.timer);
@@ -49,7 +49,7 @@ export class StackView {
     const txt=document.createElement('span');txt.className='card-text';
     const title=document.createElement('span');title.className='card-title';title.textContent=item.title;title.title=item.title;
     if(item.title.endsWith(' · Recording kept')) {title.textContent=item.title.slice(0,-17);const kept=document.createElement('span');kept.className='dim';kept.textContent=' · Recording kept';title.append(kept);}
-    if(item.count>1) {const count=document.createElement('span');count.className='card-count';count.textContent=`×${item.count}`;title.append(' ',count);}
+    if(item.count>1 && !item.key.startsWith('escape_hint:')) {const count=document.createElement('span');count.className='card-count';count.textContent=`×${item.count}`;title.append(' ',count);}
     const sub=document.createElement('small');sub.textContent=item.sub;sub.hidden=!item.sub;txt.append(title);
     const actions=document.createElement('div');actions.className='card-actions';
     for(const a of item.actions) {
@@ -62,14 +62,22 @@ export class StackView {
     } else {
       actions.append(dismiss);const bottom=document.createElement('div');bottom.className='card-bottom';bottom.append(sub,actions);el.replaceChildren(glyph,txt,bottom);
     }
+    if(item.key.startsWith('escape_hint:')) {
+      el.classList.add('escape-hint-card');
+      const drain=document.createElement('span');drain.className='drain';
+      const bar=document.createElement('i'),remaining=Math.max(0,(item.expiresAt ?? performance.now()+2000)-performance.now());
+      bar.style.animationDuration=`${remaining}ms`;bar.style.setProperty('--drain-start',String(Math.min(1,remaining/2000)));
+      drain.append(bar);el.append(drain);
+    }
   }
   private sync() {
-    const signature=JSON.stringify(this.stack.items.map(i=>[i.key,i.count,i.title,i.sub]));
+    const signature=JSON.stringify(this.stack.items.map(i=>[i.key,i.count,i.title,i.sub,i.expiresAt]));
     if(signature===this.snapshot)return;this.snapshot=signature;
     for(const item of this.stack.items) {
       let v=this.views.get(item.key);
       if(!v) {const el=document.createElement('div');this.container.append(el);v={el,w:new Spring(300),h:new Spring(54),y:new Spring(8),scale:new Spring(.96),alpha:0,targetAlpha:1,key:item.key};this.views.set(item.key,v);}
-      this.fill(v.el,item);
+      const content=JSON.stringify([item.count,item.title,item.sub,item.expiresAt]);
+      if(v.el.dataset.content!==content) {this.fill(v.el,item);v.el.dataset.content=content;}
     }
     this.more.textContent=`+${this.stack.more}`;this.more.hidden=!this.stack.more;
   }
@@ -97,7 +105,7 @@ export class StackView {
     for(const [key,v] of this.views) {
       const index=this.stack.displayed.findIndex(i=>i.key===key);
       const alive=this.stack.items.some(i=>i.key===key), displayed=index>=0, depth=displayed ? this.stack.displayed.length-1-index : 0;
-      v.targetAlpha=displayed && depth<3 ? 1 : 0;
+      v.targetAlpha=(displayed && depth<3 || alive && key===this.handoff) ? 1 : 0;
       v.w.to=width;v.h.to=height;v.y.to=direction*Math.min(2,depth)*19;v.scale.to=1-Math.min(2,depth)*.05;
       for(const s of [v.w,v.h,v.y,v.scale]) moving=s.step(dt,reduced)||moving;
       v.alpha+=Math.sign(v.targetAlpha-v.alpha)*Math.min(Math.abs(v.targetAlpha-v.alpha),dt/(alive ? .2 : .08));

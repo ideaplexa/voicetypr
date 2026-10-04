@@ -28,7 +28,7 @@ export function WhereYouTalk({ apps, loading }: { apps: UsageApp[]; loading: boo
             .slice(0, 5)
             .map((app, i) => (
               <li key={app.name} data-pencil-name="App" className="flex items-center gap-[10px]">
-                <UsageApplicationIcon name={app.name} iconKey={app.icon_key} />
+                <UsageApplicationIcon name={app.name} iconKey={app.icon_key} refreshToken={apps} />
                 <span className="w-[128px] shrink-0 truncate text-[12.5px]" title={app.name}>
                   {app.name}
                 </span>

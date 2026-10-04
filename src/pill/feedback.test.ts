@@ -149,7 +149,7 @@ describe('live recording warnings', () => {
     h.emit('dictation-note', { generation: 1, kind: 'mic_silent_live' }); await h.settle();
     if (end === 'stop') h.emit('recording-state-changed', { state: 'stopping', error: null });
     if (end === 'cancel') h.emit('recording-state-changed', { state: 'idle', error: null });
-    if (end === 'paste') h.emit('paste-outcome', { outcome: 'pasted', words: 12, polished: false });
+    if (end === 'paste') { h.emit('transcription-started'); h.emit('paste-outcome', { outcome: 'pasted', words: 12, polished: false }); }
     await h.settle(); expect(h.get('[data-key="mic_silent_live:1"]')).toBeNull();
     h.emit('dictation-note', { generation: 1, kind: 'mic_silent' });
     await h.settle(3000); expect(h.get('[data-key="mic_silent"]')).not.toBeNull(); h.destroy();
@@ -164,4 +164,56 @@ it('drops long-silence feedback when recording ends and ignores late live warnin
   h.emit('island-notice', { kind: 'long_silence' });
   h.emit('dictation-note', {generation:1,kind:'mic_silent_live'}); await h.settle();
   expect(h.get('.feedback-card')).toBeNull(); h.destroy();
+});
+
+
+it('retains the current mic warning when a previous outcome arrives during recording', async () => {
+  const h = pillHarness(); await h.settle(); h.context(); h.emit('recording-started'); h.emit('transcription-started');
+  h.context({generation:2}); h.emit('recording-started');
+  h.emit('dictation-note', {generation:2,kind:'mic_silent_live'}); await h.settle();
+  h.emit('paste-outcome', {generation:1,outcome:'pasted',words:12,polished:false}); await h.settle();
+  expect(h.get('[data-key="mic_silent_live:2"]').hidden).toBe(false);
+  expect(h.get('[data-layer="row"]').getAttribute('aria-hidden')).toBe('false'); h.destroy();
+});
+
+it('keeps a recovery handoff visible on every frame while the island contracts', async () => {
+  const h = pillHarness(); await h.settle(); h.context(); h.emit('recording-started'); h.emit('transcription-started'); await h.settle(1000);
+  h.emit('dictation-recovery', {generation:1,id:'handoff',kind:'cloud_failed',engine_short:'Soniox',alt_engine_short:null,expires_in_ms:10000});
+  for (let frame=0;frame<90;frame++) {
+    await h.settle(16);
+    const card=h.get('[data-key="recovery:handoff"]');
+    expect(card.hidden).toBe(false); expect(Number(card.style.opacity)).toBe(1);
+    expect(Number(h.get('.feedback-stack').style.opacity)).toBe(1);
+  }
+  h.destroy();
+});
+
+it('scopes accepted-outcome live cleanup to its generation', () => {
+  const stack = new FeedbackStack();
+  stack.push(noteCard({generation:1,kind:'mic_silent_live'}),0);
+  stack.push(noteCard({generation:2,kind:'mic_silent_live'}),0);
+  stack.dropLive(1);
+  expect(stack.items.map(item=>item.liveGeneration)).toEqual([2]);
+});
+
+
+it('rejects a previous generation outcome during processing and retains its live hint', async () => {
+  const h = pillHarness(); await h.settle(); h.context({generation:2}); h.emit('recording-started'); h.emit('transcription-started');
+  h.emit('escape-hint', {generation:2,phase:'processing'}); await h.settle();
+  h.emit('paste-outcome', {generation:1,outcome:'pasted',words:12,polished:false}); await h.settle();
+  expect(h.get('.escape-hint-card').hidden).toBe(false);
+  expect(h.get('[data-layer="work"]').getAttribute('aria-hidden')).toBe('false');
+  h.emit('paste-outcome', {generation:2,outcome:'pasted',words:12,polished:false}); await h.settle();
+  expect(h.get('.escape-hint-card')).toBeNull(); h.destroy();
+});
+
+
+it('keeps the Escape deadline and drain when recording hands off to processing', async () => {
+  const h=pillHarness(); await h.settle(); h.context(); h.emit('recording-started');
+  h.emit('escape-hint',{generation:1,phase:'recording'}); await h.settle(1000);
+  h.emit('transcription-started'); await h.settle(200);
+  expect(h.get('.escape-hint-card .card-title').textContent).toBe('Press Esc again to discard');
+  expect(h.get('.escape-hint-card .drain i').style.animationDuration).toBe('1000ms');
+  expect(h.get('.escape-hint-card .drain i').style.getPropertyValue('--drain-start')).toBe('0.5');
+  await h.settle(1100); expect(h.get('.escape-hint-card')).toBeNull(); h.destroy();
 });

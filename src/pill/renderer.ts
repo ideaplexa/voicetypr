@@ -57,18 +57,18 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let destroyed = false, frame: number | undefined, last = 0, hovering = false, top = false;
   let finishing = false, finishingTimer: number | undefined;
   let copiedTimer: number | undefined, pickTimer: number | undefined;
-  let lastState = machine.state, startTimer: number | undefined, feedbackTimer: number | undefined, hintTimer: number | undefined, hoverTimer: number | undefined;
+  let lastState = machine.state, startTimer: number | undefined, feedbackTimer: number | undefined, hoverTimer: number | undefined;
   let slowSince = 0;
   let entered = 0, pointerX = 0, pointerY = 0, pointerTime = 0;
   let closeHold = 0;
   let waveSeconds = 0, cancelPending = false, stopPending = false;
   let enabledStream = false, displayedSeconds = -1;
   let badgeFromX = 25, badgeFromY = 56, shortcut = deps.mac ? 'Alt+Space' : 'Ctrl+Space';
-  const timerEl = dom.get<HTMLElement>('.pill-timer'), startTimeEl = dom.get<HTMLElement>('.start-time'), workTimeEl = dom.get<HTMLElement>('.work-time'), hintTimeEl = dom.get<HTMLElement>('.hint-time');
-  const timerElements = [timerEl, startTimeEl, workTimeEl, hintTimeEl];
+  const timerEl = dom.get<HTMLElement>('.pill-timer'), startTimeEl = dom.get<HTMLElement>('.start-time'), workTimeEl = dom.get<HTMLElement>('.work-time');
+  const timerElements = [timerEl, startTimeEl, workTimeEl];
   const rowEl = dom.get<HTMLElement>('.listening-row'), ctlEl = dom.get<HTMLElement>('.ctl');
-  const rowLayers = ['row', 'hint', 'work', 'note'].map(name => layers.entries[name as 'row' | 'hint' | 'work' | 'note'].el);
-  const timers = () => { for (const id of [startTimer, feedbackTimer, hintTimer, hoverTimer, copiedTimer, finishingTimer, pickTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hintTimer = hoverTimer = copiedTimer = finishingTimer = pickTimer = undefined; finishing = false; };
+  const rowLayers = ['row', 'work', 'note'].map(name => layers.entries[name as 'row' | 'work' | 'note'].el);
+  const timers = () => { for (const id of [startTimer, feedbackTimer, hoverTimer, copiedTimer, finishingTimer, pickTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hoverTimer = copiedTimer = finishingTimer = pickTimer = undefined; finishing = false; };
   const text = (selector: string, value: string) => { const el = dom.get<HTMLElement>(selector); if (el.textContent !== value) el.textContent = value; if (el.matches('.done-label,.note-text')) el.title = value; };
   const inlineWidth = (selector: string) => {
     const range = document.createRange(); range.selectNodeContents(dom.get(selector));
@@ -145,7 +145,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (shapeMoving) place(); glyph.draw(waveSeconds, Math.max(0, GW.x), reduced);
     const landed = machine.state === 'rest' && W.x < 12.5 && H.x < 12.5;
     stack.tuck(mode === 'never' || !landed);
-    stack.setGeometry(machine.recording ? {...geometry,anchorY:geometry.anchorY+(top ? 1 : -1)*Math.max(0,H.x-12)} : geometry);
+    stack.setGeometry(machine.recording || machine.processing ? {...geometry,anchorY:geometry.anchorY+(top ? 1 : -1)*Math.max(0,H.x-12)} : geometry);
     moving = stack.step(dt,reduced,landed,mode !== "never") || moving;
     hit();
     if (!deps.staticPreview && (moving || (!dom.surface.hidden && machine.recording && !reduced))) frame = requestAnimationFrame(tick);
@@ -174,7 +174,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.root.dataset.visible = String(!dom.surface.hidden);
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
     dom.get<HTMLElement>('.core').classList.toggle('bad', !machine.context.mic.ok);
-    const ctl = hovering && state === 'listening' && !machine.hint && !stopPending;
+    const ctl = hovering && state === 'listening' && !stopPending;
     HC.to = ctl ? 62 : 0;
     W.to = machine.width + (ctl ? 62 : 0);
     const showDoneActions = state === 'pasted' && polished && hovering && !!deps.actions.original;
@@ -186,7 +186,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     IY.to = rest ? 5 : 16;
     GX.to = state === 'start' ? 52 : machine.recording ? 42 : 34; GY.to = 4;
     GW.to = machine.recording ? machine.width - (state === 'start' ? 105 : 93) : 22;
-    layers.target(pick ? ['pick'] : machine.layers); glyph.target(state, !machine.hint);
+    layers.target(pick ? ['pick'] : machine.layers); glyph.target(state, true);
     badge.target(machine.context, machine.recording && state !== 'start' || machine.processing, fromStart);
     if (machine.committed || machine.tentative || layers.entries.words.alpha === 0) words.update(machine.committed, machine.tentative, reduced);
     dom.canvas.dataset.state = state; dom.canvas.hidden = !!pick || state === 'peek';
@@ -208,7 +208,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.get<HTMLButtonElement>('.note-dismiss').hidden = state !== 'nospeech';
     dom.get<HTMLButtonElement>('.dismiss').hidden = state === 'error';
     text('.note-text', state === 'nospeech' ? 'No speech heard' : shortCopy(machine.context));
-    text('.hint-row > span:first-child', `Press Esc again to ${machine.processing ? 'discard' : 'cancel'}`);
     dom.get<HTMLButtonElement>('.cancel').disabled = cancelPending;
     dom.get<HTMLButtonElement>('.stop').disabled = stopPending;
     if (state === 'too_short' || state === 'nospeech') {
@@ -278,7 +277,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const flash = (kind: 'too_short' | 'nospeech' | 'error', message = '') => {
     stack.dropLive();
     if (machine.state === kind && machine.error === message) return;
-    timers(); machine.clearStream(); machine.hint = false; machine.state = kind; machine.error = message;
+    timers(); machine.clearStream(); machine.state = kind; machine.error = message;
     announce(kind === 'too_short' ? shortCopy(machine.context) : kind === 'nospeech' ? 'No speech heard' : message);
     feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, kind === 'error' ? 1500 : kind === 'too_short' ? 1400 : 30000); sync();
   };
@@ -472,12 +471,19 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (reduced) { glyph.wave.advance((performance.now() - machine.startedAt) / 1000, 1 / 60); syncTime(performance.now()); glyph.draw(waveSeconds, GW.x, true); }
     },
     stream(value: TranscriptionStreamEvent) { if (enabledStream && machine.stream(value)) sync(); },
-    work(state: 'transcribing' | 'polishing') { stack.dropLive(); pick = undefined; if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined; machine.work(state, performance.now()); sync(); },
+    work(state: 'transcribing' | 'polishing') {
+      const hint=stack.stack.items.find(item=>item.key===`escape_hint:${machine.generation}`);
+      stack.dropLive(); pick = undefined;
+      if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined;
+      machine.work(state, performance.now());
+      if(hint && (hint.expiresAt ?? 0)>performance.now()) stack.push({...hint,title:'Press Esc again to discard'},undefined,false);
+      sync();
+    },
     outcome(value: PasteOutcomePayload) {
-      stack.dropLive();
-      pick = undefined;
       if (machine.terminal && machine.state === value.outcome && machine.words === value.words) return;
       if (!machine.outcome(value)) return;
+      stack.dropLive(value.generation ?? machine.generation);
+      pick = undefined;
       polished = value.polished === true; pastedLeft=2400;pastedSince=performance.now();text('.done-label','Pasted');
       timers(); announce(value.outcome === 'pasted' ? `Pasted · ${value.words} words` : value.outcome === 'no_permission' ? 'Copied — allow Accessibility to paste automatically' : copiedTitle(deps.mac));
       if (value.outcome === 'pasted') dom.get<HTMLElement>('.hold').replaceChildren(document.createElement('i'));
@@ -491,9 +497,8 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     },
     escapeHint() {
       if (!machine.recording && !machine.processing) return;
-      machine.hint = true; dom.get<HTMLElement>('.drain').replaceChildren(document.createElement('i'));
-      if (hintTimer !== undefined) deps.clearTimeout(hintTimer);
-      hintTimer = deps.setTimeout(() => { hintTimer = undefined; machine.hint = false; sync(); }, 2000); sync();
+      stack.push({key:`escape_hint:${machine.generation}`,title:`Press Esc again to ${machine.processing ? 'discard' : 'cancel'}`,sub:'',tone:'neutral',glyph:'back',duration:null,liveGeneration:machine.generation,expiresAt:performance.now()+2000,actions:[]});
+      sync();
     },
     destroy() { destroyed = true; window.removeEventListener('keydown', keydown); stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },
   };

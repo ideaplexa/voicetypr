@@ -173,7 +173,8 @@ async fn insert_text_with_generation(
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))??;
-    let payload = paste_outcome_payload(&outcome, words, polished);
+    let mut payload = paste_outcome_payload(&outcome, words, polished);
+    payload.generation = generation;
     let _ = outcome_app.emit_to("main", "paste-outcome", payload.clone());
     super::pill_feedback::send(
         &outcome_app,
@@ -260,6 +261,8 @@ enum PasteOutcome {
 
 #[derive(Clone, serde::Serialize)]
 struct PasteOutcomePayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation: Option<u64>,
     outcome: &'static str,
     words: u32,
     polished: bool,
@@ -271,6 +274,7 @@ fn paste_outcome_payload(
     polished: bool,
 ) -> PasteOutcomePayload {
     PasteOutcomePayload {
+        generation: None,
         outcome: match outcome {
             PasteOutcome::Pasted => "pasted",
             PasteOutcome::LeftInClipboard => "copied",
@@ -299,7 +303,8 @@ pub(crate) fn emit_dictation_copy_outcome(
     generation: u64,
     polished: bool,
 ) {
-    if let Some(payload) = dictation_copy_payload(succeeded, words, polished) {
+    if let Some(mut payload) = dictation_copy_payload(succeeded, words, polished) {
+        payload.generation = Some(generation);
         let _ = app.emit_to("main", "paste-outcome", payload.clone());
         super::pill_feedback::send(
             app,

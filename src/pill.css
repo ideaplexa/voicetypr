@@ -57,11 +57,9 @@ button { font:inherit }
 .result-row { width:100%;padding:0 14px 0 60px }
 .done-label { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis }
 .done-count { margin-left:auto;flex:none }
-.hint-row { padding:0 12px 0 38px;width:100%;font-size:12.5px;gap:4px }
-.hint-row>span:first-child { flex:1 }
 .drain { position:absolute;left:38px;right:12px;bottom:4px;height:2px;border-radius:1px;background:rgba(255,255,255,.14);overflow:hidden }
 .drain i { display:block;height:100%;background:rgba(255,255,255,.72);animation:hint-drain 2s linear forwards;transform-origin:left }
-@keyframes hint-drain { from { transform:scaleX(1) } to { transform:scaleX(0) } }
+@keyframes hint-drain { from { transform:scaleX(var(--drain-start,1)) } to { transform:scaleX(0) } }
 .hold { position:absolute;left:16px;right:16px;bottom:4px;height:2px;background:rgba(255,255,255,.05);overflow:hidden }
 .hold i { display:block;height:100%;background:rgba(255,255,255,.2);animation:hint-drain 2.4s linear forwards;transform-origin:left }
 .notice { top:0;bottom:auto;flex-direction:column;align-items:stretch }
@@ -166,3 +164,5 @@ button:focus-visible { outline:2px solid var(--sage);outline-offset:-2px }
 .pick-error { font-size:11px;color:#ff8c79;padding:4px 8px }
 .quick-label { min-width:0;overflow:hidden;text-overflow:ellipsis }
 .quick-icon,.quick-chevron { display:inline-flex;flex:none }
+
+.escape-hint-card .drain { left:12px;right:12px;bottom:2px;top:auto }

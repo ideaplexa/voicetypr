@@ -650,12 +650,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          if gh release view "$RELEASE_TAG" --json body --jq '.body' > release-body.md; then
-            test -s release-body.md
-          else
+          if ! gh release view "$RELEASE_TAG" --json body --jq '.body' > release-body.md ||
+            ! LC_ALL=C grep -q '[^[:space:]]' release-body.md; then
             gh api "repos/${{ github.repository }}/releases/generate-notes" \
               -f tag_name="$RELEASE_TAG" --jq '.body' > release-body.md
           fi
+          LC_ALL=C grep -q '[^[:space:]]' release-body.md
 
       - name: Generate latest.json
         run: |
