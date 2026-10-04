@@ -70,6 +70,14 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     setTimeout: ((handler: () => void, delay: number) => (deps.setTimeout ?? window.setTimeout.bind(window))(handler, delay)) as typeof window.setTimeout,
     clearTimeout: handle => (deps.clearTimeout ?? window.clearTimeout.bind(window))(handle),
   });
+  // Debug-only measurement: one startup query, then nothing unless the backend opts in.
+  void Promise.resolve().then(() => call<boolean>('perf_enabled')).then(enabled => {
+    if (destroyed || enabled !== true) return;
+    island.attachPerf(true, {
+      visible: unixMs => call('perf_island_visible', { unixMs }),
+      summary: summary => call('perf_pill_summary', { summary }),
+    });
+  }).catch(() => {});
   const subscribe = <T,>(event: string, handler: (payload: T) => void) => {
     subscriptions.push(on<T>(event, ({ payload }) => { if (!destroyed) handler(payload); }).then(stop => {
       if (destroyed) stop(); else unlisteners.push(stop);

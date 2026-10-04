@@ -3,10 +3,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { CASES, PARAKEET_CACHE_SUBDIRS, compareReports, csv, parseArgs, positiveNumber, profilePaths, seedSettings, wer, words } from "./helpers.mjs";
+import { CASES, PARAKEET_CACHE_SUBDIRS, compareReports, csv, parseArgs, perfColumns, positiveNumber, profilePaths, seedSettings, soakGrowth, wer, words } from "./helpers.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const REAL_HOME = process.env.HOME;
+let PERF = false; // set from --perf / --soak
 const READY_LINE = "App state managed and ready";
 const HELP = `Usage: node scripts/e2e/dictation-e2e.mjs --clips <dir> --engines <engine:model,...> [options]
 
@@ -22,6 +23,10 @@ const HELP = `Usage: node scripts/e2e/dictation-e2e.mjs --clips <dir> --engines 
   --baseline <report.json>      Fail if WER or stop-to-text regresses
   --wer-threshold <fraction>    Allowed absolute WER increase (default 0.05)
   --latency-threshold-ms <ms>   Allowed stop-to-text increase (default 250)
+  --perf                        Debug-only [PERF] measurement (VOICETYPR_PERF=1): hotkey→island,
+                                pill frame times, level gaps, DOM nodes, RSS
+  --soak <N>                    Repeat the regular case N times in one launch and report
+                                first-vs-last DOM nodes and RSS (implies --perf)
   --help                        Show this message`;
 
 function fail(message) { throw new Error(message); }
@@ -150,7 +155,7 @@ async function launch(bin, home, paths) {
   const fd = openSync(join(home, "app-stdout.log"), "w");
   // Tauri's dirs crate follows HOME; Foundation's homeDirectoryForCurrentUser
   // (used by FluidAudio's Swift sidecar) follows CFFIXED_USER_HOME on macOS.
-  const child = spawn(bin, [], { env: { ...process.env, HOME: home, CFFIXED_USER_HOME: home, VOICETYPR_E2E_CAPTURE_PILL: "1" }, stdio: ["ignore", fd, fd] });
+  const child = spawn(bin, [], { env: { ...process.env, HOME: home, CFFIXED_USER_HOME: home, VOICETYPR_E2E_CAPTURE_PILL: "1", ...(PERF ? { VOICETYPR_PERF: "1" } : {}) }, stdio: ["ignore", fd, fd] });
   closeSync(fd);
   let spawnError;
   child.on("error", (error) => { spawnError = error; });
@@ -349,13 +354,18 @@ async function runCaseInDocument({ kind, clips, outputIndex, pid, paths, out, wi
     last_word_present: kind === "last-word" ? words(actual).at(-1) === words(reference).at(-1) : null,
     stop_to_text_ms: stoppedAt && actual.length ? result.at - stoppedAt : null,
     ...timing(lines), screenshot: basename(screenshot),
+    ...(PERF ? perfColumns(lines) : {}),
     preview_events_seen: null,
   };
 }
 function summary(report, regressions) {
   const body = report.cases.map((item) => `| ${item.engine}/${item.model} | ${item.language} | ${item.mode} | ${item.case} | ${item.wer?.toFixed(3) ?? "—"} | ${item.stop_to_text_ms ?? "—"} | ${item.start_to_first_audio_ms ?? "—"} |`).join("\n");
   const baselineStatus = report.baseline ? (regressions.length ? `Regressions: ${regressions.join("; ")}` : "No baseline regressions.") : "No baseline supplied.";
-  return `# Dictation E2E\n\n${report.cases.length} cases. ${baselineStatus}\n\n| Engine/model | Lang | Mode | Case | WER | Stop→text ms | First audio ms |\n|---|---|---|---|---:|---:|---:|\n${body}\n`;
+  if (!PERF) return `# Dictation E2E\n\n${report.cases.length} cases. ${baselineStatus}\n\n| Engine/model | Lang | Mode | Case | WER | Stop→text ms | First audio ms |\n|---|---|---|---|---:|---:|---:|\n${body}\n`;
+  const num = (value, digits = 1) => (value == null ? "—" : Number(value).toFixed(digits));
+  const perfBody = report.cases.map((item) => `| ${item.engine}/${item.model} | ${item.language} | ${item.mode} | ${item.case} | ${item.wer?.toFixed(3) ?? "—"} | ${item.stop_to_text_ms ?? "—"} | ${item.start_to_first_audio_ms ?? "—"} | ${item.hotkey_to_island_ms ?? "—"} | ${num(item.frame_p95_ms)} | ${num(item.frame_max_ms)} | ${item.frame_over33 ?? "—"} | ${num(item.level_gap_p95_ms)} | ${item.pill_dom_nodes ?? "—"} | ${num(item.rss_mb)} |`).join("\n");
+  const soak = (report.soak ?? []).map((item) => `- ${item.key}: ${item.takes} takes, DOM ${item.first_dom ?? "—"} → ${item.last_dom ?? "—"}, RSS ${num(item.first_rss_mb)} → ${num(item.last_rss_mb)} MB. ${item.growth ? `GROWTH: ${item.flags.join("; ")}` : "No growth flagged."}`).join("\n");
+  return `# Dictation E2E\n\n${report.cases.length} cases. ${baselineStatus}\n\n| Engine/model | Lang | Mode | Case | WER | Stop→text ms | First audio ms | Hotkey→island ms | Frame p95 ms | Frame max ms | Frames >33 | Level gap p95 ms | DOM nodes | RSS MB |\n|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n${perfBody}\n${soak ? `\n## Soak\n\n${soak}\n` : ""}`;
 }
 async function stopApp(child) {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -384,6 +394,9 @@ async function main() {
   const selected = args.cases ? csv(args.cases) : CASES;
   if (!selected.length) fail("--cases must name at least one case.");
   for (const item of selected) if (!CASES.includes(item)) fail(`Unknown case ${item}. Choose from ${CASES.join(", ")}.`);
+  const soak = args.soak === undefined ? 0 : positiveNumber(args.soak, "--soak");
+  if (!Number.isInteger(soak)) fail("--soak must be a whole number of takes.");
+  PERF = Boolean(args.perf) || soak > 0;
   const tailMs = positiveNumber(args["tail-ms"] ?? 250, "--tail-ms", true);
   const timeoutMs = positiveNumber(args["timeout-ms"] ?? 30000, "--timeout-ms");
   const werThreshold = positiveNumber(args["wer-threshold"] ?? 0.05, "--wer-threshold", true);
@@ -409,7 +422,9 @@ async function main() {
           const child = await launch(bin, home, paths);
           try {
             for (const kind of wanted) {
-              const clipSets = kind === "regular" || kind === "live-preview" ? languageClips.map((clip) => [clip]) : [languageClips];
+              const clipSets = soak > 0 && kind === "regular"
+                ? Array.from({ length: soak }, (_, index) => [languageClips[index % languageClips.length]])
+                : kind === "regular" || kind === "live-preview" ? languageClips.map((clip) => [clip]) : [languageClips];
               for (const [ordinal, clipSet] of clipSets.entries()) {
                 console.log(`Running ${selection.engine}/${selection.model} ${language} ${kind} clip ${ordinal + 1}...`);
                 const item = await runCase({ kind, clips: clipSet, outputIndex, pid: child.pid, paths, out, windowFinder, timeoutMs, tailMs, selection, livePreview, ordinal });
@@ -421,6 +436,12 @@ async function main() {
           }
         }
       }
+    }
+    if (PERF) {
+      report.perf = true;
+      if (!report.cases.some((item) => item.hotkey_to_island_ms != null || item.frame_p95_ms != null)) console.warn("No [PERF] lines were logged. --perf needs a debug build (pnpm tauri:dev / cargo debug binary).");
+      report.soak = soakGrowth(report.cases);
+      for (const item of report.soak) console.log(`Soak ${item.key}: ${item.takes} takes, DOM ${item.first_dom ?? "n/a"} → ${item.last_dom ?? "n/a"}, RSS ${item.first_rss_mb?.toFixed(1) ?? "n/a"} → ${item.last_rss_mb?.toFixed(1) ?? "n/a"} MB. ${item.growth ? `GROWTH: ${item.flags.join("; ")}` : "No growth flagged."}`);
     }
     const baseline = args.baseline ? JSON.parse(readFileSync(resolve(args.baseline), "utf8")) : null;
     const regressions = baseline ? compareReports(report, baseline, { werThreshold, latencyThresholdMs }) : [];

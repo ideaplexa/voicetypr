@@ -5103,6 +5103,7 @@ pub async fn start_recording(
     {
         let app_state = app.state::<AppState>();
         let generation = begin_recording_generation();
+        crate::perf::begin_take(generation);
         let hold = !source.is_toggle()
             && app_state
                 .recording_mode
@@ -5728,7 +5729,9 @@ pub async fn start_recording(
         should_show_pill
     );
     if should_show_pill {
+        crate::perf::mark(recording_generation, crate::perf::Stage::PillShowCalled);
         let pill_result = crate::commands::window::show_pill_widget(app.clone()).await;
+        crate::perf::mark(recording_generation, crate::perf::Stage::PillShown);
         if recording_generation_is_stale(recording_generation) {
             return Ok(false);
         }

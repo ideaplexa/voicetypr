@@ -14,6 +14,7 @@ import { AppIcon } from '@/pill/app-icon';
 import { Badge } from '@/pill/badge';
 import { Glyph } from '@/pill/glyph';
 import { IslandMachine } from '@/pill/island';
+import { createPerfProbe, type PerfProbe, type PerfSink } from '@/pill/perf';
 import { copiedTitle, elapsed, contextMicName, shortCopy, styleName } from '@/pill/copy';
 import type { DictationContext, IslandActions, PillPointer, PillSettings } from '@/pill/contracts';
 import type { PillAudioLevel } from '@/types';
@@ -59,6 +60,8 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let copiedTimer: number | undefined, pickTimer: number | undefined;
   let lastState = machine.state, startTimer: number | undefined, feedbackTimer: number | undefined, hoverTimer: number | undefined;
   let slowSince = 0;
+  let perf: PerfProbe | undefined; // debug-only measurement (VOICETYPR_PERF=1); undefined otherwise
+  const endTake = () => { if (machine.recording) perf?.end(machine.generation); };
   let entered = 0, pointerX = 0, pointerY = 0, pointerTime = 0;
   let closeHold = 0;
   let waveSeconds = 0, cancelPending = false, stopPending = false;
@@ -129,6 +132,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     frame = undefined;
     if (destroyed) return;
     const dt = Math.min(.05, Math.max(0, (now - last) / 1000)); last = now;
+    if (perf && machine.recording && !reduced) perf.frame(now);
     let moving = false, shapeMoving = false;
     if (closeHold > 0 && !reduced) { closeHold = Math.max(0, closeHold - dt); moving = true; }
     else for (const spring of springs) { const before = spring.x; shapeMoving = spring.step(dt, reduced) || spring.x !== before || shapeMoving; }
@@ -273,9 +277,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
 
   };
   const foldStart = () => { if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = deps.setTimeout(() => { startTimer = undefined; if (!pick) machine.foldStart(); sync(); }, 800); };
-  const rest = () => { stack.dropLive(); pick = undefined; timers(); machine.rest(); cancelPending = stopPending = false; sync(); };
+  const rest = () => { endTake(); stack.dropLive(); pick = undefined; timers(); machine.rest(); cancelPending = stopPending = false; sync(); };
   const flash = (kind: 'too_short' | 'nospeech' | 'error', message = '') => {
-    stack.dropLive();
+    endTake(); stack.dropLive();
     if (machine.state === kind && machine.error === message) return;
     timers(); machine.clearStream(); machine.state = kind; machine.error = message;
     announce(kind === 'too_short' ? shortCopy(machine.context) : kind === 'nospeech' ? 'No speech heard' : message);
@@ -293,6 +297,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (!machine.start(performance.now())) return;
     timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; announce('');
     if (machine.state === 'start') foldStart(); sync();
+    perf?.begin();
   };
   const context = (value: DictationContext) => {
     if (!machine.contextEvent(value)) return;
@@ -465,13 +470,25 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     clearNotice(kind: IslandNotice['kind']) { stack.remove(`notice:${kind}`); },
     geometry(value: PillGeometry) { geometry = value; stack.setGeometry(value); top = value.anchor.startsWith('top-'); applyPillGeometry(dom.root, value); sync(); },
     context, pointer, start, rest, flash,
+    /** Debug-only: the backend reports VOICETYPR_PERF=1 on a debug build. */
+    attachPerf(enabled: boolean, sink: PerfSink) {
+      perf?.destroy();
+      perf = createPerfProbe(enabled, {
+        sink, now: () => performance.now(), timeOrigin: () => performance.timeOrigin,
+        raf: callback => requestAnimationFrame(callback), caf: id => cancelAnimationFrame(id),
+        visible: () => !dom.surface.hidden && machine.recording,
+        domNodes: () => host.querySelectorAll('*').length, stackItems: () => stack.stack.items.length,
+      });
+    },
     level(value: PillAudioLevel) {
       if (!machine.recording || !machine.observeGeneration(value.generation)) return;
+      perf?.level(performance.now(), value.generation);
       glyph.wave.sample(value.level);
       if (reduced) { glyph.wave.advance((performance.now() - machine.startedAt) / 1000, 1 / 60); syncTime(performance.now()); glyph.draw(waveSeconds, GW.x, true); }
     },
     stream(value: TranscriptionStreamEvent) { if (enabledStream && machine.stream(value)) sync(); },
     work(state: 'transcribing' | 'polishing') {
+      endTake();
       const hint=stack.stack.items.find(item=>item.key===`escape_hint:${machine.generation}`);
       stack.dropLive(); pick = undefined;
       if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined;
@@ -500,6 +517,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       stack.push({key:`escape_hint:${machine.generation}`,title:`Press Esc again to ${machine.processing ? 'discard' : 'cancel'}`,sub:'',tone:'neutral',glyph:'back',duration:null,liveGeneration:machine.generation,expiresAt:performance.now()+2000,actions:[]});
       sync();
     },
-    destroy() { destroyed = true; window.removeEventListener('keydown', keydown); stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },
+    destroy() { destroyed = true; perf?.destroy(); perf = undefined; window.removeEventListener('keydown', keydown); stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },
   };
 }

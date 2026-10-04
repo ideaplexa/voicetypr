@@ -275,6 +275,7 @@ pub fn update_recording_state(
         "error": error
     });
 
+    crate::perf::on_state(final_state);
     crate::menu::runtime::recording_changed(app, final_state);
     let _ = app.emit("recording-state-changed", payload);
 }

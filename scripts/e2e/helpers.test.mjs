@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PARAKEET_CACHE_SUBDIRS, compareReports, parseArgs, profilePaths, seedSettings, wer } from "./helpers.mjs";
+import { PARAKEET_CACHE_SUBDIRS, compareReports, parseArgs, parsePerfLines, perfColumns, profilePaths, seedSettings, soakGrowth, wer } from "./helpers.mjs";
 
 test("parseArgs accepts flags and values, rejects missing and unknown options", () => {
   assert.deepEqual(parseArgs(["--check-setup", "--clips", "/tmp/clips", "--cases", "regular,live-preview"]), {
@@ -43,4 +43,56 @@ test("report comparison uses absolute WER and stop-to-text thresholds", () => {
   const differences = compareReports({ cases: [{ id: "a", wer: 0.16, stop_to_text_ms: 751 }] }, baseline, { werThreshold: 0.05, latencyThresholdMs: 250 });
   assert.equal(differences.length, 2);
   assert.throws(() => compareReports({ cases: [{ id: "missing" }] }, baseline, { werThreshold: 0, latencyThresholdMs: 0 }), /Baseline lacks case/u);
+});
+
+test("parseArgs accepts --perf and --soak and leaves them absent by default", () => {
+  assert.deepEqual(parseArgs(["--perf", "--soak", "30"]), { perf: true, soak: "30" });
+  assert.equal(parseArgs(["--clips", "x"]).perf, undefined);
+  assert.throws(() => parseArgs(["--soak"]), /needs a value/u);
+});
+
+const PERF_LOG = [
+  "2026-10-04 INFO unrelated line",
+  "2026-10-04T10:00:00 INFO voicetypr::perf: [PERF] take=7 hotkey_ms=1000 starting_ms=1004 recording_ms=1120 pill_show_called_ms=1121 pill_shown_ms=1150",
+  "2026-10-04T10:00:00 INFO voicetypr::perf: [PERF] take=7 island_visible_ms=1180",
+  "2026-10-04T10:00:05 INFO voicetypr::perf: [PERF] take=7 rss_mb=312.4",
+  "2026-10-04T10:00:05 INFO voicetypr::perf: [PERF] take=7 frames=600 p50_ms=16.7 p95_ms=18.0 max_ms=55.0 over16=12 over33=2 over50=1 level_events=590 level_gap_p95_ms=20.0 pill_dom_nodes=210 stack_items=0 longtasks=-",
+];
+
+test("[PERF] parser merges the lines of one take and maps '-' to null", () => {
+  const [take, ...rest] = parsePerfLines(PERF_LOG);
+  assert.equal(rest.length, 0);
+  assert.equal(take.take, 7);
+  assert.equal(take.hotkey_ms, 1000);
+  assert.equal(take.island_visible_ms, 1180);
+  assert.equal(take.rss_mb, 312.4);
+  assert.equal(take.p95_ms, 18);
+  assert.equal(take.longtasks, null);
+  assert.deepEqual(parsePerfLines(["nothing here", "[PERF] take=x a=1"]), []);
+});
+
+test("perf report columns derive hotkey→island and pick the last take with pill numbers", () => {
+  const columns = perfColumns(PERF_LOG);
+  assert.equal(columns.hotkey_to_island_ms, 180);
+  assert.equal(columns.hotkey_to_recording_ms, 120);
+  assert.equal(columns.frame_p95_ms, 18);
+  assert.equal(columns.frame_max_ms, 55);
+  assert.equal(columns.frame_over33, 2);
+  assert.equal(columns.level_gap_p95_ms, 20);
+  assert.equal(columns.pill_dom_nodes, 210);
+  assert.equal(columns.rss_mb, 312.4);
+  assert.equal(perfColumns([]).hotkey_to_island_ms, null);
+});
+
+test("soak growth flags DOM growth and large RSS growth, and ignores flat runs", () => {
+  const make = (dom, rss) => ({ case: "regular", engine: "parakeet", model: "m", language: "en", mode: "regular", pill_dom_nodes: dom, rss_mb: rss });
+  const [flat] = soakGrowth([make(200, 300), make(200, 305), make(200, 310)]);
+  assert.equal(flat.growth, false);
+  assert.equal(flat.takes, 3);
+  const [grown] = soakGrowth([make(200, 300), make(260, 340)]);
+  assert.equal(grown.growth, true);
+  assert.equal(grown.dom_delta, 60);
+  assert.equal(grown.flags.length, 2);
+  assert.deepEqual(soakGrowth([make(200, 300)]), []);
+  assert.deepEqual(soakGrowth([{ case: "cancel", engine: "e", model: "m", language: "en", mode: "regular" }]), []);
 });

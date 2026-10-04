@@ -22,6 +22,7 @@ mod media;
 mod menu;
 mod observability;
 mod parakeet;
+mod perf;
 mod pill;
 mod product_analytics;
 pub mod provider_capabilities;
@@ -1384,6 +1385,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             recreate_pill_widget,
             commands::pill_feedback::pill_feedback_visible,
             commands::pill_feedback::pill_feedback_ready,
+            perf::perf_enabled,
+            perf::perf_island_visible,
+            perf::perf_pill_summary,
             focus_main_window,
             check_accessibility_permission,
             request_accessibility_permission,

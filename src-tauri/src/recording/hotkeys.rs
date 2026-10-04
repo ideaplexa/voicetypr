@@ -65,6 +65,7 @@ fn handle_toggle_mode(
 
     match current_state {
         RecordingState::Idle | RecordingState::Error => {
+            crate::perf::hotkey_pressed();
             log::info!("Toggle: Starting recording via hotkey");
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -180,6 +181,7 @@ fn handle_ptt_mode(
             app_state.ptt_key_held.store(true, Ordering::Relaxed);
 
             if matches!(current_state, RecordingState::Idle | RecordingState::Error) {
+                crate::perf::hotkey_pressed();
                 log::info!("PTT: Starting recording");
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
