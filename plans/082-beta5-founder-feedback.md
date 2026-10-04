@@ -163,6 +163,24 @@ Releases need Windows CI green before merging (it caught 3 Windows-only breaks i
    - This is the same live-card path as the recording-time mic warnings (A1).
    - It keeps the 2 s countdown, and the drain animation lives on the card.
 
+### F0. Regression vs pre-redesign (founder, 2026-10-04)
+
+The island appears later, and the audio bars sometimes stutter. 2.0.7 felt instant.
+- **Measure first** (debug-only instrumentation, content-free):
+  - hotkey → island visible (ms)
+  - pill frame times while recording (p50, p95 and max; long frames over 16 ms and over 50 ms)
+  - pill and main memory across ~50 back-to-back dictations (leak check)
+  - idle CPU with the resting dot showing
+- Compare 2.0.7, beta.4 and the fixed build on the same machine, using the E2E harness and real speech.
+- **Suspects:**
+  - the pill animates layout properties and measures every frame (F6)
+  - 60 Hz level IPC to both windows (F1)
+  - the 30 Hz cursor poll and `set_ignore_cursor_events` on the main thread, which contends with show and position
+  - the island shows only after first audio and then plays an opening morph
+  - possible DOM or listener growth in the waveform or stack
+- **Done means** the numbers match or beat 2.0.7.
+- Snapshot: the founder's installed beta.4 idles at about 1% CPU and 251 MB footprint after 16 h.
+
 ### F. Audit result (2026-10-04, static; React Doctor local-only: 64 warnings, 11 perf)
 
 Ranked:
