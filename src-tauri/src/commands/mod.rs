@@ -7,6 +7,7 @@ pub mod debug;
 pub mod device;
 pub(crate) mod dictation_telemetry;
 pub mod distribution;
+pub mod history_index;
 pub mod key_normalizer;
 pub mod keyring;
 pub mod license;

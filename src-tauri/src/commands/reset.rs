@@ -52,6 +52,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     // Clear transcriptions store
     if let Ok(store) = app.store("transcriptions") {
         store.clear();
+        crate::commands::history_index::note_reset(&app);
         if let Err(e) = store.save() {
             errors.push(format!(
                 "Failed to save cleared transcriptions store: {}",

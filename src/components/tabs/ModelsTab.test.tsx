@@ -94,6 +94,7 @@ let mockModels: Record<string, ModelInfo> = {
 
 // Mock the ModelManagementContext that ModelsTab actually imports
 vi.mock("@/contexts/ModelManagementContext", () => ({
+  useDownloadProgress: () => ({}),
   useModelManagementContext: () => ({
     models: mockModels,
     downloadProgress: {},

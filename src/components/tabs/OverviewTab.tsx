@@ -12,7 +12,7 @@ import { useUsageStats } from "@/components/insights/useUsageStats";
 import { ShareStatsModal } from "@/components/ShareStatsModal";
 import { languages } from "@/components/languages";
 import { useReadiness } from "@/contexts/ReadinessContext";
-import { useModelManagementContext } from "@/contexts/ModelManagementContext";
+import { useDownloadProgress } from "@/contexts/ModelManagementContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useTranscriptionHistory } from "@/hooks/useTranscriptionHistory";
 import { useActiveTrigger } from "@/hooks/useActiveTrigger";
@@ -52,7 +52,6 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const { settings } = useSettings();
   const trigger = useActiveTrigger(settings);
   const remoteLabel = useActiveRemoteLabel(readiness.remoteSelected);
-  const { downloadProgress } = useModelManagementContext();
   const [polishLabel, setPolishLabel] = useState("Off");
   const [tryOpen, setTryOpen] = useState(false);
   const [tryText, setTryText] = useState("");
@@ -62,8 +61,9 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const { history, totalCount, isLoading, loadError, refreshHistory } = useTranscriptionHistory({ limit: 500, includeTotalCount: true });
   const stats = useOverviewStats(history, totalCount);
   const model = settings?.current_model ?? "";
+  const modelProgress = useDownloadProgress((progress) => progress[model]);
   const engine = settings?.current_model_engine ?? "whisper";
-  const status = homeStatus({ model, engine, modelAvailable: readiness.selectedModelAvailable, canRecord: readiness.canRecord, remoteSelected: readiness.remoteSelected, remoteAvailable: readiness.remoteAvailable, remoteLabel, downloadProgress: downloadProgress[model] ?? null, licenseValid: readiness.licenseValid, licenseStatus: readiness.licenseStatus, hasMicrophonePermission: readiness.hasMicrophonePermission });
+  const status = homeStatus({ model, engine, modelAvailable: readiness.selectedModelAvailable, canRecord: readiness.canRecord, remoteSelected: readiness.remoteSelected, remoteAvailable: readiness.remoteAvailable, remoteLabel, downloadProgress: modelProgress ?? null, licenseValid: readiness.licenseValid, licenseStatus: readiness.licenseStatus, hasMicrophonePermission: readiness.hasMicrophonePermission });
   const caps = trigger.hotkey
     ? shortcutKeyCaps(trigger.hotkey, isMacOS ? "darwin" : "windows")
     : trigger.kbdLabel && trigger.kbdLabel !== "Not set" ? [trigger.kbdLabel] : [];

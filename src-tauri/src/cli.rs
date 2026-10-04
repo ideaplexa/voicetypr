@@ -445,12 +445,7 @@ async fn run_status(app: &tauri::AppHandle, args: StatusArgs) -> Result<(), Box<
 }
 
 async fn run_models(app: &tauri::AppHandle, args: OutputArgs) -> Result<(), Box<dyn Error>> {
-    let response = get_model_status(
-        app.state::<AsyncRwLock<WhisperManager>>(),
-        app.state::<ParakeetManager>(),
-        app.clone(),
-    )
-    .await?;
+    let response = get_model_status(app.clone()).await?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&response)?);

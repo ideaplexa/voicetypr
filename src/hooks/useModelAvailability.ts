@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useSettings } from "@/contexts/SettingsContext";
-import type { ModelInfo } from "@/types";
+import type { ModelStatusResponse } from "@/lib/model-status";
 import { createLogger } from "@/lib/logger";
+import { fetchModelStatus } from "@/lib/model-status";
 
 const log = createLogger("model-availability");
 export type RemoteAvailabilityStatus =
@@ -20,10 +21,6 @@ type RemoteAvailabilityStatusPayload =
   | "Offline"
   | "AuthFailed"
   | "SelfConnection";
-
-interface ModelStatusResponse {
-  models: ModelInfo[];
-}
 
 interface RecognitionAvailabilitySnapshot {
   whisper_available: boolean;
@@ -165,6 +162,12 @@ export function useModelAvailability() {
   const selectedModel = settings?.current_model;
   const [state, setState] = useState<ModelAvailabilityState>(DEFAULT_STATE);
   const refreshGenerationRef = useRef(0);
+  // Read through refs so checkModels (and the event listeners that call it) keep
+  // a stable identity when the selected model changes.
+  const selectedModelRef = useRef(selectedModel);
+  useEffect(() => {
+    selectedModelRef.current = selectedModel;
+  }, [selectedModel]);
   const latestAvailabilityRef = useRef<DerivedAvailabilityState>({
     hasModels: DEFAULT_STATE.hasModels,
     selectedModelAvailable: DEFAULT_STATE.selectedModelAvailable,
@@ -212,7 +215,7 @@ export function useModelAvailability() {
 
     try {
       const [status, availabilityResult] = await Promise.all([
-        invoke<ModelStatusResponse>("get_model_status"),
+        fetchModelStatus(),
         invoke<RecognitionAvailabilitySnapshot | null>("get_recognition_availability_snapshot"),
       ]);
 
@@ -221,7 +224,10 @@ export function useModelAvailability() {
       }
 
       const availability = availabilityResult ?? FALLBACK_AVAILABILITY;
-      const localSelectedModelAvailable = getLocalSelectedModelAvailability(status, selectedModel);
+      const localSelectedModelAvailable = getLocalSelectedModelAvailability(
+        status,
+        selectedModelRef.current,
+      );
       return applyCanonicalAvailability(availability, localSelectedModelAvailable);
     } catch (error) {
       log.error("Failed to check model availability:", error);
@@ -250,7 +256,7 @@ export function useModelAvailability() {
       }));
       return unresolved;
     }
-  }, [applyCanonicalAvailability, selectedModel]);
+  }, [applyCanonicalAvailability]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -258,7 +264,7 @@ export function useModelAvailability() {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [checkModels]);
+  }, [checkModels, selectedModel]);
 
   useEffect(() => {
     const handleFocus = () => {
@@ -306,7 +312,7 @@ export function useModelAvailability() {
       refreshGenerationRef.current += 1;
       applyCanonicalAvailability(
         event.payload as RecognitionAvailabilitySnapshot,
-        state.selectedModelAvailable,
+        latestAvailabilityRef.current.selectedModelAvailable,
       );
     });
 
@@ -323,16 +329,19 @@ export function useModelAvailability() {
         unsubs.forEach((unsub) => unsub());
       });
     };
-  }, [applyCanonicalAvailability, checkModels, state.selectedModelAvailable]);
+  }, [applyCanonicalAvailability, checkModels]);
 
-  return {
-    hasModels: state.hasModels,
-    selectedModelAvailable: state.selectedModelAvailable,
-    remoteSelected: state.remoteSelected,
-    remoteAvailable: state.remoteAvailable,
-    remoteStatus: state.remoteStatus,
-    remoteLastChecked: state.remoteLastChecked,
-    isChecking: state.isChecking,
-    checkModels,
-  };
+  return useMemo(
+    () => ({
+      hasModels: state.hasModels,
+      selectedModelAvailable: state.selectedModelAvailable,
+      remoteSelected: state.remoteSelected,
+      remoteAvailable: state.remoteAvailable,
+      remoteStatus: state.remoteStatus,
+      remoteLastChecked: state.remoteLastChecked,
+      isChecking: state.isChecking,
+      checkModels,
+    }),
+    [state, checkModels],
+  );
 }

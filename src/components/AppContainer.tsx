@@ -9,13 +9,17 @@ import { PrivacyConsentDialog } from "@/components/PrivacyConsentDialog";
 import { useReadiness } from "@/contexts/ReadinessContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useInAppRecordingHotkey } from "@/hooks/useInAppRecordingHotkey";
-import { useModelManagementContext } from "@/contexts/ModelManagementContext";
+import { useDownloadProgress, useModelManagementContext } from "@/contexts/ModelManagementContext";
 import { useModelAvailabilityContext } from "@/contexts/ModelAvailabilityContext";
 import { useAppBootstrap } from "@/components/app/useAppBootstrap";
 import { useAppEvents } from "@/components/app/useAppEvents";
 import { useOnboardingRecovery } from "@/components/app/useOnboardingRecovery";
 
 import type { SourceFilter } from "@/components/sections/models/types";
+
+const progressOf = (progress: Record<string, number>) => progress;
+const NO_PROGRESS: Record<string, number> = {};
+const noProgress = () => NO_PROGRESS;
 
 export function AppContainer() {
   const [{ activeSection, sourceFilter, settingsPane }, setNavigation] = useState<{
@@ -77,6 +81,9 @@ export function AppContainer() {
     forceShowOnboarding ||
     modelAvailability.hasModels === false,
   );
+  // Progress is only needed by onboarding; subscribing elsewhere would re-render
+  // this container on every tick.
+  const downloadProgress = useDownloadProgress(showOnboarding ? progressOf : noProgress);
 
   useOnboardingRecovery({
     forceShowOnboarding,
@@ -110,7 +117,7 @@ export function AppContainer() {
             refreshSettings();
             void modelAvailability.checkModels();
           }}
-          modelManagement={modelManagement}
+          modelManagement={{ ...modelManagement, downloadProgress }}
         />
       </AppErrorBoundary>
     );

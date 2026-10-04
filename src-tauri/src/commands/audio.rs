@@ -1605,21 +1605,8 @@ pub(crate) fn reconcile_transcription_history_entry(
     }
 }
 
-fn parse_history_key(key: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    chrono::DateTime::parse_from_rfc3339(key)
-        .ok()
-        .map(|timestamp| timestamp.with_timezone(&chrono::Utc))
-}
-
 pub(crate) fn page_history_keys(mut keys: Vec<String>, limit: usize) -> Vec<String> {
-    keys.sort_unstable_by(|a, b| match (parse_history_key(a), parse_history_key(b)) {
-        (Some(a_timestamp), Some(b_timestamp)) => {
-            b_timestamp.cmp(&a_timestamp).then_with(|| b.cmp(a))
-        }
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => b.cmp(a),
-    });
+    keys.sort_unstable_by(|a, b| crate::commands::history_index::compare_history_keys(a, b));
     keys.truncate(limit);
     keys
 }
@@ -7698,6 +7685,7 @@ pub async fn cleanup_old_transcriptions(app: AppHandle, days: Option<u32>) -> Re
             if let Ok(date) = chrono::DateTime::parse_from_rfc3339(&key) {
                 if date < cutoff_date {
                     store.delete(&key);
+                    crate::commands::history_index::note_removed(&app, &key);
                 }
             }
         }
@@ -7768,7 +7756,7 @@ async fn save_transcription_with_recording_internal(
 ) -> Option<Result<(), String>> {
     // De-dup guard: skip saving if the most recent entry matches the same text & model within a short window
     if let Ok(store) = app.store("transcriptions") {
-        let latest_key = page_history_keys(store.keys(), 1).into_iter().next();
+        let latest_key = latest_history_key(&app, &store);
 
         if let Some(key) = latest_key {
             if let Some(value) = store.get(&key) {
@@ -7830,6 +7818,7 @@ async fn save_transcription_with_recording_internal(
         }
         Some(Err(e)) => Some(Err(e)),
         Some(Ok(())) => {
+            crate::commands::history_index::note_added(&app, &timestamp);
             // Emit the new transcription data to frontend for append-only update
             let _ = emit_to_window(&app, "main", "transcription-added", transcription_data);
 
@@ -7907,6 +7896,7 @@ async fn save_failed_transcription_internal(
         }
         Some(Err(e)) => Some(Err(e)),
         Some(Ok(())) => {
+            crate::commands::history_index::note_added(app, &timestamp);
             // Emit the new transcription data to frontend
             let _ = emit_to_window(app, "main", "transcription-added", transcription_data);
 
@@ -7927,6 +7917,26 @@ async fn save_failed_transcription_internal(
     }
 }
 
+/// Newest history key via the managed index (falls back to a full sort when the
+/// index is not managed, e.g. in tests).
+fn history_page_keys(
+    app: &AppHandle,
+    store: &tauri_plugin_store::Store<tauri::Wry>,
+    limit: usize,
+) -> Vec<String> {
+    match app.try_state::<crate::commands::history_index::HistoryIndex>() {
+        Some(index) => index.page(store.length(), || store.keys(), limit),
+        None => page_history_keys(store.keys(), limit),
+    }
+}
+
+fn latest_history_key(
+    app: &AppHandle,
+    store: &tauri_plugin_store::Store<tauri::Wry>,
+) -> Option<String> {
+    history_page_keys(app, store, 1).into_iter().next()
+}
+
 #[tauri::command]
 pub async fn get_transcription_history(
     app: AppHandle,
@@ -7934,24 +7944,32 @@ pub async fn get_transcription_history(
 ) -> Result<Vec<serde_json::Value>, String> {
     let store = app.store("transcriptions").map_err(|e| e.to_string())?;
     let current_session_marker = current_retranscription_session_marker();
-
     let limit = limit.unwrap_or(50);
-    let keys = page_history_keys(store.keys(), limit);
 
-    let mut entries: Vec<serde_json::Value> = Vec::with_capacity(limit.min(keys.len()));
-    let mut pending_updates: Vec<(String, serde_json::Value)> = Vec::new();
+    // Store reads and reconciliation run off the async runtime.
+    let read_app = app.clone();
+    let read_store = store.clone();
+    let (entries, pending_updates) = tauri::async_runtime::spawn_blocking(move || {
+        let keys = history_page_keys(&read_app, &read_store, limit);
 
-    // Reconcile only the requested page; stale rows beyond this page are handled lazily.
-    for key in keys {
-        if let Some(value) = store.get(&key) {
-            let reconciled =
-                reconcile_transcription_history_entry(value.clone(), &current_session_marker);
-            if reconciled != value {
-                pending_updates.push((key, reconciled.clone()));
+        let mut entries: Vec<serde_json::Value> = Vec::with_capacity(limit.min(keys.len()));
+        let mut pending_updates: Vec<(String, serde_json::Value)> = Vec::new();
+
+        // Reconcile only the requested page; stale rows beyond this page are handled lazily.
+        for key in keys {
+            if let Some(value) = read_store.get(&key) {
+                let reconciled =
+                    reconcile_transcription_history_entry(value.clone(), &current_session_marker);
+                if reconciled != value {
+                    pending_updates.push((key, reconciled.clone()));
+                }
+                entries.push(reconciled);
             }
-            entries.push(reconciled);
         }
-    }
+        (entries, pending_updates)
+    })
+    .await
+    .map_err(|e| format!("History read task failed: {e}"))?;
 
     if !pending_updates.is_empty() {
         for (key, value) in pending_updates {
@@ -7978,7 +7996,7 @@ pub async fn get_transcription_history(
 #[tauri::command]
 pub async fn get_transcription_count(app: AppHandle) -> Result<usize, String> {
     let store = app.store("transcriptions").map_err(|e| e.to_string())?;
-    Ok(store.keys().len())
+    Ok(store.length())
 }
 
 #[tauri::command]
@@ -8608,6 +8626,7 @@ pub async fn delete_transcription_entry(app: AppHandle, timestamp: String) -> Re
 
     // Delete the entry
     store.delete(&timestamp);
+    crate::commands::history_index::note_removed(&app, &timestamp);
 
     // Save the store
     store
@@ -8641,6 +8660,7 @@ pub async fn clear_all_transcriptions(app: AppHandle) -> Result<(), String> {
     for key in keys {
         store.delete(&key);
     }
+    crate::commands::history_index::note_reset(&app);
 
     // Save the store
     store
@@ -8771,6 +8791,7 @@ pub async fn save_retranscription(
         .map(|map| apply_retranscription_status(map, status))?;
 
     store.set(&timestamp, transcription_data.clone());
+    crate::commands::history_index::note_added(&app, &timestamp);
 
     store
         .save()

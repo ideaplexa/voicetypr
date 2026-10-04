@@ -13,18 +13,77 @@ import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { formatPrimaryHotkeyLabel } from "@/lib/shortcut-display";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRecordingHotkey } from "./useRecordingHotkey";
 
 const log = createLogger("recording-settings");
 
+const METER_SEGMENTS = 24;
+
+/**
+ * Mic meter. Tells the backend it is mounted (so `audio-level` is emitted to the
+ * main window only while visible) and paints segments from rAF via DOM refs,
+ * never through React state, so a 60 Hz stream causes zero re-renders.
+ */
+export function MicLevelMeter() {
+  const meterRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let level = 0;
+    let frame = 0;
+    const paint = () => {
+      frame = 0;
+      const meter = meterRef.current;
+      if (!meter) return;
+      const lit = Math.round(level * METER_SEGMENTS);
+      meter.setAttribute("aria-valuenow", String(Math.round(level * 100)));
+      Array.from(meter.children).forEach((segment, index) => {
+        segment.classList.toggle("bg-sage", index < lit);
+        segment.classList.toggle("bg-muted", index >= lit);
+      });
+    };
+    void invoke("set_audio_meter_active", { active: true }).catch(() => undefined);
+    void listen<number | { level: number }>("audio-level", (event) => {
+      const raw = typeof event.payload === "number" ? event.payload : event.payload.level;
+      level = Math.max(0, Math.min(1, raw));
+      if (!frame) frame = requestAnimationFrame(paint);
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (frame) cancelAnimationFrame(frame);
+      unlisten?.();
+      void invoke("set_audio_meter_active", { active: false }).catch(() => undefined);
+    };
+  }, []);
+  return (
+    <div
+      ref={meterRef}
+      className="mt-3 flex h-[18px] items-center gap-[3px]"
+      role="meter"
+      aria-label="Microphone level"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={0}
+    >
+      {Array.from({ length: METER_SEGMENTS }, (_, index) => (
+        <span key={index} className="h-2 flex-1 rounded-sm bg-muted" />
+      ))}
+    </div>
+  );
+}
+
 export function CaptureControlsCard() {
   const { settings } = useSettings();
   const canAutoInsert = useCanAutoInsert();
   const [recording, setRecording] = useState(false);
-  const [level, setLevel] = useState(0);
   useEffect(() => {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
@@ -36,17 +95,7 @@ export function CaptureControlsCard() {
     void listen<{ state: string }>("recording-state-changed", (event) => {
       if (!disposed) {
         setRecording(event.payload.state === "recording");
-        if (event.payload.state !== "recording") setLevel(0);
       }
-    })
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else unlisteners.push(unlisten);
-      })
-      .catch(() => undefined);
-    void listen<number | { level: number }>("audio-level", (event) => {
-      const raw = typeof event.payload === "number" ? event.payload : event.payload.level;
-      if (!disposed) setLevel(Math.max(0, Math.min(1, raw)));
     })
       .then((unlisten) => {
         if (disposed) unlisten();
@@ -199,21 +248,7 @@ export function CaptureControlsCard() {
           />
         </div>
         {recording ? (
-          <div
-            className="mt-3 flex h-[18px] items-center gap-[3px]"
-            role="meter"
-            aria-label="Microphone level"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(level * 100)}
-          >
-            {Array.from({ length: 24 }, (_, index) => (
-              <span
-                key={index}
-                className={`h-2 flex-1 rounded-sm ${index < Math.round(level * 24) ? "bg-sage" : "bg-muted"}`}
-              />
-            ))}
-          </div>
+          <MicLevelMeter />
         ) : null}
         <p className="mt-3 text-xs text-muted-foreground">
           Speak to test — start a dictation to see the level.

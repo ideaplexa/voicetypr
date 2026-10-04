@@ -216,11 +216,14 @@ describe("Recording screen", () => {
     await act(async () => {
       emitMockEvent("audio-level", 0.42);
     });
-    expect(meter).toHaveAttribute("aria-valuenow", "42");
+    // Painted from requestAnimationFrame, not React state.
+    await waitFor(() => expect(meter).toHaveAttribute("aria-valuenow", "42"));
+    expect(invoke).toHaveBeenCalledWith("set_audio_meter_active", { active: true });
     await act(async () => {
       emitMockEvent("recording-state-changed", { state: "idle" });
     });
     expect(screen.queryByRole("meter", { name: "Microphone level" })).not.toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith("set_audio_meter_active", { active: false });
   });
 
   it("hides pill position and detail when visibility is never", () => {
