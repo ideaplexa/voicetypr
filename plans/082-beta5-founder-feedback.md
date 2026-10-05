@@ -97,6 +97,22 @@ Board: `design/voicetypr-2.1.pen` "Beta.5 · Where should the app open?". Export
   - "Pro" as plain text with the licence icon, not a button.
   - Right side: the version, plus an update-check icon that spins while checking, becomes a download badge when an update exists, and opens the install dialog.
 
+- **Placement rule (founder, 2026-10-05): how often a thing changes decides where it lives.**
+  - Daily things live in the main pages:
+    - shortcut, Press/Hold mode and mic on Recording (plus the Home hero, island peek and tray)
+    - engine, language and streaming on Transcription
+    - style on Polish
+    - words on Dictionary
+  - Set-once things live in Settings.
+- **Settings, regrouped (approved; board `design/exports/beta5/QJsu7.png`): 9 → 7 panes.**
+  - **General:** Appearance, Open at login, Updates (version + Check now, auto-install, channel), Privacy (the one sharing switch + "What's shared").
+  - **App shortcuts:** renamed from Shortcuts; extra app actions only, since the dictation shortcut lives on Recording.
+  - **Storage.**
+  - **Advanced:** Network sharing, CLI & API, Troubleshooting.
+  - **Account:** License.
+  - The About & updates and Privacy panes are removed. Help and What's new live on the Help page; version and update check live in the sidebar footer.
+  - Rows are separated by hairlines with small section labels and no outer card border.
+
 ## C. Design (Opus 5.5 in Pencil, founder approves before building)
 
 1. **Sidebar footer → slim status bar:**
