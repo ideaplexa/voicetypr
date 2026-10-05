@@ -233,6 +233,23 @@ Run: debug build, Parakeet v3, 15 back-to-back takes, from `.tmp/e2e/2026-10-04T
   2. Keep the panel ordered in, invisible and click-through, when idle (as the "always" mode does), so the show is just a repaint (target ~15 ms).
   3. Run a 40-take soak plus `leaks` and `vmmap` on the main process to find the RSS growth.
 
+### Validation of the next island steps (research, 2026-10-05)
+
+1. **Pre-create the hidden pill window** shortly after startup, on the main thread, with `visible(false)`. This is the common overlay pattern. The cost is one idle webview (keep it static while hidden).
+   - On WebView2, `hide()` may not idle the engine: consider `put_IsVisible(false)` and `TrySuspend`.
+2. **Ordered-in at alpha 0 instead of `orderOut`.** HUD apps use this to avoid WKWebView occlusion throttling, which likely explains most of the 49 ms warm show.
+   - Not an Apple-documented recipe, so **A/B-measure hidden vs alpha-0 first-paint latency on real hardware before adopting it**.
+   - If adopted: alpha 0 plus `ignoresMouseEvents`, and the collection behaviour CanJoinAllSpaces | FullScreenAuxiliary | Stationary | IgnoresCycle.
+   - Keep content protection.
+   - Windows: a layered alpha-0 window with `WS_EX_TRANSPARENT`.
+   - Spaces, Stage Manager and full-screen behaviour need a smoke test.
+3. **Memory** (+2.4 MB per take):
+   - Check `vmmap --summary` before and after 20 dictations to separate allocator plateau from unbounded growth.
+   - `heap -sortBySize` and `leaks --groupByType`, with MallocStackLogging and `malloc_history`.
+   - Instruments Allocations with Mark Generation per dictation.
+   - dhat-rs if the growth is in the Rust heap.
+   - Eliminate candidates one at a time: TranscriberCache, the store, the pill webview.
+
 ### F. Audit result (2026-10-04, static; React Doctor local-only: 64 warnings, 11 perf)
 
 Ranked:
