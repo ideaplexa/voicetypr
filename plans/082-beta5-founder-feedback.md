@@ -84,6 +84,19 @@ Order:
      - Optional later: a second "slim" installer using `embedBootstrapper`.
    - macOS is already lean (main binary 60 MB, Parakeet sidecar 18 MB); no change.
 
+## C0. Founder design decisions (2026-10-05)
+
+Board: `design/voicetypr-2.1.pen` "Beta.5 · Where should the app open?". Export: `design/exports/beta5/DmqDy.png`.
+
+- **Home stays, as a true overview (option B):**
+  - The big "Press ⌥ Space" hero with the setup chips. Remove "Try a test dictation" here; it's in onboarding.
+  - **Needs you:** kept recordings with Retry, update ready with Install, setup problems. Shown only when there's something.
+  - **Get more out of Voicetypr:** a couple of contextual tips, e.g. turn on Polish, teach it your words.
+  - Recent and This week are removed (History and Insights already hold them).
+- **Sidebar footer → status bar** (approved):
+  - "Pro" as plain text with the licence icon, not a button.
+  - Right side: the version, plus an update-check icon that spins while checking, becomes a download badge when an update exists, and opens the install dialog.
+
 ## C. Design (Opus 5.5 in Pencil, founder approves before building)
 
 1. **Sidebar footer → slim status bar:**
