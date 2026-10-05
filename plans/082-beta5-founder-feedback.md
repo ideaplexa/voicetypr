@@ -124,6 +124,13 @@ Board: `design/voicetypr-2.1.pen` "Beta.5 · Where should the app open?". Export
     - Otherwise it's greyed out with a "turn on Real-time words" hint.
     - Off means a compact island, with faster final text still.
 
+- **Island polish (approved; board `design/exports/beta5/woACk.png`):**
+  - Listening in three zones: icon left, waveform centred and filling the middle, timer right.
+  - Pasted centred: check, "Pasted" and the word count grouped in the middle, icon anchoring the left.
+  - Timed cards: the card outline drains as the countdown (replaces the line).
+  - Start details: Compact / Smart (default; the "first 5" rule is dropped) / Expanded.
+  - The transcribing and Polish animations will be prototyped live (motion) before building.
+
 ## C. Design (Opus 5.5 in Pencil, founder approves before building)
 
 1. **Sidebar footer → slim status bar:**
