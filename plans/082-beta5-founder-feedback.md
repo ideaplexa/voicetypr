@@ -113,6 +113,17 @@ Board: `design/voicetypr-2.1.pen` "Beta.5 · Where should the app open?". Export
   - The About & updates and Privacy panes are removed. Help and What's new live on the Help page; version and update check live in the sidebar footer.
   - Rows are separated by hairlines with small section labels and no outer card border.
 
+- **Transcription, per-model options (approved; board `design/exports/beta5/LiuA2.png`).**
+  - The selected model expands in place:
+    - Language: a picker, or an "English only" tag.
+    - Real-time words (streaming): shown only on models that stream.
+    - Cleanup and formatting (paragraphs at long pauses, remove filler words): shown only where they apply, with per-model defaults tuned to what each model already does.
+  - The bottom Spoken language / Live preview cards are removed.
+  - **Recording → Island → "Show live words while you talk"** depends on streaming:
+    - When the model streams, it's active and the island grows to show the words.
+    - Otherwise it's greyed out with a "turn on Real-time words" hint.
+    - Off means a compact island, with faster final text still.
+
 ## C. Design (Opus 5.5 in Pencil, founder approves before building)
 
 1. **Sidebar footer → slim status bar:**
