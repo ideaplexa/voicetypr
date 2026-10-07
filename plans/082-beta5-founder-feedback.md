@@ -26,6 +26,18 @@ Order:
 4. G1–G3.
 5. Prove it with before/after numbers plus a cua-driver screenshot pass of every state (debug build with `VOICETYPR_E2E_CAPTURE_PILL`).
 
+### Island track: audio level looks quiet at normal voice (founder, 2026-10-07)
+
+- **Cause:** the wave uses `sqrt(peak)` (`pill/level.rs:54`, `audio/level_meter.rs`), which is close to a linear amplitude. Normal speech peaks at 5–15 % of full scale, so the bars reach only about 25–40 %.
+- **Fix (display only):**
+  - Map the level on a speech-tuned dB scale (roughly −50 dB → 0, −12 dB → 1, with a soft knee).
+  - Add a gentle display auto-gain: the reference follows the take's recent peak over a few seconds, with a floor so silence stays flat.
+  - Applies to the island and the Recording meter.
+- **Capture is unaffected:** recordings are normalised before transcription.
+- **Experiment, measured on real speech before deciding:** macOS voice-processing input (AGC + noise suppression) for quiet or far-field speech.
+  - It may change audio quality and duck other audio. Compare WER and loudness on the same real clips.
+  - Windows has an equivalent communications/AGC mode.
+
 ## A. Bugs (no decisions needed)
 
 1. **Stale "mic sent silence" card after a good take.**
