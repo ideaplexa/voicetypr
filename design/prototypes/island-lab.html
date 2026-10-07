@@ -103,6 +103,13 @@ h1{margin:0;font-size:28px;font-weight:600;letter-spacing:-.02em}
 .stage[data-anchor="top"] .hold,.stage[data-anchor="top"] .drain.under{bottom:auto;top:4px}
 .stage[data-anchor="top"] .card{transform-origin:50% 0;align-self:start}
 .stage[data-anchor="top"][data-platform="win"] .card{transform-origin:100% 0}
+@property --wa{syntax:"<angle>";inherits:false;initial-value:0deg}
+.island .ring{position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;opacity:0;transition:opacity .25s ease;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;z-index:3}
+.island[data-wait="p-beam"] .ring{opacity:1;background:conic-gradient(from var(--wa),transparent 0 72%,rgba(167,139,250,.0) 72%,rgba(196,181,253,.95) 86%,rgba(143,209,168,.9) 92%,transparent 96%);animation:waitspin 1.9s linear infinite}
+.island[data-wait="p-glow"] .ring{opacity:.95;padding:1.6px;background:conic-gradient(from var(--wa),#a78bfa,#60a5fa,#8fd1a8,#f2b35b,#a78bfa);animation:waitspin 3.2s linear infinite;filter:saturate(.85)}
+.island[data-wait="p-glow"]{box-shadow:inset 0 0 14px rgba(167,139,250,.22),0 12px 34px rgba(0,0,0,.30)}
+@keyframes waitspin{to{--wa:360deg}}
+@media (prefers-reduced-motion:reduce){.island .ring{animation:none!important}}
 .island.amber{box-shadow:inset 0 0 0 1px rgba(242,179,91,.66),0 12px 34px rgba(0,0,0,.30)}
 .island.red{box-shadow:inset 0 0 0 1px rgba(242,139,122,.66),0 12px 34px rgba(0,0,0,.30);background:#24151A}
 .ghost,.ghost *{pointer-events:none!important}
@@ -330,6 +337,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
             <div class="dothit" id="dotHit" aria-hidden="true"></div>
             <div class="island" id="island">
               <i class="core" id="core" aria-hidden="true"></i>
+              <i class="ring" id="waitRing" aria-hidden="true"></i>
               <div class="appico" id="appico" aria-hidden="true"></div>
               <i class="aibadge" id="aiBadge" aria-hidden="true"></i>
               <canvas class="glyph" id="glyph" width="520" height="48" aria-hidden="true"></canvas>
@@ -377,6 +385,8 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
         <div class="vrow" style="margin:0"><span>Polish</span><div class="btns sm" id="polish"><button class="b" type="button" data-p="on" aria-pressed="true">On</button><button class="b" type="button" data-p="off" aria-pressed="false">Off (raw)</button></div></div>
         <div class="vrow" style="margin:0"><span>Live words</span><div class="btns sm" id="preview"><button class="b" type="button" data-v="on" aria-pressed="true">On</button><button class="b" type="button" data-v="off" aria-pressed="false">Off</button></div></div>
         <div class="vrow" style="margin:0"><span>Start card</span><div class="btns sm" id="startCard"><button class="b" type="button" data-v="always" aria-pressed="false">Always</button><button class="b" type="button" data-v="changed" aria-pressed="true">When changed</button><button class="b" type="button" data-v="never" aria-pressed="false">Never</button></div></div>
+        <div class="vrow" style="margin:0"><span>Transcribing look</span><div class="btns sm" id="waitT"><button class="b" type="button" data-v="spin" aria-pressed="true">Spinner (today)</button><button class="b" type="button" data-v="ring" aria-pressed="false">Voice ring</button><button class="b" type="button" data-v="ripple" aria-pressed="false">Ripple</button><button class="b" type="button" data-v="caret" aria-pressed="false">Caret</button></div></div>
+        <div class="vrow" style="margin:0"><span>Polishing look</span><div class="btns sm" id="waitP"><button class="b" type="button" data-v="spin" aria-pressed="true">Spinner (today)</button><button class="b" type="button" data-v="beam" aria-pressed="false">Border beam</button><button class="b" type="button" data-v="glow" aria-pressed="false">Edge glow</button><button class="b" type="button" data-v="sparkle" aria-pressed="false">Sparkle</button></div></div>
         <div class="vrow" style="margin:0"><span>First run</span><div class="btns sm" id="firstRun"><button class="b" type="button" data-v="on" aria-pressed="false">On</button><button class="b" type="button" data-v="off" aria-pressed="true">Off</button></div></div>
         <div class="vrow" style="margin:0"><span>2nd engine configured</span><div class="btns sm" id="engine2"><button class="b" type="button" data-v="on" aria-pressed="false">On</button><button class="b" type="button" data-v="off" aria-pressed="true">Off</button></div></div>
         <div class="vrow" style="margin:0"><span>Take</span><div class="btns sm" id="take"><button class="b" type="button" data-v="short" aria-pressed="true">Short</button><button class="b" type="button" data-v="long" aria-pressed="false">Long (m:ss)</button></div></div>
@@ -1050,6 +1060,7 @@ function pinShared() {
 // ---------- glyph model: wave → arc → check / clipboard / ring-with-! ----------
 const G0 = () => ({kind: "spin", spin: "white", spinT0: -9, tint: "amber", arcTo: 0, arcP: 0, endP: 0, alpha: 0, alphaTo: 0, micP: 0, micTo: 0, flash: 0, inT: 0, spinA: 0, reopen: 0, reopenT0: 0, a0: -Math.PI / 2, len0: 0, col0: null});
 const G = G0();
+const WAIT = {t: "spin", p: "spin"}; // the transcribing / polishing looks being compared (beta.5)
 const COL = {amber: "#F2B35B", red: "#F28B7A", sage: "#8FD1A8", white: "rgba(255,255,255,.95)"};
 const RGB = {amber: [242, 179, 91, 1], red: [242, 139, 122, 1], sage: [143, 209, 168, 1], white: [255, 255, 255, .95]};
 const mixCol = (a, b, t) => `rgba(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)},${(a[3] + (b[3] - a[3]) * t).toFixed(3)})`;
@@ -1141,10 +1152,42 @@ function drawMark(k, stroke, col) { // the tick of the check, or the "!" of the 
   if (k === "check") { g.lineWidth = 1.8; g.beginPath(); const Q = [[cx - 3.2, cy + .2], [cx - 1, cy + 2.6], [cx + 3.4, cy - 2.4]], L1 = Math.hypot(2.2, 2.4), L2 = Math.hypot(4.4, 5), d = (L1 + L2) * stroke; g.moveTo(...Q[0]); if (d <= L1) g.lineTo(Q[0][0] + 2.2 * d / L1, Q[0][1] + 2.4 * d / L1); else { g.lineTo(...Q[1]); const r = (d - L1) / L2; g.lineTo(Q[1][0] + 4.4 * r, Q[1][1] - 5 * r); } g.stroke(); }
   if (k === "bang") { g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy - 3.8); g.lineTo(cx, cy - 3.8 + 4.4 * stroke); g.stroke(); if (stroke > .8) { g.fillStyle = col; g.beginPath(); g.arc(cx, cy + 3.3, 1.15, 0, TAU); g.fill(); } }
 }
+function drawSpark(x, y, r, rot, col) { // a four-point star
+  g.save(); g.translate(x, y); g.rotate(rot); g.fillStyle = col; g.beginPath();
+  g.moveTo(r, 0); for (let i = 1; i <= 4; i++) { const a = i * TAU / 4, c = a - TAU / 8; g.quadraticCurveTo(Math.cos(c) * r * .18, Math.sin(c) * r * .18, Math.cos(a) * r, Math.sin(a) * r); }
+  g.closePath(); g.fill(); g.restore();
+}
+function drawWait(cx, cy, track) { // the look while transcribing (white) or polishing (sage)
+  const polish = G.spin === "sage", look = polish ? WAIT.p : WAIT.t, t = wT;
+  const isl = document.getElementById("island"), tag = look === "spin" ? "" : (polish ? "p-" : "t-") + look;
+  if (isl.dataset.wait !== tag) isl.dataset.wait = tag;
+  if (look === "spin") { track(); g.strokeStyle = spinCol(); g.beginPath(); g.arc(cx, cy, 7, G.spinA, G.spinA + 1.9); g.stroke(); return; }
+  if (look === "ring") { // the voice bars wrap into a ring that keeps breathing
+    g.lineWidth = 1.6; g.lineCap = "round";
+    for (let i = 0; i < 14; i++) { const a = i * TAU / 14 - Math.PI / 2, wv = .5 + .5 * Math.sin(t * 7 - i * .9), len = 1.6 + 3.2 * wv;
+      g.strokeStyle = `rgba(255,255,255,${(.35 + .6 * wv).toFixed(3)})`; g.beginPath(); g.moveTo(cx + Math.cos(a) * 4.6, cy + Math.sin(a) * 4.6); g.lineTo(cx + Math.cos(a) * (4.6 + len), cy + Math.sin(a) * (4.6 + len)); g.stroke(); }
+    return;
+  }
+  if (look === "ripple") { // soft rings leave the centre: sound turning into words
+    g.lineWidth = 1.4; for (let j = 0; j < 3; j++) { const q = ((t * .9 + j / 3) % 1); g.strokeStyle = `rgba(255,255,255,${(.85 * (1 - q)).toFixed(3)})`; g.beginPath(); g.arc(cx, cy, 2 + 8 * q, 0, TAU); g.stroke(); }
+    g.fillStyle = "rgba(255,255,255,.9)"; g.beginPath(); g.arc(cx, cy, 1.8, 0, TAU); g.fill(); return;
+  }
+  if (look === "caret") { // a text caret with a line being written beside it
+    const on = Math.floor(t * 1.6) % 2 === 0, w = 3 + 9 * ((t * .7) % 1);
+    g.fillStyle = "rgba(255,255,255,.35)"; g.beginPath(); g.roundRect(cx - 7, cy + 4, w, 1.6, .8); g.fill();
+    if (on) { g.fillStyle = "rgba(255,255,255,.95)"; g.fillRect(cx - 7 + w + 1, cy - 6, 1.6, 12); } return;
+  }
+  // polishing: beam and glow run on the island's outline; the glyph keeps a calm star
+  const tw = look === "sparkle" ? .5 + .5 * Math.sin(t * 3.4) : .35;
+  drawSpark(cx, cy, look === "sparkle" ? 6 + 1.2 * tw : 5.5, look === "sparkle" ? t * 1.2 : 0, `rgba(196,181,253,${(.75 + .25 * tw).toFixed(3)})`);
+  if (look === "sparkle") { const s1 = .5 + .5 * Math.sin(t * 3.4 + 2), s2 = .5 + .5 * Math.sin(t * 3.4 + 4); g.globalAlpha *= 1; drawSpark(cx + 7, cy - 5, 2.4 * s1, 0, `rgba(147,197,253,${s1.toFixed(3)})`); drawSpark(cx - 6, cy + 5, 2 * s2, 0, `rgba(143,209,168,${s2.toFixed(3)})`); }
+}
 function drawGlyph() {
   const w = 260, h = 24, cx = GCX, cy = GCY;
   g.setTransform(2, 0, 0, 2, 0, 0); g.clearRect(0, 0, w, h);
-  const A = clamp(G.alpha, 0, 1); if (A < .01) return;
+  const A = clamp(G.alpha, 0, 1);
+  if (!(G.kind === "spin" && G.arcP > .3 && A > .3)) { const isl = document.getElementById("island"); if (isl.dataset.wait) isl.dataset.wait = ""; }
+  if (A < .01) return;
   const arc = clamp(G.arcP, 0, 1), mic = clamp(G.micP, 0, 1), ba = A * Math.pow(1 - arc, 3) * (1 - mic); // the bars are gone before they reach the arc
   if (ba > .01 && bars.length && warmA < .99) drawStrip(ba * (1 - warmA), arc); // getting ready: the wave waits behind the words
   const disc = (al, rgb) => { g.globalAlpha = al; g.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},.16)`; g.beginPath(); g.arc(cx, cy, 10, 0, TAU); g.fill(); }; // the tinted status disc, for recognition at a glance
@@ -1161,7 +1204,7 @@ function drawGlyph() {
     } else if (G.flash > 0) { // only the arc that was spinning flashes amber; the ring then closes from that same arc
       track(); g.strokeStyle = COL.amber; g.beginPath(); if (G.len0 > 0) g.arc(cx, cy, 7, G.a0, G.a0 + G.len0); else g.arc(cx, cy, 7, 0, TAU); g.stroke();
     } else if (k === "spin") {
-      track(); g.strokeStyle = spinCol(); g.beginPath(); g.arc(cx, cy, 7, G.spinA, G.spinA + 1.9); g.stroke();
+      drawWait(cx, cy, track);
     } else if (k === "quiet") { // no speech heard: the arc closes into a dashed ring, a neutral "nothing came through"
       g.strokeStyle = `rgba(255,255,255,${(.62 * clamp(G.endP / .25, 0, 1) + .2).toFixed(3)})`; g.setLineDash([2.6, 2.4]); g.beginPath(); g.arc(cx, cy, 7, G.a0, G.a0 + (G.len0 + (TAU - G.len0) * ring)); g.stroke(); g.setLineDash([]);
     } else if (k === "clip") {
@@ -2342,6 +2385,12 @@ if (q && byId(q)) {
   view.wall = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   resetWorld(freeSetup()); applyView(); fire("update"); settle(); buildStrip(); snapRender();
 }
+for (const [id, key] of [["waitT", "t"], ["waitP", "p"]]) {
+  const box = document.getElementById(id);
+  box.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; WAIT[key] = b.dataset.v; for (const x of box.querySelectorAll("button")) x.setAttribute("aria-pressed", String(x === b)); });
+}
+window.__labWait = WAIT;
 requestAnimationFrame(frame);
 })();
+
 </script>
