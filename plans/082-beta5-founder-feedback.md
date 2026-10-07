@@ -131,6 +131,17 @@ Board: `design/voicetypr-2.1.pen` "Beta.5 · Where should the app open?". Export
   - Start details: Compact / Smart (default; the "first 5" rule is dropped) / Expanded.
   - The transcribing and Polish animations will be prototyped live (motion) before building.
 
+- **Menu bar / tray, lean (founder approved 2026-10-07):**
+  - Keep:
+    - status line (Ready / Recording · 0:07 / problem + Fix…)
+    - Start Dictation
+    - kept recording Retry/Discard (only when present)
+    - Polish ▸, Engine ▸, Microphone ▸, Language ▸
+    - Copy last dictation
+    - Open Voicetypr, Settings…, Check for updates…
+    - Quit
+  - **Remove:** Live preview, Mode, Transcribe a file, Recent ▸, Paste last, Insights, Help.
+
 ## C. Design (Opus 5.5 in Pencil, founder approves before building)
 
 1. **Sidebar footer → slim status bar:**
