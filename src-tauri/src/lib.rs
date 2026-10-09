@@ -2352,7 +2352,7 @@ mod ai_settings_migration_tests {
         let mut values = values(
             "google",
             "gemini-2.5-flash",
-            json!({ "google": "gemini-3-flash-preview", "gemini": "gemini-2.5-flash" }),
+            json!({ "google": "gemini-3.8-flash", "gemini": "gemini-2.5-flash" }),
         );
 
         assert!(migrate_ai_settings_values(&mut values));

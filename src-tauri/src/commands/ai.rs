@@ -341,7 +341,7 @@ async fn run_openai_chat_probe(
         .polish(request, tokio_util::sync::CancellationToken::new())
         .await
         .map(|_| ())
-        .map_err(|error| match error {
+        .map_err(|failure| match failure.error {
             AiProviderError::InvalidApiKey => {
                 "Invalid API key (the endpoint rejected the credentials).".to_string()
             }
@@ -717,13 +717,13 @@ pub async fn validate_ai_api_key(
         .polish(request, tokio_util::sync::CancellationToken::new())
         .await
         .map(|_| ())
-        .map_err(|error| {
+        .map_err(|failure| {
             log::warn!(
                 "AI provider validation failed: provider={} category={}",
                 provider,
-                user_facing_message(&error)
+                user_facing_message(&failure.error)
             );
-            user_facing_message(&error).to_string()
+            user_facing_message(&failure.error).to_string()
         })
 }
 
@@ -1405,6 +1405,36 @@ fn executor_for_provider(
     ))
 }
 
+/// After a fast-tier refusal (whether or not the standard retry then
+/// succeeded): persist fast=false for the provider and emit
+/// `ai-fast-mode-unavailable` so the UI drops the toggle.
+fn disable_native_fast_mode_after_refusal(app: &tauri::AppHandle, provider: &str, model: &str) {
+    let persisted = app
+        .store("settings")
+        .map_err(|error| error.to_string())
+        .and_then(|store| {
+            crate::ai::native_settings::persist_native_fast_mode_disabled(&store, provider)
+        });
+    if persisted.is_err() {
+        log::warn!("Failed to persist native fast mode disable");
+        return;
+    }
+    log::warn!(
+        "AI fast mode unavailable for provider={} model={}; persisted fast mode off",
+        provider,
+        model
+    );
+    if let Err(error) = app.emit(
+        "ai-fast-mode-unavailable",
+        json!({
+            "provider": provider,
+            "model": model,
+        }),
+    ) {
+        log::warn!("Failed to emit ai-fast-mode-unavailable: {error}");
+    }
+}
+
 async fn polish_text_with_prompt_result_typed(
     app: &tauri::AppHandle,
     text: &str,
@@ -1468,44 +1498,26 @@ async fn polish_text_with_prompt_result_typed(
         prompt,
         timeout_ms,
     };
+
     let result = executor
         .polish(request, tokio_util::sync::CancellationToken::new())
         .await
-        .map_err(|error| AiPolishAttemptError {
-            error,
-            provider_id: runtime_provider,
-            model_id: model,
+        .map_err(|failure| {
+            // The fast-tier refusal is already known even when the standard
+            // retry fails: pin fast mode off and tell the UI either way.
+            if failure.fast_mode_fallback {
+                disable_native_fast_mode_after_refusal(app, &runtime_provider, &model);
+            }
+            AiPolishAttemptError {
+                error: failure.error,
+                provider_id: runtime_provider,
+                model_id: model,
+            }
         })?;
     if result.fast_mode_fallback {
         // The provider refused the fast tier: pin fast mode off for this
         // provider and tell the UI, which surfaces the disabled toggle.
-        let persisted = app
-            .store("settings")
-            .map_err(|error| error.to_string())
-            .and_then(|store| {
-                crate::ai::native_settings::persist_native_fast_mode_disabled(
-                    &store,
-                    &result.provider_id,
-                )
-            });
-        if persisted.is_err() {
-            log::warn!("Failed to persist native fast mode disable");
-            return Ok(result);
-        }
-        log::warn!(
-            "AI fast mode unavailable for provider={} model={}; persisted fast mode off",
-            result.provider_id,
-            result.model_id
-        );
-        if let Err(error) = app.emit(
-            "ai-fast-mode-unavailable",
-            json!({
-                "provider": result.provider_id,
-                "model": result.model_id,
-            }),
-        ) {
-            log::warn!("Failed to emit ai-fast-mode-unavailable: {error}");
-        }
+        disable_native_fast_mode_after_refusal(app, &result.provider_id, &result.model_id);
     }
     log::info!(
         "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
@@ -1791,7 +1803,7 @@ mod tests {
             "gemini-2.5-flash"
         ));
         assert!(!selection_meets_model_requirement("openai", ""));
-        assert!(selection_meets_model_requirement("openai", "gpt-5-nano"));
+        assert!(selection_meets_model_requirement("openai", "gpt-6-luna"));
         assert!(!selection_meets_model_requirement("unknown-provider", ""));
     }
 
@@ -1933,20 +1945,20 @@ mod tests {
     fn test_provider_models_are_contract_backed() {
         let openai_models = provider_models("openai");
         assert!(openai_models.len() >= 2);
-        assert!(openai_models.iter().any(|m| m.id == "gpt-5-nano"));
-        assert!(openai_models.iter().any(|m| m.id == "gpt-5-mini"));
+        assert!(openai_models.iter().any(|m| m.id == "gpt-6-luna"));
+        assert!(openai_models.iter().any(|m| m.id == "gpt-5.6-luna"));
 
         let gemini_models = provider_models("gemini");
         assert!(!gemini_models.is_empty());
-        assert!(gemini_models.iter().any(|m| m.id == "gemini-2.5-flash"));
         assert!(gemini_models
             .iter()
-            .any(|m| m.id == "gemini-2.5-flash-lite"));
+            .any(|m| m.id == "gemini-3.5-flash-lite"));
+        assert!(gemini_models.iter().any(|m| m.id == "gemini-3.8-flash"));
 
         let anthropic_models = provider_models("anthropic");
         assert!(!anthropic_models.is_empty());
-        assert!(anthropic_models.iter().any(|m| m.id == "claude-haiku-4-5"));
-        assert!(anthropic_models.iter().any(|m| m.id == "claude-sonnet-4-5"));
+        assert!(anthropic_models.iter().any(|m| m.id == "claude-haiku-5-5"));
+        assert!(anthropic_models.iter().any(|m| m.id == "claude-sonnet-5-5"));
 
         assert!(provider_models("custom").is_empty());
         assert!(provider_models("unknown").is_empty());
@@ -2003,12 +2015,12 @@ mod tests {
     fn remember_provider_model_preserves_explicit_cli_default_selection() {
         let mut models = HashMap::from([
             ("claude-code".to_string(), "sonnet".to_string()),
-            ("openai".to_string(), "gpt-5-nano".to_string()),
+            ("openai".to_string(), "gpt-6-luna".to_string()),
         ]);
 
         remember_provider_model(&mut models, "claude-code", "");
         assert_eq!(models.get("claude-code"), Some(&String::new()));
-        assert_eq!(models.get("openai"), Some(&"gpt-5-nano".to_string()));
+        assert_eq!(models.get("openai"), Some(&"gpt-6-luna".to_string()));
 
         remember_provider_model(&mut models, "openai", "");
         assert!(!models.contains_key("openai"));
