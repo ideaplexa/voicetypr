@@ -16,6 +16,12 @@ import {
   type ModelPickerGroup,
   type ModelPickerItem,
 } from "./agentCli";
+import {
+  DEFAULT_NATIVE_EFFORT,
+  isNativeProvider,
+  nativeEffortLevels,
+  resolveNativeEffort,
+} from "./nativeProvider";
 
 export const EMPTY_RECOMMENDED_ITEMS: ModelPickerItem[] = [];
 export const EMPTY_OTHER_ITEMS: ModelPickerItem[] = [];
@@ -63,6 +69,8 @@ export interface ProviderRowViewModel {
   reasoning: string;
   reasoningLevels: string[];
   fastModeEnabled: boolean;
+  /** Cloud rows: whether the selected model accepts a fast service tier. */
+  supportsFastMode: boolean;
 }
 
 export function toPickerItem(providerId: string, model: AIProviderModel): ModelPickerItem {
@@ -149,6 +157,15 @@ export function buildProviderRowViewModel(props: ProviderRowProps): ProviderRowV
           recommended: false,
         })
       : null);
+  // Cloud (native API key) rows resolve effort from the selected model's
+  // advertised levels; agent-CLI rows use the probed static levels instead.
+  const cloudReasoningLevels = agentCli
+    ? []
+    : nativeEffortLevels(selectedModelItem?.model.reasoningLevels);
+  const cloudReasoning = isNativeProvider(provider.id)
+    ? (resolveNativeEffort(aiSettings.reasoningByProvider[provider.id], cloudReasoningLevels) ??
+      DEFAULT_NATIVE_EFFORT)
+    : (aiSettings.reasoningByProvider[provider.id] ?? DEFAULT_NATIVE_EFFORT);
   const statusCopy = agentCli
     ? agentCliChecking
       ? "Checking installation…"
@@ -182,9 +199,14 @@ export function buildProviderRowViewModel(props: ProviderRowProps): ProviderRowV
     modelPickerGroups,
     selectedModelItem,
     statusCopy,
-    reasoning: aiSettings.reasoningByProvider[provider.id] ?? defaultAgentCliReasoning(provider.id),
-    reasoningLevels: agentProbe?.reasoningLevels ?? [],
+    reasoning: agentCli
+      ? (aiSettings.reasoningByProvider[provider.id] ?? defaultAgentCliReasoning(provider.id))
+      : cloudReasoning,
+    reasoningLevels: agentCli ? (agentProbe?.reasoningLevels ?? []) : cloudReasoningLevels,
     fastModeEnabled: aiSettings.fastModeByProvider[provider.id] ?? false,
+    supportsFastMode: agentCli
+      ? Boolean(agentProbe?.supportsFastMode)
+      : Boolean(selectedModelItem?.model.supportsFastMode),
   };
 }
 

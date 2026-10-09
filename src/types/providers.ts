@@ -10,6 +10,10 @@ export interface AIProviderModel {
   name: string;
   recommended: boolean;
   reasoning?: boolean;
+  /** Native effort levels this model supports; absent for agent-CLI models. */
+  reasoningLevels?: string[];
+  /** Whether this model accepts the provider's fast service tier. */
+  supportsFastMode?: boolean;
   contextWindow?: number | null;
   sourceProvider?: string | null;
   cliDefault?: boolean;

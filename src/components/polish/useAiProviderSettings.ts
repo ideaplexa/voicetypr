@@ -23,6 +23,8 @@ import {
   normalizeAISettings,
   type AISettingsResponse,
 } from "./agentCli";
+import { isNativeProvider } from "./nativeProvider";
+import { useNativeFastModeUnavailable } from "./useNativeFastModeUnavailable";
 
 const log = createLogger("enhancements");
 
@@ -371,6 +373,8 @@ export function useAiProviderSettings({
     };
   }, [settingsLoaded, aiSettings.provider, clearModels, onActiveProviderCleared]);
 
+  useNativeFastModeUnavailable(providers, setAISettings);
+
   const getDisplayModels = useCallback(
     (providerId: string): AIProviderModel[] => {
       const models = getModels(providerId);
@@ -620,8 +624,9 @@ export function useAiProviderSettings({
   };
 
   const handleSelectReasoning = async (providerId: string, reasoning: string) => {
+    const native = isNativeProvider(providerId);
     try {
-      await invoke("update_agent_cli_reasoning", {
+      await invoke(native ? "update_native_ai_reasoning" : "update_agent_cli_reasoning", {
         provider: providerId,
         reasoning,
       });
@@ -632,15 +637,18 @@ export function useAiProviderSettings({
           [providerId]: reasoning,
         },
       }));
-      toast.success("Thinking setting saved");
+      toast.success(native ? "Effort saved" : "Thinking setting saved");
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to save thinking setting"));
+      toast.error(
+        getErrorMessage(error, native ? "Failed to save effort" : "Failed to save thinking setting"),
+      );
     }
   };
 
   const handleToggleFastMode = async (providerId: string, enabled: boolean) => {
+    const native = isNativeProvider(providerId);
     try {
-      await invoke("update_agent_cli_fast_mode", {
+      await invoke(native ? "update_native_ai_fast_mode" : "update_agent_cli_fast_mode", {
         provider: providerId,
         enabled,
       });
