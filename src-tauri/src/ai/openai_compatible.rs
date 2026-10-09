@@ -42,7 +42,7 @@ impl OpenAiCompatibleRuntime {
                 { "role": "user", "content": request.input_text }
             ],
             "temperature": 0.2,
-            "max_tokens": output_token_cap_for_input(request.input_text.len()),
+            "max_tokens": output_token_cap_for_input(request.input_text.len(), 0, None),
             "stream": false
         });
         let mut builder = self.client.post(url).json(&payload);
@@ -71,6 +71,14 @@ impl OpenAiCompatibleRuntime {
 
         let value: Value = serde_json::from_str(&body)
             .map_err(|_| MappedAiProviderError::new(AiProviderError::BadResponse))?;
+        if matches!(
+            value
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str),
+            Some("length" | "max_tokens")
+        ) {
+            return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
+        }
         value
             .pointer("/choices/0/message/content")
             .and_then(Value::as_str)

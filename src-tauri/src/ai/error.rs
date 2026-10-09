@@ -39,6 +39,10 @@ pub enum AiProviderError {
 pub(crate) struct MappedAiProviderError {
     pub error: AiProviderError,
     pub retry_after: Option<Duration>,
+    /// The provider rejected the request specifically because of its fast
+    /// service tier. Only meaningful when the request used fast mode; callers
+    /// retry once at standard speed.
+    pub fast_mode_refused: bool,
 }
 
 impl MappedAiProviderError {
@@ -46,7 +50,36 @@ impl MappedAiProviderError {
         Self {
             error,
             retry_after: None,
+            fast_mode_refused: false,
         }
+    }
+
+    fn with_fast_mode_refused(mut self) -> Self {
+        self.fast_mode_refused = true;
+        self
+    }
+}
+
+/// Whether an HTTP rejection is a fast-tier refusal rather than a real request
+/// error: OpenAI 400s on an unknown `service_tier`, Anthropic 400/403s when the
+/// speed field is invalid or not permitted for the account, and 429/529 when
+/// the fast tier itself is rate-limited or over capacity. Auth failures never
+/// match, so a bad key cannot silently downgrade to standard speed.
+fn is_fast_mode_refusal(status: StatusCode, body: &str) -> bool {
+    let body = body.to_ascii_lowercase();
+    if body.contains("api_key_invalid")
+        || body.contains("api key")
+        || body.contains("authentication")
+        || body.contains("unauthorized")
+    {
+        return false;
+    }
+    match status.as_u16() {
+        400 | 403 => {
+            body.contains("service_tier") || body.contains("fast") || body.contains("speed")
+        }
+        429 | 529 => body.contains("fast") || body.contains("speed"),
+        _ => false,
     }
 }
 
@@ -87,10 +120,15 @@ pub(crate) fn map_http_status(
         500..=599 => AiProviderError::ServiceUnavailable,
         _ => AiProviderError::BadResponse,
     };
-    MappedAiProviderError {
+    let mut mapped = MappedAiProviderError {
         error,
         retry_after: headers.and_then(retry_after_from_headers),
+        fast_mode_refused: false,
+    };
+    if is_fast_mode_refusal(status, &body) {
+        mapped = mapped.with_fast_mode_refused();
     }
+    mapped
 }
 
 pub(crate) fn map_reqwest_error(error: &reqwest::Error) -> AiProviderError {
@@ -166,6 +204,34 @@ fn retry_after_from_headers(headers: &HeaderMap) -> Option<Duration> {
 mod tests {
     use super::{map_http_status, AiProviderError};
     use reqwest::StatusCode;
+
+    #[test]
+    fn fast_permission_refusal_is_distinct_from_auth_failure() {
+        assert!(
+            map_http_status(
+                StatusCode::FORBIDDEN,
+                Some("Account is not permitted to use fast mode"),
+                None,
+            )
+            .fast_mode_refused
+        );
+        assert!(
+            !map_http_status(
+                StatusCode::FORBIDDEN,
+                Some("Invalid API key for fast mode"),
+                None,
+            )
+            .fast_mode_refused
+        );
+        assert!(
+            !map_http_status(
+                StatusCode::UNAUTHORIZED,
+                Some("Unauthorized fast mode"),
+                None,
+            )
+            .fast_mode_refused
+        );
+    }
 
     #[test]
     fn request_timeout_maps_to_retryable_transient_error() {
