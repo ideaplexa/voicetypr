@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { createLogger } from "@/lib/logger";
 import { isMacOS } from "@/lib/platform";
 import { getTrayStatus, retryTrayCreation, type TrayStatus } from "@/lib/tray";
+import { useNativeFastModeUnavailableNotice } from "@/components/polish/useNativeFastModeUnavailable";
 
 const log = createLogger("app-shell");
 
@@ -34,6 +35,7 @@ export function AppShell({ activeSection, onSectionChange, ...sourceFilterProps 
   }, []);
 
   useTauriEvent<TrayStatus>("tray-status-changed", setTrayStatus);
+  useNativeFastModeUnavailableNotice();
 
   const handleRetryTray = async () => {
     setIsRetryingTray(true);
