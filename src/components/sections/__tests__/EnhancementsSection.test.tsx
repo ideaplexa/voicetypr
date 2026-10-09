@@ -2242,7 +2242,7 @@ describe("EnhancementsSection", () => {
       await waitFor(() => expect(fastSwitch).toBeChecked());
     });
 
-    it("turns Fast off and notifies when the backend reports it unavailable", async () => {
+    it("turns Fast off locally when the backend reports it unavailable", async () => {
       aiSettingsResponse = {
         ...enabledAISettings,
         fastModeByProvider: { openai: true },
@@ -2260,10 +2260,35 @@ describe("EnhancementsSection", () => {
 
       emitEvent("ai-fast-mode-unavailable", { provider: "openai", model: "gpt-5-mini" });
 
-      expect(toast.info).toHaveBeenCalledWith(
-        "Fast mode isn't available for OpenAI on your account — used standard speed and turned Fast off.",
-      );
       await waitFor(() => expect(fastSwitch).not.toBeChecked());
+    });
+
+    it("keeps selected-model effort and Fast visible when search matches another model", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        reasoningByProvider: { openai: "high" },
+        fastModeByProvider: { openai: true },
+      };
+      vi.mocked(hasApiKey).mockImplementation(async (providerId: string) => providerId === "openai");
+      const user = userEvent.setup();
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+      await within(providersPanel).findByRole("combobox", { name: "Effort for OpenAI" });
+
+      await user.type(
+        within(providersPanel).getByLabelText("Search cloud providers and models"),
+        "gpt-5-nano",
+      );
+
+      expect(
+        within(providersPanel).getByRole("combobox", { name: "Effort for OpenAI" }),
+      ).toHaveTextContent("High");
+      expect(
+        within(providersPanel).getByRole("switch", { name: /fast mode for openai/i }),
+      ).toBeChecked();
+      await user.click(within(providersPanel).getByRole("combobox", { name: "Model for OpenAI" }));
+      expect(await screen.findByRole("option", { name: /gpt-5 nano/i })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: /gpt-5 mini/i })).not.toBeInTheDocument();
     });
   });
 });

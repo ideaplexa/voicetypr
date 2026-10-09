@@ -157,11 +157,12 @@ export function buildProviderRowViewModel(props: ProviderRowProps): ProviderRowV
           recommended: false,
         })
       : null);
+  const selectedModelCapabilities = models.find((model) => model.id === selectedModel);
   // Cloud (native API key) rows resolve effort from the selected model's
   // advertised levels; agent-CLI rows use the probed static levels instead.
   const cloudReasoningLevels = agentCli
     ? []
-    : nativeEffortLevels(selectedModelItem?.model.reasoningLevels);
+    : nativeEffortLevels(selectedModelCapabilities?.reasoningLevels);
   const cloudReasoning = isNativeProvider(provider.id)
     ? (resolveNativeEffort(aiSettings.reasoningByProvider[provider.id], cloudReasoningLevels) ??
       DEFAULT_NATIVE_EFFORT)
@@ -206,7 +207,7 @@ export function buildProviderRowViewModel(props: ProviderRowProps): ProviderRowV
     fastModeEnabled: aiSettings.fastModeByProvider[provider.id] ?? false,
     supportsFastMode: agentCli
       ? Boolean(agentProbe?.supportsFastMode)
-      : Boolean(selectedModelItem?.model.supportsFastMode),
+      : Boolean(selectedModelCapabilities?.supportsFastMode),
   };
 }
 

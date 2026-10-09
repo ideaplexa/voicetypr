@@ -2,20 +2,14 @@ import type { Dispatch, SetStateAction } from "react";
 import { toast } from "sonner";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import type { AISettings } from "@/types/ai";
-import type { AIProviderConfig } from "@/types/providers";
 
 interface FastModeUnavailablePayload {
   provider?: string;
   model?: string;
 }
 
-/**
- * The backend refuses a fast-mode request the account can't use, retries at
- * standard speed, persists fast=off, then emits `ai-fast-mode-unavailable`.
- * Mirror that persisted state locally and tell the user once.
- */
+/** Keep the mounted formatting screen in sync with the backend's persisted fast=off. */
 export function useNativeFastModeUnavailable(
-  providers: AIProviderConfig[],
   setAISettings: Dispatch<SetStateAction<AISettings>>,
 ) {
   useTauriEvent<FastModeUnavailablePayload>("ai-fast-mode-unavailable", (payload) => {
@@ -25,10 +19,21 @@ export function useNativeFastModeUnavailable(
       ...prev,
       fastModeByProvider: { ...prev.fastModeByProvider, [providerId]: false },
     }));
-    const providerName =
-      providers.find((provider) => provider.id === providerId)?.name ?? providerId;
+  });
+}
+
+/** Main-window notice subscription, independent of which screen is mounted. */
+export function useNativeFastModeUnavailableNotice() {
+  useTauriEvent<FastModeUnavailablePayload>("ai-fast-mode-unavailable", (payload) => {
+    const providerId = payload?.provider;
+    if (!providerId) return;
+    const providerNames: Record<string, string> = {
+      openai: "OpenAI",
+      anthropic: "Anthropic",
+      gemini: "Google Gemini",
+    };
     toast.info(
-      `Fast mode isn't available for ${providerName} on your account — used standard speed and turned Fast off.`,
+      `Fast mode isn't available for ${providerNames[providerId] ?? providerId} on your account — used standard speed and turned Fast off.`,
     );
   });
 }

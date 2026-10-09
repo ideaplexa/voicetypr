@@ -373,7 +373,7 @@ export function useAiProviderSettings({
     };
   }, [settingsLoaded, aiSettings.provider, clearModels, onActiveProviderCleared]);
 
-  useNativeFastModeUnavailable(providers, setAISettings);
+  useNativeFastModeUnavailable(setAISettings);
 
   const getDisplayModels = useCallback(
     (providerId: string): AIProviderModel[] => {
