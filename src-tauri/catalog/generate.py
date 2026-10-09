@@ -16,7 +16,10 @@ CATALOG_PATH = ROOT / "catalog.generated.json"
 FULL_API_PATH = ROOT / ".cache" / "models.dev.api.full.json"
 
 STATUS_ORDER = {"production": 0, "experimental": 1, "hidden": 2}
-REASONING_ADAPTERS = {"OpenAI", "Anthropic", "Gemini"}
+# Canonical low→high ladder the app exposes. models.dev effort values are
+# intersected with this set (xhigh/max are never surfaced).
+NATIVE_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high")
+REASONING_ADAPTERS = {"OpenAI", "OpenAIResp", "Anthropic", "Gemini"}
 PROVIDER_FIELDS = ("id", "name", "env", "npm", "doc", "api")
 MODEL_FIELDS = (
     "id",
@@ -63,19 +66,66 @@ def sorted_models(models: Any) -> list[dict[str, Any]]:
         key=lambda entry: str(entry.get("id", "")),
     )
 
+def reasoning_levels(model: dict[str, Any]) -> list[str]:
+    """Per-model selectable reasoning levels for the native UI/runtime.
 
-def project_model(model: dict[str, Any], recommended_ids: set[str]) -> dict[str, Any]:
+    - Effort-value models: catalog values intersected with the native ladder;
+      a "toggle" option adds "none" (thinking can be switched off).
+    - Budget-only models (budget_tokens, no effort values): low/medium/high,
+      mapped onto genai's legacy budgets; "none" when a toggle exists or the
+      budget minimum is 0.
+    - Non-reasoning models: no levels.
+    """
+    if not model.get("reasoning", False):
+        return []
+    options = [
+        option
+        for option in (model.get("reasoning_options") or [])
+        if isinstance(option, dict)
+    ]
+    has_toggle = any(option.get("type") == "toggle" for option in options)
+    budget_option = next(
+        (option for option in options if option.get("type") == "budget_tokens"), None
+    )
+
+    effort_values = [
+        value
+        for option in options
+        if option.get("type") == "effort"
+        for value in option.get("values", [])
+    ]
+    if effort_values:
+        levels = [level for level in NATIVE_EFFORT_LEVELS if level in effort_values]
+        if has_toggle and "none" not in levels:
+            levels.insert(0, "none")
+        return levels
+
+    if budget_option is not None:
+        levels = list(NATIVE_EFFORT_LEVELS[2:])
+        if has_toggle or budget_option.get("min") == 0:
+            levels.insert(0, "none")
+        return levels
+
+    return []
+
+
+
+def project_model(
+    model: dict[str, Any], recommended_ids: set[str], fast_ids: set[str]
+) -> dict[str, Any]:
     model_id = str(model.get("id") or model["model_id"])
     projected: dict[str, Any] = {
         "model_id": model_id,
         "label": str(model.get("name") or model.get("label") or humanize(model_id)),
         "recommended": model_id in recommended_ids,
         "reasoning": bool(model.get("reasoning", False)),
+        "reasoning_levels": reasoning_levels(model),
+        "fast_mode": model_id in fast_ids,
     }
     projected["reasoning_efforts"] = [
         value
-        for option in model.get("reasoning_options", [])
-        if option.get("type") == "effort"
+        for option in model.get("reasoning_options") or []
+        if isinstance(option, dict) and option.get("type") == "effort"
         for value in option.get("values", [])
     ]
 
@@ -111,9 +161,24 @@ def build_catalog() -> dict[str, Any]:
         provider = snapshot[snapshot_id] if snapshot_id else {}
         recommended_ids = set(config.get("recommended", []))
         adapter = config.get("adapter")
+        fast_ids = set(config.get("fast_models", []))
         source_models = inline_models if inline_models is not None or snapshot_id is None else provider.get("models")
-        models = [project_model(model, recommended_ids) for model in sorted_models(source_models)]
-        models.sort(key=lambda model: (not model["recommended"], model["model_id"]))
+        models = [
+            project_model(model, recommended_ids, fast_ids)
+            for model in sorted_models(source_models)
+        ]
+        # The overlay recommended list is an ordered preference list: index 0
+        # is the provider default. Recommended models sort by that order, then
+        # all other models alphabetically.
+        recommended_order = list(config.get("recommended", []))
+        models.sort(
+            key=lambda model: (
+                recommended_order.index(model["model_id"])
+                if model["model_id"] in recommended_ids
+                else len(recommended_order),
+                model["model_id"],
+            )
+        )
         runtime = str(config.get("runtime", "genai_adapter"))
 
         providers.append(

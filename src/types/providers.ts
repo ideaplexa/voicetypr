@@ -15,6 +15,10 @@ export interface AIProviderModel {
   cliDefault?: boolean;
   costInput?: number | null;
   costOutput?: number | null;
+  /** Effort levels this model accepts ("none"|"minimal"|"low"|"medium"|"high"); empty for non-reasoning models. */
+  reasoningLevels?: string[];
+  /** Whether the model can run on the provider's fast service tier. */
+  supportsFastMode?: boolean;
 }
 
 export type AgentCliProbeState = "ready" | "missing" | "unsafe_launcher";

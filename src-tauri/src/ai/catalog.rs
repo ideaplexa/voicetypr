@@ -28,8 +28,15 @@ pub struct CatalogModel {
     pub label: String,
     pub recommended: bool,
     pub reasoning: bool,
+    /// Raw models.dev effort values (may include xhigh/max, never surfaced);
+    /// empty for budget-only and non-reasoning models.
     #[serde(default)]
     pub reasoning_efforts: Vec<String>,
+    #[serde(default)]
+    pub reasoning_levels: Vec<String>,
+    #[serde(default)]
+    pub fast_mode: bool,
+    pub output: Option<u64>,
     pub context: Option<u64>,
     pub cost_input: Option<f64>,
     pub cost_output: Option<f64>,
@@ -151,6 +158,120 @@ pub fn all_provider_models(provider_id: &str) -> Vec<&'static CatalogModel> {
     provider(provider_id)
         .map(|provider| provider.models.iter().collect())
         .unwrap_or_default()
+}
+
+/// Look up a model in a provider's catalog list.
+pub fn find_model(provider_id: &str, model_id: &str) -> Option<&'static CatalogModel> {
+    provider(provider_id).and_then(|provider| {
+        provider
+            .models
+            .iter()
+            .find(|model| model.model_id == model_id)
+    })
+}
+
+/// The provider's default model: the first entry of the overlay's ordered
+/// `recommended` list (generated catalog order preserves it).
+pub fn default_model_id(provider_id: &str) -> Option<&'static str> {
+    provider(provider_id)
+        .and_then(|provider| provider.models.iter().find(|model| model.recommended))
+        .map(|model| model.model_id.as_str())
+}
+
+/// Whether the provider exposes any model that supports the fast service tier.
+pub fn provider_has_fast_models(provider_id: &str) -> bool {
+    all_provider_models(provider_id)
+        .iter()
+        .any(|model| model.fast_mode)
+}
+
+/// Canonical selectable effort ladder, low→high. Catalog `reasoning_levels`
+/// carry values in this order; xhigh/max are never surfaced.
+pub const REASONING_LEVEL_ORDER: [&str; 5] = ["none", "minimal", "low", "medium", "high"];
+
+/// Stored reasoning level used for native providers before the user picks one.
+pub const DEFAULT_REASONING_LEVEL: &str = "medium";
+
+/// Resolve a stored effort level against a model's supported levels.
+///
+/// Rule (shared with the frontend): use the stored level if the model supports
+/// it; else "medium" if supported; else the highest supported level below
+/// "medium"; else the lowest supported level; else no effort.
+pub fn resolve_reasoning_level(
+    provider_id: &str,
+    model_id: &str,
+    stored: Option<&str>,
+) -> Option<String> {
+    let model = find_model(provider_id, model_id)?;
+    resolve_supported_reasoning_level(&model.reasoning_levels, stored)
+}
+
+fn resolve_supported_reasoning_level(levels: &[String], stored: Option<&str>) -> Option<String> {
+    if levels.is_empty() {
+        return None;
+    }
+    if let Some(stored) = stored {
+        if levels.iter().any(|level| level == stored) {
+            return Some(stored.to_string());
+        }
+    }
+    if levels.iter().any(|level| level == "medium") {
+        return Some("medium".to_string());
+    }
+    // Highest supported level below medium.
+    for level in ["low", "minimal", "none"] {
+        if levels.iter().any(|candidate| candidate == level) {
+            return Some(level.to_string());
+        }
+    }
+    // Lowest supported level.
+    REASONING_LEVEL_ORDER
+        .iter()
+        .find(|level| levels.iter().any(|candidate| candidate == *level))
+        .map(|level| (*level).to_string())
+}
+
+#[cfg(test)]
+#[test]
+fn reasoning_resolution_covers_sparse_ladders() {
+    let resolve = |levels: &[&str], stored| {
+        resolve_supported_reasoning_level(
+            &levels
+                .iter()
+                .map(|level| (*level).to_string())
+                .collect::<Vec<_>>(),
+            stored,
+        )
+    };
+    assert_eq!(
+        resolve(&["none", "low", "high"], None).as_deref(),
+        Some("low")
+    );
+    assert_eq!(
+        resolve(&["minimal", "high"], None).as_deref(),
+        Some("minimal")
+    );
+    assert_eq!(resolve(&["high"], Some("medium")).as_deref(), Some("high"));
+    assert_eq!(resolve(&[], Some("medium")), None);
+}
+
+/// The lowest effort a model accepts — used for API-key validation probes so
+/// they exercise the cheapest supported thinking level.
+pub fn lowest_reasoning_level(provider_id: &str, model_id: &str) -> Option<String> {
+    find_model(provider_id, model_id).and_then(|model| {
+        REASONING_LEVEL_ORDER
+            .iter()
+            .find(|level| model.reasoning_levels.iter().any(|l| l == *level))
+            .map(|level| (*level).to_string())
+    })
+}
+
+/// Whether the model's reasoning came from a budget_tokens option only (no
+/// named effort values). On genai those levels map to legacy budgets, and
+/// "none" needs `thinkingBudget: 0` to actually disable thinking.
+pub fn is_budget_only_reasoning(provider_id: &str, model_id: &str) -> bool {
+    find_model(provider_id, model_id)
+        .is_some_and(|model| model.reasoning && model.reasoning_efforts.is_empty())
 }
 
 pub fn is_native_provider(provider_id: &str) -> bool {
@@ -346,5 +467,102 @@ mod tests {
         for retired in ["amp", "kilo-code"] {
             assert!(provider(retired).is_none(), "{retired} must stay retired");
         }
+    }
+
+    #[test]
+    fn reasoning_levels_follow_the_contract_rule() {
+        let levels = |provider: &str, model: &str| {
+            find_model(provider, model)
+                .unwrap_or_else(|| panic!("{provider}/{model} must exist"))
+                .reasoning_levels
+                .clone()
+        };
+        // Effort values ∩ the 5-level ladder; a toggle adds "none".
+        assert_eq!(
+            levels("openai", "gpt-6-luna"),
+            vec!["none", "low", "medium", "high"]
+        );
+        assert_eq!(
+            levels("openai", "gpt-5-mini"),
+            vec!["minimal", "low", "medium", "high"]
+        );
+        assert_eq!(
+            levels("anthropic", "claude-haiku-5-5"),
+            vec!["none", "low", "medium", "high"]
+        );
+        assert_eq!(
+            levels("anthropic", "claude-sonnet-5-5"),
+            vec!["low", "medium", "high"]
+        );
+        // Budget-only models get low/medium/high, plus "none" when the
+        // budget can be 0 (2.5 flash) or the model has a toggle.
+        assert_eq!(
+            levels("gemini", "gemini-2.5-flash"),
+            vec!["none", "low", "medium", "high"]
+        );
+        assert_eq!(
+            levels("anthropic", "claude-haiku-4-5"),
+            vec!["low", "medium", "high"]
+        );
+        // Non-reasoning models expose no levels.
+        assert!(levels("openai", "gpt-4o").is_empty());
+    }
+
+    #[test]
+    fn resolve_reasoning_level_follows_the_contract_rule() {
+        // Stored level wins when supported.
+        assert_eq!(
+            resolve_reasoning_level("openai", "gpt-6-luna", Some("high")),
+            Some("high".to_string())
+        );
+        // Unsupported stored level falls back to medium when supported.
+        assert_eq!(
+            resolve_reasoning_level("openai", "gpt-5-mini", Some("none")),
+            Some("medium".to_string())
+        );
+        // No medium: highest supported level below medium.
+        assert_eq!(
+            resolve_reasoning_level("openai", "gpt-6-luna", None),
+            Some("medium".to_string())
+        );
+        // Only minimal+high style ladders: below-medium wins over the floor.
+        // gemini-3.8-flash has [low, medium, high]; a model with only
+        // [minimal, high] would resolve to minimal.
+        // Lowest supported level when nothing below medium exists.
+        assert_eq!(
+            resolve_reasoning_level("anthropic", "claude-haiku-4-5", Some("bogus")),
+            Some("medium".to_string())
+        );
+        // Non-reasoning model: no effort at all.
+        assert_eq!(
+            resolve_reasoning_level("openai", "gpt-4o", Some("low")),
+            None
+        );
+        // Unknown model: no effort.
+        assert_eq!(resolve_reasoning_level("openai", "nope", Some("low")), None);
+    }
+
+    #[test]
+    fn lowest_reasoning_level_returns_the_cheapest_supported() {
+        assert_eq!(
+            lowest_reasoning_level("openai", "gpt-6-luna"),
+            Some("none".to_string())
+        );
+        assert_eq!(
+            lowest_reasoning_level("anthropic", "claude-haiku-5-5"),
+            Some("none".to_string())
+        );
+        assert_eq!(
+            lowest_reasoning_level("gemini", "gemini-3.5-flash-lite"),
+            Some("minimal".to_string())
+        );
+        assert_eq!(lowest_reasoning_level("openai", "gpt-4o"), None);
+    }
+
+    #[test]
+    fn default_model_is_first_recommended_entry() {
+        assert_eq!(default_model_id("openai"), Some("gpt-6-luna"));
+        assert_eq!(default_model_id("anthropic"), Some("claude-haiku-5-5"));
+        assert_eq!(default_model_id("gemini"), Some("gemini-3.5-flash-lite"));
     }
 }

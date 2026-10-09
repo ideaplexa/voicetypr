@@ -280,6 +280,7 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     Menu::with_items(app, &[&app_menu, &edit_menu, &help_menu])
 }
 
+use ai::native_settings::{update_native_ai_fast_mode, update_native_ai_reasoning};
 use audio::recorder::AudioRecorder;
 use commands::remote::load_remote_settings;
 use commands::telemetry::{
@@ -1704,6 +1705,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             update_ai_settings,
             update_agent_cli_reasoning,
             update_agent_cli_fast_mode,
+            update_native_ai_reasoning,
+            update_native_ai_fast_mode,
             disable_ai_enhancement,
             get_enhancement_options,
             update_enhancement_options,
@@ -1907,6 +1910,22 @@ fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::V
             }
             changed = true;
         }
+        // Retired saved models on native providers switch to the provider's
+        // default recommended model instead of forcing reselection.
+        for (provider_id, saved) in models.iter_mut() {
+            if !crate::ai::catalog::is_native_provider(provider_id) {
+                continue;
+            }
+            let valid = saved
+                .as_str()
+                .is_some_and(|model| crate::ai::catalog::find_model(provider_id, model).is_some());
+            if !valid {
+                if let Some(default) = crate::ai::catalog::default_model_id(provider_id) {
+                    *saved = serde_json::Value::String(default.to_string());
+                    changed = true;
+                }
+            }
+        }
     }
 
     let current_model = values
@@ -1921,15 +1940,32 @@ fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::V
     if !current_model.is_empty()
         && !ai_model_is_valid_for_provider(&migrated_provider, &current_model)
     {
-        values.insert(
-            "ai_model".to_string(),
-            serde_json::Value::String(String::new()),
-        );
-        if ai_enabled {
-            values.insert(
-                "ai_model_needs_reselection".to_string(),
-                serde_json::Value::Bool(true),
-            );
+        // Retired native models silently switch to the provider default; other
+        // providers keep the old clear-and-flag behaviour.
+        let native_default = if crate::ai::catalog::is_native_provider(&migrated_provider) {
+            crate::ai::catalog::default_model_id(&migrated_provider)
+        } else {
+            None
+        };
+        match native_default {
+            Some(default) => {
+                values.insert(
+                    "ai_model".to_string(),
+                    serde_json::Value::String(default.to_string()),
+                );
+            }
+            None => {
+                values.insert(
+                    "ai_model".to_string(),
+                    serde_json::Value::String(String::new()),
+                );
+                if ai_enabled {
+                    values.insert(
+                        "ai_model_needs_reselection".to_string(),
+                        serde_json::Value::Bool(true),
+                    );
+                }
+            }
         }
         changed = true;
     }
@@ -1959,6 +1995,11 @@ fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::V
 fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {
     if provider == "custom" {
         return !model.trim().is_empty();
+    }
+    if crate::ai::catalog::is_native_provider(provider) {
+        // Any catalog-listed model is a valid selection, not just the
+        // recommended shortlist.
+        return crate::ai::catalog::find_model(provider, model).is_some();
     }
     crate::ai::providers::recommended_models(provider)
         .iter()
@@ -2323,18 +2364,24 @@ mod ai_settings_migration_tests {
     }
 
     #[test]
-    fn migration_flags_enabled_invalid_model_for_reselection_without_substitution() {
+    fn migration_substitutes_provider_default_for_retired_native_model() {
         let mut values = values("google", "text-bison", json!({ "google": "text-bison" }));
 
         assert!(migrate_ai_settings_values(&mut values));
         assert_eq!(values["ai_enabled"], json!(true));
         assert_eq!(values["ai_provider"], json!("gemini"));
-        assert_eq!(values["ai_model"], json!(""));
-        assert_eq!(values["ai_model_needs_reselection"], json!(true));
+        // Retired native models switch to the provider's default recommended
+        // model — no reselection flag, even when AI is enabled.
+        assert_eq!(values["ai_model"], json!("gemini-3.5-flash-lite"));
+        assert_eq!(
+            values["ai_models_by_provider"],
+            json!({ "gemini": "gemini-3.5-flash-lite" })
+        );
+        assert_eq!(values.get("ai_model_needs_reselection"), None);
     }
 
     #[test]
-    fn migration_does_not_flag_disabled_invalid_model() {
+    fn migration_does_not_flag_disabled_retired_native_model() {
         let mut values = values_with_enabled(
             false,
             "google",
@@ -2345,8 +2392,34 @@ mod ai_settings_migration_tests {
         assert!(migrate_ai_settings_values(&mut values));
         assert_eq!(values["ai_enabled"], json!(false));
         assert_eq!(values["ai_provider"], json!("gemini"));
-        assert_eq!(values["ai_model"], json!(""));
+        assert_eq!(values["ai_model"], json!("gemini-3.5-flash-lite"));
         assert_eq!(values.get("ai_model_needs_reselection"), None);
+    }
+
+    #[test]
+    fn migration_keeps_catalog_listed_non_recommended_native_model() {
+        // gpt-5-nano is in the catalog but not recommended; a saved selection
+        // stays valid rather than being cleared or flagged.
+        let mut values = values("openai", "gpt-5-nano", json!({ "openai": "gpt-5-nano" }));
+
+        assert!(!migrate_ai_settings_values(&mut values));
+        assert_eq!(values["ai_model"], json!("gpt-5-nano"));
+        assert_eq!(values.get("ai_model_needs_reselection"), None);
+    }
+
+    #[test]
+    fn migration_still_flags_invalid_model_on_non_native_provider() {
+        // openrouter keeps the old clear-and-flag behaviour: it is not a
+        // native catalog provider.
+        let mut values = values(
+            "openrouter",
+            "retired/model",
+            json!({ "openrouter": "retired/model" }),
+        );
+
+        assert!(migrate_ai_settings_values(&mut values));
+        assert_eq!(values["ai_model"], json!(""));
+        assert_eq!(values["ai_model_needs_reselection"], json!(true));
     }
 
     #[test]

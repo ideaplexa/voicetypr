@@ -75,13 +75,14 @@ impl AiExecutor {
 
     pub async fn polish(
         &self,
-        request: AiPolishRequest,
+        mut request: AiPolishRequest,
         cancellation_token: CancellationToken,
     ) -> Result<AiPolishResult, AiProviderError> {
         let start = Instant::now();
         let budget = Duration::from_millis(request.timeout_ms);
         let deadline = start + budget;
         let mut attempt = 0_u8;
+        let mut fast_mode_fallback = false;
 
         loop {
             let remaining = deadline
@@ -120,7 +121,21 @@ impl AiExecutor {
                         provider_id: request.provider_id,
                         model_id: request.model_id,
                         duration_ms: start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                        fast_mode_fallback,
                     });
+                }
+                Err(mapped)
+                    if request.fast_mode && !fast_mode_fallback && mapped.fast_mode_refused =>
+                {
+                    // The provider refused the fast tier: retry once at
+                    // standard speed without consuming the validation retry.
+                    fast_mode_fallback = true;
+                    request.fast_mode = false;
+                    log::warn!(
+                        "AI fast mode refused by provider={}; retried at standard speed",
+                        request.provider_id
+                    );
+                    continue;
                 }
                 Err(mapped) if attempt == 0 && should_retry(&mapped.error) => {
                     attempt += 1;
