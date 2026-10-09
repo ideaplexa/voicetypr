@@ -1,3 +1,19 @@
+## 2.0.9 (unreleased)
+
+### Features
+
+* **ai:** new recommended models: GPT-6 Luna and GPT-5.6 Luna (OpenAI), Claude Haiku 5.5 and Sonnet 5.5 (Anthropic), Gemini 3.5 Flash Lite and 3.8 Flash (Gemini); a saved model that no longer exists switches to the provider's default
+* **ai:** choose the reasoning effort (Off to High, per model) for OpenAI, Anthropic and Gemini; default Medium
+* **ai:** optional Fast mode (costs more) for OpenAI models and Claude Opus 5.5 / 5 / 4.8; if your account can't use it, Polish runs at standard speed, turns Fast off and tells you
+* **ai:** local CLIs default to Claude Haiku 5.5 (Claude Code) and GPT-6 Luna (Codex, pi, oh-my-pi) at Medium effort; saved choices are kept
+
+### Bug Fixes
+
+* **ai:** Claude Opus 4.7 / 4.8, Fable 5 and the Claude 5.x models work in Polish (they rejected the old thinking request)
+* **ai:** very long dictations on Gemini no longer exceed the model's output limit, and a cut-off response falls back to your raw text instead of pasting a partial result
+* **ai:** OpenAI Polish uses the Responses API; API key checks use the newest cheapest model at its lowest effort
+* **ai:** Claude Code runs with slash commands and skills disabled
+
 ## 2.0.8 (2026-10-09)
 
 ### Bug Fixes
