@@ -1798,7 +1798,7 @@ describe("EnhancementsSection", () => {
       within(providersPanel).getByRole("combobox", {
         name: "Effort for Claude Code",
       }),
-    ).toHaveTextContent("Low");
+    ).toHaveTextContent("Medium");
   });
 
   it("restores the selected local agent and model after remount", async () => {
@@ -1849,7 +1849,7 @@ describe("EnhancementsSection", () => {
       within(restoredPanel).getByRole("combobox", {
         name: "Effort for Claude Code",
       }),
-    ).toHaveTextContent("Low");
+    ).toHaveTextContent("Medium");
   });
 
   it("keeps an undiscovered saved local model label truthful", async () => {
@@ -1869,7 +1869,7 @@ describe("EnhancementsSection", () => {
     const providerSummary = await screen.findByRole("button", {
       name: "Choose provider and model",
     });
-    expect(providerSummary).toHaveTextContent("Claude Code · Legacy Model · Effort low");
+    expect(providerSummary).toHaveTextContent("Claude Code · Legacy Model · Effort medium");
     const providersPanel = await getProviderSetupPanel();
     await user.click(within(providersPanel).getByRole("tab", { name: "Local Agents" }));
 
@@ -1896,7 +1896,7 @@ describe("EnhancementsSection", () => {
     const providerSummary = await screen.findByRole("button", {
       name: "Choose provider and model",
     });
-    expect(providerSummary).toHaveTextContent("pi · GPT-5 Mini · Thinking off");
+    expect(providerSummary).toHaveTextContent("pi · GPT-5 Mini · Thinking medium");
     const providersPanel = await getProviderSetupPanel();
 
     const piModel = await within(providersPanel).findByRole("button", {
@@ -1917,7 +1917,7 @@ describe("EnhancementsSection", () => {
     });
     expect(
       within(providersPanel).getByRole("combobox", { name: "Thinking for pi" }),
-    ).toHaveTextContent("Off");
+    ).toHaveTextContent("Medium");
   });
 
   it("discovers local-agent models when its picker is opened", async () => {

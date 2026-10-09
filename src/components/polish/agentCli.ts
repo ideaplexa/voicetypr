@@ -130,8 +130,8 @@ export const shortModelName = (modelId: string, fallbackName?: string) => {
   return humanizeModelId(shortId || modelId);
 };
 
-export const defaultAgentCliReasoning = (providerId: string) =>
-  providerId === "pi" || providerId === "omp" ? "off" : "low";
+// Shared default contract used by the provider row and active-provider summary.
+export const defaultAgentCliReasoning = (_providerId: string) => "medium";
 
 export const formatAgentCliReasoning = (providerId: string, reasoning: string) =>
   providerId === "claude-code" ? `Effort ${reasoning}` : `Thinking ${reasoning}`;
