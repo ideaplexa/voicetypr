@@ -70,29 +70,39 @@ const providerModels = vi.hoisted(
       costOutput?: number | null;
     }>
   > => ({
-    gemini: [{ id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", recommended: true }],
+    gemini: [
+      {
+        id: "gemini-3.8-flash",
+        name: "Gemini 3.8 Flash",
+        recommended: true,
+        reasoningLevels: ["low", "medium", "high"],
+      },
+      {
+        id: "gemini-3.5-flash-lite",
+        name: "Gemini 3.5 Flash Lite",
+        recommended: false,
+      },
+    ],
     openai: [
       {
-        id: "gpt-5-mini",
-        name: "GPT-5 Mini",
+        id: "gpt-6-luna",
+        name: "GPT-6 Luna",
         recommended: true,
         reasoning: true,
         reasoningLevels: ["minimal", "low", "medium", "high"],
         supportsFastMode: true,
-        contextWindow: 400000,
-        costInput: 0.25,
-        costOutput: 2,
       },
-      { id: "gpt-5-nano", name: "GPT-5 Nano", recommended: false },
+      { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", recommended: false },
     ],
     anthropic: [
       {
-        id: "claude-sonnet-4",
-        name: "Claude Sonnet 4",
+        id: "claude-sonnet-5-5",
+        name: "Claude Sonnet 5.5",
         recommended: true,
         reasoning: true,
         reasoningLevels: ["low", "medium", "high"],
       },
+      { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", recommended: false },
     ],
     groq: [
       {
@@ -115,14 +125,14 @@ const providerModels = vi.hoisted(
         cliDefault: true,
       },
       {
-        id: "openai/gpt-5-mini",
-        name: "GPT-5 Mini",
+        id: "openai/gpt-6-luna",
+        name: "GPT-6 Luna",
         recommended: false,
         sourceProvider: "OpenAI",
       },
       {
-        id: "anthropic/claude-sonnet-4",
-        name: "Claude Sonnet 4",
+        id: "anthropic/claude-sonnet-5-5",
+        name: "Claude Sonnet 5.5",
         recommended: false,
         sourceProvider: "Anthropic",
       },
@@ -206,10 +216,10 @@ let aiSettingsHandler: (() => Promise<typeof aiSettingsResponse>) | undefined;
 const enabledAISettings = {
   enabled: true,
   provider: "openai",
-  model: "gpt-5-mini",
+  model: "gpt-6-luna",
   hasApiKey: true,
   modelsByProvider: {
-    openai: "gpt-5-mini",
+    openai: "gpt-6-luna",
   },
   reasoningByProvider: {},
   fastModeByProvider: {},
@@ -534,13 +544,13 @@ describe("EnhancementsSection", () => {
         name: "Model for OpenAI",
       }),
     );
-    await user.click(await screen.findByRole("option", { name: /gpt-5 nano/i }));
+    await user.click(await screen.findByRole("option", { name: /gpt-5.6 luna/i }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
         enabled: false,
         provider: "openai",
-        model: "gpt-5-nano",
+        model: "gpt-5.6-luna",
       });
     });
   });
@@ -617,7 +627,7 @@ describe("EnhancementsSection", () => {
     expect(launcher).toHaveTextContent("Provider & model");
     // The summary text arrives after the async settings load — wait for it
     // instead of asserting once (this raced under full-suite load).
-    await waitFor(() => expect(launcher).toHaveTextContent("OpenAI · GPT-5 Mini"), {
+    await waitFor(() => expect(launcher).toHaveTextContent("OpenAI · GPT-6 Luna"), {
       timeout: 3000,
     });
     expect(launcher).toHaveTextContent("Active");
@@ -630,12 +640,12 @@ describe("EnhancementsSection", () => {
     await user.click(within(providersPanel).getByRole("button", { name: /close/i }));
     // Closing may already unmount the dialog; assert the user-visible result.
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(launcher).toHaveTextContent("OpenAI · GPT-5 Mini");
+    expect(launcher).toHaveTextContent("OpenAI · GPT-6 Luna");
     expect(launcher).toHaveTextContent("Active");
     await user.click(launcher);
     const reopenedPanel = await screen.findByRole("dialog");
     expect(within(reopenedPanel).getByRole("combobox", { name: "Model for OpenAI" })).toHaveValue(
-      "GPT-5 Mini",
+      "GPT-6 Luna",
     );
   });
 
@@ -662,7 +672,7 @@ describe("EnhancementsSection", () => {
         screen.getByRole("button", {
           name: "Choose provider and model",
         }),
-      ).toHaveTextContent("OpenAI · GPT-5 Mini");
+      ).toHaveTextContent("OpenAI · GPT-6 Luna");
     });
   });
 
@@ -984,7 +994,7 @@ describe("EnhancementsSection", () => {
       expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
         enabled: true,
         provider: "openai",
-        model: "gpt-5-mini",
+        model: "gpt-6-luna",
       });
       expect(invoke).toHaveBeenCalledWith("update_enhancement_options", {
         options: { preset: "CleanDictation" },
@@ -998,8 +1008,8 @@ describe("EnhancementsSection", () => {
     aiSettingsResponse = {
       ...enabledAISettings,
       provider: "anthropic",
-      model: "claude-sonnet-4",
-      modelsByProvider: { anthropic: "claude-sonnet-4" },
+      model: "claude-sonnet-5-5",
+      modelsByProvider: { anthropic: "claude-sonnet-5-5" },
     };
     vi.mocked(hasApiKey).mockResolvedValue(false);
 
@@ -1012,7 +1022,7 @@ describe("EnhancementsSection", () => {
       });
       expect(polishSwitch).toBeChecked();
       expect(polishSwitch).not.toHaveAttribute("aria-disabled", "true");
-      expect(providerSummary).toHaveTextContent("Anthropic · Claude Sonnet 4");
+      expect(providerSummary).toHaveTextContent("Anthropic · Claude Sonnet 5.5");
       expect(providerSummary).toHaveTextContent("Active");
     });
   });
@@ -1051,7 +1061,7 @@ describe("EnhancementsSection", () => {
       const providerSummary = screen.getByRole("button", {
         name: "Choose provider and model",
       });
-      expect(providerSummary).toHaveTextContent("OpenAI · GPT-5 Mini");
+      expect(providerSummary).toHaveTextContent("OpenAI · GPT-6 Luna");
       expect(providerSummary).toHaveTextContent("Active");
       expect(screen.queryByText("Connect an AI to turn on Polish")).not.toBeInTheDocument();
     });
@@ -1703,8 +1713,8 @@ describe("EnhancementsSection", () => {
       ...enabledAISettings,
       enabled: false,
       modelsByProvider: {
-        openai: "gpt-5-mini",
-        gemini: "gemini-1.5-flash",
+        openai: "gpt-6-luna",
+        gemini: "gemini-3.8-flash",
       },
     };
     (hasApiKey as ReturnType<typeof vi.fn>).mockImplementation(
@@ -1722,7 +1732,7 @@ describe("EnhancementsSection", () => {
     await waitFor(() => {
       expect(saveApiKey).toHaveBeenCalledWith("gemini", "gemini-key");
       expect(screen.getByRole("combobox", { name: "Model for Google Gemini" })).toHaveValue(
-        "Gemini 1.5 Flash",
+        "Gemini 3.8 Flash",
       );
     });
   });
@@ -1747,13 +1757,13 @@ describe("EnhancementsSection", () => {
       ),
     ).toBeInTheDocument();
     await user.click(within(providersPanel).getByRole("combobox", { name: "Model for OpenAI" }));
-    await user.click(await screen.findByRole("option", { name: /GPT-5 Mini/i }));
+    await user.click(await screen.findByRole("option", { name: /GPT-6 Luna/i }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
         enabled: true,
         provider: "openai",
-        model: "gpt-5-mini",
+        model: "gpt-6-luna",
       });
       expect(aiSettingsResponse.aiModelNeedsReselection).toBe(false);
     });
@@ -1900,21 +1910,21 @@ describe("EnhancementsSection", () => {
     aiSettingsResponse = {
       ...baseAISettings,
       provider: "pi",
-      model: "openai/gpt-5-mini",
-      modelsByProvider: { pi: "openai/gpt-5-mini" },
+      model: "openai/gpt-6-luna",
+      modelsByProvider: { pi: "openai/gpt-6-luna" },
     };
     const user = userEvent.setup();
     renderWithProviders();
     const providerSummary = await screen.findByRole("button", {
       name: "Choose provider and model",
     });
-    expect(providerSummary).toHaveTextContent("pi · GPT-5 Mini · Thinking off");
+    expect(providerSummary).toHaveTextContent("pi · GPT-6 Luna · Thinking off");
     const providersPanel = await getProviderSetupPanel();
 
     const piModel = await within(providersPanel).findByRole("button", {
       name: "Model for pi",
     });
-    expect(piModel).toHaveTextContent("GPT-5 Mini");
+    expect(piModel).toHaveTextContent("GPT-6 Luna");
     await user.click(piModel);
     await user.click(
       await screen.findByRole("button", {
@@ -2181,7 +2191,7 @@ describe("EnhancementsSection", () => {
       renderWithProviders();
       const providersPanel = await getProviderSetupPanel();
 
-      // gpt-5-mini supports [minimal, low, medium, high]; xhigh falls back to medium.
+      // gpt-6-luna supports [minimal, low, medium, high]; xhigh falls back to medium.
       expect(
         await within(providersPanel).findByRole("combobox", { name: "Effort for OpenAI" }),
       ).toHaveTextContent("Medium");
@@ -2191,8 +2201,8 @@ describe("EnhancementsSection", () => {
       aiSettingsResponse = {
         ...enabledAISettings,
         provider: "openai",
-        model: "gpt-5-nano",
-        modelsByProvider: { openai: "gpt-5-nano" },
+        model: "gpt-5.6-luna",
+        modelsByProvider: { openai: "gpt-5.6-luna" },
       };
       vi.mocked(hasApiKey).mockImplementation(
         async (providerId: string) => providerId === "openai",
@@ -2209,7 +2219,7 @@ describe("EnhancementsSection", () => {
     it("shows Fast only for models with fast support and persists the toggle", async () => {
       aiSettingsResponse = {
         ...enabledAISettings,
-        modelsByProvider: { openai: "gpt-5-mini", anthropic: "claude-sonnet-4" },
+        modelsByProvider: { openai: "gpt-6-luna", anthropic: "claude-sonnet-5-5" },
       };
       vi.mocked(hasApiKey).mockImplementation(
         async (providerId: string) => providerId === "openai" || providerId === "anthropic",
@@ -2225,7 +2235,7 @@ describe("EnhancementsSection", () => {
         name: /fast mode for openai/i,
       });
       expect(fastSwitch).not.toBeChecked();
-      // Claude Sonnet 4 has no fast tier: no switch, but effort shows.
+      // Claude Sonnet 5.5 has no fast tier: no switch, but effort shows.
       expect(
         within(providersPanel).queryByRole("switch", { name: /anthropic/i }),
       ).not.toBeInTheDocument();
@@ -2258,7 +2268,7 @@ describe("EnhancementsSection", () => {
       });
       expect(fastSwitch).toBeChecked();
 
-      emitEvent("ai-fast-mode-unavailable", { provider: "openai", model: "gpt-5-mini" });
+      emitEvent("ai-fast-mode-unavailable", { provider: "openai", model: "gpt-6-luna" });
 
       await waitFor(() => expect(fastSwitch).not.toBeChecked());
     });
@@ -2277,7 +2287,7 @@ describe("EnhancementsSection", () => {
 
       await user.type(
         within(providersPanel).getByLabelText("Search cloud providers and models"),
-        "gpt-5-nano",
+        "gpt-5.6-luna",
       );
 
       expect(
@@ -2287,8 +2297,8 @@ describe("EnhancementsSection", () => {
         within(providersPanel).getByRole("switch", { name: /fast mode for openai/i }),
       ).toBeChecked();
       await user.click(within(providersPanel).getByRole("combobox", { name: "Model for OpenAI" }));
-      expect(await screen.findByRole("option", { name: /gpt-5 nano/i })).toBeInTheDocument();
-      expect(screen.queryByRole("option", { name: /gpt-5 mini/i })).not.toBeInTheDocument();
+      expect(await screen.findByRole("option", { name: /gpt-5.6 luna/i })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: /gpt-6 luna/i })).not.toBeInTheDocument();
     });
   });
 });
