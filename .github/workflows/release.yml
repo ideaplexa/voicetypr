@@ -53,6 +53,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Ensure stable releases run from main or a hotfix branch
+        if: ${{ inputs.channel == 'stable' && github.ref_name != 'main' && !startsWith(github.ref_name, 'hotfix/') }}
+        run: |
+          echo "::error::Stable releases must be dispatched from main or a hotfix/* branch, not ${{ github.ref_name }}."
+          exit 1
+
       - name: Calculate version
         id: version
         env:
@@ -727,18 +733,22 @@ jobs:
     outputs:
       ref: ${{ steps.push.outputs.ref }}
     steps:
-      - name: Checkout main
+      # Stable releases normally run from `main`; a `hotfix/*` dispatch releases
+      # and bumps that branch instead, so `main` (the next minor) is untouched.
+      - name: Checkout release branch
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
-      - name: Ensure main did not move during build
+      - name: Ensure release branch did not move during build
+        env:
+          RELEASE_BRANCH: ${{ github.ref_name }}
         run: |
           BASE_SHA="${{ needs.prepare.outputs.base_sha }}"
           CURRENT_SHA="$(git rev-parse HEAD)"
           if [[ "$CURRENT_SHA" != "$BASE_SHA" ]]; then
-            echo "::error::main moved from $BASE_SHA to $CURRENT_SHA while builds were running. Re-run release from latest main."
+            echo "::error::$RELEASE_BRANCH moved from $BASE_SHA to $CURRENT_SHA while builds were running. Re-run release from latest $RELEASE_BRANCH."
             exit 1
           fi
 
@@ -765,6 +775,7 @@ jobs:
         id: push
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -782,7 +793,7 @@ jobs:
             # immutable/reachable; Stable promotion later performs the normal main bump.
             git push origin "${{ needs.prepare.outputs.tag }}"
           else
-            git push --atomic origin main "${{ needs.prepare.outputs.tag }}"
+            git push --atomic origin "$RELEASE_BRANCH" "${{ needs.prepare.outputs.tag }}"
           fi
           echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 

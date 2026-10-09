@@ -251,6 +251,78 @@ mod tests {
         assert!(request.headers.get(AUTHORIZATION).is_none());
     }
 
+    async fn sent_body(case: ProviderCase, input_text: &str) -> serde_json::Value {
+        let server = MockServer::start().await;
+        mount_sequence(&server, case.id, vec![ok_response(case.id, "polished")]).await;
+        let executor = executor_for(case, &server, true, false);
+        let mut polish_request = request(case, 1_000);
+        polish_request.input_text = input_text.to_string();
+        executor
+            .polish(polish_request, CancellationToken::new())
+            .await
+            .unwrap();
+        let received = server.received_requests().await.unwrap().remove(0);
+        serde_json::from_slice(&received.body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ai_runtime_gpt5_reasoning_models_get_no_temperature() {
+        // GPT-5 reasoning models reject any non-default temperature with a 400
+        // ("invalid model" in v2.0.7), so Polish silently fell back to raw text.
+        let body = sent_body(
+            ProviderCase {
+                id: PROVIDER_OPENAI,
+                model: "gpt-5-nano",
+            },
+            "ok",
+        )
+        .await;
+        assert!(body.get("temperature").is_none(), "{body}");
+        assert_eq!(body["reasoning_effort"], "minimal");
+
+        // gpt-5.4 lists "none" but not "minimal" as an effort.
+        let body = sent_body(
+            ProviderCase {
+                id: PROVIDER_OPENAI,
+                model: "gpt-5.4-nano",
+            },
+            "ok",
+        )
+        .await;
+        assert!(body.get("temperature").is_none(), "{body}");
+        assert_eq!(body["reasoning_effort"], "none");
+
+        // Non-reasoning models keep a low temperature and no reasoning field.
+        let body = sent_body(
+            ProviderCase {
+                id: PROVIDER_OPENAI,
+                model: "gpt-4o",
+            },
+            "ok",
+        )
+        .await;
+        assert_eq!(body["temperature"], 0.2);
+        assert!(body.get("reasoning_effort").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn ai_runtime_anthropic_thinking_request_is_valid_for_short_input() {
+        // Key validation sends "ok" to claude-haiku-4-5. v2.0.7 sent thinking
+        // budget 1024 with max_tokens 1024 plus temperature 0.2; Anthropic
+        // rejected both, so the key could not be saved.
+        let body = sent_body(
+            ProviderCase {
+                id: PROVIDER_ANTHROPIC,
+                model: "claude-haiku-4-5",
+            },
+            "ok",
+        )
+        .await;
+        assert!(body.get("temperature").is_none(), "{body}");
+        let budget = body["thinking"]["budget_tokens"].as_u64().unwrap();
+        assert!(body["max_tokens"].as_u64().unwrap() > budget, "{body}");
+    }
+
     #[tokio::test]
     async fn ai_runtime_openrouter_routes_via_openai_compatible_with_attribution_headers() {
         // OpenRouter must route through the OpenAI-compatible runtime (never the

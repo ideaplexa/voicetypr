@@ -50,32 +50,7 @@ impl GenaiRuntime {
         let chat_request =
             ChatRequest::from_user(request.input_text.clone()).with_system(request.prompt.clone());
 
-        // Inline formatting is latency- and cost-sensitive, so for reasoning-capable
-        // models we ask for the cheapest reasoning effort the provider allows. Each
-        // native adapter translates `ReasoningEffort::Minimal` into its own low knob:
-        //   - OpenAI (gpt-5):  request body `reasoning_effort: "minimal"`
-        //   - Gemini (2.5):    `thinkingConfig.thinkingBudget = 1000` (LOW; the genai
-        //                      crate maps Minimal->LOW since a zero budget is rejected
-        //                      by 2.5 Pro)
-        //   - Anthropic (4.x): adaptive thinking, effort "low" / 1024 budget tokens
-        // Non-reasoning models still receive sampling options, but never a
-        // reasoning parameter a provider would reject (e.g. gpt-4o,
-        // gemini-2.0-flash).
-        let max_tokens = output_token_cap_for_input(request.input_text.len());
-        let chat_options = if model_supports_reasoning(&request.provider_id, &request.model_id) {
-            Some(
-                ChatOptions::default()
-                    .with_temperature(0.2)
-                    .with_max_tokens(max_tokens)
-                    .with_reasoning_effort(ReasoningEffort::Minimal),
-            )
-        } else {
-            Some(
-                ChatOptions::default()
-                    .with_temperature(0.2)
-                    .with_max_tokens(max_tokens),
-            )
-        };
+        let chat_options = Some(chat_options(request));
 
         let response = self
             .client
@@ -115,13 +90,46 @@ fn namespaced_model(provider_id: &str, model_id: &str) -> String {
     }
 }
 
-/// Whether the embedded catalog flags `(provider_id, model_id)` as a reasoning
-/// model. Unknown providers/models resolve to `false` so a reasoning effort is
-/// only ever attached to calls that can accept it.
-fn model_supports_reasoning(provider_id: &str, model_id: &str) -> bool {
-    catalog::all_provider_models(provider_id)
+/// genai counts Minimal/Low thinking inside `max_tokens` (Anthropic legacy
+/// `budget_tokens` 1024, Gemini 2.5 1000; OpenAI reasoning tokens count against
+/// `max_completion_tokens`), and Anthropic rejects `max_tokens <= budget_tokens`.
+const REASONING_TOKEN_ALLOWANCE: u32 = 1024;
+
+/// Inline formatting is latency- and cost-sensitive, so reasoning models get the
+/// cheapest effort the catalog lists for them and no temperature: GPT-5 accepts
+/// only the default temperature, and Anthropic rejects one once thinking is on.
+/// Other models keep a low temperature and never receive a reasoning parameter
+/// a provider would reject (e.g. gpt-4o, gemini-2.0-flash). Unknown models are
+/// treated as non-reasoning.
+fn chat_options(request: &AiPolishRequest) -> ChatOptions {
+    let max_tokens = output_token_cap_for_input(request.input_text.len());
+    let reasoning_model = catalog::all_provider_models(&request.provider_id)
         .into_iter()
-        .any(|model| model.model_id == model_id && model.reasoning)
+        .find(|model| model.model_id == request.model_id && model.reasoning);
+    match reasoning_model {
+        Some(model) => ChatOptions::default()
+            .with_max_tokens(max_tokens.saturating_add(REASONING_TOKEN_ALLOWANCE))
+            .with_reasoning_effort(cheapest_reasoning_effort(&model.reasoning_efforts)),
+        None => ChatOptions::default()
+            .with_temperature(0.2)
+            .with_max_tokens(max_tokens),
+    }
+}
+
+/// The cheapest effort a model lists (gpt-5.4 accepts "none" but rejects
+/// "minimal"; o3 starts at "low"). Models that list none (budget-only thinking)
+/// get `Minimal`, which genai maps to each provider's lowest setting.
+fn cheapest_reasoning_effort(levels: &[String]) -> ReasoningEffort {
+    [
+        ("none", ReasoningEffort::None),
+        ("minimal", ReasoningEffort::Minimal),
+        ("low", ReasoningEffort::Low),
+        ("medium", ReasoningEffort::Medium),
+        ("high", ReasoningEffort::High),
+    ]
+    .into_iter()
+    .find(|(name, _)| levels.iter().any(|level| level == name))
+    .map_or(ReasoningEffort::Minimal, |(_, effort)| effort)
 }
 
 fn ensure_trailing_slash(base_url: &str) -> String {
@@ -173,18 +181,14 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_targets_only_reasoning_models() {
-        // Recommended reasoning models should be gated in for minimal effort.
-        assert!(model_supports_reasoning("openai", "gpt-5-mini"));
-        assert!(model_supports_reasoning("gemini", "gemini-2.5-flash"));
-        assert!(model_supports_reasoning("anthropic", "claude-haiku-4-5"));
-
-        // Non-reasoning models must be excluded so no reasoning param is sent.
-        assert!(!model_supports_reasoning("openai", "gpt-4o"));
-        assert!(!model_supports_reasoning("gemini", "gemini-2.0-flash"));
-
-        // Unknown provider/model resolves to false (safe default).
-        assert!(!model_supports_reasoning("openai", "does-not-exist"));
-        assert!(!model_supports_reasoning("custom", "anything"));
+    fn cheapest_reasoning_effort_follows_listed_levels() {
+        let cheapest = |values: &[&str]| {
+            let levels: Vec<String> = values.iter().map(|value| value.to_string()).collect();
+            format!("{:?}", cheapest_reasoning_effort(&levels))
+        };
+        assert_eq!(cheapest(&["none", "low", "medium"]), "None");
+        assert_eq!(cheapest(&["minimal", "low"]), "Minimal");
+        assert_eq!(cheapest(&["high", "low", "medium"]), "Low");
+        assert_eq!(cheapest(&[]), "Minimal");
     }
 }

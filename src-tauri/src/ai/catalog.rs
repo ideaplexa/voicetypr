@@ -28,6 +28,8 @@ pub struct CatalogModel {
     pub label: String,
     pub recommended: bool,
     pub reasoning: bool,
+    #[serde(default)]
+    pub reasoning_efforts: Vec<String>,
     pub context: Option<u64>,
     pub cost_input: Option<f64>,
     pub cost_output: Option<f64>,

@@ -1,3 +1,10 @@
+## 2.0.8 (2026-10-09)
+
+### Bug Fixes
+
+* **ai:** Polish works again with GPT-5 models (gpt-5-nano, gpt-5-mini, gpt-5.4): they reject a custom temperature, so every Polish fell back to the raw transcript
+* **ai:** Anthropic API keys save again and Claude Polish works on short dictations: the key check sent a thinking budget equal to `max_tokens` plus a temperature, which Anthropic rejected as a bad request
+
 ## Unreleased
 
 ### Features

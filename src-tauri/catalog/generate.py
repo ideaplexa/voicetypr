@@ -72,6 +72,12 @@ def project_model(model: dict[str, Any], recommended_ids: set[str]) -> dict[str,
         "recommended": model_id in recommended_ids,
         "reasoning": bool(model.get("reasoning", False)),
     }
+    projected["reasoning_efforts"] = [
+        value
+        for option in model.get("reasoning_options", [])
+        if option.get("type") == "effort"
+        for value in option.get("values", [])
+    ]
 
     limit = model.get("limit")
     if isinstance(limit, dict):
