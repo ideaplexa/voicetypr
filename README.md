@@ -56,6 +56,30 @@ voicetypr record --until-silence --json
 
 Human-readable output is the default. Add `--json` for structured automation output. Audio stays on the machine unless the command explicitly selects a remote Voicetypr server.
 
+### Local agents for AI formatting
+
+The Polish provider picker also supports installed, signed-in coding CLIs.
+Each formatting request starts a fresh process in an empty temporary directory;
+the CLI still sends the transcript to its model provider.
+
+Default selections use Claude Haiku 5.5 for Claude Code and GPT-6 Luna for
+Codex, pi, and oh-my-pi, with Medium reasoning. Saved model and reasoning
+choices remain unchanged. Claude Code disables skills with
+`--disable-slash-commands` when the installed CLI supports it; it does not use
+`--bare`, which interferes with subscription authentication.
+
+Cursor is experimental: install `cursor-agent` (or its `agent` alias). VoiceTypr
+lists models through the real `models` command, invokes read-only Ask mode with
+sandboxing and an empty workspace, and does not enable unattended write or MCP
+approval flags. Cursor exposes no reasoning or fast-mode control. Authentication
+is managed by Cursor (for example, `agent login` or `CURSOR_API_KEY`); no login is
+required to verify help, documented flags, or fake-binary integration tests.
+The headless contract follows Cursor's [headless guide](https://cursor.com/docs/cli/headless),
+[output format](https://cursor.com/docs/cli/reference/output-format),
+[parameters](https://cursor.com/docs/cli/reference/parameters), and
+[permissions](https://cursor.com/docs/cli/reference/permissions).
+
+
 ## Privacy and data flow
 
 Voicetypr is offline-first, but the selected mode determines what leaves your computer:

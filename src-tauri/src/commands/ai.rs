@@ -53,7 +53,8 @@ fn normalize_agent_cli_reasoning(provider: &str, reasoning: &str) -> String {
 }
 
 fn agent_cli_supports_reasoning(provider: &str) -> bool {
-    catalog::runtime_kind(provider) == Some("agent_cli")
+    // The cursor-agent CLI documents no reasoning/thinking level.
+    catalog::runtime_kind(provider) == Some("agent_cli") && provider != "cursor"
 }
 
 fn validate_agent_cli_reasoning(provider: &str, reasoning: &str) -> Result<(), String> {
@@ -1817,6 +1818,9 @@ mod tests {
             assert!(validate_agent_cli_reasoning(provider, "low").is_ok());
         }
         assert!(validate_agent_cli_reasoning("opencode", "low").is_ok());
+        // Cursor documents no reasoning level: it stays rejected and the
+        // probe reports an empty ladder.
+        assert!(validate_agent_cli_reasoning("cursor", "low").is_err());
         for provider in AGENT_CLI_PROVIDER_IDS {
             assert_eq!(default_agent_cli_reasoning(provider), "medium");
         }
@@ -1828,6 +1832,7 @@ mod tests {
         assert!(supports_fast_mode("codex"));
         assert!(!supports_fast_mode("pi"));
         assert!(!supports_fast_mode("droid"));
+        assert!(!supports_fast_mode("cursor"));
         assert!(validate_agent_cli_reasoning("pi", "minimal").is_ok());
         assert!(validate_agent_cli_reasoning("omp", "minimal").is_ok());
         assert!(validate_agent_cli_reasoning("opencode", "minimal").is_ok());

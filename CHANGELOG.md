@@ -1,3 +1,9 @@
+## 2.0.10 (unreleased)
+
+### Features
+
+* **ai:** Cursor CLI provider (experimental)
+
 ## 2.0.9 (2026-10-10)
 
 ### Features
