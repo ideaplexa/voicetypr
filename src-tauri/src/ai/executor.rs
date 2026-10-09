@@ -1,5 +1,5 @@
 use super::agent_cli::AgentCliRuntime;
-use super::contract::{AiPolishRequest, AiPolishResult};
+use super::contract::{AiPolishError, AiPolishRequest, AiPolishResult};
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::genai_runtime::{AiKeyResolver, GenaiRuntime};
 use super::openai_compatible::OpenAiCompatibleRuntime;
@@ -77,7 +77,7 @@ impl AiExecutor {
         &self,
         mut request: AiPolishRequest,
         cancellation_token: CancellationToken,
-    ) -> Result<AiPolishResult, AiProviderError> {
+    ) -> Result<AiPolishResult, AiPolishError> {
         let start = Instant::now();
         let budget = Duration::from_millis(request.timeout_ms);
         let deadline = start + budget;
@@ -87,9 +87,14 @@ impl AiExecutor {
         loop {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
-                .ok_or(AiProviderError::Timeout)?;
+                .ok_or(AiPolishError::new(AiProviderError::Timeout))?;
             let result = self
-                .run_with_budget(&request, cancellation_token.clone(), remaining)
+                .run_with_budget(
+                    &request,
+                    cancellation_token.clone(),
+                    remaining,
+                    fast_mode_fallback,
+                )
                 .await;
 
             match result {
@@ -111,10 +116,18 @@ impl AiExecutor {
                             );
                             continue;
                         }
-                        Err(error) => return Err(error),
+                        Err(error) => {
+                            return Err(AiPolishError {
+                                error,
+                                fast_mode_fallback,
+                            })
+                        }
                     };
                     if validated.trim().is_empty() {
-                        return Err(AiProviderError::BadResponse);
+                        return Err(AiPolishError {
+                            error: AiProviderError::BadResponse,
+                            fast_mode_fallback,
+                        });
                     }
                     return Ok(AiPolishResult {
                         output_text: validated,
@@ -129,6 +142,9 @@ impl AiExecutor {
                 {
                     // The provider refused the fast tier: retry once at
                     // standard speed without consuming the validation retry.
+                    // For OpenAI the retry must send service_tier "default"
+                    // explicitly — omitting it falls back to the project's
+                    // Default Service Tier, which may itself be fast.
                     fast_mode_fallback = true;
                     request.fast_mode = false;
                     log::warn!(
@@ -142,17 +158,25 @@ impl AiExecutor {
                     if let Some(retry_after) = mapped.retry_after {
                         let remaining_after_sleep = deadline
                             .checked_duration_since(Instant::now())
-                            .ok_or(AiProviderError::Timeout)?;
+                            .ok_or(AiPolishError::new(AiProviderError::Timeout))?;
                         if retry_after >= remaining_after_sleep {
-                            return Err(mapped.error);
+                            return Err(AiPolishError {
+                                error: mapped.error,
+                                fast_mode_fallback,
+                            });
                         }
                         tokio::select! {
-                            _ = cancellation_token.cancelled() => return Err(AiProviderError::Canceled),
+                            _ = cancellation_token.cancelled() => return Err(AiPolishError::new(AiProviderError::Canceled)),
                             _ = tokio::time::sleep(retry_after) => {}
                         }
                     }
                 }
-                Err(mapped) => return Err(mapped.error),
+                Err(mapped) => {
+                    return Err(AiPolishError {
+                        error: mapped.error,
+                        fast_mode_fallback,
+                    })
+                }
             }
         }
     }
@@ -162,21 +186,23 @@ impl AiExecutor {
         request: &AiPolishRequest,
         cancellation_token: CancellationToken,
         remaining: Duration,
+        fast_mode_fallback: bool,
     ) -> Result<String, MappedAiProviderError> {
         tokio::select! {
             biased;
             _ = tokio::time::sleep(remaining) => Err(MappedAiProviderError::new(AiProviderError::Timeout)),
             _ = cancellation_token.cancelled() => Err(MappedAiProviderError::new(AiProviderError::Canceled)),
-            result = self.execute_once(request) => result,
+            result = self.execute_once(request, fast_mode_fallback) => result,
         }
     }
 
     async fn execute_once(
         &self,
         request: &AiPolishRequest,
+        fast_mode_fallback: bool,
     ) -> Result<String, MappedAiProviderError> {
         if crate::ai::catalog::is_native_provider(&request.provider_id) {
-            self.genai_runtime.polish(request).await
+            self.genai_runtime.polish(request, fast_mode_fallback).await
         } else if crate::ai::catalog::runtime_kind(&request.provider_id)
             == Some("openai_compatible")
         {

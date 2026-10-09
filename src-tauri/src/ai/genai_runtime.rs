@@ -57,7 +57,11 @@ impl GenaiRuntime {
         }
     }
 
-    pub async fn polish(&self, request: &AiPolishRequest) -> Result<String, MappedAiProviderError> {
+    pub async fn polish(
+        &self,
+        request: &AiPolishRequest,
+        standard_after_fast_refusal: bool,
+    ) -> Result<String, MappedAiProviderError> {
         // Claude 4.7+/5.x models reject genai's legacy thinking shape; they go
         // through the raw Messages client (anthropic_current.rs).
         if request.provider_id == "anthropic" && uses_raw_messages(&request.model_id) {
@@ -70,8 +74,7 @@ impl GenaiRuntime {
         let model = ModelIden::new(adapter_kind, model_str);
         let chat_request =
             ChatRequest::from_user(request.input_text.clone()).with_system(request.prompt.clone());
-
-        let chat_options = Some(chat_options(request));
+        let chat_options = Some(chat_options(request, standard_after_fast_refusal));
 
         let response = self
             .client
@@ -140,7 +143,7 @@ fn genai_effort(provider_id: &str, model_id: &str, level: &str) -> ReasoningEffo
 /// the resolved effort and no temperature (reasoning APIs reject or ignore
 /// one); non-reasoning and unknown models keep the low temperature and never
 /// receive a reasoning parameter a provider would reject.
-fn chat_options(request: &AiPolishRequest) -> ChatOptions {
+fn chat_options(request: &AiPolishRequest, standard_after_fast_refusal: bool) -> ChatOptions {
     let model = catalog::find_model(&request.provider_id, &request.model_id);
     let effort = catalog::resolve_reasoning_level(
         &request.provider_id,
@@ -168,8 +171,15 @@ fn chat_options(request: &AiPolishRequest) -> ChatOptions {
     // Fast mode: genai's ServiceTier has no "fast" variant (and the Responses
     // API expects the literal service_tier field), so it rides extra_body —
     // merged last, it cannot conflict with anything the adapter sets.
-    if request.fast_mode && request.provider_id == "openai" {
-        options = options.with_extra_body(serde_json::json!({"service_tier": "fast"}));
+    if request.provider_id == "openai" {
+        if request.fast_mode {
+            options = options.with_extra_body(serde_json::json!({"service_tier": "fast"}));
+        } else if standard_after_fast_refusal {
+            // Standard-speed retry after a refusal: pin the tier explicitly —
+            // omitting it falls back to the project's Default Service Tier,
+            // which the user may have configured to Fast.
+            options = options.with_extra_body(serde_json::json!({"service_tier": "default"}));
+        }
     }
     options
 }
@@ -188,14 +198,14 @@ mod tests {
 
     #[test]
     fn namespaced_model_leaves_native_adapters_clean() {
-        assert_eq!(namespaced_model("openai", "gpt-5-mini"), "gpt-5-mini");
+        assert_eq!(namespaced_model("openai", "gpt-6-luna"), "gpt-6-luna");
         assert_eq!(
-            namespaced_model("anthropic", "claude-haiku-4-5"),
-            "claude-haiku-4-5"
+            namespaced_model("anthropic", "claude-haiku-5-5"),
+            "claude-haiku-5-5"
         );
         assert_eq!(
-            namespaced_model("gemini", "gemini-2.5-flash"),
-            "gemini-2.5-flash"
+            namespaced_model("gemini", "gemini-3.5-flash-lite"),
+            "gemini-3.5-flash-lite"
         );
     }
 

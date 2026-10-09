@@ -111,9 +111,15 @@ impl AnthropicCurrentRuntime {
         }
         let value: Value = serde_json::from_str(&body)
             .map_err(|_| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-        // A max-tokens stop means the response is partial; pasting it would
-        // silently inject a truncated rewrite at the cursor.
-        if value.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
+        // A truncated or refused response is partial: pasting it would
+        // silently inject an incomplete rewrite (or a refusal notice) at the
+        // cursor, so every non-natural stop reason becomes a retryable
+        // BadResponse rather than delivered text.
+        let stop_reason = value.get("stop_reason").and_then(Value::as_str);
+        if matches!(
+            stop_reason,
+            Some("max_tokens" | "model_context_window_exceeded" | "refusal")
+        ) {
             return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
         }
         let text = value

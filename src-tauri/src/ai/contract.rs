@@ -1,3 +1,4 @@
+use crate::ai::error::AiProviderError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,31 @@ pub struct AiPolishRequest {
     pub input_text: String,
     pub prompt: String,
     pub timeout_ms: u64,
+}
+
+/// Error from a polish attempt. `fast_mode_fallback` is true when the
+/// fast-tier request was refused and the standard-speed retry produced this
+/// error — the refusal is already known, so callers must still disable fast
+/// mode for the provider.
+#[derive(Debug)]
+pub struct AiPolishError {
+    pub error: AiProviderError,
+    pub fast_mode_fallback: bool,
+}
+
+impl AiPolishError {
+    pub fn new(error: AiProviderError) -> Self {
+        Self {
+            error,
+            fast_mode_fallback: false,
+        }
+    }
+}
+
+impl From<AiProviderError> for AiPolishError {
+    fn from(error: AiProviderError) -> Self {
+        Self::new(error)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

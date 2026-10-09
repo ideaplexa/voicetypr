@@ -28,15 +28,15 @@ mod tests {
     const PROVIDERS: &[ProviderCase] = &[
         ProviderCase {
             id: PROVIDER_OPENAI,
-            model: "gpt-5-nano",
+            model: "gpt-6-luna",
         },
         ProviderCase {
             id: PROVIDER_ANTHROPIC,
-            model: "claude-sonnet-4-6",
+            model: "claude-sonnet-5-5",
         },
         ProviderCase {
             id: PROVIDER_GEMINI,
-            model: "gemini-3-flash-preview",
+            model: "gemini-3.5-flash-lite",
         },
         ProviderCase {
             id: PROVIDER_CUSTOM,
@@ -75,7 +75,7 @@ mod tests {
                 .await
                 .unwrap_err();
 
-            assert_eq!(error, AiProviderError::InvalidApiKey);
+            assert_eq!(error.error, AiProviderError::InvalidApiKey);
             assert_eq!(server.received_requests().await.unwrap().len(), 1);
         }
     }
@@ -150,7 +150,7 @@ mod tests {
                 .await
                 .unwrap_err();
 
-            assert_eq!(error, AiProviderError::ServiceUnavailable);
+            assert_eq!(error.error, AiProviderError::ServiceUnavailable);
             assert_eq!(server.received_requests().await.unwrap().len(), 2);
         }
     }
@@ -173,7 +173,7 @@ mod tests {
                 .unwrap_err();
 
             let elapsed = started.elapsed();
-            assert_eq!(error, AiProviderError::Timeout);
+            assert_eq!(error.error, AiProviderError::Timeout);
             assert!(elapsed >= Duration::from_millis(100), "elapsed={elapsed:?}");
             assert!(elapsed < Duration::from_millis(900), "elapsed={elapsed:?}");
         }
@@ -198,7 +198,7 @@ mod tests {
 
             let error = handle.await.unwrap().unwrap_err();
 
-            assert_eq!(error, AiProviderError::Canceled);
+            assert_eq!(error.error, AiProviderError::Canceled);
         }
     }
 
@@ -214,7 +214,7 @@ mod tests {
                 .await
                 .unwrap_err();
 
-            assert_eq!(error, AiProviderError::BadResponse);
+            assert_eq!(error.error, AiProviderError::BadResponse);
         }
     }
 
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gemini_medium_uses_legacy_budget_and_room_for_visible_output() {
+    async fn gemini_2_5_budget_medium_uses_legacy_budget_and_room_for_visible_output() {
         let body = sent_body_with_level(
             ProviderCase {
                 id: PROVIDER_GEMINI,
@@ -362,17 +362,18 @@ mod tests {
     #[tokio::test]
     async fn ai_runtime_gpt_reasoning_models_get_no_temperature() {
         // Reasoning models reject any non-default temperature, so Polish
-        // silently fell back to raw text when one was sent.
+        // silently fell back to raw text when one was sent. gpt-5.6-luna is
+        // the second recommended OpenAI model, used here as a placeholder.
         let body = sent_body(
             ProviderCase {
                 id: PROVIDER_OPENAI,
-                model: "gpt-5-nano",
+                model: "gpt-5.6-luna",
             },
             "ok",
         )
         .await;
         assert!(body.get("temperature").is_none(), "{body}");
-        // No stored level resolves to medium for gpt-5-nano.
+        // No stored level resolves to medium for gpt-5.6-luna.
         assert_eq!(body["reasoning"]["effort"], "medium");
 
         // Non-reasoning models keep a low temperature and no reasoning field.
@@ -486,7 +487,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ai_runtime_gemini_none_sends_zero_thinking_budget() {
+    async fn ai_runtime_gemini_2_5_none_sends_zero_thinking_budget() {
         // gemini-2.5-flash "none" must actually disable thinking; genai only
         // emits thinkingBudget via the explicit Budget(0) variant.
         let body = sent_body_with_level(
@@ -509,7 +510,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ai_runtime_gemini_output_cap_clamps_to_catalog_limit() {
+    async fn ai_runtime_gemini_2_5_output_cap_clamps_to_catalog_limit() {
         // The 2.0.8 review found maxOutputTokens could exceed gemini's 65,536
         // output limit; the cap now clamps to the catalog limit.
         let body = sent_body_with_level(
@@ -525,7 +526,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ai_runtime_anthropic_thinking_request_is_valid_for_short_input() {
+    async fn ai_runtime_legacy_anthropic_thinking_budget_stays_below_max_tokens() {
+        // Legacy (budget-only) Claude models keep the genai path; this pins
+        // that path specifically, hence non-recommended claude-haiku-4-5.
         // max_tokens must always exceed the thinking budget Anthropic sends.
         let body = sent_body_with_level(
             ProviderCase {
@@ -543,8 +546,9 @@ mod tests {
 
     #[tokio::test]
     async fn ai_runtime_fast_refusal_retries_once_at_standard_speed() {
-        // A fast-tier refusal (OpenAI 400 on service_tier) retries once
-        // without the tier and reports the fallback.
+        // A fast-tier refusal (OpenAI 400 on service_tier) retries once at
+        // the explicit default tier — omitting service_tier would fall back
+        // to the project's Default Service Tier, which may itself be fast.
         let case = ProviderCase {
             id: PROVIDER_OPENAI,
             model: "gpt-6-luna",
@@ -575,9 +579,46 @@ mod tests {
         let first: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
         let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
         assert_eq!(first["service_tier"], "fast");
-        assert!(second.get("service_tier").is_none(), "{second}");
+        assert_eq!(second["service_tier"], "default");
     }
 
+    #[tokio::test]
+    async fn ai_runtime_fast_fallback_flag_survives_standard_retry_failure() {
+        // When the standard-speed retry also fails, the refusal is still
+        // reported: callers must persist fast=false and emit the unavailable
+        // event even though no polished text was produced.
+        let case = ProviderCase {
+            id: PROVIDER_OPENAI,
+            model: "gpt-6-luna",
+        };
+        let server = MockServer::start().await;
+        mount_sequence(
+            &server,
+            case.id,
+            vec![
+                error_response(400, r#"{"error":{"message":"Invalid service_tier value"}}"#),
+                error_response(500, "server error"),
+                error_response(500, "server error"),
+            ],
+        )
+        .await;
+        let executor = executor_for(case, &server, true, false);
+        let mut polish_request = request(case, 1_000);
+        polish_request.fast_mode = true;
+
+        let failure = executor
+            .polish(polish_request, CancellationToken::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(failure.error, AiProviderError::ServiceUnavailable);
+        assert!(failure.fast_mode_fallback);
+        let requests = server.received_requests().await.unwrap();
+        // fast refusal + standard attempt + one validation retry.
+        assert_eq!(requests.len(), 3);
+        let second: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(second["service_tier"], "default");
+    }
     #[tokio::test]
     async fn ai_runtime_anthropic_fast_refusal_retries_at_standard_speed() {
         // Anthropic 403/429 refusals mentioning speed/fast also retry once
@@ -611,6 +652,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ai_runtime_anthropic_non_natural_stop_reasons_are_bad_response() {
+        // model_context_window_exceeded and refusal are partial/failed
+        // responses — pasting them would inject truncated text or a refusal
+        // notice, so they must surface as BadResponse like max_tokens.
+        let case = ProviderCase {
+            id: PROVIDER_ANTHROPIC,
+            model: "claude-haiku-5-5",
+        };
+        for stop_reason in ["max_tokens", "model_context_window_exceeded", "refusal"] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path_regex(path_for_provider(case.id)))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "model": case.model,
+                    "content": [{ "type": "text", "text": "partial output" }],
+                    "stop_reason": stop_reason
+                })))
+                .mount(&server)
+                .await;
+            let executor = executor_for(case, &server, true, false);
+
+            let failure = executor
+                .polish(request(case, 1_000), CancellationToken::new())
+                .await
+                .unwrap_err();
+
+            assert_eq!(
+                failure.error,
+                AiProviderError::BadResponse,
+                "stop_reason {stop_reason} should error, not paste"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn ai_runtime_auth_error_never_triggers_fast_fallback() {
         // A 401 must not downgrade to standard speed — auth errors are real.
         let case = ProviderCase {
@@ -636,7 +712,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(error, AiProviderError::InvalidApiKey);
+        assert_eq!(error.error, AiProviderError::InvalidApiKey);
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
@@ -669,7 +745,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(error, AiProviderError::BadResponse);
+        assert_eq!(error.error, AiProviderError::BadResponse);
     }
 
     #[tokio::test]
@@ -758,7 +834,7 @@ mod tests {
     async fn ai_runtime_maps_gemini_api_key_invalid_400_to_invalid_api_key() {
         let case = ProviderCase {
             id: PROVIDER_GEMINI,
-            model: "gemini-3-flash-preview",
+            model: "gemini-3.8-flash",
         };
         let server = MockServer::start().await;
         mount_sequence(
@@ -777,7 +853,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(error, AiProviderError::InvalidApiKey);
+        assert_eq!(error.error, AiProviderError::InvalidApiKey);
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
@@ -807,7 +883,7 @@ mod tests {
 
         let elapsed = started.elapsed();
         assert!(matches!(
-            error,
+            error.error,
             AiProviderError::Timeout | AiProviderError::RateLimited
         ));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
@@ -903,7 +979,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(error, AiProviderError::BadResponse);
+        assert_eq!(error.error, AiProviderError::BadResponse);
         // One attempt + one retry, then it stops: exactly two requests.
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
     }
@@ -960,7 +1036,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(error, AiProviderError::BadResponse);
+        assert_eq!(error.error, AiProviderError::BadResponse);
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
     }
 
@@ -1025,7 +1101,7 @@ mod tests {
 
         let error = handle.await.unwrap().unwrap_err();
 
-        assert_eq!(error, AiProviderError::Canceled);
+        assert_eq!(error.error, AiProviderError::Canceled);
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
         assert!(started.elapsed() < Duration::from_millis(500));
     }
@@ -1085,7 +1161,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert_eq!(error, AiProviderError::Timeout);
+        assert_eq!(error.error, AiProviderError::Timeout);
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
@@ -1149,7 +1225,7 @@ mod tests {
     fn ok_response(provider_id: &str, content: &str) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(match provider_id {
             PROVIDER_ANTHROPIC => json!({
-                "model": "claude-sonnet-4-6",
+                "model": "claude-sonnet-5-5",
                 "content": [{ "type": "text", "text": content }],
                 "stop_reason": "end_turn"
             }),
@@ -1279,7 +1355,7 @@ mod tests {
                 );
                 assert!(
                     matches!(
-                        err,
+                        err.error,
                         AiProviderError::UnsupportedProvider | AiProviderError::Timeout
                     ),
                     "expected graceful spawn failure (UnsupportedProvider/Timeout), got {err:?}",
@@ -1289,7 +1365,7 @@ mod tests {
                 if let Err(err) = result {
                     assert!(
                         matches!(
-                            err,
+                            err.error,
                             AiProviderError::UnsupportedProvider
                                 | AiProviderError::Timeout
                                 | AiProviderError::BadResponse
