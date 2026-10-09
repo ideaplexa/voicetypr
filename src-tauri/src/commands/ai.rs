@@ -38,12 +38,8 @@ const LEGACY_OPENAI_NO_AUTH_KEY: &str = "ai_openai_no_auth";
 const AGENT_CLI_REASONING_KEY: &str = "ai_agent_cli_reasoning_by_provider";
 const AGENT_CLI_FAST_MODE_KEY: &str = "ai_agent_cli_fast_mode_by_provider";
 
-fn default_agent_cli_reasoning(provider: &str) -> &'static str {
-    if matches!(provider, "pi" | "omp") {
-        "off"
-    } else {
-        "low"
-    }
+fn default_agent_cli_reasoning(_provider: &str) -> &'static str {
+    "medium"
 }
 
 fn normalize_agent_cli_reasoning(provider: &str, reasoning: &str) -> String {
@@ -1809,9 +1805,9 @@ mod tests {
             assert!(validate_agent_cli_reasoning(provider, "low").is_ok());
         }
         assert!(validate_agent_cli_reasoning("opencode", "low").is_ok());
-        assert_eq!(default_agent_cli_reasoning("pi"), "off");
-        assert_eq!(default_agent_cli_reasoning("omp"), "off");
-        assert_eq!(default_agent_cli_reasoning("codex"), "low");
+        for provider in AGENT_CLI_PROVIDER_IDS {
+            assert_eq!(default_agent_cli_reasoning(provider), "medium");
+        }
         assert!(validate_agent_cli_reasoning("pi", "medium").is_ok());
         assert!(validate_agent_cli_reasoning("pi", "high").is_err());
         assert_eq!(normalize_agent_cli_reasoning("pi", "high"), "medium");

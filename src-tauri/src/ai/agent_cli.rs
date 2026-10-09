@@ -97,7 +97,7 @@ enum ReasoningPolicy {
         omit_off: bool,
     },
     CodexConfig,
-    ClaudeEffortLowIfSupported,
+    ClaudeEffortIfSupported,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,6 +126,7 @@ enum OutputParser {
 struct ClaudeCapabilities {
     safe_mode: bool,
     effort: bool,
+    disable_slash_commands: bool,
 }
 
 const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
@@ -142,9 +143,9 @@ const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
         "--no-session-persistence",
     ],
     required_capability_flags: &["--no-session-persistence"],
-    default_model: None,
+    default_model: Some("claude-haiku-5-5"),
     model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::ClaudeEffortLowIfSupported,
+    reasoning: ReasoningPolicy::ClaudeEffortIfSupported,
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
     input_mode: InputMode::Stdin,
     output: OutputParser::ClaudeJson,
@@ -174,11 +175,11 @@ const PI_SPEC: AgentCliSpec = AgentCliSpec {
         "--no-context-files",
         "--thinking",
     ],
-    default_model: None,
+    default_model: Some("openai/gpt-6-luna"),
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::Flag {
         flag: "--thinking",
-        default: "off",
+        default: "medium",
         omit_off: false,
     },
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
@@ -212,11 +213,11 @@ const OMP_SPEC: AgentCliSpec = AgentCliSpec {
         "--no-title",
         "--thinking",
     ],
-    default_model: None,
+    default_model: Some("openai-codex/gpt-6-luna"),
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::Flag {
         flag: "--thinking",
-        default: "off",
+        default: "medium",
         omit_off: false,
     },
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
@@ -269,7 +270,7 @@ const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
         "--sandbox",
         "--json",
     ],
-    default_model: None,
+    default_model: Some("gpt-6-luna"),
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::CodexConfig,
     system_prompt: SystemPromptPolicy::CodexConfig,
@@ -294,7 +295,7 @@ const DROID_SPEC: AgentCliSpec = AgentCliSpec {
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::Flag {
         flag: "--reasoning-effort",
-        default: "low",
+        default: "medium",
         omit_off: false,
     },
     system_prompt: SystemPromptPolicy::Flag("--append-system-prompt"),
@@ -330,7 +331,7 @@ const GROK_SPEC: AgentCliSpec = AgentCliSpec {
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::Flag {
         flag: "--reasoning-effort",
-        default: "low",
+        default: "medium",
         omit_off: false,
     },
     system_prompt: SystemPromptPolicy::Flag("--system-prompt-override"),
@@ -351,7 +352,7 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::Flag {
         flag: "--variant",
-        default: "low",
+        default: "medium",
         omit_off: true,
     },
     system_prompt: SystemPromptPolicy::None,
@@ -383,7 +384,7 @@ const CLINE_SPEC: AgentCliSpec = AgentCliSpec {
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::Flag {
         flag: "--thinking",
-        default: "low",
+        default: "medium",
         omit_off: false,
     },
     system_prompt: SystemPromptPolicy::Flag("--system"),
@@ -470,6 +471,10 @@ fn cold_argv_for_model_with_options(
         } else {
             argv.extend(["--setting-sources", ""].into_iter().map(str::to_string));
         }
+        // Disable skills without --bare, which breaks subscription login.
+        if capabilities.disable_slash_commands {
+            argv.push("--disable-slash-commands".to_string());
+        }
     }
 
     if fast_mode {
@@ -525,19 +530,21 @@ fn cold_argv_for_model_with_options(
             }
         }
         ReasoningPolicy::CodexConfig => {
-            let level = valid_level.filter(|level| *level != "off").unwrap_or("low");
+            let level = valid_level
+                .filter(|level| *level != "off")
+                .unwrap_or("medium");
             argv.extend([
                 "-c".to_string(),
                 format!("model_reasoning_effort=\"{level}\""),
             ]);
         }
-        ReasoningPolicy::ClaudeEffortLowIfSupported if capabilities.effort => {
-            let level = valid_level.unwrap_or("low");
+        ReasoningPolicy::ClaudeEffortIfSupported if capabilities.effort => {
+            let level = valid_level.unwrap_or("medium");
             if level != "off" {
                 argv.extend(["--effort".to_string(), level.to_string()]);
             }
         }
-        ReasoningPolicy::ClaudeEffortLowIfSupported => {}
+        ReasoningPolicy::ClaudeEffortIfSupported => {}
     }
 
     if spec.output == OutputParser::PiJsonl {
@@ -1061,6 +1068,7 @@ fn claude_capabilities_from_help(help: &[u8]) -> ClaudeCapabilities {
     ClaudeCapabilities {
         safe_mode: help_advertises_flag(help, "--safe-mode"),
         effort: help_advertises_flag(help, "--effort"),
+        disable_slash_commands: help_advertises_flag(help, "--disable-slash-commands"),
     }
 }
 
@@ -1808,8 +1816,8 @@ fn supported_reasoning_levels(spec: &AgentCliSpec) -> Vec<String> {
     // medium; pi, omp, and opencode also document `minimal` between
     // off and low, so it is included wherever the contract has it.
     let has_off = matches!(
-        spec.reasoning,
-        ReasoningPolicy::Flag { default: "off", .. } | ReasoningPolicy::Flag { omit_off: true, .. }
+        spec.provider_id,
+        PROVIDER_PI | PROVIDER_OMP | PROVIDER_OPENCODE
     );
     let mut levels: Vec<&str> = if has_off { vec!["off"] } else { Vec::new() };
     if supports_minimal_thinking(spec) {
@@ -3185,6 +3193,8 @@ mod tests {
                 "-p",
                 "--setting-sources",
                 "",
+                "--model",
+                "claude-haiku-5-5",
                 "--tools",
                 "",
                 "--strict-mcp-config",
@@ -3196,8 +3206,21 @@ mod tests {
                 "json",
             ]
         );
-        assert!(!argv.iter().any(|arg| arg == "--model"));
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "claude-haiku-5-5"));
         assert!(!argv.contains(&"--bare".to_string()));
+    }
+
+    #[test]
+    fn claude_disables_skills_only_when_supported_without_bare() {
+        let capabilities =
+            claude_capabilities_from_help(b"--disable-slash-commands --effort --safe-mode");
+        let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "", capabilities);
+        assert!(argv.iter().any(|arg| arg == "--disable-slash-commands"));
+        assert!(!argv.iter().any(|arg| arg == "--bare"));
+        let fallback = cold_argv(&CLAUDE_CODE_SPEC, "prompt");
+        assert!(!fallback.iter().any(|arg| arg == "--disable-slash-commands"));
     }
 
     #[test]
@@ -3208,18 +3231,20 @@ mod tests {
         let argv = cold_argv(&CLAUDE_CODE_SPEC, "polish this");
         assert!(!argv.contains(&dangerous_input.to_string()));
         assert!(argv.iter().all(|arg| !arg.contains("sh -c")));
-        assert_eq!(argv.len(), 12);
+        assert_eq!(argv.len(), 14);
     }
 
     #[test]
     fn pi_cold_argv_is_fixed_except_for_prompt_slot() {
-        // Dictation is fed via stdin; empty model selection must omit
-        // `--model` while retaining every mandatory isolation flag.
+        // Dictation is fed via stdin; empty selection uses the explicit default
+        // while retaining every mandatory isolation flag.
         let argv = cold_argv(&PI_SPEC, "my system prompt");
         assert_eq!(
             argv,
             vec![
                 "-p",
+                "--model",
+                "openai/gpt-6-luna",
                 "--no-tools",
                 "--no-session",
                 "--no-extensions",
@@ -3227,24 +3252,28 @@ mod tests {
                 "--no-prompt-templates",
                 "--no-context-files",
                 "--thinking",
-                "off",
+                "medium",
                 "--system-prompt",
                 "my system prompt",
             ]
         );
-        assert!(!argv.iter().any(|arg| arg == "--model"));
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "openai/gpt-6-luna"));
         assert!(argv.iter().all(|arg| !arg.contains("sh -c")));
     }
 
     #[test]
     fn omp_cold_argv_is_fixed_except_for_prompt_slot() {
-        // Empty model selection omits `--model`; omp still receives every
-        // mandatory isolation flag and thinking-off policy.
+        // Empty model selection uses GPT-6 Luna while retaining every
+        // mandatory isolation flag and medium thinking.
         let argv = cold_argv(&OMP_SPEC, "my system prompt");
         assert_eq!(
             argv,
             vec![
                 "-p",
+                "--model",
+                "openai-codex/gpt-6-luna",
                 "--no-tools",
                 "--no-session",
                 "--no-skills",
@@ -3253,14 +3282,16 @@ mod tests {
                 "--no-lsp",
                 "--no-title",
                 "--thinking",
-                "off",
+                "medium",
                 "--mode",
                 "json",
                 "--system-prompt",
                 "my system prompt",
             ]
         );
-        assert!(!argv.iter().any(|arg| arg == "--model"));
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "openai-codex/gpt-6-luna"));
         assert!(argv.iter().all(|arg| !arg.contains("sh -c")));
         assert_eq!(OMP_SPEC.input_mode, InputMode::PositionalArg);
         assert_eq!(OMP_SPEC.cold_argv_suffix.len(), 0);
@@ -3306,7 +3337,7 @@ mod tests {
         };
         assert!(has_pair(&pi, "--model", "anthropic/sonnet"));
         assert!(!has_pair(&pi, "--model", ""));
-        assert!(has_pair(&pi, "--thinking", "off"));
+        assert!(has_pair(&pi, "--thinking", "medium"));
 
         let omp = cold_argv_for_model(
             &OMP_SPEC,
@@ -3316,7 +3347,7 @@ mod tests {
         );
         assert!(has_pair(&omp, "--model", "openai/gpt-4o@exact"));
         assert!(!has_pair(&omp, "--model", ""));
-        assert!(has_pair(&omp, "--thinking", "off"));
+        assert!(has_pair(&omp, "--thinking", "medium"));
     }
 
     #[test]
@@ -3358,7 +3389,7 @@ mod tests {
         }
         assert!(codex
             .windows(2)
-            .any(|pair| pair[0] == "-c" && pair[1] == "model_reasoning_effort=\"low\""));
+            .any(|pair| pair[0] == "-c" && pair[1] == "model_reasoning_effort=\"medium\""));
         assert!(codex.windows(2).any(|pair| {
             pair[0] == "-c" && pair[1].starts_with("developer_instructions=\"system\"")
         }));
@@ -3428,7 +3459,8 @@ mod tests {
             capabilities,
             ClaudeCapabilities {
                 safe_mode: true,
-                effort: true
+                effort: true,
+                disable_slash_commands: false,
             }
         );
         let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "sonnet", capabilities);
@@ -3437,7 +3469,7 @@ mod tests {
             .any(|pair| pair[0] == "--model" && pair[1] == "sonnet"));
         assert!(argv
             .windows(2)
-            .any(|pair| pair[0] == "--effort" && pair[1] == "low"));
+            .any(|pair| pair[0] == "--effort" && pair[1] == "medium"));
 
         let medium = cold_argv_for_model_with_reasoning(
             &CLAUDE_CODE_SPEC,
@@ -3561,7 +3593,9 @@ mod tests {
         assert!(argv
             .windows(2)
             .any(|pair| pair[0] == "--setting-sources" && pair[1].is_empty()));
-        assert!(!argv.iter().any(|arg| arg == "--model"));
+        assert!(argv
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "claude-haiku-5-5"));
         assert!(!argv.contains(&"--safe-mode".to_string()));
         assert!(!argv.contains(&"--effort".to_string()));
     }

@@ -35,6 +35,11 @@ Local transcription is the default. After the trial, a lifetime license keeps lo
 - **Release channels:** choose Stable or Beta updates. Microsoft Store installations remain Store-managed.
 - **Native performance:** a small React interface backed by Rust audio, transcription, hotkey, and insertion pipelines.
 
+Local-agent formatting defaults to Claude Haiku 5.5 in Claude Code and GPT-6
+Luna in Codex, pi, and oh-my-pi, with Medium reasoning. Saved selections are
+preserved. Claude Code disables skills using `--disable-slash-commands` when
+supported; it does not use `--bare`, which interferes with subscription login.
+
 ## Command-line interface
 
 Voicetypr's CLI gives scripts and AI agents access to local transcription: audio in, plain text or structured JSON out. With a lifetime license and a local model, there are no per-minute API fees or cloud usage quotas.
