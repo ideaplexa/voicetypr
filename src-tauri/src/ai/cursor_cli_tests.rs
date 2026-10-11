@@ -171,7 +171,6 @@ async fn cursor_fake_models_command_has_no_invented_fallback() {
 
 #[cfg(unix)]
 #[tokio::test]
-#[serial_test::serial]
 async fn cursor_alias_requires_identity_and_reuses_validated_path() {
     use std::os::unix::fs::PermissionsExt;
     let fixture = TempDir::new().unwrap();
@@ -184,34 +183,24 @@ async fn cursor_alias_requires_identity_and_reuses_validated_path() {
     )
     .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path_cache = RESOLVED_PATH.get_or_init(|| Mutex::new(None));
-    let previous_path = path_cache
-        .lock()
-        .await
-        .replace(fixture.path().as_os_str().to_owned());
-    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+    // Inject the candidate directly into the production identity validator.
+    // Do not replace process-global PATH, help, or resolution caches: other
+    // CLI fixtures run concurrently and need their own normal environment.
+    let help = run_model_list_command(&binary, &["--help"]).await.unwrap();
+    let unrelated = crate::ai::cursor_cli::validate_alias_path(binary.clone(), &help);
     assert_eq!(
-        probe(PROVIDER_CURSOR, false).await.state,
+        probe_for_resolution(&CURSOR_SPEC, &unrelated).state,
         AgentCliProbeState::Missing
     );
-    assert!(list_models(PROVIDER_CURSOR).await.is_err());
-    let request = AiPolishRequest {
-        provider_id: PROVIDER_CURSOR.to_string(),
-        model_id: "gpt-6-luna".to_string(),
-        reasoning_level: None,
-        fast_mode: false,
-        input_text: "ship today".to_string(),
-        prompt: "Polish.".to_string(),
-        timeout_ms: 20_000,
-    };
-    assert!(AgentCliRuntime::new().polish(&request).await.is_err());
+    assert_eq!(unrelated, BinaryResolution::Missing);
     assert_eq!(std::fs::read_to_string(&calls).unwrap(), "--help\n");
 
     // Identity alone is insufficient: the required isolation flags must exist.
     std::fs::write(&binary, "#!/bin/sh\nprintf 'Start the Cursor Agent\\n'\n").unwrap();
-    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+    let help = run_model_list_command(&binary, &["--help"]).await.unwrap();
+    let missing_flags = crate::ai::cursor_cli::validate_alias_path(binary.clone(), &help);
     assert_eq!(
-        probe(PROVIDER_CURSOR, false).await.state,
+        probe_for_resolution(&CURSOR_SPEC, &missing_flags).state,
         AgentCliProbeState::Missing
     );
 
@@ -223,25 +212,40 @@ async fn cursor_alias_requires_identity_and_reuses_validated_path() {
     )
     .unwrap();
     std::fs::write(&calls, "").unwrap();
-    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+    let help = run_model_list_command(&binary, &["--help"]).await.unwrap();
+    let resolution = crate::ai::cursor_cli::validate_alias_path(binary.clone(), &help);
     assert_eq!(
-        probe(PROVIDER_CURSOR, false).await.state,
+        probe_for_resolution(&CURSOR_SPEC, &resolution).state,
         AgentCliProbeState::Ready
     );
-    assert_eq!(model_binary(&CURSOR_SPEC).await.unwrap(), binary);
+    let BinaryResolution::Found(validated_path) = resolution else {
+        panic!("Cursor alias must resolve");
+    };
+    assert_eq!(validated_path, binary);
+    let payload = run_model_list_command(&validated_path, &["models"])
+        .await
+        .unwrap();
     assert_eq!(
-        list_models(PROVIDER_CURSOR).await.unwrap()[1].id,
+        crate::ai::cursor_cli::parse_models(&payload).unwrap()[1].id,
         "gpt-6-luna"
     );
+    let argv = cold_argv_for_model(&CURSOR_SPEC, "Polish.", "gpt-6-luna", Default::default());
     assert_eq!(
-        AgentCliRuntime::new().polish(&request).await.unwrap(),
+        cold_spawn_and_collect(
+            &CURSOR_SPEC,
+            &validated_path,
+            &argv,
+            CURSOR_SPEC.input_mode,
+            "ship today",
+            CURSOR_SPEC.output,
+        )
+        .await
+        .unwrap(),
         "Ship today."
     );
-    // Detection validated once; models and polish reused that exact path/help.
+    // Both invocations use the injected, validated absolute path.
     assert_eq!(
         std::fs::read_to_string(&calls).unwrap(),
         "--help\nmodels\n-p\n"
     );
-    *path_cache.lock().await = previous_path;
-    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
 }

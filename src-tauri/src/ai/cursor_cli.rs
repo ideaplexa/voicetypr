@@ -33,11 +33,7 @@ pub(super) async fn resolve_binary(refresh_path: bool) -> BinaryResolution {
             BinaryResolution::Found(path) => {
                 let (_, help, _) =
                     discover_capabilities_for_polish(&path, &CURSOR_SPEC, false).await;
-                if alias_is_cursor(&help) {
-                    BinaryResolution::Found(path)
-                } else {
-                    BinaryResolution::Missing
-                }
+                validate_alias_path(path, &help)
             }
             BinaryResolution::UnsafeLauncher => BinaryResolution::UnsafeLauncher,
             BinaryResolution::Missing => primary,
@@ -45,6 +41,15 @@ pub(super) async fn resolve_binary(refresh_path: bool) -> BinaryResolution {
     };
     *cached = Some(resolution.clone());
     resolution
+}
+
+/// Validate an already resolved alias candidate before any non-help command.
+pub(super) fn validate_alias_path(path: std::path::PathBuf, help: &[u8]) -> BinaryResolution {
+    if alias_is_cursor(help) {
+        BinaryResolution::Found(path)
+    } else {
+        BinaryResolution::Missing
+    }
 }
 
 fn alias_is_cursor(help: &[u8]) -> bool {
