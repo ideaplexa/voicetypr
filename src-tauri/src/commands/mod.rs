@@ -1,4 +1,5 @@
 pub mod ai;
+pub(crate) mod ai_lifecycle;
 pub mod audio;
 pub mod audio_feedback;
 pub mod cli_tool;

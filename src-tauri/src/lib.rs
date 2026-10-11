@@ -1817,6 +1817,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             tauri::RunEvent::Exit => {
+                crate::commands::ai_lifecycle::invalidate();
                 // Never strand a system output device we muted: restore the
                 // mute state we changed before the process goes away.
                 #[cfg(target_os = "macos")]

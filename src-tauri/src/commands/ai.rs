@@ -1062,6 +1062,7 @@ pub async fn update_writing_settings(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     save_writing_settings(&app, &settings)?;
+    super::ai_lifecycle::invalidate();
     // Writing settings are persisted by writing::settings; keep one invalidation immediately after that save.
     crate::commands::audio::invalidate_recording_config_cache(&app).await;
     Ok(())
@@ -1202,11 +1203,14 @@ pub(crate) async fn warm_ai_provider(app: tauri::AppHandle, provider_id: String)
 }
 
 /// Recording-start prefetch for the selected polish provider. HTTP providers
-/// get a pooled HEAD on their resolved origin; agent-CLI providers get a
-/// binary + `--help` capability prefetch. No user text is sent on either path.
+/// get a pooled HEAD; agent CLIs get binary/capability prefetch, and eligible
+/// Claude Code recordings also prepare an isolated, transcript-free spare.
 pub(crate) async fn prefetch_ai_provider(app: tauri::AppHandle, provider_id: String) {
     if crate::ai::catalog::runtime_kind(&provider_id) == Some("agent_cli") {
         crate::ai::agent_cli::prefetch_polish_capabilities(&provider_id).await;
+        if provider_id == crate::ai::providers::PROVIDER_CLAUDE_CODE {
+            super::ai_lifecycle::prefetch(app).await;
+        }
     } else if should_warm_ai_provider(&app, &provider_id) {
         warm_ai_provider(app, provider_id).await;
     }
@@ -1494,9 +1498,10 @@ async fn polish_text_with_prompt_result_typed(
         prompt,
         timeout_ms,
     };
+    super::ai_lifecycle::remember_request(&request);
 
     let result = executor
-        .polish(request, tokio_util::sync::CancellationToken::new())
+        .polish(request, super::ai_lifecycle::polish_cancellation())
         .await
         .map_err(|failure| {
             // The fast-tier refusal is already known even when the standard
@@ -1580,6 +1585,7 @@ pub async fn set_openai_config(
     store
         .save()
         .map_err(|e| format!("Failed to save AI settings: {}", e))?;
+    super::ai_lifecycle::invalidate();
     Ok(())
 }
 

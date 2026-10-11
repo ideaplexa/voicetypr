@@ -77,9 +77,9 @@ fn parse_catalog(json: &str) -> Catalog {
         models: Vec::new(),
     });
 
-    // Subscription-authenticated coding CLIs. Each is cold-spawned from an
-    // empty temporary directory by AgentCliRuntime; provider-specific flags
-    // live in agent_cli.rs.
+    // Subscription-authenticated coding CLIs. Each request uses a fresh child
+    // in an empty temporary directory (Claude may consume a prepared spare).
+    // Provider-specific flags live in agent_cli.rs.
     for (id, label) in [
         ("claude-code", "Claude Code"),
         ("pi", "pi"),

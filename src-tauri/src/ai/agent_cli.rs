@@ -1,8 +1,7 @@
-//! Cold-spawn runtime for agent-CLI polish providers.
+//! Isolated, one-shot runtime for agent-CLI polish providers.
 //!
-//! Agent CLIs are deliberately launched as isolated, one-shot subprocesses.
-//! There is no warm-session manager: every request gets a fresh process and a
-//! fresh temporary working directory.
+//! Every request gets a fresh process and temporary working directory. Claude
+//! may consume a pre-spawned single-use spare; conversations are never reused.
 //!
 //! # Spawning model
 //!
@@ -28,6 +27,59 @@
 //! Dictated text is fed via discrete stdin/argv values — NEVER a shell string,
 //! NEVER `sh -c`. Isolation flags are provider policy in `AgentCliSpec`; the
 //! child also runs from an EMPTY temp cwd so it discovers no project config.
+
+mod hot_spare;
+
+static CLAUDE_SPARE: LazyLock<hot_spare::HotSpare> = LazyLock::new(hot_spare::HotSpare::default);
+// Configuration invalidation is separate from consuming/expiring a spare.
+static HOT_SPARE_SETTINGS_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn invalidate_hot_spare() {
+    HOT_SPARE_SETTINGS_EPOCH.fetch_add(1, Ordering::SeqCst);
+    CLAUDE_SPARE.invalidate();
+}
+
+pub(crate) fn hot_spare_generation() -> u64 {
+    HOT_SPARE_SETTINGS_EPOCH.load(Ordering::SeqCst)
+}
+
+/// Prepare only the selected, enabled provider's complete request configuration.
+pub(crate) async fn warm_hot_spare_if_current(request: &AiPolishRequest, generation: u64) {
+    let spare_generation = CLAUDE_SPARE.generation();
+    if generation != hot_spare_generation() {
+        return;
+    }
+    if request.provider_id != PROVIDER_CLAUDE_CODE {
+        invalidate_hot_spare();
+        return;
+    }
+    let Some(binary_path) = resolve_binary(CLAUDE_CODE_SPEC.binary).await else {
+        invalidate_hot_spare();
+        return;
+    };
+    let (capabilities, help, _) =
+        discover_capabilities_for_polish(&binary_path, &CLAUDE_CODE_SPEC, false).await;
+    if !required_capabilities_present(&CLAUDE_CODE_SPEC, &help)
+        || !help_advertises_flag(&help, "--input-format")
+        || !help_advertises_flag(&help, "--output-format")
+    {
+        invalidate_hot_spare();
+        return;
+    }
+    let argv = cold_argv_for_model_with_options(
+        &CLAUDE_CODE_SPEC,
+        &request.prompt,
+        &request.model_id,
+        capabilities,
+        request.reasoning_level.as_deref(),
+        request.fast_mode,
+    );
+    if generation == hot_spare_generation() {
+        CLAUDE_SPARE
+            .warm_if_current(&binary_path, &argv, spare_generation)
+            .await;
+    }
+}
 
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
@@ -582,8 +634,7 @@ fn cold_argv(spec: &AgentCliSpec, prompt: &str) -> Vec<String> {
     cold_argv_for_model(spec, prompt, "", ClaudeCapabilities::default())
 }
 
-/// Cold-spawn runtime. Each `polish` call spawns a fresh child in a unique
-/// temporary cwd; no warm session is retained.
+/// Each invocation consumes a fresh child; a Claude spare is never reused.
 #[derive(Clone, Default)]
 pub struct AgentCliRuntime;
 
@@ -636,9 +687,21 @@ impl AgentCliRuntime {
             request.fast_mode,
         );
         let invocation_started = Instant::now();
-        let result =
-            cold_spawn_and_collect(spec, &binary_path, &argv, input_mode, &input_text, output)
-                .await;
+        let hot_result = if spec.provider_id == PROVIDER_CLAUDE_CODE {
+            CLAUDE_SPARE
+                .take_and_run(&binary_path, &argv, &input_text)
+                .await
+        } else {
+            invalidate_hot_spare();
+            None
+        };
+        let result = match hot_result {
+            Some(Ok(text)) => Ok(text),
+            Some(Err(_)) | None => {
+                cold_spawn_and_collect(spec, &binary_path, &argv, input_mode, &input_text, output)
+                    .await
+            }
+        };
         log::info!(
             "agent_cli_stage_timing provider={} stage=model_invocation duration_ms={} outcome={}",
             spec.provider_id,
@@ -980,6 +1043,9 @@ static POLISH_CAPABILITY_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// capabilities learned from a binary that has since been updated or
 /// replaced on PATH.
 pub async fn invalidate_polish_capabilities(provider: &str) {
+    if provider == PROVIDER_CLAUDE_CODE {
+        invalidate_hot_spare();
+    }
     let Some(spec) = spec_for(provider) else {
         return;
     };

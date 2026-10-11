@@ -83,7 +83,9 @@ static RECORDING_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// before `Starting` is published, so every stop/cancel and spawned
 /// transcription task within this attempt observes the same generation.
 pub(crate) fn begin_recording_generation() -> u64 {
-    RECORDING_GENERATION.fetch_add(1, AtomicOrdering::SeqCst) + 1
+    let generation = RECORDING_GENERATION.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+    crate::commands::ai_lifecycle::begin_recording(generation);
+    generation
 }
 
 /// The generation of the most recently begun recording.
@@ -5886,9 +5888,12 @@ async fn stop_recording_with_mode(
 
                     // 1. Process the transcription and enhancement
                     let (final_text, mut writing_metadata, should_deliver, writing_succeeded) =
-                        match crate::writing::process_transcription(
-                            app_for_process.clone(),
-                            transcription_for_process.clone(),
+                        match crate::commands::ai_lifecycle::recording_polish(
+                            task_generation,
+                            crate::writing::process_transcription(
+                                app_for_process.clone(),
+                                transcription_for_process.clone(),
+                            ),
                         )
                         .await
                         {
@@ -6268,6 +6273,12 @@ async fn stop_recording_with_mode(
                             insertion_ms
                         );
                         record_insertion_timing(&mut writing_metadata, insertion_ms);
+                    }
+
+                    if delivery_journey.succeeded == Some(true)
+                        && !delivery_aborted(app_state.is_cancellation_requested(), task_generation)
+                    {
+                        crate::commands::ai_lifecycle::delivered(app_for_process.clone(), task_generation);
                     }
 
                     // Recheck (Race 3) IMMEDIATELY before history save: a cancel
@@ -7528,6 +7539,7 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     // Request cancellation FIRST
     let app_state = app.state::<AppState>();
     app_state.request_cancellation();
+    crate::commands::ai_lifecycle::cancel_recording();
     log::info!("Cancellation requested in app state");
 
     // Get current state
