@@ -132,7 +132,7 @@ pub(crate) enum OutputParser {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ClaudeCapabilities {
+pub(super) struct ClaudeCapabilities {
     safe_mode: bool,
     effort: bool,
     disable_slash_commands: bool,
@@ -1002,6 +1002,9 @@ pub async fn invalidate_polish_capabilities(provider: &str) {
     let Some(spec) = spec_for(provider) else {
         return;
     };
+    if spec.provider_id == PROVIDER_CURSOR {
+        super::cursor_cli::invalidate_resolution().await;
+    }
     // Bump the epoch and drop the entry under the SAME cache lock so the
     // invalidation is atomic for every cache reader: an in-flight probe
     // that snapshotted the previous epoch can never repopulate stale
@@ -1012,7 +1015,7 @@ pub async fn invalidate_polish_capabilities(provider: &str) {
     guard.remove(spec.provider_id);
 }
 
-async fn discover_capabilities_for_polish(
+pub(super) async fn discover_capabilities_for_polish(
     binary_path: &Path,
     spec: &'static AgentCliSpec,
     refresh: bool,
@@ -1065,7 +1068,7 @@ async fn discover_capabilities_for_polish(
     }
 }
 
-fn required_capabilities_present(spec: &AgentCliSpec, help: &[u8]) -> bool {
+pub(super) fn required_capabilities_present(spec: &AgentCliSpec, help: &[u8]) -> bool {
     spec.required_capability_flags
         .iter()
         .all(|flag| help_advertises_flag(help, flag))
@@ -1550,7 +1553,7 @@ static RESOLVED_PATH: OnceLock<Mutex<Option<OsString>>> = OnceLock::new();
 /// historical `Option<PathBuf>` wrapper, while detection can distinguish a
 /// missing binary from a deliberately rejected launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum BinaryResolution {
+pub(super) enum BinaryResolution {
     Found(PathBuf),
     Missing,
     UnsafeLauncher,
@@ -1577,7 +1580,7 @@ fn select_safe_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> Binar
 /// Returns the first name that yields a safe executable; when no name
 /// resolves, UnsafeLauncher outranks Missing so the probe reports the
 /// actionable state (an unsafe launcher was seen) rather than "not found".
-async fn resolve_binary_names<'a>(
+pub(super) async fn resolve_binary_names<'a>(
     names: impl IntoIterator<Item = &'a str>,
     refresh_path: bool,
 ) -> BinaryResolution {
@@ -1608,7 +1611,11 @@ fn spec_binary_names(spec: &AgentCliSpec) -> impl Iterator<Item = &str> {
 }
 
 async fn resolve_spec_binary_state(spec: &AgentCliSpec, refresh_path: bool) -> BinaryResolution {
-    resolve_binary_names(spec_binary_names(spec), refresh_path).await
+    if spec.provider_id == PROVIDER_CURSOR {
+        super::cursor_cli::resolve_binary(refresh_path).await
+    } else {
+        resolve_binary_names(spec_binary_names(spec), refresh_path).await
+    }
 }
 
 /// Resolve a spec's binary (or its aliases) to an absolute safe path against

@@ -2,11 +2,57 @@
 //! sandbox enabled, explicit empty workspace. Prompt is a discrete positional
 //! argument as documented at https://cursor.com/docs/cli/headless.
 use super::agent_cli::{
-    named_cli_default, AgentCliModel, AgentCliSpec, InputMode, OutputParser, ReasoningPolicy,
-    SystemPromptPolicy,
+    discover_capabilities_for_polish, named_cli_default, required_capabilities_present,
+    resolve_binary_names, AgentCliModel, AgentCliSpec, BinaryResolution, InputMode, OutputParser,
+    ReasoningPolicy, SystemPromptPolicy,
 };
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::providers::PROVIDER_CURSOR;
+use tokio::sync::Mutex;
+
+// Detection, model discovery and polish share this validated absolute path.
+// Explicit provider Refresh invalidates it along with cached help.
+static BINARY_RESOLUTION: Mutex<Option<BinaryResolution>> = Mutex::const_new(None);
+
+pub(crate) async fn invalidate_resolution() {
+    *BINARY_RESOLUTION.lock().await = None;
+}
+
+pub(super) async fn resolve_binary(refresh_path: bool) -> BinaryResolution {
+    let mut cached = BINARY_RESOLUTION.lock().await;
+    if !refresh_path {
+        if let Some(resolution) = cached.as_ref() {
+            return resolution.clone();
+        }
+    }
+    let primary = resolve_binary_names([CURSOR_SPEC.binary], refresh_path).await;
+    let resolution = if matches!(primary, BinaryResolution::Found(_)) {
+        primary
+    } else {
+        match resolve_binary_names(CURSOR_SPEC.binary_aliases.iter().copied(), false).await {
+            BinaryResolution::Found(path) => {
+                let (_, help, _) =
+                    discover_capabilities_for_polish(&path, &CURSOR_SPEC, false).await;
+                if alias_is_cursor(&help) {
+                    BinaryResolution::Found(path)
+                } else {
+                    BinaryResolution::Missing
+                }
+            }
+            BinaryResolution::UnsafeLauncher => BinaryResolution::UnsafeLauncher,
+            BinaryResolution::Missing => primary,
+        }
+    };
+    *cached = Some(resolution.clone());
+    resolution
+}
+
+fn alias_is_cursor(help: &[u8]) -> bool {
+    String::from_utf8_lossy(help)
+        .lines()
+        .any(|line| line.trim() == "Start the Cursor Agent")
+        && required_capabilities_present(&CURSOR_SPEC, help)
+}
 
 pub(crate) const CURSOR_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_CURSOR,

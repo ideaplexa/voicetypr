@@ -2,7 +2,7 @@
 
 ### Features
 
-* **ai:** Cursor CLI provider (experimental)
+* **ai:** Cursor CLI provider (experimental); its `agent` alias is accepted only when help identifies Cursor and advertises the required isolation flags
 
 ## 2.0.9 (2026-10-10)
 

@@ -168,3 +168,80 @@ async fn cursor_fake_models_command_has_no_invented_fallback() {
     .unwrap();
     assert!(run_model_list_command(&binary, &["models"]).await.is_err());
 }
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial_test::serial]
+async fn cursor_alias_requires_identity_and_reuses_validated_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = TempDir::new().unwrap();
+    let binary = fixture.path().join("agent");
+    let calls = fixture.path().join("agent.calls");
+    let flags = "--print --output-format --mode --sandbox --trust --workspace --model";
+    std::fs::write(
+        &binary,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\nprintf 'Start another Agent\\n{flags}\\n'\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path_cache = RESOLVED_PATH.get_or_init(|| Mutex::new(None));
+    let previous_path = path_cache
+        .lock()
+        .await
+        .replace(fixture.path().as_os_str().to_owned());
+    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+    assert_eq!(
+        probe(PROVIDER_CURSOR, false).await.state,
+        AgentCliProbeState::Missing
+    );
+    assert!(list_models(PROVIDER_CURSOR).await.is_err());
+    let request = AiPolishRequest {
+        provider_id: PROVIDER_CURSOR.to_string(),
+        model_id: "gpt-6-luna".to_string(),
+        reasoning_level: None,
+        fast_mode: false,
+        input_text: "ship today".to_string(),
+        prompt: "Polish.".to_string(),
+        timeout_ms: 20_000,
+    };
+    assert!(AgentCliRuntime::new().polish(&request).await.is_err());
+    assert_eq!(std::fs::read_to_string(&calls).unwrap(), "--help\n");
+
+    // Identity alone is insufficient: the required isolation flags must exist.
+    std::fs::write(&binary, "#!/bin/sh\nprintf 'Start the Cursor Agent\\n'\n").unwrap();
+    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+    assert_eq!(
+        probe(PROVIDER_CURSOR, false).await.state,
+        AgentCliProbeState::Missing
+    );
+
+    std::fs::write(
+        &binary,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\ncase \"$1\" in\n--help) printf 'Start the Cursor Agent\\n{flags}\\n';;\nmodels) printf 'Available models\\n\\ngpt-6-luna - GPT-6 Luna\\n';;\n-p) printf '{{\"result\":\"Ship today.\"}}\\n';;\n*) exit 9;;\nesac\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(&calls, "").unwrap();
+    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+    assert_eq!(
+        probe(PROVIDER_CURSOR, false).await.state,
+        AgentCliProbeState::Ready
+    );
+    assert_eq!(model_binary(&CURSOR_SPEC).await.unwrap(), binary);
+    assert_eq!(
+        list_models(PROVIDER_CURSOR).await.unwrap()[1].id,
+        "gpt-6-luna"
+    );
+    assert_eq!(
+        AgentCliRuntime::new().polish(&request).await.unwrap(),
+        "Ship today."
+    );
+    // Detection validated once; models and polish reused that exact path/help.
+    assert_eq!(
+        std::fs::read_to_string(&calls).unwrap(),
+        "--help\nmodels\n-p\n"
+    );
+    *path_cache.lock().await = previous_path;
+    invalidate_polish_capabilities(PROVIDER_CURSOR).await;
+}
