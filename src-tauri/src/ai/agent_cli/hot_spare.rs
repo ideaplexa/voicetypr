@@ -31,7 +31,7 @@ pub(crate) async fn warm_hot_spare_if_current(request: &AiPolishRequest, generat
         invalidate_hot_spare();
         return;
     }
-    let Some(binary_path) = resolve_binary(CLAUDE_CODE_SPEC.binary).await else {
+    let Some(binary_path) = resolve_spec_binary(&CLAUDE_CODE_SPEC).await else {
         invalidate_hot_spare();
         return;
     };
@@ -357,7 +357,8 @@ async fn read_result(
 
 fn parse_result_line(line: &[u8]) -> Option<Result<String, MappedAiProviderError>> {
     let value: Value = serde_json::from_slice(line).ok()?;
-    (value.get("type").and_then(Value::as_str) == Some("result")).then(|| parse_claude_json(line))
+    (value.get("type").and_then(Value::as_str) == Some("result"))
+        .then(|| parse_cli_output(CLAUDE_CODE_SPEC.output, line))
 }
 
 #[cfg(all(test, unix))]
@@ -587,7 +588,7 @@ fi
             &args,
             InputMode::Stdin,
             "original text",
-            OutputParser::ClaudeJson,
+            CLAUDE_CODE_SPEC.output,
         )
         .await
         .unwrap();
