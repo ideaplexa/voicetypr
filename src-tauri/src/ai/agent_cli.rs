@@ -29,57 +29,8 @@
 //! child also runs from an EMPTY temp cwd so it discovers no project config.
 
 mod hot_spare;
-
-static CLAUDE_SPARE: LazyLock<hot_spare::HotSpare> = LazyLock::new(hot_spare::HotSpare::default);
-// Configuration invalidation is separate from consuming/expiring a spare.
-static HOT_SPARE_SETTINGS_EPOCH: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) fn invalidate_hot_spare() {
-    HOT_SPARE_SETTINGS_EPOCH.fetch_add(1, Ordering::SeqCst);
-    CLAUDE_SPARE.invalidate();
-}
-
-pub(crate) fn hot_spare_generation() -> u64 {
-    HOT_SPARE_SETTINGS_EPOCH.load(Ordering::SeqCst)
-}
-
-/// Prepare only the selected, enabled provider's complete request configuration.
-pub(crate) async fn warm_hot_spare_if_current(request: &AiPolishRequest, generation: u64) {
-    let spare_generation = CLAUDE_SPARE.generation();
-    if generation != hot_spare_generation() {
-        return;
-    }
-    if request.provider_id != PROVIDER_CLAUDE_CODE {
-        invalidate_hot_spare();
-        return;
-    }
-    let Some(binary_path) = resolve_binary(CLAUDE_CODE_SPEC.binary).await else {
-        invalidate_hot_spare();
-        return;
-    };
-    let (capabilities, help, _) =
-        discover_capabilities_for_polish(&binary_path, &CLAUDE_CODE_SPEC, false).await;
-    if !required_capabilities_present(&CLAUDE_CODE_SPEC, &help)
-        || !help_advertises_flag(&help, "--input-format")
-        || !help_advertises_flag(&help, "--output-format")
-    {
-        invalidate_hot_spare();
-        return;
-    }
-    let argv = cold_argv_for_model_with_options(
-        &CLAUDE_CODE_SPEC,
-        &request.prompt,
-        &request.model_id,
-        capabilities,
-        request.reasoning_level.as_deref(),
-        request.fast_mode,
-    );
-    if generation == hot_spare_generation() {
-        CLAUDE_SPARE
-            .warm_if_current(&binary_path, &argv, spare_generation)
-            .await;
-    }
-}
+use hot_spare::CLAUDE_SPARE;
+pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_spare_if_current};
 
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
