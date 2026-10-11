@@ -295,6 +295,12 @@ const providerListResponse = [
     status: "production",
     supportsReasoning: false,
   },
+  {
+    id: "cursor",
+    name: "Cursor",
+    status: "experimental",
+    supportsReasoning: false,
+  },
 ];
 const localAgentProviderIds = new Set([
   "claude-code",
@@ -305,6 +311,7 @@ const localAgentProviderIds = new Set([
   "grok",
   "opencode",
   "cline",
+  "cursor",
 ]);
 
 const isAgentCliProviderForTest = (providerId: string) => localAgentProviderIds.has(providerId);
@@ -486,7 +493,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(8);
+      expect(probeCalls).toHaveLength(9);
       expect(eventListeners.has("ai-ready")).toBe(true);
     });
 
@@ -502,7 +509,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(8);
+      expect(probeCalls).toHaveLength(9);
     });
   });
 
@@ -1940,6 +1947,32 @@ describe("EnhancementsSection", () => {
     expect(
       within(providersPanel).getByRole("combobox", { name: "Thinking for pi" }),
     ).toHaveTextContent("Medium");
+  });
+
+  it("shows experimental Cursor without reasoning or fast controls", async () => {
+    agentCliProbeResponse = {
+      state: "ready",
+      reasoningLevels: [],
+      supportsFastMode: false,
+    };
+    aiSettingsResponse = {
+      ...baseAISettings,
+      provider: "cursor",
+      model: "",
+      modelsByProvider: { cursor: "" },
+    };
+    renderWithProviders();
+    const providersPanel = await getProviderSetupPanel();
+    expect(await within(providersPanel).findByRole("button", {
+      name: "Model for Cursor",
+    })).toBeInTheDocument();
+    expect(within(providersPanel).getAllByText("Experimental").length).toBeGreaterThan(0);
+    expect(within(providersPanel).queryByRole("combobox", {
+      name: /(?:Thinking|Effort) for Cursor/,
+    })).not.toBeInTheDocument();
+    expect(within(providersPanel).queryByRole("switch", {
+      name: "Fast mode for Cursor",
+    })).not.toBeInTheDocument();
   });
 
   it("discovers local-agent models when its picker is opened", async () => {

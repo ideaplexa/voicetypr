@@ -1,3 +1,10 @@
+## 2.0.10 (unreleased)
+
+### Features
+
+* **ai:** Cursor CLI provider (experimental); its `agent` alias is accepted only when help identifies Cursor and advertises the required isolation flags
+* **ai:** Claude Code Polish is about 1 s faster: a fresh Claude process is prepared ahead of time for the selected provider while Polish is on, used for exactly one dictation (fresh conversation every time), and discarded after settings changes or ten idle minutes; if it fails, Polish uses the normal path
+
 ## 2.0.9 (2026-10-10)
 
 ### Features
@@ -24,8 +31,6 @@
 ## Unreleased
 
 ### Features
-
-* **ai:** reduce Claude Code Polish startup latency with a single-use prepared process, warmed only for the selected provider while Polish is enabled; each dictation starts a fresh conversation, settings changes and ten minutes idle discard the spare, and failed prepared processes fall back to the isolated cold path
 
 * **ai:** harden Claude Code, pi, and oh-my-pi subscription-based Polish with isolated, deadline-bounded processes; add curated/discovered model selection in Advanced settings
 

@@ -50,6 +50,7 @@ const AGENT_CLI_PROVIDER_IDS = [
   "grok",
   "opencode",
   "cline",
+  "cursor",
 ] as const;
 
 const CLAUDE_CODE_MODELS: AIProviderModel[] = [

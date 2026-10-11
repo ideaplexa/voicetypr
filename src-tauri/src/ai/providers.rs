@@ -16,6 +16,10 @@ pub const PROVIDER_DROID: &str = "droid";
 pub const PROVIDER_GROK: &str = "grok";
 pub const PROVIDER_OPENCODE: &str = "opencode";
 pub const PROVIDER_CLINE: &str = "cline";
+/// Cursor Agent CLI — subscription-authenticated via the `cursor-agent`
+/// binary (alias `agent`); no API key. Polished via cold-spawn in read-only
+/// `--mode ask`, JSON output, sandboxed workspace.
+pub const PROVIDER_CURSOR: &str = "cursor";
 
 pub const AGENT_CLI_PROVIDER_IDS: &[&str] = &[
     PROVIDER_CLAUDE_CODE,
@@ -26,6 +30,7 @@ pub const AGENT_CLI_PROVIDER_IDS: &[&str] = &[
     PROVIDER_GROK,
     PROVIDER_OPENCODE,
     PROVIDER_CLINE,
+    PROVIDER_CURSOR,
 ];
 
 pub fn launch_providers() -> Vec<AiProvider> {
