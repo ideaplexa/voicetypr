@@ -11,3 +11,8 @@ paths:
       - 'shellcheck reported issue in this script: SC2012:'
       # Tauri emits one fixed Voicetypr.app bundle name; it cannot begin with a dash.
       - 'shellcheck reported issue in this script: SC2035:'
+  '.github/workflows/update-beta-channel.yml':
+    ignore:
+      # actionlint does not yet know the `concurrency.queue` key
+      # (rhysd/actionlint#657, unmerged fix rhysd/actionlint#654).
+      - 'unexpected key "queue" for "concurrency" section'
