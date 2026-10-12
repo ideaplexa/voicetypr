@@ -88,7 +88,7 @@ impl HotSpare {
         self.shared.lock().generation
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) async fn warm(&self, binary_path: &Path, argv: &[String]) {
         self.warm_if_current(binary_path, argv, self.generation())
             .await;
