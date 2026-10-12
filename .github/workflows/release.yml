@@ -566,6 +566,86 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: node .github/scripts/release-tool.mjs check-tag "$RELEASE_TAG"
 
+      # Assemble and validate every release file BEFORE any git push: if a
+      # build artifact is missing or latest.json is wrong, the tag never lands.
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          # macOS aarch64
+          cp artifacts/macos-aarch64/*.dmg "release/Voicetypr_${VERSION}_aarch64.dmg"
+          cp artifacts/macos-aarch64/Voicetypr_${VERSION}_aarch64.app.tar.gz "release/Voicetypr_${VERSION}_aarch64.app.tar.gz"
+          cp artifacts/macos-aarch64/Voicetypr_${VERSION}_aarch64.app.tar.gz.sig "release/Voicetypr_${VERSION}_aarch64.app.tar.gz.sig"
+
+          # macOS x86_64
+          cp artifacts/macos-x86_64/*.dmg "release/Voicetypr_${VERSION}_x86_64.dmg"
+          cp artifacts/macos-x86_64/Voicetypr_${VERSION}_x86_64.app.tar.gz "release/Voicetypr_${VERSION}_x86_64.app.tar.gz"
+          cp artifacts/macos-x86_64/Voicetypr_${VERSION}_x86_64.app.tar.gz.sig "release/Voicetypr_${VERSION}_x86_64.app.tar.gz.sig"
+
+          # Windows x64 (CPU-safe main app with bundled optional Vulkan sidecar)
+          cp artifacts/windows-x64/Voicetypr_${VERSION}_x64-setup.exe "release/Voicetypr_${VERSION}_x64-setup.exe"
+          cp artifacts/windows-x64/Voicetypr_${VERSION}_x64-setup.exe.sig "release/Voicetypr_${VERSION}_x64-setup.exe.sig"
+
+      - name: Generate latest.json
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+
+          AARCH64_SIG=$(tr -d '\n' < "release/Voicetypr_${VERSION}_aarch64.app.tar.gz.sig")
+          X86_64_SIG=$(tr -d '\n' < "release/Voicetypr_${VERSION}_x86_64.app.tar.gz.sig")
+          WINDOWS_SIG=$(tr -d '\n' < "release/Voicetypr_${VERSION}_x64-setup.exe.sig")
+
+          if [ -z "$AARCH64_SIG" ] || [ -z "$X86_64_SIG" ] || [ -z "$WINDOWS_SIG" ]; then
+            echo "::error::One or more signature files are missing or empty"
+            exit 1
+          fi
+
+          jq -n \
+            --arg version "$TAG" \
+            --arg notes "See the release notes for $TAG" \
+            --arg pub_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg aarch64_sig "$AARCH64_SIG" \
+            --arg aarch64_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_aarch64.app.tar.gz" \
+            --arg x86_64_sig "$X86_64_SIG" \
+            --arg x86_64_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_x86_64.app.tar.gz" \
+            --arg windows_sig "$WINDOWS_SIG" \
+            --arg windows_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_x64-setup.exe" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $aarch64_sig, url: $aarch64_url },
+                "darwin-x86_64": { signature: $x86_64_sig, url: $x86_64_url },
+                "windows-x86_64": { signature: $windows_sig, url: $windows_url }
+              }
+            }' > release/latest.json
+
+          jq -e '
+            (.version | type == "string" and length > 0) and
+            (.platforms | type == "object") and
+            (.platforms | length == 3) and
+            all(.platforms[];
+              (.signature | type == "string" and length > 0) and
+              (.url | type == "string" and startswith("https://"))
+            )
+          ' release/latest.json >/dev/null
+
+      - name: Stage release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: release/
+          retention-days: 1
+
       - name: Bump version files
         run: |
           export RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
@@ -620,67 +700,14 @@ jobs:
         with:
           ref: ${{ needs.publish.outputs.ref }}
 
-      - name: Download all artifacts
+      - name: Download release files
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
-      - name: Prepare release files
-        run: |
-          mkdir -p release
-          VERSION="${{ needs.prepare.outputs.version }}"
-
-          # macOS aarch64
-          cp artifacts/macos-aarch64/*.dmg "release/Voicetypr_${VERSION}_aarch64.dmg"
-          cp artifacts/macos-aarch64/Voicetypr_${VERSION}_aarch64.app.tar.gz "release/Voicetypr_${VERSION}_aarch64.app.tar.gz"
-          cp artifacts/macos-aarch64/Voicetypr_${VERSION}_aarch64.app.tar.gz.sig "release/Voicetypr_${VERSION}_aarch64.app.tar.gz.sig"
-
-          # macOS x86_64
-          cp artifacts/macos-x86_64/*.dmg "release/Voicetypr_${VERSION}_x86_64.dmg"
-          cp artifacts/macos-x86_64/Voicetypr_${VERSION}_x86_64.app.tar.gz "release/Voicetypr_${VERSION}_x86_64.app.tar.gz"
-          cp artifacts/macos-x86_64/Voicetypr_${VERSION}_x86_64.app.tar.gz.sig "release/Voicetypr_${VERSION}_x86_64.app.tar.gz.sig"
-
-          # Windows x64 (CPU-safe main app with bundled optional Vulkan sidecar)
-          cp artifacts/windows-x64/Voicetypr_${VERSION}_x64-setup.exe "release/Voicetypr_${VERSION}_x64-setup.exe"
-          cp artifacts/windows-x64/Voicetypr_${VERSION}_x64-setup.exe.sig "release/Voicetypr_${VERSION}_x64-setup.exe.sig"
-
-      - name: Generate latest.json
-        run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          TAG="${{ needs.prepare.outputs.tag }}"
-
-          AARCH64_SIG=$(tr -d '\n' < "release/Voicetypr_${VERSION}_aarch64.app.tar.gz.sig")
-          X86_64_SIG=$(tr -d '\n' < "release/Voicetypr_${VERSION}_x86_64.app.tar.gz.sig")
-          WINDOWS_SIG=$(tr -d '\n' < "release/Voicetypr_${VERSION}_x64-setup.exe.sig")
-
-          if [ -z "$AARCH64_SIG" ] || [ -z "$X86_64_SIG" ] || [ -z "$WINDOWS_SIG" ]; then
-            echo "::error::One or more signature files are missing or empty"
-            exit 1
-          fi
-
-          jq -n \
-            --arg version "$TAG" \
-            --arg notes "See the release notes for $TAG" \
-            --arg pub_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-            --arg aarch64_sig "$AARCH64_SIG" \
-            --arg aarch64_url "https://github.com/${{ github.repository }}/releases/download/$TAG/Voicetypr_${VERSION}_aarch64.app.tar.gz" \
-            --arg x86_64_sig "$X86_64_SIG" \
-            --arg x86_64_url "https://github.com/${{ github.repository }}/releases/download/$TAG/Voicetypr_${VERSION}_x86_64.app.tar.gz" \
-            --arg windows_sig "$WINDOWS_SIG" \
-            --arg windows_url "https://github.com/${{ github.repository }}/releases/download/$TAG/Voicetypr_${VERSION}_x64-setup.exe" \
-            '{
-              version: $version,
-              notes: $notes,
-              pub_date: $pub_date,
-              platforms: {
-                "darwin-aarch64": { signature: $aarch64_sig, url: $aarch64_url },
-                "darwin-x86_64": { signature: $x86_64_sig, url: $x86_64_url },
-                "windows-x86_64": { signature: $windows_sig, url: $windows_url }
-              }
-            }' > release/latest.json
+          name: release-files
+          path: release
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: Voicetypr ${{ needs.prepare.outputs.tag }}
