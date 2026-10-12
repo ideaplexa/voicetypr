@@ -41,7 +41,7 @@ jobs:
           pnpm --version
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: src-tauri
 

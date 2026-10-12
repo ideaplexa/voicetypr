@@ -202,12 +202,12 @@ jobs:
           pnpm --version
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.91.1
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0  # 1.91.1
         with:
           components: clippy
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: src-tauri
 
