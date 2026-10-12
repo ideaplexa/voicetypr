@@ -23,7 +23,8 @@ function download(url, outFile) {
   try {
     // -sS: silent but show errors; -L: follow redirects; -f: fail on HTTP errors
     // --http1.1: force HTTP/1.1 to avoid HTTP/2 protocol errors on some servers
-    run('curl', ['--http1.1', '-sS', '-L', '-f', '-o', outFile, url]);
+    // --retry: evermeet.cx throttles with HTTP 429; curl honours Retry-After
+    run('curl', ['--http1.1', '-sS', '-L', '-f', '--retry', '5', '--retry-delay', '10', '-o', outFile, url]);
     return;
   } catch (e) {
     // Fallback to powershell on Windows
