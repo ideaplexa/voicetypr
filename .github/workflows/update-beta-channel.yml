@@ -116,6 +116,24 @@ jobs:
         run: |
           SHOULD_UPDATE=true
           if gh release view beta --repo "$REPOSITORY" >/dev/null 2>&1; then
+            # Recover a pointer swap that crashed mid-flight: if latest.json.next
+            # was staged but the rename to latest.json never completed, treat the
+            # staged asset as the current pointer and finish the swap first.
+            NEXT_URL="$(gh release view beta \
+              --repo "$REPOSITORY" \
+              --json assets --jq '.assets[] | select(.name == "latest.json.next") | .apiUrl' \
+              | head -1)"
+            if [[ -n "$NEXT_URL" ]]; then
+              OLD_URL="$(gh release view beta \
+                --repo "$REPOSITORY" \
+                --json assets --jq '.assets[] | select(.name == "latest.json") | .apiUrl' \
+                | head -1)"
+              if [[ -n "$OLD_URL" ]]; then
+                gh api -X DELETE "$OLD_URL"
+              fi
+              gh api -X PATCH "$NEXT_URL" -f name=latest.json
+            fi
+
             mkdir -p current
             gh release download beta \
               --repo "$REPOSITORY" \
@@ -132,9 +150,25 @@ jobs:
         if: ${{ env.should_update == 'true' }}
         run: |
           if gh release view beta --repo "$REPOSITORY" >/dev/null 2>&1; then
-            gh release upload beta candidate/latest.json \
+            # Stage the new pointer under a scratch name first so the live
+            # latest.json is never missing or half-written: upload as
+            # latest.json.next, delete the old asset, then rename.
+            cp candidate/latest.json candidate/latest.json.next
+            gh release upload beta candidate/latest.json.next \
               --repo "$REPOSITORY" \
               --clobber
+            OLD_URL="$(gh release view beta \
+              --repo "$REPOSITORY" \
+              --json assets --jq '.assets[] | select(.name == "latest.json") | .apiUrl' \
+              | head -1)"
+            if [[ -n "$OLD_URL" ]]; then
+              gh api -X DELETE "$OLD_URL"
+            fi
+            NEXT_URL="$(gh release view beta \
+              --repo "$REPOSITORY" \
+              --json assets --jq '.assets[] | select(.name == "latest.json.next") | .apiUrl' \
+              | head -1)"
+            gh api -X PATCH "$NEXT_URL" -f name=latest.json
           else
             gh release create beta candidate/latest.json \
               --repo "$REPOSITORY" \
