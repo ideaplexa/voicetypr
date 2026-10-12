@@ -55,8 +55,10 @@ jobs:
 
       - name: Ensure stable releases run from main or a hotfix branch
         if: ${{ inputs.channel == 'stable' && github.ref_name != 'main' && !startsWith(github.ref_name, 'hotfix/') }}
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
         run: |
-          echo "::error::Stable releases must be dispatched from main or a hotfix/* branch, not ${{ github.ref_name }}."
+          echo "::error::Stable releases must be dispatched from main or a hotfix/* branch, not $RELEASE_REF."
           exit 1
 
       - name: Calculate version
