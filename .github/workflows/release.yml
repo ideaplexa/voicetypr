@@ -128,7 +128,7 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
+      - name: Cache verified FFmpeg sidecars
         uses: actions/cache@v5
         with:
           path: |
@@ -136,6 +136,8 @@ jobs:
             sidecar/ffmpeg/dist/ffprobe
             sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
             sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
+            sidecar/ffmpeg/dist/ffmpeg-x86_64-apple-darwin
+            sidecar/ffmpeg/dist/ffprobe-x86_64-apple-darwin
           key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
 
       - name: Setup Node.js
@@ -337,7 +339,7 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
+      - name: Cache verified FFmpeg sidecars
         uses: actions/cache@v5
         with:
           path: |
@@ -345,6 +347,8 @@ jobs:
             sidecar/ffmpeg/dist/ffprobe
             sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
             sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
+            sidecar/ffmpeg/dist/ffmpeg-x86_64-apple-darwin
+            sidecar/ffmpeg/dist/ffprobe-x86_64-apple-darwin
           key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
 
       - name: Setup Node.js
