@@ -4,9 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'hotfix/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'hotfix/**']
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
