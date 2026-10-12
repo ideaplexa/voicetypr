@@ -15,6 +15,7 @@ permissions:
 
 concurrency:
   group: update-beta-channel
+  queue: max
   cancel-in-progress: false
 
 jobs:

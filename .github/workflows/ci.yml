@@ -86,7 +86,7 @@ jobs:
         run: node --test .github/scripts/*.node-test.mjs
 
       - name: Validate GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   # ===========================================
   # Frontend (fast - no Rust)
