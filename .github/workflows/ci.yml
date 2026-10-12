@@ -4,9 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'hotfix/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'hotfix/**']
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
@@ -86,7 +86,7 @@ jobs:
         run: node --test .github/scripts/*.node-test.mjs
 
       - name: Validate GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   # ===========================================
   # Frontend (fast - no Rust)
