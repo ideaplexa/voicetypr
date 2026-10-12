@@ -23,7 +23,7 @@ function download(url, outFile) {
   try {
     // -sS: silent but show errors; -L: follow redirects; -f: fail on HTTP errors
     // --http1.1: force HTTP/1.1 to avoid HTTP/2 protocol errors on some servers
-    // --retry: evermeet.cx throttles with HTTP 429; curl honours Retry-After
+    // --retry: ride out transient download failures (curl honours Retry-After)
     run('curl', ['--http1.1', '-sS', '-L', '-f', '--retry', '5', '--retry-delay', '10', '-o', outFile, url]);
     return;
   } catch (e) {
@@ -174,11 +174,11 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
     const ffprobeX64Dst = path.join(distDir, 'ffprobe-x86_64-apple-darwin');
     const macFfmpegBinSha = process.env.FFMPEG_MAC_BIN_SHA256 || '77d2c853f431318d55ec02676d9b2f185ebfdddb9f7677a251fbe453affe025a';
     const macFfprobeBinSha = process.env.FFPROBE_MAC_BIN_SHA256 || 'babf170e86bd6b0b2fefee5fa56f57721b0acb98ad2794b095d8030b02857dfe';
-    // Pinned macOS Intel 9.0.1 from evermeet.cx (override via env if needed)
-    const ffmpegX64Url = process.env.FFMPEG_MAC_X64_URL || 'https://evermeet.cx/ffmpeg/ffmpeg-9.0.1.zip';
-    const ffprobeX64Url = process.env.FFPROBE_MAC_X64_URL || 'https://evermeet.cx/ffmpeg/ffprobe-9.0.1.zip';
-    const macX64FfmpegBinSha = process.env.FFMPEG_MAC_X64_BIN_SHA256 || 'e27de05e3a9f9c758f9766d15d1a069fddeed5f725e35d9ab28683be4740dad7';
-    const macX64FfprobeBinSha = process.env.FFPROBE_MAC_X64_BIN_SHA256 || 'a1508faa028bfb8e20c9d182c3d41fcff29ee7584ae21b2d6c357472a3ecbc24';
+    // Pinned macOS Intel 9.0.1 from Martin Riedl's build server (override via env if needed)
+    const ffmpegX64Url = process.env.FFMPEG_MAC_X64_URL || 'https://ffmpeg.martin-riedl.de/download/macos/amd64/1787081194_9.0.1/ffmpeg.zip';
+    const ffprobeX64Url = process.env.FFPROBE_MAC_X64_URL || 'https://ffmpeg.martin-riedl.de/download/macos/amd64/1787081194_9.0.1/ffprobe.zip';
+    const macX64FfmpegBinSha = process.env.FFMPEG_MAC_X64_BIN_SHA256 || '56f4a0478fff60fa549ab7aa03759d7ab116dadcdf63dba4d466ebfba1280b2f';
+    const macX64FfprobeBinSha = process.env.FFPROBE_MAC_X64_BIN_SHA256 || 'dd287b051b569382fe32eb73003b04035d416bccfa30148c140e35636cd3a1d8';
 
     // Check if ARM64 binaries exist
     const arm64Present = fs.existsSync(ffmpegDst) && fs.existsSync(ffprobeDst);
@@ -264,7 +264,7 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
     }
 
     // Also download Intel x86_64 binaries for universal build support
-    // Using pinned evermeet.cx 9.0.1 artifacts (trusted source for Intel Mac ffmpeg builds)
+    // Using pinned Martin Riedl 9.0.1 artifacts (evermeet.cx rate-limits CI with HTTP 429)
     if (!fs.existsSync(ffmpegX64Dst) || !fs.existsSync(ffprobeX64Dst)) {
       console.log('[ensure-ffmpeg-sidecar] Downloading Intel x86_64 binaries for universal support...');
 
