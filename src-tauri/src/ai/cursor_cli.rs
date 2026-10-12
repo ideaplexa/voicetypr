@@ -25,34 +25,27 @@ pub(super) async fn resolve_binary(refresh_path: bool) -> BinaryResolution {
             return resolution.clone();
         }
     }
-    let primary = resolve_binary_names([CURSOR_SPEC.binary], refresh_path).await;
-    let resolution = if matches!(primary, BinaryResolution::Found(_)) {
-        primary
-    } else {
-        match resolve_binary_names(CURSOR_SPEC.binary_aliases.iter().copied(), false).await {
-            BinaryResolution::Found(path) => {
-                let (_, help, _) =
-                    discover_capabilities_for_polish(&path, &CURSOR_SPEC, false).await;
-                validate_alias_path(path, &help)
-            }
-            BinaryResolution::UnsafeLauncher => BinaryResolution::UnsafeLauncher,
-            BinaryResolution::Missing => primary,
+    let resolution = match resolve_binary_names([CURSOR_SPEC.binary], refresh_path).await {
+        BinaryResolution::Found(path) => {
+            let (_, help, _) = discover_capabilities_for_polish(&path, &CURSOR_SPEC, false).await;
+            validate_binary_path(path, &help)
         }
+        resolution => resolution,
     };
     *cached = Some(resolution.clone());
     resolution
 }
 
-/// Validate an already resolved alias candidate before any non-help command.
-pub(super) fn validate_alias_path(path: std::path::PathBuf, help: &[u8]) -> BinaryResolution {
-    if alias_is_cursor(help) {
+/// Validate an already resolved cursor-agent candidate before non-help work.
+pub(super) fn validate_binary_path(path: std::path::PathBuf, help: &[u8]) -> BinaryResolution {
+    if binary_is_cursor(help) {
         BinaryResolution::Found(path)
     } else {
         BinaryResolution::Missing
     }
 }
 
-fn alias_is_cursor(help: &[u8]) -> bool {
+fn binary_is_cursor(help: &[u8]) -> bool {
     String::from_utf8_lossy(help)
         .lines()
         .any(|line| line.trim() == "Start the Cursor Agent")
@@ -62,7 +55,7 @@ fn alias_is_cursor(help: &[u8]) -> bool {
 pub(crate) const CURSOR_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_CURSOR,
     binary: "cursor-agent",
-    binary_aliases: &["agent"],
+    binary_aliases: &[],
     help_argv: &["--help"],
     cold_argv_prefix: &["-p", "--output-format", "json"],
     cold_argv_suffix: &[],

@@ -68,11 +68,11 @@ choices remain unchanged. Claude Code disables skills with
 `--disable-slash-commands` when the installed CLI supports it; it does not use
 `--bare`, which interferes with subscription authentication.
 
-Cursor is experimental: install `cursor-agent` (or its `agent` alias). VoiceTypr
+Cursor Agent is experimental: install `cursor-agent`. VoiceTypr
 lists models through the real `models` command, invokes read-only Ask mode with
 sandboxing and an empty workspace, and does not enable unattended write or MCP
-approval flags. Cursor exposes no reasoning or fast-mode control. Authentication
-is managed by Cursor (for example, `agent login` or `CURSOR_API_KEY`); no login is
+approval flags. Cursor Agent exposes no reasoning or fast-mode control. Authentication
+is managed by Cursor (for example, `cursor-agent login` or `CURSOR_API_KEY`); no login is
 required to verify help, documented flags, or fake-binary integration tests.
 The headless contract follows Cursor's [headless guide](https://cursor.com/docs/cli/headless),
 [output format](https://cursor.com/docs/cli/reference/output-format),

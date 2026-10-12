@@ -171,11 +171,11 @@ async fn cursor_fake_models_command_has_no_invented_fallback() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn cursor_alias_requires_identity_and_reuses_validated_path() {
+async fn cursor_agent_identity_uses_validated_primary_path() {
     use std::os::unix::fs::PermissionsExt;
     let fixture = TempDir::new().unwrap();
-    let binary = fixture.path().join("agent");
-    let calls = fixture.path().join("agent.calls");
+    let binary = fixture.path().join("cursor-agent");
+    let calls = fixture.path().join("cursor-agent.calls");
     let flags = "--print --output-format --mode --sandbox --trust --workspace --model";
     std::fs::write(
         &binary,
@@ -187,7 +187,7 @@ async fn cursor_alias_requires_identity_and_reuses_validated_path() {
     // Do not replace process-global PATH, help, or resolution caches: other
     // CLI fixtures run concurrently and need their own normal environment.
     let help = run_model_list_command(&binary, &["--help"]).await.unwrap();
-    let unrelated = crate::ai::cursor_cli::validate_alias_path(binary.clone(), &help);
+    let unrelated = crate::ai::cursor_cli::validate_binary_path(binary.clone(), &help);
     assert_eq!(
         probe_for_resolution(&CURSOR_SPEC, &unrelated).state,
         AgentCliProbeState::Missing
@@ -198,7 +198,7 @@ async fn cursor_alias_requires_identity_and_reuses_validated_path() {
     // Identity alone is insufficient: the required isolation flags must exist.
     std::fs::write(&binary, "#!/bin/sh\nprintf 'Start the Cursor Agent\\n'\n").unwrap();
     let help = run_model_list_command(&binary, &["--help"]).await.unwrap();
-    let missing_flags = crate::ai::cursor_cli::validate_alias_path(binary.clone(), &help);
+    let missing_flags = crate::ai::cursor_cli::validate_binary_path(binary.clone(), &help);
     assert_eq!(
         probe_for_resolution(&CURSOR_SPEC, &missing_flags).state,
         AgentCliProbeState::Missing
@@ -213,13 +213,13 @@ async fn cursor_alias_requires_identity_and_reuses_validated_path() {
     .unwrap();
     std::fs::write(&calls, "").unwrap();
     let help = run_model_list_command(&binary, &["--help"]).await.unwrap();
-    let resolution = crate::ai::cursor_cli::validate_alias_path(binary.clone(), &help);
+    let resolution = crate::ai::cursor_cli::validate_binary_path(binary.clone(), &help);
     assert_eq!(
         probe_for_resolution(&CURSOR_SPEC, &resolution).state,
         AgentCliProbeState::Ready
     );
     let BinaryResolution::Found(validated_path) = resolution else {
-        panic!("Cursor alias must resolve");
+        panic!("Cursor Agent binary must resolve");
     };
     assert_eq!(validated_path, binary);
     let payload = run_model_list_command(&validated_path, &["models"])
@@ -243,7 +243,7 @@ async fn cursor_alias_requires_identity_and_reuses_validated_path() {
         .unwrap(),
         "Ship today."
     );
-    // Both invocations use the injected, validated absolute path.
+    // Model listing and polish use the injected, validated absolute path.
     assert_eq!(
         std::fs::read_to_string(&calls).unwrap(),
         "--help\nmodels\n-p\n"

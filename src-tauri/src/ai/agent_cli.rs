@@ -3507,7 +3507,7 @@ mod tests {
             let spec = spec_for(provider).expect("provider must have a CLI spec");
             assert_eq!(spec.binary, binary);
         }
-        assert_eq!(CURSOR_SPEC.binary_aliases, &["agent"]);
+        assert!(CURSOR_SPEC.binary_aliases.is_empty());
         assert!(spec_for("unknown").is_none());
     }
 

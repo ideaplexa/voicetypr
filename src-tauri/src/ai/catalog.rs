@@ -90,7 +90,7 @@ fn parse_catalog(json: &str) -> Catalog {
         ("opencode", "OpenCode", "production"),
         ("cline", "Cline", "production"),
         // No headless polish run has been verified end-to-end yet.
-        ("cursor", "Cursor", "experimental"),
+        ("cursor", "Cursor Agent", "experimental"),
     ] {
         catalog.providers.push(CatalogProvider {
             id: id.to_string(),

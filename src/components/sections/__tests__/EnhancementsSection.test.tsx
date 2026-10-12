@@ -297,7 +297,7 @@ const providerListResponse = [
   },
   {
     id: "cursor",
-    name: "Cursor",
+    name: "Cursor Agent",
     status: "experimental",
     supportsReasoning: false,
   },
@@ -1949,7 +1949,7 @@ describe("EnhancementsSection", () => {
     ).toHaveTextContent("Medium");
   });
 
-  it("shows experimental Cursor without reasoning or fast controls", async () => {
+  it("shows experimental Cursor Agent without reasoning or fast controls", async () => {
     agentCliProbeResponse = {
       state: "ready",
       reasoningLevels: [],
@@ -1964,14 +1964,14 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     const providersPanel = await getProviderSetupPanel();
     expect(await within(providersPanel).findByRole("button", {
-      name: "Model for Cursor",
+      name: "Model for Cursor Agent",
     })).toBeInTheDocument();
     expect(within(providersPanel).getAllByText("Experimental").length).toBeGreaterThan(0);
     expect(within(providersPanel).queryByRole("combobox", {
-      name: /(?:Thinking|Effort) for Cursor/,
+      name: /(?:Thinking|Effort) for Cursor Agent/,
     })).not.toBeInTheDocument();
     expect(within(providersPanel).queryByRole("switch", {
-      name: "Fast mode for Cursor",
+      name: "Fast mode for Cursor Agent",
     })).not.toBeInTheDocument();
   });
 
