@@ -97,6 +97,21 @@ jobs:
             exit 1
           }
 
+          # Every manifest URL must resolve to a real asset on the source release.
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" \
+            --repo "$REPOSITORY" \
+            --json assets --jq '.assets[].name')"
+          MISSING=""
+          while IFS= read -r asset_name; do
+            if ! grep -qxF "$asset_name" <<< "$ASSET_NAMES"; then
+              MISSING="$MISSING $asset_name"
+            fi
+          done < <(jq -r '.platforms[].url | sub(".*/"; "")' candidate/latest.json)
+          if [[ -n "$MISSING" ]]; then
+            echo "::error::Manifest references assets missing from release $RELEASE_TAG:$MISSING"
+            exit 1
+          fi
+
       - name: Decide whether candidate advances Beta
         run: |
           SHOULD_UPDATE=true
