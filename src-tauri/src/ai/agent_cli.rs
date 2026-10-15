@@ -38,8 +38,8 @@ use catalog_refresh::{
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::providers::{
-    PROVIDER_CLAUDE_CODE, PROVIDER_CLINE, PROVIDER_CODEX, PROVIDER_DROID, PROVIDER_GROK,
-    PROVIDER_OMP, PROVIDER_OPENCODE, PROVIDER_PI,
+    PROVIDER_CLAUDE_CODE, PROVIDER_CODEX, PROVIDER_GROK, PROVIDER_OMP, PROVIDER_OPENCODE,
+    PROVIDER_PI,
 };
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
@@ -290,31 +290,6 @@ const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[],
 };
 
-const DROID_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_DROID,
-    binary: "droid",
-    help_argv: &["exec", "--help"],
-    cold_argv_prefix: &["exec", "--output-format", "text"],
-    cold_argv_suffix: &[],
-    required_isolation_args: &["--restrict-tools", "TodoWrite", "--disable-builtin-skills"],
-    required_capability_flags: &[
-        "--restrict-tools",
-        "--disable-builtin-skills",
-        "--output-format",
-    ],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--reasoning-effort",
-        default: "low",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--append-system-prompt"),
-    input_mode: InputMode::PositionalArg,
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
 const GROK_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_GROK,
     binary: "grok",
@@ -372,48 +347,14 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)],
 };
 
-const CLINE_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_CLINE,
-    binary: "cline",
-    help_argv: &["--help"],
-    cold_argv_prefix: &[],
-    cold_argv_suffix: &[],
-    required_isolation_args: &[
-        "--auto-approve",
-        "false",
-        "--timeout",
-        "9",
-        "--retries",
-        "1",
-        "--compaction",
-        "off",
-        "--hooks-dir",
-        ".",
-    ],
-    required_capability_flags: &["--auto-approve", "--timeout", "--system", "--hooks-dir"],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--thinking",
-        default: "low",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--system"),
-    input_mode: InputMode::PositionalArg,
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
 fn spec_for(provider_id: &str) -> Option<&'static AgentCliSpec> {
     match provider_id {
         PROVIDER_CLAUDE_CODE => Some(&CLAUDE_CODE_SPEC),
         PROVIDER_PI => Some(&PI_SPEC),
         PROVIDER_OMP => Some(&OMP_SPEC),
         PROVIDER_CODEX => Some(&CODEX_SPEC),
-        PROVIDER_DROID => Some(&DROID_SPEC),
         PROVIDER_GROK => Some(&GROK_SPEC),
         PROVIDER_OPENCODE => Some(&OPENCODE_SPEC),
-        PROVIDER_CLINE => Some(&CLINE_SPEC),
         _ => None,
     }
 }
@@ -1098,31 +1039,6 @@ fn apply_no_window(command: &mut Command) {
     }
 }
 
-struct RuntimeIsolation {
-    _cline_data_dir: Option<TempDir>,
-}
-
-fn apply_runtime_isolation(
-    spec: &AgentCliSpec,
-    command: &mut Command,
-) -> Result<RuntimeIsolation, MappedAiProviderError> {
-    let cline_data_dir = if spec.provider_id == PROVIDER_CLINE {
-        let directory = TempDir::new().map_err(|error| {
-            MappedAiProviderError::new(AiProviderError::AgentCli(sanitize_cli_error(
-                &error.to_string(),
-            )))
-        })?;
-        command.arg("--data-dir").arg(directory.path());
-        Some(directory)
-    } else {
-        None
-    };
-
-    Ok(RuntimeIsolation {
-        _cline_data_dir: cline_data_dir,
-    })
-}
-
 /// Spawn the binary, deliver `input_text` per `input_mode`, wait for exit, and
 /// parse the polish result from stdout. A non-zero exit is always an error,
 /// even when stdout looks like a successful JSON response.
@@ -1136,8 +1052,6 @@ async fn cold_spawn_and_collect(
 ) -> Result<String, MappedAiProviderError> {
     let mut command = Command::new(binary_path);
     command.args(argv);
-
-    let runtime_isolation = apply_runtime_isolation(spec, &mut command)?;
 
     match input_mode {
         InputMode::Stdin => {}
@@ -1163,7 +1077,6 @@ async fn cold_spawn_and_collect(
     )
     .await
     .map_err(map_process_failure)?;
-    drop(runtime_isolation);
 
     if !capture.status.success() {
         let detail = extract_process_error(output, &capture.stdout, &capture.stderr);
@@ -2089,61 +2002,6 @@ fn parse_codex_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProvi
     ])
 }
 
-fn parse_droid_models(
-    stdout: &[u8],
-) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
-    let text = String::from_utf8_lossy(stdout);
-    let mut in_models = false;
-    let mut saw_models = false;
-    let mut default_name = None;
-    let mut models = Vec::new();
-
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if matches!(line, "Available Models:" | "Custom Models:") {
-            in_models = true;
-            saw_models = true;
-            continue;
-        }
-        if line == "Model details:" {
-            break;
-        }
-        if !in_models || line.is_empty() {
-            continue;
-        }
-        let Some(split_at) = line.find(char::is_whitespace) else {
-            continue;
-        };
-        let id = &line[..split_at];
-        let raw_name = line[split_at..].trim();
-        if id.is_empty() || raw_name.is_empty() {
-            continue;
-        }
-        let is_default = raw_name.ends_with(" (default)");
-        let name = raw_name.strip_suffix(" (default)").unwrap_or(raw_name);
-        if is_default {
-            default_name = Some(name.to_string());
-        }
-        models.push(AgentCliModel {
-            id: id.to_string(),
-            name: name.to_string(),
-            recommended: false,
-            reasoning: id != "auto",
-            context_window: None,
-            source_provider: None,
-            cli_default: false,
-        });
-    }
-
-    if !saw_models || models.is_empty() {
-        return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
-    }
-    Ok((
-        named_cli_default("Droid", default_name.as_deref(), None),
-        models,
-    ))
-}
-
 fn parse_grok_models(
     stdout: &[u8],
 ) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
@@ -2295,7 +2153,6 @@ const PI_MODEL_LIST_ARGV: &[&str] = &[
 const OMP_MODEL_LIST_ARGV: &[&str] = &["models", "--json", "--no-extensions"];
 const OMP_DEFAULT_MODEL_ARGV: &[&str] = &["config", "get", "modelRoles", "--json"];
 const CODEX_DEFAULT_MODEL_ARGV: &[&str] = &["doctor", "--json"];
-const DROID_MODEL_LIST_ARGV: &[&str] = &["exec", "--help"];
 const GROK_MODEL_LIST_ARGV: &[&str] = &["models"];
 const OPENCODE_MODEL_LIST_ARGV: &[&str] = &["models", "--pure"];
 const OPENCODE_CONFIG_ARGV: &[&str] = &["debug", "config", "--pure"];
@@ -2346,15 +2203,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
                     .await?;
             parse_codex_models(&payload)
         }
-        PROVIDER_DROID => {
-            let payload =
-                run_model_list_command(&model_binary(&DROID_SPEC).await?, DROID_MODEL_LIST_ARGV)
-                    .await?;
-            let (default, models) = parse_droid_models(&payload)?;
-            let mut result = vec![default];
-            result.extend(models);
-            Ok(result)
-        }
         PROVIDER_GROK => {
             let payload =
                 run_model_list_command(&model_binary(&GROK_SPEC).await?, GROK_MODEL_LIST_ARGV)
@@ -2384,7 +2232,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             result.extend(models);
             Ok(result)
         }
-        PROVIDER_CLINE => Ok(vec![named_cli_default("Cline", None, None)]),
         _ => Err(MappedAiProviderError::new(
             AiProviderError::UnsupportedProvider,
         )),
@@ -2632,10 +2479,8 @@ mod tests {
             PROVIDER_PI,
             PROVIDER_OMP,
             PROVIDER_CODEX,
-            PROVIDER_DROID,
             PROVIDER_GROK,
             PROVIDER_OPENCODE,
-            PROVIDER_CLINE,
         ] {
             assert_eq!(cold_spawn_timeout_ms(provider), 20_000, "{provider}");
         }
@@ -3019,7 +2864,6 @@ mod tests {
             b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n"
         );
         assert_eq!(CODEX_DEFAULT_MODEL_ARGV, &["doctor", "--json"][..]);
-        assert_eq!(DROID_MODEL_LIST_ARGV, &["exec", "--help"][..]);
         assert_eq!(GROK_MODEL_LIST_ARGV, &["models"][..]);
         assert_eq!(OPENCODE_MODEL_LIST_ARGV, &["models", "--pure"][..]);
         assert!(!CODEX_DEFAULT_MODEL_ARGV.contains(&"app-server"));
@@ -3102,19 +2946,6 @@ mod tests {
         .unwrap();
         assert_eq!(codex[0].name, "Default");
 
-        let (droid_default, droid_models) = parse_droid_models(
-            b"Available Models:\n  auto  Auto Model\n  claude-opus-5  Opus 5 (default)\nCustom Models:\n  custom:glm  GLM\nModel details:\n",
-        )
-        .unwrap();
-        assert_eq!(droid_default.name, "Default");
-        assert_eq!(
-            droid_models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["auto", "claude-opus-5", "custom:glm"]
-        );
-
         let (grok_default, grok_models) = parse_grok_models(
             b"Default model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)\n",
         )
@@ -3132,7 +2963,6 @@ mod tests {
     fn discovery_parsers_reject_missing_model_contracts() {
         assert!(parse_pi_default_model(b"{}").is_err());
         assert!(parse_codex_models(b"{}").is_err());
-        assert!(parse_droid_models(b"Available Models:\n").is_err());
         assert!(parse_grok_models(b"Available models:\n").is_err());
         assert!(parse_selector_models(b"not-a-selector\n").is_err());
     }
@@ -3298,10 +3128,8 @@ mod tests {
             (PROVIDER_PI, "pi"),
             (PROVIDER_OMP, "omp"),
             (PROVIDER_CODEX, "codex"),
-            (PROVIDER_DROID, "droid"),
             (PROVIDER_GROK, "grok"),
             (PROVIDER_OPENCODE, "opencode"),
-            (PROVIDER_CLINE, "cline"),
         ] {
             let spec = spec_for(provider).expect("provider must have a CLI spec");
             assert_eq!(spec.binary, binary);
@@ -3328,12 +3156,6 @@ mod tests {
             pair[0] == "-c" && pair[1].starts_with("developer_instructions=\"system\"")
         }));
 
-        let droid = cold_argv(&DROID_SPEC, "system");
-        assert!(droid
-            .windows(2)
-            .any(|pair| pair[0] == "--restrict-tools" && pair[1] == "TodoWrite"));
-        assert!(droid.contains(&"--disable-builtin-skills".to_string()));
-
         let grok = cold_argv(&GROK_SPEC, "system");
         assert!(grok
             .windows(2)
@@ -3344,30 +3166,6 @@ mod tests {
             OPENCODE_SPEC.static_env,
             &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)]
         );
-        assert!(cold_argv(&CLINE_SPEC, "system")
-            .windows(2)
-            .any(|pair| pair[0] == "--auto-approve" && pair[1] == "false"));
-        assert!(cold_argv(&CLINE_SPEC, "system")
-            .windows(2)
-            .any(|pair| pair[0] == "--retries" && pair[1] == "1"));
-    }
-
-    #[test]
-    fn cline_runtime_uses_disposable_local_state() {
-        let mut command = Command::new("cline");
-        let isolation =
-            apply_runtime_isolation(&CLINE_SPEC, &mut command).expect("Cline isolation");
-        let args: Vec<OsString> = command
-            .as_std()
-            .get_args()
-            .map(OsStr::to_os_string)
-            .collect();
-        assert_eq!(args.first(), Some(&OsString::from("--data-dir")));
-        let data_dir = PathBuf::from(args.get(1).expect("data directory argument"));
-        assert!(data_dir.is_dir());
-
-        drop(isolation);
-        assert!(!data_dir.exists());
     }
 
     #[test]
@@ -4216,7 +4014,7 @@ not a json line\n";
             assert_ne!(default.name, "CLI default");
             if matches!(
                 provider,
-                PROVIDER_PI | PROVIDER_OMP | PROVIDER_DROID | PROVIDER_GROK | PROVIDER_OPENCODE
+                PROVIDER_PI | PROVIDER_OMP | PROVIDER_GROK | PROVIDER_OPENCODE
             ) {
                 assert!(
                     models.len() > 1,

@@ -48,7 +48,7 @@ pub(crate) fn migrate_ai_settings_before_key_cache<R: tauri::Runtime>(app: &taur
 pub(crate) fn migrate_ai_settings_values(
     values: &mut serde_json::Map<String, serde_json::Value>,
 ) -> bool {
-    let mut changed = false;
+    let mut changed = migrate_removed_agent_cli_provider(values);
 
     let provider = values
         .get("ai_provider")
@@ -166,6 +166,43 @@ pub(crate) fn migrate_ai_settings_values(
     }
 
     changed
+}
+
+/// Cline and Droid Polish were removed; a saved selection falls back to Claude Code.
+fn migrate_removed_agent_cli_provider(
+    values: &mut serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    const REMOVED_PROVIDERS: [&str; 2] = ["cline", "droid"];
+    let Some(old) = values
+        .get("ai_provider")
+        .and_then(|value| value.as_str())
+        .filter(|provider| REMOVED_PROVIDERS.contains(provider))
+        .map(str::to_string)
+    else {
+        return false;
+    };
+
+    let claude_model = values
+        .get_mut("ai_models_by_provider")
+        .and_then(|value| value.as_object_mut())
+        .map(|models| {
+            for provider in REMOVED_PROVIDERS {
+                models.remove(provider);
+            }
+            models
+                .get(crate::ai::providers::PROVIDER_CLAUDE_CODE)
+                .and_then(|model| model.as_str())
+                .unwrap_or_default()
+                .to_string()
+        })
+        .unwrap_or_default();
+    values.insert(
+        "ai_provider".to_string(),
+        serde_json::json!(crate::ai::providers::PROVIDER_CLAUDE_CODE),
+    );
+    values.insert("ai_model".to_string(), serde_json::json!(claude_model));
+    log::info!("Polish provider {old} was removed; switched to Claude Code");
+    true
 }
 
 fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {

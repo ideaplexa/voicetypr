@@ -84,10 +84,8 @@ fn parse_catalog(json: &str) -> Catalog {
         ("pi", "pi"),
         ("omp", "oh-my-pi"),
         ("codex", "Codex"),
-        ("droid", "Droid"),
         ("grok", "Grok"),
         ("opencode", "OpenCode"),
-        ("cline", "Cline"),
     ] {
         catalog.providers.push(CatalogProvider {
             id: id.to_string(),
@@ -401,16 +399,7 @@ mod tests {
 
     #[test]
     fn agent_cli_providers_share_runtime_contract() {
-        for id in [
-            "claude-code",
-            "pi",
-            "omp",
-            "codex",
-            "droid",
-            "grok",
-            "opencode",
-            "cline",
-        ] {
+        for id in ["claude-code", "pi", "omp", "codex", "grok", "opencode"] {
             assert_eq!(runtime_kind(id), Some("agent_cli"), "{id} runtime");
             assert!(!is_native_provider(id), "{id} not native");
             assert_eq!(adapter_name(id), None, "{id} no adapter");

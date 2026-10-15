@@ -107,33 +107,3 @@ async fn real_omp_cold_spawn_round_trip() {
     );
     println!("omp polished output: {polished}");
 }
-
-/// A real `droid exec` round-trip — gated behind `#[ignore]`. Verifies the
-/// documented `--restrict-tools` isolation contract (an unknown
-/// `--enabled-tools` would leave default tools on). Run with
-/// `cargo test agent_cli -- --ignored`.
-#[tokio::test]
-#[ignore = "requires droid CLI installed + authenticated; not run in CI"]
-async fn real_droid_cold_spawn_round_trip() {
-    let runtime = AgentCliRuntime::new();
-    let request = AiPolishRequest {
-        provider_id: PROVIDER_DROID.to_string(),
-        model_id: String::new(),
-        reasoning_level: Some("low".to_string()),
-        fast_mode: false,
-        input_text: "hello; echo $HOME $(whoami)".to_string(),
-        needs_output_language_transform: false,
-        prompt:
-            "Clean up this voice dictation into clear written English. Output only the fixed text."
-                .to_string(),
-        timeout_ms: 9_000,
-    };
-    let result = runtime.polish(&request).await;
-    let polished = result.expect("droid cold-spawn polish should succeed locally");
-    assert!(!polished.trim().is_empty());
-    assert!(
-        polished.contains("echo $HOME $(whoami)"),
-        "droid must preserve shell metacharacters as literal content: {polished}"
-    );
-    println!("droid polished output: {polished}");
-}

@@ -27,3 +27,4 @@ Add best-effort Polish adapters for Codex, Droid, Grok, OpenCode, and Cline. Pre
 - Browser smoke opened Polish → Local Agents and observed exactly Claude Code, pi, oh-my-pi, Codex, Droid, Grok, OpenCode, and Cline; Amp, Kilo Code, and Hermes were absent.
 - Focused review findings were independently checked against installed CLI help and real invocations. Cline uses disposable `--data-dir` state and a valid retry count.
 - Amp and Kilo Code were removed from the catalog, runtime, discovery, and UI by product decision on 2026-08-10. Hermes was removed by product decision on 2026-08-12.
+- Cline and Droid were removed by product decision on 2026-10-16; saved selections migrate to Claude Code.

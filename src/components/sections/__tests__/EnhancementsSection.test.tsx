@@ -139,7 +139,7 @@ const providerModels = vi.hoisted(
         cliDefault: true,
       },
     ],
-    droid: [
+    grok: [
       { id: "", name: "Default", recommended: true, cliDefault: true },
       {
         id: "claude-opus-5-5",
@@ -256,22 +256,10 @@ const providerListResponse = [
     status: "production",
     supportsReasoning: false,
   },
-  {
-    id: "droid",
-    name: "Droid",
-    status: "production",
-    supportsReasoning: false,
-  },
   { id: "grok", name: "Grok", status: "production", supportsReasoning: false },
   {
     id: "opencode",
     name: "OpenCode",
-    status: "production",
-    supportsReasoning: false,
-  },
-  {
-    id: "cline",
-    name: "Cline",
     status: "production",
     supportsReasoning: false,
   },
@@ -281,10 +269,8 @@ const localAgentProviderIds = new Set([
   "pi",
   "omp",
   "codex",
-  "droid",
   "grok",
   "opencode",
-  "cline",
 ]);
 
 const isAgentCliProviderForTest = (providerId: string) => localAgentProviderIds.has(providerId);
@@ -479,7 +465,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(8);
+      expect(probeCalls).toHaveLength(6);
       expect(eventListeners.has("ai-ready")).toBe(true);
     });
 
@@ -495,7 +481,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(8);
+      expect(probeCalls).toHaveLength(6);
     });
   });
 
@@ -858,7 +844,7 @@ describe("EnhancementsSection", () => {
         name: "Claude Code",
       }),
     ).toBeInTheDocument();
-    for (const providerName of ["Codex", "Droid", "Grok", "OpenCode", "Cline"]) {
+    for (const providerName of ["Codex", "Grok", "OpenCode"]) {
       expect(
         within(providersPanel).getByRole("heading", { name: providerName }),
       ).toBeInTheDocument();
@@ -1939,7 +1925,7 @@ describe("EnhancementsSection", () => {
     });
   });
 
-  it("shows discovered Droid models beside its current default", async () => {
+  it("shows discovered Grok models beside its current default", async () => {
     agentCliProbeResponse = {
       state: "ready",
       reasoningLevels: ["low", "medium"],
@@ -1948,33 +1934,33 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     const providersPanel = await getProviderSetupPanel();
     await user.click(within(providersPanel).getByRole("tab", { name: "Local Agents" }));
-    await user.click(await within(providersPanel).findByRole("button", { name: "Select Droid" }));
+    await user.click(await within(providersPanel).findByRole("button", { name: "Select Grok" }));
 
-    const droidModel = await within(providersPanel).findByRole("button", {
-      name: "Model for Droid",
+    const grokModel = await within(providersPanel).findByRole("button", {
+      name: "Model for Grok",
     });
-    expect(droidModel).toHaveTextContent("Default");
-    await user.click(droidModel);
+    expect(grokModel).toHaveTextContent("Default");
+    await user.click(grokModel);
     const modelDialog = await screen.findByRole("dialog", {
-      name: "Choose a Droid model",
+      name: "Choose a Grok model",
     });
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Default.*droid\/default/i,
+        name: /^Default.*grok\/default/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Opus 5.5.*droid\/claude-opus-5-5.*Reasoning/i,
+        name: /^Opus 5.5.*grok\/claude-opus-5-5.*Reasoning/i,
       }),
     ).toBeInTheDocument();
     await user.type(
-      within(modelDialog).getByRole("textbox", { name: "Search Droid models" }),
+      within(modelDialog).getByRole("textbox", { name: "Search Grok models" }),
       "gpt-6.1",
     );
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-6.1 Sol.*droid\/gpt-6.1-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*grok\/gpt-6.1-sol.*Reasoning/i,
       }),
     ).toBeInTheDocument();
     expect(
@@ -1984,13 +1970,13 @@ describe("EnhancementsSection", () => {
     ).not.toBeInTheDocument();
     await user.click(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-6.1 Sol.*droid\/gpt-6.1-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*grok\/gpt-6.1-sol.*Reasoning/i,
       }),
     );
 
     expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
       enabled: false,
-      provider: "droid",
+      provider: "grok",
       model: "gpt-6.1-sol",
     });
   });

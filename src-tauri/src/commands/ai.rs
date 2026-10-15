@@ -1822,15 +1822,7 @@ mod tests {
 
     #[test]
     fn expanded_cli_reasoning_policy_matches_runtime_support() {
-        for provider in [
-            "claude-code",
-            "pi",
-            "omp",
-            "codex",
-            "droid",
-            "grok",
-            "cline",
-        ] {
+        for provider in ["claude-code", "pi", "omp", "codex", "grok"] {
             assert!(validate_agent_cli_reasoning(provider, "low").is_ok());
         }
         assert!(validate_agent_cli_reasoning("opencode", "low").is_ok());
@@ -1844,7 +1836,6 @@ mod tests {
         assert!(supports_fast_mode("omp"));
         assert!(supports_fast_mode("codex"));
         assert!(!supports_fast_mode("pi"));
-        assert!(!supports_fast_mode("droid"));
         assert!(validate_agent_cli_reasoning("pi", "minimal").is_ok());
         assert!(validate_agent_cli_reasoning("omp", "minimal").is_ok());
         assert!(validate_agent_cli_reasoning("opencode", "minimal").is_ok());

@@ -62,7 +62,7 @@ describe("Polish provider defaults", () => {
     expect(view.reasoning).toBe("low");
   });
 
-  it.each(["claude-code", "pi", "omp", "droid", "grok", "opencode", "cline"])(
+  it.each(["claude-code", "pi", "omp", "grok", "opencode"])(
     "keeps %s defaults unchanged",
     (provider) => {
       const view = buildProviderRowViewModel(props(provider));

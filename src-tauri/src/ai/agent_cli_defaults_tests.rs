@@ -84,7 +84,6 @@ fn other_provider_model_and_reasoning_defaults_are_unchanged() {
     for (spec, flag, level) in [
         (&PI_SPEC, "--thinking", "off"),
         (&OMP_SPEC, "--thinking", "off"),
-        (&DROID_SPEC, "--reasoning-effort", "low"),
     ] {
         let args = cold_argv_for_model(spec, "prompt", "", ClaudeCapabilities::default());
         assert!(has_pair(&args, flag, level));
