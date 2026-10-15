@@ -15,6 +15,7 @@ permissions:
 
 concurrency:
   group: update-beta-channel
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -96,15 +97,44 @@ jobs:
             exit 1
           }
 
+          gh release view "$RELEASE_TAG" --repo "$REPOSITORY" --json assets \
+            | jq -r '.assets[].name' | sort > "$RUNNER_TEMP/release-assets.txt"
+          jq -r '.platforms[].url | split("/")[-1]' candidate/latest.json \
+            | sort > "$RUNNER_TEMP/manifest-assets.txt"
+          MISSING="$(comm -23 "$RUNNER_TEMP/manifest-assets.txt" "$RUNNER_TEMP/release-assets.txt")"
+          if [[ -n "$MISSING" ]]; then
+            echo "::error::Manifest references assets not present on $RELEASE_TAG:"
+            echo "$MISSING"
+            exit 1
+          fi
+
       - name: Decide whether candidate advances Beta
         run: |
           SHOULD_UPDATE=true
           if gh release view beta --repo "$REPOSITORY" >/dev/null 2>&1; then
             mkdir -p current
+            # Recover a pointer swap that crashed mid-flight: if latest.json.next
+            # was staged but the rename to latest.json never completed, treat the
+            # staged asset as the current pointer and finish the swap first.
+            NEXT_URL="$(gh release view beta \
+              --repo "$REPOSITORY" \
+              --json assets --jq '.assets[] | select(.name == "latest.json.next") | .apiUrl' \
+              | head -1)"
+            if [[ -n "$NEXT_URL" ]]; then
+              OLD_URL="$(gh release view beta \
+                --repo "$REPOSITORY" \
+                --json assets --jq '.assets[] | select(.name == "latest.json") | .apiUrl' \
+                | head -1)"
+              if [[ -n "$OLD_URL" ]]; then
+                gh api -X DELETE "$OLD_URL"
+              fi
+              gh api -X PATCH "$NEXT_URL" -f name=latest.json
+            fi
             gh release download beta \
               --repo "$REPOSITORY" \
               --pattern latest.json \
-              --dir current
+              --dir current \
+              --clobber
             CURRENT_VERSION="$(jq -r '.version' current/latest.json)"
             SHOULD_UPDATE="$(node .github/scripts/should-update-beta-manifest.mjs \
               "$candidate_version" "$CURRENT_VERSION")"
@@ -116,9 +146,29 @@ jobs:
         if: ${{ env.should_update == 'true' }}
         run: |
           if gh release view beta --repo "$REPOSITORY" >/dev/null 2>&1; then
-            gh release upload beta candidate/latest.json \
+            # Stage the new manifest as latest.json.next before touching the
+            # live asset, so an interrupted run never leaves no manifest.
+            cp candidate/latest.json candidate/latest.json.next
+            gh release upload beta candidate/latest.json.next \
               --repo "$REPOSITORY" \
               --clobber
+
+            OLD_URL="$(gh release view beta \
+              --repo "$REPOSITORY" \
+              --json assets --jq '.assets[] | select(.name == "latest.json") | .apiUrl' \
+              | head -1)"
+            if [[ -n "$OLD_URL" ]]; then
+              gh api -X DELETE "$OLD_URL"
+            fi
+            NEXT_URL="$(gh release view beta \
+              --repo "$REPOSITORY" \
+              --json assets --jq '.assets[] | select(.name == "latest.json.next") | .apiUrl' \
+              | head -1)"
+            if [[ -z "$NEXT_URL" ]]; then
+              echo "::error::latest.json.next asset not found after upload"
+              exit 1
+            fi
+            gh api -X PATCH "$NEXT_URL" -f name=latest.json
           else
             gh release create beta candidate/latest.json \
               --repo "$REPOSITORY" \

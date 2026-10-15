@@ -23,7 +23,8 @@ function download(url, outFile) {
   try {
     // -sS: silent but show errors; -L: follow redirects; -f: fail on HTTP errors
     // --http1.1: force HTTP/1.1 to avoid HTTP/2 protocol errors on some servers
-    run('curl', ['--http1.1', '-sS', '-L', '-f', '-o', outFile, url]);
+    // --retry: ride out transient download failures (curl honours Retry-After)
+    run('curl', ['--http1.1', '-sS', '-L', '-f', '--retry', '5', '--retry-delay', '10', '-o', outFile, url]);
     return;
   } catch (e) {
     // Fallback to powershell on Windows
@@ -173,6 +174,11 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
     const ffprobeX64Dst = path.join(distDir, 'ffprobe-x86_64-apple-darwin');
     const macFfmpegBinSha = process.env.FFMPEG_MAC_BIN_SHA256 || '77d2c853f431318d55ec02676d9b2f185ebfdddb9f7677a251fbe453affe025a';
     const macFfprobeBinSha = process.env.FFPROBE_MAC_BIN_SHA256 || 'babf170e86bd6b0b2fefee5fa56f57721b0acb98ad2794b095d8030b02857dfe';
+    // Pinned macOS Intel 9.0.1 from Martin Riedl's build server (override via env if needed)
+    const ffmpegX64Url = process.env.FFMPEG_MAC_X64_URL || 'https://ffmpeg.martin-riedl.de/download/macos/amd64/1787081194_9.0.1/ffmpeg.zip';
+    const ffprobeX64Url = process.env.FFPROBE_MAC_X64_URL || 'https://ffmpeg.martin-riedl.de/download/macos/amd64/1787081194_9.0.1/ffprobe.zip';
+    const macX64FfmpegBinSha = process.env.FFMPEG_MAC_X64_BIN_SHA256 || '56f4a0478fff60fa549ab7aa03759d7ab116dadcdf63dba4d466ebfba1280b2f';
+    const macX64FfprobeBinSha = process.env.FFPROBE_MAC_X64_BIN_SHA256 || 'dd287b051b569382fe32eb73003b04035d416bccfa30148c140e35636cd3a1d8';
 
     // Check if ARM64 binaries exist
     const arm64Present = fs.existsSync(ffmpegDst) && fs.existsSync(ffprobeDst);
@@ -183,7 +189,11 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
     }
     // Check if x86_64 binaries exist
     const x64Present = fs.existsSync(ffmpegX64Dst) && fs.existsSync(ffprobeX64Dst);
-
+    if (x64Present) {
+      // Revalidate restored/cached x86_64 binaries like the arm64 pair above.
+      verifyChecksum(ffmpegX64Dst, macX64FfmpegBinSha, 'macOS x86_64 ffmpeg (binary)');
+      verifyChecksum(ffprobeX64Dst, macX64FfprobeBinSha, 'macOS x86_64 ffprobe (binary)');
+    }
     if (arm64Present && x64Present) {
       // Both architectures present - ensure symlinks and exit
       ensureSymlink(ffmpegDst, path.join(distDir, 'ffmpeg-aarch64-apple-darwin'));
@@ -198,8 +208,6 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
       ensureSymlink(ffprobeDst, path.join(distDir, 'ffprobe-aarch64-apple-darwin'));
       console.log('[ensure-ffmpeg-sidecar] ARM64 binaries present, downloading x86_64...');
 
-      const ffmpegX64Url = process.env.FFMPEG_MAC_X64_URL || 'https://evermeet.cx/ffmpeg/getrelease/zip';
-      const ffprobeX64Url = process.env.FFPROBE_MAC_X64_URL || 'https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip';
       const tmpX64 = fs.mkdtempSync(path.join(os.tmpdir(), 'fftools-x64-'));
 
       try {
@@ -209,6 +217,8 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
         unzip(path.join(tmpX64, 'ffprobe.zip'), tmpX64);
 
         if (fs.existsSync(path.join(tmpX64, 'ffmpeg')) && fs.existsSync(path.join(tmpX64, 'ffprobe'))) {
+          verifyChecksum(path.join(tmpX64, 'ffmpeg'), macX64FfmpegBinSha, 'macOS x86_64 ffmpeg (binary)');
+          verifyChecksum(path.join(tmpX64, 'ffprobe'), macX64FfprobeBinSha, 'macOS x86_64 ffprobe (binary)');
           fs.copyFileSync(path.join(tmpX64, 'ffmpeg'), ffmpegX64Dst); chmodx(ffmpegX64Dst);
           fs.copyFileSync(path.join(tmpX64, 'ffprobe'), ffprobeX64Dst); chmodx(ffprobeX64Dst);
           console.log('[ensure-ffmpeg-sidecar] Installed x86_64 binaries for Intel Mac support.');
@@ -254,11 +264,9 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
     }
 
     // Also download Intel x86_64 binaries for universal build support
-    // Using evermeet.cx (trusted source for Intel Mac ffmpeg builds)
+    // Using pinned Martin Riedl 9.0.1 artifacts (evermeet.cx rate-limits CI with HTTP 429)
     if (!fs.existsSync(ffmpegX64Dst) || !fs.existsSync(ffprobeX64Dst)) {
       console.log('[ensure-ffmpeg-sidecar] Downloading Intel x86_64 binaries for universal support...');
-      const ffmpegX64Url = process.env.FFMPEG_MAC_X64_URL || 'https://evermeet.cx/ffmpeg/getrelease/zip';
-      const ffprobeX64Url = process.env.FFPROBE_MAC_X64_URL || 'https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip';
 
       const tmpX64 = fs.mkdtempSync(path.join(os.tmpdir(), 'fftools-x64-'));
       const ffmpegX64Zip = path.join(tmpX64, 'ffmpeg.zip');
@@ -274,6 +282,8 @@ function removeObsoleteDoubleExtensionCopies(distDir) {
         const outFfprobeX64 = path.join(tmpX64, 'ffprobe');
 
         if (fs.existsSync(outFfmpegX64) && fs.existsSync(outFfprobeX64)) {
+          verifyChecksum(outFfmpegX64, macX64FfmpegBinSha, 'macOS x86_64 ffmpeg (binary)');
+          verifyChecksum(outFfprobeX64, macX64FfprobeBinSha, 'macOS x86_64 ffprobe (binary)');
           fs.copyFileSync(outFfmpegX64, ffmpegX64Dst); chmodx(ffmpegX64Dst);
           fs.copyFileSync(outFfprobeX64, ffprobeX64Dst); chmodx(ffprobeX64Dst);
           console.log('[ensure-ffmpeg-sidecar] Installed macOS x86_64 sidecar binaries for Intel Mac support.');

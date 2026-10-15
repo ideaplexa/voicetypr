@@ -68,7 +68,7 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
+      - name: Cache verified FFmpeg sidecars
         uses: actions/cache@v5
         with:
           path: |
@@ -76,6 +76,8 @@ jobs:
             sidecar/ffmpeg/dist/ffprobe
             sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
             sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
+            sidecar/ffmpeg/dist/ffmpeg-x86_64-apple-darwin
+            sidecar/ffmpeg/dist/ffprobe-x86_64-apple-darwin
           key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
 
       - name: Setup Node.js
@@ -90,8 +92,13 @@ jobs:
           corepack prepare pnpm@10.13.1 --activate
           pnpm --version
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0 # 1.91.1
+        with:
+          components: clippy
+
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -108,7 +115,7 @@ jobs:
         run: cd src-tauri && cargo test
 
       - name: Clippy
-        run: cd src-tauri && cargo clippy -- -D warnings
+        run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build Tauri (release)
         run: cd src-tauri && cargo build --release
@@ -150,17 +157,21 @@ jobs:
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0 # 1.91.1
         with:
-          shared-key: windows-x64-build
-          key: vulkan-${{ env.VULKAN_RUNTIME_VERSION }}
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: windows-x64-build-vk${{ env.VULKAN_RUNTIME_VERSION }}
           workspaces: |
             src-tauri -> ../../../../b/app
             sidecar/whisper-vulkan -> ../../../../../b/vulkan
 
       - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1
+        uses: jakoch/install-vulkan-sdk-action@d17de7e2f5e50efb5d2123efed18497d3c58c533 # v1.7.0
         with:
           vulkan_version: 1.3.296.0
           install_runtime: true

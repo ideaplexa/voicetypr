@@ -55,8 +55,10 @@ jobs:
 
       - name: Ensure stable releases run from main or a hotfix branch
         if: ${{ inputs.channel == 'stable' && github.ref_name != 'main' && !startsWith(github.ref_name, 'hotfix/') }}
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
         run: |
-          echo "::error::Stable releases must be dispatched from main or a hotfix/* branch, not ${{ github.ref_name }}."
+          echo "::error::Stable releases must be dispatched from main or a hotfix/* branch, not $RELEASE_REF."
           exit 1
 
       - name: Calculate version
@@ -128,7 +130,7 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
+      - name: Cache verified FFmpeg sidecars
         uses: actions/cache@v5
         with:
           path: |
@@ -136,6 +138,8 @@ jobs:
             sidecar/ffmpeg/dist/ffprobe
             sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
             sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
+            sidecar/ffmpeg/dist/ffmpeg-x86_64-apple-darwin
+            sidecar/ffmpeg/dist/ffprobe-x86_64-apple-darwin
           key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
 
       - name: Setup Node.js
@@ -144,17 +148,17 @@ jobs:
           node-version: '22.19.0'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@e9540b3eafaf84907c087a645d3258bfaa861427 # v3.0.0
         with:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0 # 1.91.1
         with:
           targets: aarch64-apple-darwin
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -337,7 +341,7 @@ jobs:
           restore-keys: |
             parakeet-swift-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift-toolchain.outputs.hash }}-
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
+      - name: Cache verified FFmpeg sidecars
         uses: actions/cache@v5
         with:
           path: |
@@ -345,6 +349,8 @@ jobs:
             sidecar/ffmpeg/dist/ffprobe
             sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
             sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
+            sidecar/ffmpeg/dist/ffmpeg-x86_64-apple-darwin
+            sidecar/ffmpeg/dist/ffprobe-x86_64-apple-darwin
           key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
 
       - name: Setup Node.js
@@ -353,17 +359,17 @@ jobs:
           node-version: '22.19.0'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@e9540b3eafaf84907c087a645d3258bfaa861427 # v3.0.0
         with:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0 # 1.91.1
         with:
           targets: x86_64-apple-darwin
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -510,26 +516,25 @@ jobs:
           node-version: '22.19.0'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@e9540b3eafaf84907c087a645d3258bfaa861427 # v3.0.0
         with:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0 # 1.91.1
         with:
           targets: x86_64-pc-windows-msvc
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: windows-x64-build
-          key: vulkan-${{ env.VULKAN_RUNTIME_VERSION }}
+          shared-key: windows-x64-build-vk${{ env.VULKAN_RUNTIME_VERSION }}
           workspaces: |
             src-tauri -> ../../../../b/app
             sidecar/whisper-vulkan -> ../../../../../b/vulkan
 
       - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1
+        uses: jakoch/install-vulkan-sdk-action@d17de7e2f5e50efb5d2123efed18497d3c58c533 # v1.7.0
         with:
           vulkan_version: 1.3.296.0
           install_runtime: true
@@ -757,61 +762,6 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: node .github/scripts/release-tool.mjs check-tag "$RELEASE_TAG"
 
-      - name: Bump version files
-        run: |
-          export RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
-          node .github/scripts/release-tool.mjs apply-version "$RELEASE_VERSION"
-          cargo update \
-            --manifest-path src-tauri/Cargo.toml \
-            -p voicetypr \
-            --precise "$RELEASE_VERSION"
-          cargo metadata \
-            --manifest-path src-tauri/Cargo.toml \
-            --locked \
-            --format-version 1 \
-            --no-deps >/dev/null
-
-      - name: Commit, tag, and push
-        id: push
-        env:
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_BRANCH: ${{ github.ref_name }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock CHANGELOG.md
-          git diff --cached --stat
-          if git diff --cached --quiet; then
-            echo "No version file changes; tagging current commit"
-          else
-            git commit -m "chore: release ${{ needs.prepare.outputs.tag }}"
-          fi
-          git tag -a "${{ needs.prepare.outputs.tag }}" -m "Release ${{ needs.prepare.outputs.tag }}"
-
-          if [[ "$RELEASE_CHANNEL" == "beta" ]]; then
-            # Keep prerelease versions out of main. The tag makes the release commit
-            # immutable/reachable; Stable promotion later performs the normal main bump.
-            git push origin "${{ needs.prepare.outputs.tag }}"
-          else
-            git push --atomic origin "$RELEASE_BRANCH" "${{ needs.prepare.outputs.tag }}"
-          fi
-          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  # ===========================================
-  # Create Release (after publish succeeds)
-  # ===========================================
-  release:
-    needs: [prepare, build-macos-aarch64, build-macos-x86_64, build-windows, publish]
-    runs-on: ubuntu-latest
-    if: ${{ !inputs.dry_run }}
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.publish.outputs.ref }}
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -871,8 +821,76 @@ jobs:
               }
             }' > release/latest.json
 
+      - name: Upload assembled release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: release/
+          retention-days: 1
+
+      - name: Bump version files
+        run: |
+          export RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
+          node .github/scripts/release-tool.mjs apply-version "$RELEASE_VERSION"
+          cargo update \
+            --manifest-path src-tauri/Cargo.toml \
+            -p voicetypr \
+            --precise "$RELEASE_VERSION"
+          cargo metadata \
+            --manifest-path src-tauri/Cargo.toml \
+            --locked \
+            --format-version 1 \
+            --no-deps >/dev/null
+
+      - name: Commit, tag, and push
+        id: push
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock CHANGELOG.md
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo "No version file changes; tagging current commit"
+          else
+            git commit -m "chore: release ${{ needs.prepare.outputs.tag }}"
+          fi
+          git tag -a "${{ needs.prepare.outputs.tag }}" -m "Release ${{ needs.prepare.outputs.tag }}"
+
+          if [[ "$RELEASE_CHANNEL" == "beta" ]]; then
+            # Keep prerelease versions out of main. The tag makes the release commit
+            # immutable/reachable; Stable promotion later performs the normal main bump.
+            git push origin "${{ needs.prepare.outputs.tag }}"
+          else
+            git push --atomic origin "$RELEASE_BRANCH" "${{ needs.prepare.outputs.tag }}"
+          fi
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # ===========================================
+  # Create Release (after publish succeeds)
+  # ===========================================
+  release:
+    needs: [prepare, build-macos-aarch64, build-macos-x86_64, build-windows, publish]
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.dry_run }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.publish.outputs.ref }}
+
+      - name: Download assembled release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: Voicetypr ${{ needs.prepare.outputs.tag }}

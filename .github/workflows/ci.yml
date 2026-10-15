@@ -4,9 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'hotfix/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'hotfix/**']
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
@@ -86,7 +86,7 @@ jobs:
         run: node --test .github/scripts/*.node-test.mjs
 
       - name: Validate GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   # ===========================================
   # Frontend (fast - no Rust)
@@ -189,7 +189,7 @@ jobs:
             echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
           fi
 
-      - name: Cache verified Apple Silicon FFmpeg sidecars
+      - name: Cache verified FFmpeg sidecars
         uses: actions/cache@v5
         with:
           path: |
@@ -197,6 +197,8 @@ jobs:
             sidecar/ffmpeg/dist/ffprobe
             sidecar/ffmpeg/dist/ffmpeg-aarch64-apple-darwin
             sidecar/ffmpeg/dist/ffprobe-aarch64-apple-darwin
+            sidecar/ffmpeg/dist/ffmpeg-x86_64-apple-darwin
+            sidecar/ffmpeg/dist/ffprobe-x86_64-apple-darwin
           key: ffmpeg-sidecars-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ensure-ffmpeg-sidecar.cjs') }}
 
       - name: Setup Node.js
@@ -212,7 +214,7 @@ jobs:
           pnpm --version
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
