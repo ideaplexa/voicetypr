@@ -2036,7 +2036,8 @@ fn migrate_ai_settings_values(values: &mut serde_json::Map<String, serde_json::V
 }
 
 fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {
-    if provider == "custom" {
+    // Local CLI models are discovered from the CLI, not listed in the catalog.
+    if provider == "custom" || crate::ai::catalog::runtime_kind(provider) == Some("agent_cli") {
         return !model.trim().is_empty();
     }
     if crate::ai::catalog::is_native_provider(provider) {
