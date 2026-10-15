@@ -151,6 +151,7 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
 
 /// Alpha mode idle state: ordered in, fully transparent and click-through.
 fn conceal_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    ALPHA_SHOWN.store(false, Ordering::SeqCst);
     #[cfg(target_os = "macos")]
     {
         use tauri_nspanel::ManagerExt;
@@ -179,9 +180,14 @@ fn show_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
             .get_webview_panel(window.label())
             .map_err(|e| format!("{e:?}"))?;
         if show_mode() == ShowMode::Alpha {
-            // The hit-region task restores the pointer-driven click-through state.
+            // Flip the logical state in the same main-thread step as the native change.
+            let was_shown = ALPHA_SHOWN.swap(true, Ordering::SeqCst);
             panel.set_alpha_value(1.0);
-            panel.set_ignore_mouse_events(true);
+            if !was_shown {
+                // The hit-region task restores the pointer-driven click-through state;
+                // an already shown island keeps it (the pointer may be inside).
+                panel.set_ignore_mouse_events(true);
+            }
             if !panel.is_visible() {
                 panel.order_front_regardless();
             }
@@ -231,14 +237,11 @@ pub fn configure<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
     on_main(window, configure_native)
 }
 pub fn show<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
-    on_main(window, show_native)?;
-    ALPHA_SHOWN.store(true, Ordering::SeqCst);
-    Ok(())
+    on_main(window, show_native)
 }
 /// Idle state for a freshly configured window: alpha mode orders it in at alpha 0
 /// (so the first show is only a repaint); the default mode leaves it hidden.
 pub fn prepare_idle<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
-    ALPHA_SHOWN.store(false, Ordering::SeqCst);
     if show_mode() == ShowMode::Alpha {
         on_main(window, conceal_native)?;
     }
@@ -246,7 +249,6 @@ pub fn prepare_idle<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
 }
 /// Conceal the island: `hide()` by default, alpha 0 + click-through in alpha mode.
 pub fn hide<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
-    ALPHA_SHOWN.store(false, Ordering::SeqCst);
     if show_mode() == ShowMode::Alpha {
         on_main(window, conceal_native)
     } else {

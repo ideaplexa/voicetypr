@@ -484,8 +484,8 @@ impl WindowManager {
         };
 
         if let Some(window) = window {
-            // Hide first
-            let _ = window.hide();
+            // Hide first (alpha mode also clears its logical visibility)
+            let _ = crate::pill::native::hide(&window);
 
             // Then close
             window.close().map_err(|e| e.to_string())?;
