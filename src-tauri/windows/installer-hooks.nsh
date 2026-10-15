@@ -1,64 +1,39 @@
-; Windows installer hook: VC++ runtime + optional bundled Vulkan Runtime installer.
+; Windows installer hook: app-local Visual C++ runtime DLLs + debug symbols.
 ; Voicetypr's main executable is CPU-safe; Vulkan is isolated in a sidecar.
 
 !include "LogicLib.nsh"
 
-!macro InstallVcRedist
-    ClearErrors
-    SetRegView 64
-    ReadRegDWord $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
-    ${If} ${Errors}
-        StrCpy $0 0
-    ${EndIf}
+!macro InstallVcRuntime
+    ; Visual C++ runtime, deployed app-local. voicetypr.exe uses the static CRT,
+    ; but whisper-rs OpenMP imports vcomp140.dll (no static variant). The build
+    ; bundles the redist DLLs (scripts/stage-windows-vc-runtime.ps1); copy them
+    ; beside voicetypr.exe, which precedes System32 in the DLL search order. No
+    ; machine-wide vc_redist install, no network, no admin rights.
+    ; The Vulkan loader (vulkan-1.dll) is deliberately NOT installed: GPU drivers
+    ; ship it, and the app falls back to CPU with a clear message without it.
+    DetailPrint "Installing Visual C++ runtime files..."
+    Push $R0
+    Push $R1
+    FindFirst $R0 $R1 "$INSTDIR\resources\windows\resources\vcredist\*.dll"
+    vcrt_copy_loop:
+        StrCmp $R1 "" vcrt_copy_done
+        CopyFiles /SILENT "$INSTDIR\resources\windows\resources\vcredist\$R1" "$INSTDIR\$R1"
+        FindNext $R0 $R1
+        Goto vcrt_copy_loop
+    vcrt_copy_done:
+    FindClose $R0
+    Pop $R1
+    Pop $R0
 
-    ${If} $0 == 1
-        DetailPrint "Visual C++ Runtime already installed"
-        Goto vcredist_done
-    ${EndIf}
-
-    ${If} ${FileExists} "$INSTDIR\resources\windows\resources\vc_redist.x64.exe"
-        DetailPrint "Installing Microsoft Visual C++ Runtime..."
-        CopyFiles /SILENT "$INSTDIR\resources\windows\resources\vc_redist.x64.exe" "$TEMP\vc_redist.x64.exe"
-        ExecWait '"$TEMP\vc_redist.x64.exe" /install /passive /norestart' $1
-
-        ${If} $1 == 0
-            DetailPrint "Visual C++ Runtime installed successfully"
-        ${ElseIf} $1 == 3010
-            DetailPrint "Visual C++ Runtime installed (restart required)"
-        ${ElseIf} $1 == 1638
-            DetailPrint "Visual C++ Runtime already installed (newer or same version)"
+    ${IfNot} ${FileExists} "$INSTDIR\vcomp140.dll"
+    ${OrIfNot} ${FileExists} "$INSTDIR\vcruntime140.dll"
+        DetailPrint "Visual C++ runtime files are missing"
+        ${If} ${Silent}
+            SetErrorLevel 2
         ${Else}
-            DetailPrint "Visual C++ Runtime installer returned code $1"
-            MessageBox MB_ICONEXCLAMATION "Visual C++ Runtime installation returned code $1. Voicetypr may fail to start if the runtime is missing."
+            MessageBox MB_ICONSTOP|MB_OK "Voicetypr could not install its runtime files. Please reinstall." /SD IDOK
         ${EndIf}
-
-        Delete "$TEMP\vc_redist.x64.exe"
-    ${Else}
-        DetailPrint "vc_redist.x64.exe not bundled, skipping runtime installation"
-    ${EndIf}
-
-    vcredist_done:
-!macroend
-
-!macro InstallVulkanRuntime
-    ${If} ${FileExists} "$INSTDIR\resources\windows\resources\VulkanRT-Installer.exe"
-        DetailPrint "Installing Vulkan Runtime for optional GPU acceleration..."
-        CopyFiles /SILENT "$INSTDIR\resources\windows\resources\VulkanRT-Installer.exe" "$TEMP\VulkanRT-Installer.exe"
-        ExecWait '"$TEMP\VulkanRT-Installer.exe" /S' $1
-
-        ${If} $1 == 0
-            DetailPrint "Vulkan Runtime installed successfully"
-        ${ElseIf} $1 == 3010
-            DetailPrint "Vulkan Runtime installed (restart required)"
-        ${ElseIf} $1 == 1638
-            DetailPrint "Vulkan Runtime already installed (newer or same version)"
-        ${Else}
-            DetailPrint "Vulkan Runtime installer returned code $1; Voicetypr will use CPU fallback if GPU acceleration is unavailable"
-        ${EndIf}
-
-        Delete "$TEMP\VulkanRT-Installer.exe"
-    ${Else}
-        DetailPrint "VulkanRT-Installer.exe not bundled, skipping Vulkan Runtime installation"
+        Abort
     ${EndIf}
 !macroend
 
@@ -80,11 +55,25 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-    !insertmacro InstallVcRedist
-    !insertmacro InstallVulkanRuntime
+    !insertmacro InstallVcRuntime
     !insertmacro InstallPdbSymbols
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
     Delete "$INSTDIR\voicetypr.pdb"
+
+    ; Remove the app-local runtime DLLs copied at install time. Iterate the
+    ; bundled folder (still present at this point) so the list never drifts.
+    Push $R0
+    Push $R1
+    FindFirst $R0 $R1 "$INSTDIR\resources\windows\resources\vcredist\*.dll"
+    vcrt_remove_loop:
+        StrCmp $R1 "" vcrt_remove_done
+        Delete "$INSTDIR\$R1"
+        FindNext $R0 $R1
+        Goto vcrt_remove_loop
+    vcrt_remove_done:
+    FindClose $R0
+    Pop $R1
+    Pop $R0
 !macroend

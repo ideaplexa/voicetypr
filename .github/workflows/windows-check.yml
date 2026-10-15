@@ -2,7 +2,7 @@ name: Windows Checks (fast)
 
 # Fast, code-only Windows verification: clippy (-D warnings) + the full Rust test
 # suite on a windows-2022 runner, WITHOUT the slow/flaky bits of the release build
-# (Vulkan SDK install, Whisper-Vulkan sidecar compile, VulkanRT download, Tauri
+# (Vulkan SDK install, Whisper-Vulkan sidecar compile, VC++ runtime staging, Tauri
 # bundle). Those are only needed to produce the installer, not to prove the code is
 # correct on Windows. Mirrors the known-good macOS `build-macos` check steps.
 #
@@ -51,14 +51,15 @@ jobs:
       # tauri's Windows build.rs validates that every externalBin + resource path in
       # tauri.windows.conf.json EXISTS — even for clippy/cargo test. We check code, not
       # build an installer, so drop in empty placeholders instead of the slow/flaky
-      # Vulkan SDK + sidecar compile + runtime-installer downloads.
+      # Vulkan SDK + sidecar compile + VC++ runtime staging.
       - name: Stub Windows bundle resources (existence-only)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path sidecar/whisper-vulkan/dist | Out-Null
           New-Item -ItemType File -Force -Path sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe | Out-Null
           New-Item -ItemType Directory -Force -Path src-tauri/windows/resources | Out-Null
-          foreach ($f in @('vc_redist.x64.exe','VulkanRT-Installer.exe','voicetypr.pdb')) {
+          New-Item -ItemType Directory -Force -Path src-tauri/windows/resources/vcredist | Out-Null
+          foreach ($f in @('vcredist/placeholder.dll','voicetypr.pdb')) {
             New-Item -ItemType File -Force -Path "src-tauri/windows/resources/$f" | Out-Null
           }
 

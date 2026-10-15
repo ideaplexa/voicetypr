@@ -4,7 +4,8 @@
 
 - `ci.yml`: change classifier → workflow lint → frontend (oxlint, tsc, vitest,
   build) → `native-ci.yml` (macOS: cargo test, workspace clippy, release build;
-  Windows: clippy, `run-tests.ps1`, CPU build, no-Vulkan-import check). Native
+  Windows: clippy, `run-tests.ps1`, NSIS installer build, no-Vulkan-import check,
+  installer install check). Native
   jobs skip draft PRs; `windows-check.yml` is a faster Windows lane you can
   dispatch on any branch.
 
@@ -27,6 +28,35 @@
   (artifact only; submission in Partner Center is manual). Store installs are
   Microsoft-signed; the direct Windows installer is not Authenticode-signed
   yet (SmartScreen warning).
+
+## Windows runtime (direct installer)
+
+- No `vc_redist.x64.exe` and no Vulkan runtime installer ship or run.
+  `voicetypr.exe` is built with the static CRT, but whisper-rs OpenMP imports
+  `vcomp140.dll`, so the build stages the Visual C++ runtime DLLs (CRT + OpenMP)
+  from the Visual Studio redist folder:
+  `pwsh scripts/stage-windows-vc-runtime.ps1 -OutDir src-tauri/windows/resources/vcredist`
+  (run by `release.yml`, `native-ci.yml` and `scripts/release-windows.ps1`; it
+  fails if `vcomp140.dll` or `vcruntime140.dll` is missing). The folder is
+  gitignored and bundled via `tauri.windows.conf.json`.
+- `src-tauri/windows/installer-hooks.nsh` copies those DLLs beside
+  `voicetypr.exe` after install (app directory precedes System32 in the DLL
+  search order), aborts with a clear message if `vcomp140.dll` or
+  `vcruntime140.dll` is absent, and deletes them on uninstall by iterating the
+  bundled folder.
+- The Vulkan loader (`vulkan-1.dll`) comes from the GPU driver. Without it the
+  app falls back to CPU and says Vulkan is not installed.
+- `scripts/check-windows-install.ps1 -Installer <setup.exe>` runs in
+  `release.yml` (before signing/staging) and `native-ci.yml`: silent install,
+  `dumpbin /dependents` of `voicetypr.exe`, the sidecar and every installed DLL
+  (each import must be a Windows system DLL on the script's allowlist or ship in
+  the install dir; Visual C++ runtime DLLs are never allowlisted), `voicetypr.exe
+  --version` exits 0, silent uninstall leaves none of the runtime DLLs. If it
+  flags a genuine Windows system DLL, add it to the allowlist in the script.
+  The runner has a system redist, so the dependency check is the real proof; a
+  fresh VM without VC++ stays NEEDS-SMOKE (`plans/082`, B.2).
+- `windows-check.yml` only stubs the resources (`vcredist/placeholder.dll`,
+  `voicetypr.pdb`, a sidecar) so clippy and tests compile; it builds no installer.
 
 ## Discipline
 

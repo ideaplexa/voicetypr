@@ -4,6 +4,25 @@ Worktree `worktrees/voicetypr-beta5`, branch `feat/2.1-beta5`, from main `70c904
 Roles: Codex gpt-6.1-sol medium implements. gpt-6.1-sol high or medium reviews. Opus 5.5 does design in Pencil. Sonnet 5.5 researches.
 Releases need Windows CI green before merging (it caught 3 Windows-only breaks in beta.4).
 
+## Status (2026-10-15)
+
+Done on the branch (Codex-reviewed unless noted):
+- Island: pre-created hidden window plus the debug alpha A/B (`44663698`, `a4939c3f`); polish (`9c04d60a`): three zones, centred result cards, outline countdown, Compact/Smart/Expanded, dB level mapping with display auto-gain; review fixes `81fa9f32`.
+- App: Home overview, sidebar status bar, Settings 9 → 7 (`65d077be`, fixes `81fa9f32`).
+- CI: arm64 macOS on macos-15 with Xcode 26 (`b811b9e4`).
+- Built, awaiting review: the shared formatting stage (E: capitals, fillers, paragraphs, per-line normalising, timings from Whisper, Parakeet TDT and Deepgram, Whisper/OpenAI/Groq style hint); Transcription per-model options, the Recording → Island live-words switch, the lean tray; frontend perf F9/F10.
+- Decision: the per-model options are global settings shown under the selected model, only where they apply (no per-model store; a later change if users ask).
+- Decision: the outline countdown animates an SVG stroke (paint, not compositor). It is a small card shown for 2–2.4 s; measure it in the real-app perf run and switch to transformed segments only if frames over 16 ms show up.
+
+Left:
+- Founder: pick the Transcribing and Polishing waiting looks; OK to quit Voicetypr for the real-app A/B (hide vs alpha) and perf/screenshot pass.
+- Design: Dictionary redesign and the border/density pass (Pencil, founder approval).
+- Perf: F8 icon encoding off the main thread; the +2.4 MB/take memory investigation.
+- Voice-processing input experiment on real speech.
+- Windows installer: done in CI (app-local CRT + vcomp140, no `vc_redist`/VulkanRT, install check); fresh-VM test stays NEEDS-SMOKE (see B.2 status).
+- Leading space from the cursor context (needs real-app tests).
+- Release: Whisper Metal check on a CI-built app, full-branch Codex review, Windows CI, PR, beta.5.
+
 ## ★ Island track: priority #1 (founder, 2026-10-04)
 
 The island is the most frequent touchpoint. Every everyday interaction must feel instant and smooth.
@@ -94,6 +113,9 @@ Order:
      - Keep the sidecar and the PDB (the PDB is needed for in-process symbolication).
      - Test on fresh Windows 10/11 VMs, offline, without VC++, and with a standard user.
      - Optional later: a second "slim" installer using `embedBootstrapper`.
+   - **Status (2026-10-15): vc_redist/VulkanRT removal done in CI, NEEDS-SMOKE on real machines.**
+     - App-local CRT + OpenMP DLLs via `scripts/stage-windows-vc-runtime.ps1`; NSIS hook copies them beside the exe and removes them on uninstall; both installers dropped. `scripts/check-windows-install.ps1` (release.yml, native-ci.yml) does silent install, on-disk dependency check, `--version`, uninstall. Not yet seen green on CI.
+     - NEEDS-SMOKE: fresh Windows 10 and 11 VMs without VC++; offline install; standard (non-admin) user; PC without Vulkan shows the CPU message; PC with a Vulkan GPU still uses the GPU sidecar; upgrade from beta.4 (old uninstaller, then new files); uninstall residue (no DLLs left in the install dir).
    - macOS is already lean (main binary 60 MB, Parakeet sidecar 18 MB); no change.
 
 ## C0. Founder design decisions (2026-10-05)

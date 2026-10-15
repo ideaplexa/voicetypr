@@ -422,43 +422,13 @@ jobs:
           }
           Copy-Item $sidecarExe "sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe"
 
-      - name: Download Windows runtime installers
+      # App-local Visual C++ runtime (CRT + OpenMP DLLs from the VS redist folder),
+      # bundled into the installer and copied beside voicetypr.exe by the NSIS
+      # hook. Replaces the vc_redist.x64.exe and VulkanRT installers: nothing is
+      # downloaded, and the Vulkan loader comes from the GPU driver.
+      - name: Stage Visual C++ runtime DLLs
         shell: pwsh
-        run: |
-          function Require-TrustedInstallerSignature($Path, $Name, [string[]]$AllowedPublisherFragments) {
-            if (-not (Test-Path $Path)) {
-              throw "$Name installer not found: $Path"
-            }
-            $signature = Get-AuthenticodeSignature -FilePath $Path
-            if ($signature.Status -ne "Valid" -or -not $signature.SignerCertificate) {
-              throw "$Name installer is not Authenticode signed by a trusted publisher (status: $($signature.Status))."
-            }
-            $subject = $signature.SignerCertificate.Subject
-            foreach ($publisher in $AllowedPublisherFragments) {
-              if ($subject -like "*$publisher*") {
-                Write-Host "$Name installer signature verified: $subject"
-                return
-              }
-            }
-            throw "$Name installer signer is not an allowed publisher: $subject"
-          }
-
-          New-Item -ItemType Directory -Force -Path "src-tauri/windows/resources" | Out-Null
-          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "src-tauri/windows/resources/vc_redist.x64.exe"
-          $vulkanVersion = $env:VULKAN_RUNTIME_VERSION
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            $vulkanVersion = $env:VULKAN_VERSION
-          }
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            $vulkanVersion = Split-Path -Leaf $env:VULKAN_SDK
-          }
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            throw "Cannot determine Vulkan version. Set VULKAN_RUNTIME_VERSION, VULKAN_VERSION, or VULKAN_SDK."
-          }
-          $vulkanRuntimeUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanRT-$vulkanVersion-Installer.exe"
-          Invoke-WebRequest -Uri $vulkanRuntimeUrl -OutFile "src-tauri/windows/resources/VulkanRT-Installer.exe"
-          Require-TrustedInstallerSignature "src-tauri/windows/resources/vc_redist.x64.exe" "Visual C++ Runtime" @("Microsoft Corporation")
-          Require-TrustedInstallerSignature "src-tauri/windows/resources/VulkanRT-Installer.exe" "Vulkan Runtime" @("LunarG", "The Khronos Group")
+        run: pwsh scripts/stage-windows-vc-runtime.ps1 -OutDir src-tauri/windows/resources/vcredist
 
       - name: Build Tauri app (x86_64 CPU-safe main app)
         env:
@@ -474,6 +444,17 @@ jobs:
         shell: pwsh
         run: |
           & ./src-tauri/windows/assert-no-vulkan-import.ps1 -ExePath "$env:CARGO_TARGET_DIR\x86_64-pc-windows-msvc\release\voicetypr.exe"
+
+      # Silent install -> dependency check -> --version -> uninstall, on the exact
+      # installer that ships (before it is signed and staged for upload).
+      - name: Check Windows installer (install, dependencies, launch, uninstall)
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "$env:CARGO_TARGET_DIR\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) {
+            throw "No NSIS installer found at $env:CARGO_TARGET_DIR\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe"
+          }
+          & ./scripts/check-windows-install.ps1 -Installer $installer.FullName
 
       - name: Sign installer for updates
         env:

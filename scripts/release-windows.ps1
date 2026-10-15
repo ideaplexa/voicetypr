@@ -30,27 +30,6 @@ function Require-File($Path) {
     }
 }
 
-function Require-TrustedInstallerSignature($Path, $Name, [string[]]$AllowedPublisherFragments) {
-    Require-File $Path
-
-    $signature = Get-AuthenticodeSignature -FilePath $Path
-    if ($signature.Status -ne "Valid" -or -not $signature.SignerCertificate) {
-        Write-Error "$Name installer is not Authenticode signed by a trusted publisher (status: $($signature.Status))."
-        exit 1
-    }
-
-    $subject = $signature.SignerCertificate.Subject
-    foreach ($publisher in $AllowedPublisherFragments) {
-        if ($subject -like "*$publisher*") {
-            Write-Success "$Name installer signature verified: $subject"
-            return
-        }
-    }
-
-    Write-Error "$Name installer signer is not an allowed publisher: $subject"
-    exit 1
-}
-
 if ($Help) {
     Write-Host @"
 Windows x86_64 Release Script
@@ -58,7 +37,7 @@ Windows x86_64 Release Script
 Builds one Windows x64 NSIS installer:
 - voicetypr.exe is CPU-safe and must not import vulkan-1.dll
 - optional Vulkan acceleration ships as an x86_64 sidecar process
-- VC++ Runtime and Vulkan Runtime installers are bundled as resources
+- the Visual C++ runtime DLLs (CRT + OpenMP) are bundled and installed app-local; the Vulkan loader comes from the GPU driver
 - updater/latest.json points to this single installer
 
 This script and src-tauri/tauri.windows.conf.json are for x86_64 Windows only.
@@ -127,29 +106,17 @@ if (-not $SkipBuild) {
     cargo clean --manifest-path src-tauri\Cargo.toml
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    $runtimeDir = "src-tauri\windows\resources"
-    New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
-
-    Write-Info "Downloading Visual C++ Runtime installer..."
-    Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$runtimeDir\vc_redist.x64.exe"
-
-    Write-Info "Downloading Vulkan Runtime installer..."
-    $vulkanVersion = $env:VULKAN_RUNTIME_VERSION
-    if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-        $vulkanVersion = $env:VULKAN_VERSION
-    }
-    if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-        $vulkanVersion = Split-Path -Leaf $env:VULKAN_SDK
-    }
-    if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-        Write-Error "Cannot determine Vulkan version. Set VULKAN_RUNTIME_VERSION, VULKAN_VERSION, or VULKAN_SDK."
+    # App-local Visual C++ runtime: CRT + OpenMP DLLs from the Visual Studio redist
+    # folder, bundled into the installer and copied beside voicetypr.exe by the
+    # NSIS hook. No vc_redist / Vulkan runtime installers are downloaded or run.
+    $runtimeDir = "src-tauri\windows\resources\vcredist"
+    Write-Info "Staging Visual C++ runtime DLLs..."
+    try {
+        & (Join-Path $PSScriptRoot "stage-windows-vc-runtime.ps1") -OutDir $runtimeDir
+    } catch {
+        Write-Error "Staging the Visual C++ runtime failed: $($_.Exception.Message)"
         exit 1
     }
-    $vulkanRuntimeUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanRT-$vulkanVersion-Installer.exe"
-    Invoke-WebRequest -Uri $vulkanRuntimeUrl -OutFile "$runtimeDir\VulkanRT-Installer.exe"
-
-    Require-TrustedInstallerSignature "$runtimeDir\vc_redist.x64.exe" "Visual C++ Runtime" @("Microsoft Corporation")
-    Require-TrustedInstallerSignature "$runtimeDir\VulkanRT-Installer.exe" "Vulkan Runtime" @("LunarG", "The Khronos Group")
     Write-Info "Building Whisper Vulkan sidecar (x86_64 only)..."
     $SidecarTargetDir = $env:CARGO_TARGET_DIR
     if ([string]::IsNullOrWhiteSpace($SidecarTargetDir)) {
@@ -173,11 +140,11 @@ if (-not $SkipBuild) {
     New-Item -ItemType Directory -Path "sidecar\whisper-vulkan\dist" -Force | Out-Null
     Copy-Item $SidecarExe $SidecarDist -Force
 
-    Write-Info "Verifying bundled sidecar and runtime installers before packaging..."
-    Require-File "$runtimeDir\vc_redist.x64.exe"
-    Require-File "$runtimeDir\VulkanRT-Installer.exe"
+    Write-Info "Verifying bundled sidecar and Visual C++ runtime before packaging..."
+    Require-File "$runtimeDir\vcomp140.dll"
+    Require-File "$runtimeDir\vcruntime140.dll"
     Require-File $SidecarDist
-    Write-Success "Bundled Vulkan sidecar + VC++/Vulkan runtime installers present"
+    Write-Success "Bundled Vulkan sidecar + app-local Visual C++ runtime present"
 
     $env:VOICETYPR_REQUIRE_VULKAN_SIDECAR = "1"
 

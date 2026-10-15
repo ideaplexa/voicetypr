@@ -5,8 +5,7 @@
   },
   "bundle": {
     "resources": [
-      "windows/resources/vc_redist.x64.exe",
-      "windows/resources/VulkanRT-Installer.exe",
+      "windows/resources/vcredist/*.dll",
       "windows/resources/voicetypr.pdb"
     ],
     "externalBin": [

@@ -187,23 +187,9 @@ jobs:
           }
           Copy-Item $sidecarExe "sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe"
 
-      - name: Download Windows runtime installer resources
+      - name: Stage Visual C++ runtime DLLs
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "src-tauri/windows/resources" | Out-Null
-          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "src-tauri/windows/resources/vc_redist.x64.exe"
-          $vulkanVersion = $env:VULKAN_RUNTIME_VERSION
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            $vulkanVersion = $env:VULKAN_VERSION
-          }
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            $vulkanVersion = Split-Path -Leaf $env:VULKAN_SDK
-          }
-          if ([string]::IsNullOrWhiteSpace($vulkanVersion)) {
-            throw "Cannot determine Vulkan version. Set VULKAN_RUNTIME_VERSION, VULKAN_VERSION, or VULKAN_SDK."
-          }
-          $vulkanRuntimeUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanRT-$vulkanVersion-Installer.exe"
-          Invoke-WebRequest -Uri $vulkanRuntimeUrl -OutFile "src-tauri/windows/resources/VulkanRT-Installer.exe"
+        run: pwsh scripts/stage-windows-vc-runtime.ps1 -OutDir src-tauri/windows/resources/vcredist
 
       - name: Build frontend
         run: pnpm build
@@ -216,13 +202,27 @@ jobs:
         working-directory: src-tauri
         run: ./run-tests.ps1
 
-      - name: Build Tauri (release, CPU-safe main app)
-        run: cd src-tauri && cargo build --release
+      # Build the real NSIS installer with the same flags as release.yml (static CRT,
+      # relative PDB path) so the install check below tests what ships.
+      - name: Build Tauri installer (release, CPU-safe main app)
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB%"
+          VOICETYPR_REQUIRE_VULKAN_SIDECAR: "1"
+        run: pnpm tauri build --bundles nsis --ci --config src-tauri/tauri.windows.conf.json
 
       - name: Assert CPU build does not import vulkan-1.dll
         shell: pwsh
         run: |
           & ./src-tauri/windows/assert-no-vulkan-import.ps1 -ExePath "$env:CARGO_TARGET_DIR/release/voicetypr.exe"
+
+      - name: Check Windows installer (install, dependencies, launch, uninstall)
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) {
+            throw "No NSIS installer found at $env:CARGO_TARGET_DIR\release\bundle\nsis\*.exe"
+          }
+          & ./scripts/check-windows-install.ps1 -Installer $installer.FullName
 
       - name: Upload preview artifact
         uses: actions/upload-artifact@v6

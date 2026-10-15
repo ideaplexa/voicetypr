@@ -95,29 +95,12 @@ Write-Step "Bundling Visual C++ runtime (app-local)"
 # directory ("local deployment"). This integrates the dependency, keeps the app
 # runnable on machines without the redistributable installed, and satisfies
 # Microsoft Store policy 10.2.4.1 without a description disclosure.
-$VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path $VsWhere)) { throw "vswhere.exe not found: $VsWhere (Visual Studio with the C++ build tools is required)." }
-$VsInstallPath = (& $VsWhere -latest -prerelease -property installationPath | Select-Object -First 1)
-if ([string]::IsNullOrWhiteSpace($VsInstallPath)) { throw "Could not locate a Visual Studio installation via vswhere." }
-
-$RedistRoot = Join-Path $VsInstallPath "VC\Redist\MSVC"
-if (-not (Test-Path $RedistRoot)) { throw "VC redist root not found: $RedistRoot (install the 'C++ Redistributable' VS component)." }
-$RedistVersionDir = Get-ChildItem -Path $RedistRoot -Directory |
-    Where-Object { $_.Name -match '^\d+\.' } |
-    Sort-Object { [version]$_.Name } -Descending |
-    Select-Object -First 1
-if (-not $RedistVersionDir) { throw "No versioned VC redist directory under: $RedistRoot" }
-
-$RedistX64 = Join-Path $RedistVersionDir.FullName "x64"
-$RedistDllDirs = @(
-    (Get-ChildItem -Path $RedistX64 -Directory -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue | Select-Object -First 1),
-    (Get-ChildItem -Path $RedistX64 -Directory -Filter "Microsoft.VC*.OpenMP" -ErrorAction SilentlyContinue | Select-Object -First 1)
-)
-foreach ($DllDir in $RedistDllDirs) {
-    if (-not $DllDir) { throw "Missing VC redist subfolder under $RedistX64 (expected Microsoft.VC*.CRT and Microsoft.VC*.OpenMP)." }
-    Get-ChildItem -Path $DllDir.FullName -Filter "*.dll" | ForEach-Object {
-        Copy-Item $_.FullName (Join-Path $StageDir $_.Name) -Force
-    }
+# Shared with the direct installer build; stages CRT + OpenMP DLLs into a temp
+# folder and fails if vcomp140.dll or vcruntime140.dll is missing.
+$VcRuntimeDir = Join-Path ([System.IO.Path]::GetTempPath()) "voicetypr-vc-runtime-msix"
+& (Join-Path $PSScriptRoot "stage-windows-vc-runtime.ps1") -OutDir $VcRuntimeDir -Prerelease
+Get-ChildItem -Path $VcRuntimeDir -Filter "*.dll" | ForEach-Object {
+    Copy-Item $_.FullName (Join-Path $StageDir $_.Name) -Force
 }
 
 # vcomp140.dll is the load-bearing one (whisper OpenMP). Fail loudly if missing.

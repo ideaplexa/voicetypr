@@ -63,9 +63,9 @@ Do not change these unless Partner Center product identity changes.
 ## Bundled runtime (Visual C++)
 
 - The Store `voicetypr.exe` is built with the static CRT (`-C target-feature=+crt-static`), but `whisper-rs` enables OpenMP on Windows, which dynamically links `vcomp140.dll` (a Visual C++ Redistributable component with no static MSVC variant).
-- `scripts/build-msix-store.ps1` bundles the VC++ runtime DLLs (CRT + OpenMP) app-local, next to `voicetypr.exe` in the package, sourced from the VS redist folder via `vswhere`. The build fails if `vcomp140.dll` is not staged.
+- `scripts/build-msix-store.ps1` bundles the VC++ runtime DLLs (CRT + OpenMP) app-local, next to `voicetypr.exe` in the package, via `scripts/stage-windows-vc-runtime.ps1` (VS redist folder found with `vswhere`; the Store build passes `-Prerelease`). The build fails if `vcomp140.dll` or `vcruntime140.dll` is not staged.
 - Bundling integrates the dependency, but the reviewer asks for it by name, so the listing opening still names the Microsoft Visual C++ Redistributable (see "Listing opening" above). Keep other dev jargon (Vulkan, sidecar, CPU/GPU internals) out of the description.
-- Unlike the direct NSIS installer (which ships `vc_redist.x64.exe`), the MSIX must be fully self-contained; never rely on a machine-wide redistributable.
+- The direct NSIS installer no longer ships or runs `vc_redist.x64.exe` (or the Vulkan runtime installer) either: it bundles the same app-local DLLs (staged by the same script) and its hook copies them beside `voicetypr.exe`. Both packages are self-contained; never rely on a machine-wide redistributable.
 
 ## Store vs direct updater rules
 
