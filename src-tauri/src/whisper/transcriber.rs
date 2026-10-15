@@ -800,8 +800,8 @@ impl Transcriber {
             text.push(' ');
             segments.push(crate::transcription::TranscriptionSegment {
                 text: segment_text,
-                start_ms: None,
-                end_ms: None,
+                start_ms: whisper_centiseconds_to_ms(segment.start_timestamp()),
+                end_ms: whisper_centiseconds_to_ms(segment.end_timestamp()),
                 speaker_id: None,
             });
         }
@@ -893,6 +893,13 @@ impl Transcriber {
             },
         })
     }
+}
+
+/// whisper.cpp segment timestamps are centiseconds; negative values mean "unknown".
+fn whisper_centiseconds_to_ms(centiseconds: i64) -> Option<u64> {
+    u64::try_from(centiseconds)
+        .ok()
+        .and_then(|value| value.checked_mul(10))
 }
 
 fn adaptive_audio_ctx(samples: usize) -> Option<i32> {
@@ -1022,6 +1029,13 @@ mod adaptive_audio_ctx_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whisper_centiseconds_convert_to_milliseconds() {
+        assert_eq!(whisper_centiseconds_to_ms(0), Some(0));
+        assert_eq!(whisper_centiseconds_to_ms(150), Some(1_500));
+        assert_eq!(whisper_centiseconds_to_ms(-1), None);
+    }
 
     #[test]
     fn native_abort_callback_reads_live_captured_token() {

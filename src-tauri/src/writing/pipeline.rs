@@ -15,8 +15,9 @@ use crate::whisper::languages::validate_language;
 
 use super::{
     apply_final_restoration_guard, apply_library_rules, category_label, category_prompt_hint,
-    classify, compile_context_for_target, load_writing_settings, sanitize_transcript,
-    AiExecutionMetadata, AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint,
+    classify, compile_context_for_target, format_for_transcription, load_writing_settings,
+    protected_terms, sanitize_transcript, should_run_format_stage, AiExecutionMetadata,
+    AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint, FormatStageSettings,
     ProviderContextTarget, WritingError, WritingOperationKind, WritingProfile, WritingResult,
     WritingSettings, WritingStageTimings, WritingWarning,
 };
@@ -681,7 +682,38 @@ pub async fn process_transcription_at(
         }
         outcome.text
     } else {
-        library_result.text.clone()
+        // Polish is not rewriting this take: the shared local formatting stage
+        // is the only thing between the engine text and the paste.
+        debug_assert!(should_run_format_stage(
+            library_result.literal_locked,
+            should_run_ai
+        ));
+        let format_started = Instant::now();
+        let formatted = format_for_transcription(
+            &library_result.text,
+            &transcription,
+            transcript_language.as_deref(),
+            FormatStageSettings {
+                paragraphs: crate::commands::settings::read_transcript_paragraphs(&app),
+                remove_fillers: crate::commands::settings::read_transcript_remove_fillers(&app),
+            },
+            &protected_terms(&settings),
+        );
+        log::info!(
+            "transcription_stage_timing stage=format duration_ms={} changed={}",
+            format_started.elapsed().as_millis(),
+            formatted.is_some()
+        );
+        match formatted {
+            Some(text) => {
+                applied_operations.push(AppliedWritingOperation {
+                    kind: WritingOperationKind::FormatTranscript,
+                    detail: "Formatted transcript".to_string(),
+                });
+                text
+            }
+            None => library_result.text.clone(),
+        }
     };
 
     let (guarded_text, guard_operations) = apply_final_restoration_guard(

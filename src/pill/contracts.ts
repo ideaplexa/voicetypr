@@ -16,6 +16,7 @@ export interface PillSettings {
   pill_indicator_position?: PillIndicatorPosition;
   transcription_mode?: 'regular' | 'live_preview';
   streaming_preview_enabled?: boolean;
+  island_live_words?: boolean;
   hotkey?: string;
   ptt_hotkey?: string;
   recording_mode?: string;
@@ -50,3 +51,9 @@ export const emptyContext = (): DictationContext => ({
   language: { code: 'auto', label: 'Auto' }, mode: 'toggle',
   changed_since_last: false, show_start_card: false,
 });
+
+/** The island shows live words only when streaming is on and its own switch (default on) allows it. */
+export function islandShowsLiveWords(settings: PillSettings): boolean {
+  const streaming = settings.transcription_mode === 'live_preview' || settings.streaming_preview_enabled === true;
+  return streaming && settings.island_live_words !== false;
+}

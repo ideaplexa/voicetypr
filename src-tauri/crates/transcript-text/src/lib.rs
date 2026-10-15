@@ -38,6 +38,40 @@ pub fn normalize_transcript_spacing(input: &str) -> Cow<'_, str> {
     }
 }
 
+/// Apply [`normalize_transcript_spacing`] to each `\n`-separated line and rejoin.
+///
+/// Every line keeps the single-line guards, so a code-like line is left alone
+/// while its prose neighbours are normalised. Returns [`Cow::Borrowed`] when no
+/// line changed. Single-line input behaves exactly like the single-line function.
+pub fn normalize_transcript_spacing_per_line(input: &str) -> Cow<'_, str> {
+    if !input.contains('\n') {
+        return normalize_transcript_spacing(input);
+    }
+
+    let mut changed = false;
+    let mut out = String::with_capacity(input.len());
+    for (index, line) in input.split('\n').enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let normalized = normalize_transcript_spacing(line);
+        changed |= matches!(normalized, Cow::Owned(_));
+        out.push_str(&normalized);
+    }
+
+    if changed {
+        Cow::Owned(out)
+    } else {
+        Cow::Borrowed(input)
+    }
+}
+
+/// True when a single line looks like code, a table or other structured text that
+/// formatting must leave verbatim (the same guard [`normalize_transcript_spacing`] uses).
+pub fn line_has_structural_guard(line: &str) -> bool {
+    has_structural_guard(line)
+}
+
 fn has_structural_guard(input: &str) -> bool {
     input.contains('\n')
         || input.contains('\r')
@@ -184,6 +218,59 @@ mod tests {
     fn preserves_triple_backtick_blocks() {
         let md = "text\n```rust\nfn f() {}\n```";
         assert_eq!(normalize_transcript_spacing(md).into_owned(), md);
+    }
+
+    #[test]
+    fn per_line_normalizes_each_line() {
+        assert_eq!(
+            normalize_transcript_spacing_per_line("hello  world .\n\nsecond  line ,  ok")
+                .into_owned(),
+            "hello world.\n\nsecond line, ok"
+        );
+    }
+
+    #[test]
+    fn per_line_keeps_single_line_behaviour() {
+        for sample in ["hello  world", "let x = 1", "", "clean line"] {
+            assert_eq!(
+                normalize_transcript_spacing_per_line(sample).into_owned(),
+                normalize_transcript_spacing(sample).into_owned(),
+                "sample: {sample}"
+            );
+        }
+    }
+
+    #[test]
+    fn per_line_leaves_code_lines_alone() {
+        assert_eq!(
+            normalize_transcript_spacing_per_line("see  this\nlet x  =  1\nand  that").into_owned(),
+            "see this\nlet x  =  1\nand that"
+        );
+    }
+
+    #[test]
+    fn per_line_borrows_when_clean() {
+        let s = "one\n\ntwo";
+        assert!(matches!(
+            normalize_transcript_spacing_per_line(s),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn per_line_carriage_return_lines_are_guarded() {
+        let s = "a  b\r\nc  d";
+        assert_eq!(
+            normalize_transcript_spacing_per_line(s).into_owned(),
+            "a  b\r\nc d"
+        );
+    }
+
+    #[test]
+    fn structural_line_guard_matches_normalizer() {
+        assert!(line_has_structural_guard("x = y"));
+        assert!(line_has_structural_guard("a::b"));
+        assert!(!line_has_structural_guard("plain prose, nothing odd"));
     }
 
     #[test]

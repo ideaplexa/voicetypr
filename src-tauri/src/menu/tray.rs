@@ -117,7 +117,7 @@ pub(crate) fn latest_copyable_transcription_id(
         .max_by(|(left_ts, _), (right_ts, _)| left_ts.cmp(right_ts))
         .map(|(timestamp, _)| timestamp.clone())
 }
-/// Build the tray menu with all submenus (models, microphones, recent transcriptions, recording mode)
+/// Build the tray menu with all submenus (polish, engine, microphone, language)
 pub async fn build_tray_menu(
     app: &tauri::AppHandle,
 ) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
@@ -326,36 +326,13 @@ pub(super) async fn snapshot(
     let cloud_model =
         crate::cloud_stt::CloudProvider::from_id(&engine_hint).map(|p| p.selected_model(app).id);
     let languages = super::languages::supported(effective_model, &engine_hint, cloud_model);
-    let mut recent = Vec::new();
-    if let Some(store) = include_history
-        .then(|| app.store("transcriptions").ok())
-        .flatten()
-    {
-        let entries = crate::commands::audio::page_history_keys(store.keys(), 5)
-            .into_iter()
-            .filter_map(|id| store.get(&id).map(|v| (id, v)))
-            .filter(|(_, v)| is_copyable_transcription_entry(v))
-            .collect::<Vec<_>>();
-        for (id, entry) in entries.into_iter().take(5) {
-            let raw = entry["text"]
-                .as_str()
-                .unwrap_or_default()
-                .replace(['\n', '\r', '\t'], " ");
-            let mut preview = raw.chars().take(40).collect::<String>();
-            if raw.chars().count() > 40 {
-                preview.push('…');
-            }
-            let age = chrono::DateTime::parse_from_rfc3339(&id)
-                .ok()
-                .map(|ts| {
-                    relative_time(
-                        (chrono::Utc::now() - ts.with_timezone(&chrono::Utc)).num_seconds(),
-                    )
-                })
-                .unwrap_or_else(|| "earlier".into());
-            recent.push((id, format!("{preview} · {age}")));
-        }
-    }
+    let has_history = include_history
+        && app.store("transcriptions").ok().is_some_and(|store| {
+            crate::commands::audio::page_history_keys(store.keys(), 5)
+                .into_iter()
+                .filter_map(|id| store.get(&id))
+                .any(|entry| is_copyable_transcription_entry(&entry))
+        });
     let preset = settings_store
         .get("enhancement_options")
         .and_then(|v| serde_json::from_value::<crate::ai::prompts::EnhancementOptions>(v).ok())
@@ -388,8 +365,7 @@ pub(super) async fn snapshot(
         language: text("speech_language", "en"),
         languages,
         hold: text("recording_mode", "toggle") == "push_to_talk",
-        preview: text("transcription_mode", "regular") == "live_preview",
-        recent,
+        has_history,
         updates: !crate::commands::distribution::is_store_install(),
     };
     Ok(snapshot)
@@ -449,15 +425,6 @@ fn render_item<R: tauri::Runtime>(
         }
     })
 }
-fn relative_time(seconds: i64) -> String {
-    match seconds.max(0) {
-        0..=59 => "just now".into(),
-        60..=3599 => format!("{}m ago", seconds / 60),
-        3600..=86399 => format!("{}h ago", seconds / 3600),
-        _ => format!("{}d ago", seconds / 86400),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

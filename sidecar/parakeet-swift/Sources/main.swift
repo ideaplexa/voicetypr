@@ -182,6 +182,49 @@ struct SpeakerSegment: Encodable {
 
 struct Segment: Encodable {
     let text: String
+    // Seconds from the start of the audio. Absent when timings are unknown.
+    var start: Float? = nil
+    var end: Float? = nil
+}
+
+/// Groups TDT token timings into sentence-sized segments so the app can place
+/// paragraph breaks at long pauses. A segment ends after a word that ends a
+/// sentence (. ! ?) or before a gap to the next word of at least `gapSeconds`,
+/// so every pause of that length falls between two segments. Segment text is its
+/// words joined by single spaces.
+func segmentsFromTokenTimings(_ tokenTimings: [TokenTiming]?, gapSeconds: Double = 0.6) -> [Segment] {
+    guard let tokenTimings, !tokenTimings.isEmpty else { return [] }
+    let words = buildWordTimings(from: tokenTimings)
+    guard !words.isEmpty else { return [] }
+
+    var segments: [Segment] = []
+    var currentWords: [String] = []
+    var segmentStart = words[0].startTime
+    var segmentEnd = words[0].endTime
+
+    func flush() {
+        guard !currentWords.isEmpty else { return }
+        segments.append(
+            Segment(
+                text: currentWords.joined(separator: " "),
+                start: Float(segmentStart),
+                end: Float(segmentEnd)
+            )
+        )
+        currentWords.removeAll()
+    }
+
+    for (index, word) in words.enumerated() {
+        if currentWords.isEmpty { segmentStart = word.startTime }
+        currentWords.append(word.word)
+        segmentEnd = word.endTime
+
+        let endsSentence = word.word.last.map { ".!?".contains($0) } ?? false
+        let gapToNext = index + 1 < words.count ? words[index + 1].startTime - word.endTime : 0
+        if endsSentence || gapToNext >= gapSeconds { flush() }
+    }
+    flush()
+    return segments
 }
 
 struct StatusResponse: Encodable {
@@ -2044,6 +2087,8 @@ struct ParakeetSidecar {
             let finalText: String
             let duration: Float
             let transcriptLanguage: String?
+            // Sentence-sized timed segments (TDT only); empty means "no timing".
+            var segments: [Segment] = []
             switch selectedModel {
             case .tdt:
                 guard let manager = asrManager else { throw ASRError.notInitialized }
@@ -2056,6 +2101,11 @@ struct ParakeetSidecar {
                 finalText = await rescoreTranscriptIfPossible(
                     result: result, audioURL: fileURL, customVocabulary: customVocabulary
                 )
+                // Vocabulary rescoring rewrites words, so token timings no longer
+                // line up with the text: send segments only for the untouched transcript.
+                if finalText == result.text {
+                    segments = segmentsFromTokenTimings(result.tokenTimings)
+                }
                 duration = Float(result.duration)
                 transcriptLanguage = language
 
@@ -2095,7 +2145,7 @@ struct ParakeetSidecar {
             sendResponse(
                 TranscriptionResponse(
                     text: finalText,
-                    segments: [],
+                    segments: segments,
                     language: transcriptLanguage,
                     duration: duration
                 ),

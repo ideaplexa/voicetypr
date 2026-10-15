@@ -19,7 +19,7 @@ import { groupLeft, waveZone, ZONE } from '@/pill/zones';
 import { IslandMachine } from '@/pill/island';
 import { createPerfProbe, type PerfProbe, type PerfSink } from '@/pill/perf';
 import { copiedTitle, elapsed, contextMicName, shortCopy, styleName } from '@/pill/copy';
-import type { DictationContext, IslandActions, PillPointer, PillSettings } from '@/pill/contracts';
+import { islandShowsLiveWords, type DictationContext, type IslandActions, type PillPointer, type PillSettings } from '@/pill/contracts';
 import type { PillAudioLevel } from '@/types';
 import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import type { TranscriptionStreamEvent } from '@/types/streaming';
@@ -549,7 +549,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       contextText(); if (pick) renderPick(); sync(); },
     closeQuick() { if (pick) closePick(); else if (machine.state === 'peek') rest(); },
     get feedbackActive() { return stack.active; },
-    settings(value: PillSettings) { shortcut = value.recording_mode === 'push_to_talk' ? value.ptt_hotkey ?? shortcut : value.hotkey ?? shortcut; contextText(); mode = value.pill_indicator_mode ?? 'when_recording'; enabledStream = value.transcription_mode === 'live_preview' || value.streaming_preview_enabled === true; if (!enabledStream) machine.clearStream(); sync(); },
+    settings(value: PillSettings) { shortcut = value.recording_mode === 'push_to_talk' ? value.ptt_hotkey ?? shortcut : value.hotkey ?? shortcut; contextText(); mode = value.pill_indicator_mode ?? 'when_recording'; enabledStream = islandShowsLiveWords(value); if (!enabledStream) machine.clearStream(); sync(); },
     feedback(card: FeedbackCard, handoff = true, announce = true) {
       const origin = handoff && !machine.recording && machine.state !== 'rest' ? dom.surface.getBoundingClientRect() : undefined;
       stack.push(card, origin, announce);

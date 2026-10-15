@@ -328,11 +328,14 @@ pub(super) async fn get_validate(
     .await
 }
 
+/// Byte budget for an OpenAI/Groq transcription prompt (applied by `cap_transcription_prompt`).
+pub(super) const TRANSCRIPTION_PROMPT_MAX_BYTES: usize = 672;
+
 /// OpenAI/Groq only honor the final ~224 tokens of `prompt`, so an oversized
 /// dictionary would be truncated from the front by the provider. Cap it here on
 /// a separator (~3 chars/token for jargon-dense terms) so whole early terms win.
 fn cap_transcription_prompt(prompt: &str) -> String {
-    const MAX_BYTES: usize = 672;
+    const MAX_BYTES: usize = TRANSCRIPTION_PROMPT_MAX_BYTES;
     if prompt.len() <= MAX_BYTES {
         return prompt.to_string();
     }

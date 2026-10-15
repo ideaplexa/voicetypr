@@ -27,19 +27,23 @@ pub(super) fn is_nova3(model: &str) -> bool {
 }
 
 /// Build the repeatable query params for a `/v1/listen` request. The model and
-/// `smart_format=true` are always present; `diarize` and `language` are added
-/// when requested. Vocabulary `keyterm` params are appended (one per term, in
-/// order) only for Nova-3 model ids.
+/// `smart_format=true` are always present; `paragraphs`, `diarize` and
+/// `language` are added when requested. Vocabulary `keyterm` params are
+/// appended (one per term, in order) only for Nova-3 model ids.
 fn build_listen_params(
     model: &str,
     language: Option<&str>,
     keyterms: &[String],
     diarize: bool,
+    paragraphs: bool,
 ) -> Vec<(&'static str, String)> {
     let mut params: Vec<(&'static str, String)> = vec![
         ("model", model.to_string()),
         ("smart_format", "true".to_string()),
     ];
+    if paragraphs {
+        params.push(("paragraphs", "true".to_string()));
+    }
     if diarize {
         params.push(("diarize", "true".to_string()));
     }
@@ -77,6 +81,7 @@ pub(super) async fn transcribe_typed(
     language: Option<&str>,
 ) -> Result<String, common::SttError> {
     let keyterms = compile_keyterms(app, language);
+    let paragraphs = crate::commands::settings::read_transcript_paragraphs(app);
     transcribe_at(
         "https://api.deepgram.com",
         key,
@@ -84,8 +89,28 @@ pub(super) async fn transcribe_typed(
         audio_path,
         language,
         &keyterms,
+        paragraphs,
     )
     .await
+}
+
+/// The transcript text of a `/v1/listen` response. With `paragraphs` on, the
+/// paragraph-formatted transcript (blank line between paragraphs) is preferred;
+/// a response without it falls back to the plain transcript.
+fn extract_transcript(json: &serde_json::Value, paragraphs: bool) -> Option<String> {
+    if paragraphs {
+        if let Some(text) = json
+            .pointer("/results/channels/0/alternatives/0/paragraphs/transcript")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+    }
+    json.pointer("/results/channels/0/alternatives/0/transcript")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 pub(super) async fn transcribe_at(
@@ -95,6 +120,7 @@ pub(super) async fn transcribe_at(
     audio_path: &Path,
     language: Option<&str>,
     keyterms: &[String],
+    paragraphs: bool,
 ) -> Result<String, common::SttError> {
     use tokio::fs;
 
@@ -102,7 +128,7 @@ pub(super) async fn transcribe_at(
         .await
         .map_err(|_| common::SttError::BadResponse)?;
 
-    let params = build_listen_params(model, language, keyterms, false);
+    let params = build_listen_params(model, language, keyterms, false, paragraphs);
     let endpoint = format!("{}/v1/listen", base_url);
 
     let client = common::http_client();
@@ -130,10 +156,7 @@ pub(super) async fn transcribe_at(
                 .json()
                 .await
                 .map_err(|_| common::SttError::BadResponse)?;
-            json.pointer("/results/channels/0/alternatives/0/transcript")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .ok_or(common::SttError::BadResponse)
+            extract_transcript(&json, paragraphs).ok_or(common::SttError::BadResponse)
         }
     })
     .await
@@ -172,7 +195,9 @@ pub(super) async fn transcribe_at_diarized(
         .await
         .map_err(|_| common::SttError::BadResponse)?;
 
-    let params = build_listen_params(model, language, keyterms, true);
+    // Diarized text carries per-speaker lines; Deepgram paragraphs would add speaker
+    // headers to it, so paragraph formatting stays off here.
+    let params = build_listen_params(model, language, keyterms, true, false);
     let endpoint = format!("{}/v1/listen", base_url);
 
     let client = common::http_client();
@@ -251,7 +276,8 @@ fn parse_deepgram_word(w: &serde_json::Value) -> Option<crate::transcription::Tr
 #[cfg(test)]
 mod tests {
     use super::{
-        common, parse_deepgram_word, parse_diarized_response, transcribe_at, transcribe_at_diarized,
+        common, extract_transcript, parse_deepgram_word, parse_diarized_response, transcribe_at,
+        transcribe_at_diarized,
     };
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -285,9 +311,17 @@ mod tests {
             .await;
         let audio = audio_file();
 
-        let text = transcribe_at(&server.uri(), "k", "nova-3", audio.path(), Some("en"), &[])
-            .await
-            .unwrap();
+        let text = transcribe_at(
+            &server.uri(),
+            "k",
+            "nova-3",
+            audio.path(),
+            Some("en"),
+            &[],
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(text, "hi");
         let requests = server.received_requests().await.unwrap();
@@ -310,7 +344,7 @@ mod tests {
             .await;
         let audio = audio_file();
 
-        let error = transcribe_at(&server.uri(), "k", "nova-3", audio.path(), None, &[])
+        let error = transcribe_at(&server.uri(), "k", "nova-3", audio.path(), None, &[], false)
             .await
             .unwrap_err();
 
@@ -340,6 +374,7 @@ mod tests {
             audio.path(),
             Some("en"),
             &keyterms,
+            false,
         )
         .await
         .unwrap();
@@ -386,6 +421,7 @@ mod tests {
             audio.path(),
             Some("en"),
             &keyterms,
+            false,
         )
         .await
         .unwrap();
@@ -402,6 +438,116 @@ mod tests {
             .find(|(k, _)| k.as_ref() == "model")
             .map(|(_, v)| v.to_string());
         assert_eq!(model, Some("nova-2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn transcribe_at_requests_paragraphs_and_reads_the_paragraph_transcript() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/listen"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": {
+                    "channels": [{
+                        "alternatives": [{
+                            "transcript": "One. Two.",
+                            "paragraphs": {
+                                "transcript": "\nOne.\n\nTwo.",
+                                "paragraphs": []
+                            }
+                        }]
+                    }]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let audio = audio_file();
+
+        let text = transcribe_at(
+            &server.uri(),
+            "k",
+            "nova-3",
+            audio.path(),
+            Some("en"),
+            &[],
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(text, "One.\n\nTwo.");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests[0].url.query(),
+            Some("model=nova-3&smart_format=true&paragraphs=true&language=en")
+        );
+    }
+
+    #[tokio::test]
+    async fn transcribe_at_falls_back_to_plain_transcript_without_paragraphs() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/listen"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": {
+                    "channels": [{ "alternatives": [{ "transcript": "hi there" }] }]
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let audio = audio_file();
+
+        let text = transcribe_at(&server.uri(), "k", "nova-3", audio.path(), None, &[], true)
+            .await
+            .unwrap();
+
+        assert_eq!(text, "hi there");
+    }
+
+    #[test]
+    fn extract_transcript_prefers_paragraphs_only_when_asked() {
+        let json = serde_json::json!({
+            "results": { "channels": [{ "alternatives": [{
+                "transcript": "A. B.",
+                "paragraphs": { "transcript": "A.\n\nB." }
+            }]}]}
+        });
+        assert_eq!(extract_transcript(&json, true).as_deref(), Some("A.\n\nB."));
+        assert_eq!(extract_transcript(&json, false).as_deref(), Some("A. B."));
+
+        let blank = serde_json::json!({
+            "results": { "channels": [{ "alternatives": [{
+                "transcript": "A. B.",
+                "paragraphs": { "transcript": "  " }
+            }]}]}
+        });
+        assert_eq!(extract_transcript(&blank, true).as_deref(), Some("A. B."));
+        assert_eq!(extract_transcript(&serde_json::json!({}), true), None);
+    }
+
+    #[tokio::test]
+    async fn transcribe_at_diarized_never_requests_paragraphs() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/listen"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": { "channels": [{ "alternatives": [{ "transcript": "hi", "words": [] }] }] }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let audio = audio_file();
+
+        transcribe_at_diarized(&server.uri(), "k", "nova-3", audio.path(), None, &[])
+            .await
+            .unwrap();
+
+        let request = &server.received_requests().await.unwrap()[0];
+        assert!(!request
+            .url
+            .query_pairs()
+            .any(|(k, _)| k.as_ref() == "paragraphs"));
     }
 
     #[tokio::test]

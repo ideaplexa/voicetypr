@@ -26,7 +26,11 @@ pub(super) async fn transcribe_typed(
 ) -> Result<String, common::SttError> {
     // The personal dictionary is reused as the recognizer's initial prompt so
     // jargon/brand names are reconciled against the audio at recognition time.
-    let prompt = crate::commands::audio::compile_remote_request_context(app, language);
+    let prompt = crate::writing::with_whisper_style_hint(
+        crate::commands::audio::compile_remote_request_context(app, language),
+        language,
+        common::TRANSCRIPTION_PROMPT_MAX_BYTES,
+    );
     common::openai_compatible_transcribe(
         BASE,
         key,

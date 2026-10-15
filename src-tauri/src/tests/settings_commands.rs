@@ -36,6 +36,28 @@ mod tests {
         assert_eq!(settings.recording_retention_days, Some(30));
         assert!(!settings.whisper_speed_mode);
         assert_eq!(settings.transcription_mode, "regular");
+        assert!(settings.transcript_paragraphs);
+        assert!(!settings.transcript_remove_fillers);
+        assert!(settings.island_live_words);
+    }
+
+    #[test]
+    fn test_island_live_words_defaults_on_for_old_stores() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("island_live_words");
+        let restored: Settings = serde_json::from_value(value).unwrap();
+        assert!(restored.island_live_words);
+    }
+
+    #[test]
+    fn test_transcript_format_settings_default_for_old_stores() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("transcript_paragraphs");
+        object.remove("transcript_remove_fillers");
+        let restored: Settings = serde_json::from_value(value).unwrap();
+        assert!(restored.transcript_paragraphs);
+        assert!(!restored.transcript_remove_fillers);
     }
 
     #[test]
@@ -66,6 +88,7 @@ mod tests {
             play_sound_on_paste_success: true,
             pill_indicator_mode: "when_recording".to_string(),
             island_start_details: "changed".into(),
+            island_live_words: true,
             pill_indicator_style: "full".to_string(),
             pill_indicator_position: "bottom-center".to_string(),
             pill_indicator_offset: 10,
@@ -78,6 +101,8 @@ mod tests {
             transcription_acceleration: "auto".to_string(),
             whisper_speed_mode: false,
             transcription_mode: "regular".to_string(),
+            transcript_paragraphs: true,
+            transcript_remove_fillers: false,
             update_channel: "stable".to_string(),
         };
 
@@ -159,6 +184,7 @@ mod tests {
             play_sound_on_paste_success: false,
             pill_indicator_mode: "never".to_string(),
             island_start_details: "changed".into(),
+            island_live_words: true,
             pill_indicator_style: "compact".to_string(),
             pill_indicator_position: "top-center".to_string(),
             pill_indicator_offset: 25,
@@ -171,6 +197,8 @@ mod tests {
             transcription_acceleration: "auto".to_string(),
             whisper_speed_mode: false,
             transcription_mode: "regular".to_string(),
+            transcript_paragraphs: true,
+            transcript_remove_fillers: false,
             update_channel: "beta".to_string(),
         };
 
@@ -918,6 +946,7 @@ mod tests {
             play_sound_on_paste_success: false,
             pill_indicator_mode: "always".to_string(),
             island_start_details: "changed".into(),
+            island_live_words: true,
             pill_indicator_style: "compact".to_string(),
             pill_indicator_position: "top-left".to_string(),
             pill_indicator_offset: 42,
@@ -930,6 +959,8 @@ mod tests {
             transcription_acceleration: "gpu".to_string(),
             whisper_speed_mode: true,
             transcription_mode: "regular".to_string(),
+            transcript_paragraphs: true,
+            transcript_remove_fillers: false,
             update_channel: "beta".to_string(),
         };
 

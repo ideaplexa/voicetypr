@@ -155,6 +155,47 @@ pub fn compile_context_for_target(
     (!context.is_empty()).then_some(context)
 }
 
+/// A short, fully punctuated English sentence put in front of the recognizer
+/// prompt of Whisper-family engines (local Whisper, OpenAI, Groq) so their
+/// output keeps capitals and punctuation. It is a single constant on purpose:
+/// remove it (or empty it) if a real-speech run shows it hurting accuracy.
+/// [`strip_whisper_style_hint`] keeps it from ever reaching the output.
+pub const WHISPER_STYLE_HINT: &str = "Hello, this is a well-punctuated transcript.";
+
+/// Prepends [`WHISPER_STYLE_HINT`] to `prompt` for English speech when the
+/// result still fits in `max_bytes`; otherwise returns `prompt` unchanged.
+/// With no vocabulary the hint alone is the prompt.
+pub fn with_whisper_style_hint(
+    prompt: Option<String>,
+    language: Option<&str>,
+    max_bytes: usize,
+) -> Option<String> {
+    let english = language.is_some_and(super::format::is_english);
+    if !english {
+        return prompt;
+    }
+    match prompt {
+        None => Some(WHISPER_STYLE_HINT.to_string()),
+        Some(existing) if existing.trim().is_empty() => Some(WHISPER_STYLE_HINT.to_string()),
+        Some(existing) if WHISPER_STYLE_HINT.len() + 1 + existing.len() <= max_bytes => {
+            Some(format!("{WHISPER_STYLE_HINT} {existing}"))
+        }
+        Some(existing) => Some(existing),
+    }
+}
+
+/// Removes a leading [`WHISPER_STYLE_HINT`] (any case) that a recognizer echoed
+/// back. Returns `text` untouched when it does not start with the hint.
+pub fn strip_whisper_style_hint(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    match trimmed.get(..WHISPER_STYLE_HINT.len()) {
+        Some(head) if head.eq_ignore_ascii_case(WHISPER_STYLE_HINT) => {
+            trimmed[WHISPER_STYLE_HINT.len()..].trim_start()
+        }
+        _ => text,
+    }
+}
+
 fn strip_nul_bytes(value: &str) -> String {
     value.chars().filter(|ch| *ch != '\0').collect()
 }
@@ -612,6 +653,66 @@ mod tests {
         // Framing lives in prompts.rs now, not in the context string.
         assert!(!context.contains("Preferred"));
         assert!(!context.contains("Preserve"));
+    }
+
+    #[test]
+    fn style_hint_is_prepended_for_english_when_it_fits() {
+        assert_eq!(
+            with_whisper_style_hint(Some("Preferred spellings: Tauri.".into()), Some("en"), 900),
+            Some(format!("{WHISPER_STYLE_HINT} Preferred spellings: Tauri."))
+        );
+        assert_eq!(
+            with_whisper_style_hint(None, Some("en-US"), 900),
+            Some(WHISPER_STYLE_HINT.to_string())
+        );
+        assert_eq!(
+            with_whisper_style_hint(Some("  ".into()), Some("en"), 900),
+            Some(WHISPER_STYLE_HINT.to_string())
+        );
+    }
+
+    #[test]
+    fn style_hint_is_skipped_for_other_languages_and_unknown_language() {
+        assert_eq!(with_whisper_style_hint(None, Some("es"), 900), None);
+        assert_eq!(with_whisper_style_hint(None, None, 900), None);
+        assert_eq!(
+            with_whisper_style_hint(Some("Terms.".into()), Some("de"), 900),
+            Some("Terms.".to_string())
+        );
+    }
+
+    #[test]
+    fn style_hint_is_skipped_when_vocabulary_leaves_no_room() {
+        let vocabulary = "x".repeat(900 - WHISPER_STYLE_HINT.len() - 1);
+        let with_hint = with_whisper_style_hint(Some(vocabulary.clone()), Some("en"), 900).unwrap();
+        assert_eq!(with_hint.len(), 900);
+        let too_long = format!("{vocabulary}y");
+        assert_eq!(
+            with_whisper_style_hint(Some(too_long.clone()), Some("en"), 900),
+            Some(too_long)
+        );
+    }
+
+    #[test]
+    fn style_hint_is_stripped_from_output() {
+        assert_eq!(strip_whisper_style_hint(WHISPER_STYLE_HINT), "");
+        assert_eq!(
+            strip_whisper_style_hint(&format!("{WHISPER_STYLE_HINT} Actual words here.")),
+            "Actual words here."
+        );
+        assert_eq!(
+            strip_whisper_style_hint(&format!(
+                "  {} then more",
+                WHISPER_STYLE_HINT.to_uppercase()
+            )),
+            "then more"
+        );
+        assert_eq!(
+            strip_whisper_style_hint("Hello, this is fine."),
+            "Hello, this is fine."
+        );
+        assert_eq!(strip_whisper_style_hint("প্রথম কথা"), "প্রথম কথা");
+        assert_eq!(strip_whisper_style_hint(""), "");
     }
 
     #[test]

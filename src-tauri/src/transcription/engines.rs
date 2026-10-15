@@ -405,7 +405,39 @@ pub(crate) async fn resolve_engine_for_model(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_use_active_remote, transcription_watchdog_budget, ActiveEngineSelection};
+    use super::{
+        parakeet_segments_to_transcription_segments, should_use_active_remote,
+        transcription_watchdog_budget, ActiveEngineSelection,
+    };
+
+    #[test]
+    fn parakeet_sidecar_segments_keep_their_times() {
+        let response: crate::parakeet::messages::ParakeetResponse =
+            serde_json::from_value(serde_json::json!({
+                "type": "transcription",
+                "text": "Hello there. General Kenobi.",
+                "segments": [
+                    { "text": "Hello there.", "start": 0.0, "end": 1.2 },
+                    { "text": "General Kenobi.", "start": 3.5, "end": 5.0 },
+                    { "text": "untimed" }
+                ],
+                "language": "en",
+                "duration": 5.0
+            }))
+            .unwrap();
+        let crate::parakeet::messages::ParakeetResponse::Transcription { segments, .. } = response
+        else {
+            panic!("expected a transcription response");
+        };
+
+        let converted = parakeet_segments_to_transcription_segments(segments);
+
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[0].start_ms, Some(0));
+        assert_eq!(converted[0].end_ms, Some(1_200));
+        assert_eq!(converted[1].start_ms, Some(3_500));
+        assert_eq!(converted[2].start_ms, None);
+    }
 
     #[test]
     fn active_engine_routes_are_stable_for_evidence_logs() {

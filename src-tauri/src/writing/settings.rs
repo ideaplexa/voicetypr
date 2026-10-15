@@ -124,6 +124,8 @@ pub enum WritingOperationKind {
     // Retained so history written before spoken commands were removed still deserializes.
     VoiceCommand,
     FinalGuard,
+    /// Shared local formatting: capitals, spacing, optional fillers, paragraph breaks.
+    FormatTranscript,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

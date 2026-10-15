@@ -29,22 +29,10 @@ pub fn style_preset(label: &str) -> Option<EnhancementPreset> {
 pub fn apply_quick_setting(settings: &mut Settings, id: &str) -> bool {
     if let Some(language) = id.strip_prefix("language_") {
         settings.speech_language = language.into();
+        true
     } else {
-        match id {
-            "live_preview" => {
-                settings.transcription_mode = if settings.transcription_mode == "live_preview" {
-                    "regular"
-                } else {
-                    "live_preview"
-                }
-                .into()
-            }
-            "recording_mode_toggle" => settings.recording_mode = "toggle".into(),
-            "recording_mode_push_to_talk" => settings.recording_mode = "push_to_talk".into(),
-            _ => return false,
-        }
+        false
     }
-    true
 }
 #[derive(Clone, serde::Serialize)]
 struct MainNavigate {
@@ -55,13 +43,10 @@ struct MainNavigate {
 fn destination(id: &str) -> Option<MainNavigate> {
     let (screen, pane, source) = match id {
         "nav_home" => ("home", None, None),
-        "nav_insights" => ("insights", None, None),
         "nav_settings" => ("settings", Some("general"), None),
         "nav_polish" => ("polish", None, None),
         "nav_models" => ("transcription", None, Some("local")),
         "nav_transcription" => ("transcription", None, None),
-        "nav_file" => ("audio", None, None),
-        "nav_help" => ("help", None, None),
         _ => return None,
     };
     Some(MainNavigate {
@@ -116,10 +101,6 @@ pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(
             Some("mic")
         } else if id.starts_with("language_") {
             Some("language")
-        } else if id.starts_with("recording_mode_") {
-            Some("mode")
-        } else if id == "live_preview" {
-            Some("live_preview")
         } else {
             None
         };
@@ -132,7 +113,6 @@ pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(
             "cancel" => Some("cancel"),
             "nav_settings" => Some("open_settings"),
             "copy_last_transcription" => Some("copy"),
-            "paste_last" => Some("paste"),
             id if id.starts_with("retry_") => Some("retry"),
             id if id.starts_with("discard_") => Some("discard"),
             _ => None,
@@ -229,22 +209,11 @@ async fn run_inner(app: AppHandle, id: &str, source: &str) -> Result<(), String>
         let _ = app.emit("ai-enabled-changed", style.requires_ai_formatting());
         return Ok(());
     }
-    if id == "copy_last_transcription" || id == "paste_last" || id.starts_with("recent_copy_") {
-        let text = if let Some(timestamp) = id.strip_prefix("recent_copy_") {
-            use tauri_plugin_store::StoreExt;
-            app.store("transcriptions")
-                .map_err(|_| "History unavailable")?
-                .get(timestamp)
-                .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(str::to_owned))
-        } else {
+    if id == "copy_last_transcription" {
+        if let Some(text) =
             crate::commands::shortcuts::latest_copyable_transcription_text(&app).await?
-        };
-        if let Some(text) = text {
-            if id == "paste_last" {
-                crate::commands::text::insert_text(app, text).await?;
-            } else {
-                crate::commands::text::copy_text_to_clipboard(text).await?;
-            }
+        {
+            crate::commands::text::copy_text_to_clipboard(text).await?;
         }
         return Ok(());
     }
@@ -285,19 +254,11 @@ mod tests {
     #[test]
     fn quick_settings_use_app_settings_keys() {
         let mut s = Settings::default();
-        for (id, mode) in [
-            ("recording_mode_push_to_talk", "push_to_talk"),
-            ("recording_mode_toggle", "toggle"),
-        ] {
-            assert!(apply_quick_setting(&mut s, id));
-            assert_eq!(s.recording_mode, mode);
-        }
         assert!(apply_quick_setting(&mut s, "language_fr"));
         assert_eq!(s.speech_language, "fr");
-        assert!(apply_quick_setting(&mut s, "live_preview"));
-        assert_eq!(s.transcription_mode, "live_preview");
-        assert!(apply_quick_setting(&mut s, "live_preview"));
-        assert_eq!(s.transcription_mode, "regular");
+        // Mode and live preview are no longer menu actions.
+        assert!(!apply_quick_setting(&mut s, "live_preview"));
+        assert!(!apply_quick_setting(&mut s, "recording_mode_push_to_talk"));
         assert!(!apply_quick_setting(&mut s, "unknown"));
     }
     #[test]
@@ -311,8 +272,9 @@ mod tests {
     }
     #[test]
     fn navigation_destinations_match_existing_screens() {
-        assert_eq!(destination("nav_file").unwrap().screen, "audio");
-        assert_eq!(destination("nav_insights").unwrap().screen, "insights");
+        for removed in ["nav_file", "nav_insights", "nav_help"] {
+            assert!(destination(removed).is_none());
+        }
         assert_eq!(destination("nav_settings").unwrap().screen, "settings");
         assert_eq!(destination("nav_models").unwrap().source, Some("local"));
         assert_eq!(destination("nav_settings").unwrap().pane, Some("general"));

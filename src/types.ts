@@ -131,6 +131,7 @@ export interface AppSettings {
   pill_indicator_style?: PillIndicatorStyle;
   telemetry_enabled?: boolean;
   island_start_details?: "always" | "changed" | "never";
+  island_live_words?: boolean; // default true: the island shows live words while streaming
   // Pill indicator screen position
   pill_indicator_position?: PillIndicatorPosition;
   // Pill indicator offset from screen edge in pixels (10-50)
@@ -150,6 +151,9 @@ export interface AppSettings {
   update_channel?: UpdateChannel;
   whisper_speed_mode?: boolean;
   transcription_mode?: TranscriptionMode;
+  // Shared local formatting stage (applies with Polish off)
+  transcript_paragraphs?: boolean; // default true: paragraph breaks on long takes
+  transcript_remove_fillers?: boolean; // default false: drop English um/uh and stutters
 }
 
 /** Writing-step outcome attached to a history row (mirrors the backend `writing` metadata blob). */

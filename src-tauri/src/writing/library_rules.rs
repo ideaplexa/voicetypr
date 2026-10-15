@@ -369,7 +369,8 @@ pub(crate) struct LibraryRulesResult {
 }
 
 pub(crate) fn sanitize_transcript(text: &str) -> Cow<'_, str> {
-    let trimmed = text.trim();
+    // A recognizer can echo the style hint it was prompted with; it is never text.
+    let trimmed = super::vocabulary::strip_whisper_style_hint(text.trim());
     let needs_cleanup = trimmed.len() != text.len()
         || trimmed
             .chars()
@@ -1005,6 +1006,20 @@ mod tests {
         let untouched = sanitize_transcript(semantic_text);
         assert!(matches!(untouched, Cow::Borrowed(_)));
         assert_eq!(untouched.as_ref(), semantic_text);
+    }
+
+    #[test]
+    fn test_sanitize_transcript_strips_an_echoed_style_hint() {
+        use super::super::vocabulary::WHISPER_STYLE_HINT;
+        assert_eq!(sanitize_transcript(WHISPER_STYLE_HINT).as_ref(), "");
+        assert_eq!(
+            sanitize_transcript(&format!("{WHISPER_STYLE_HINT} Send it now.")).as_ref(),
+            "Send it now."
+        );
+        assert!(matches!(
+            sanitize_transcript("Hello, this is a normal take."),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]

@@ -7,7 +7,7 @@ import { TRANSCRIPTION_STREAM_EVENT, type TranscriptionStreamEvent } from '@/typ
 import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import type { PillAudioLevel } from '@/types';
 import type { PillGeometry } from '@/pill-geometry';
-import type { DictationContext, PillPointer, PillSettings, RecordingStatePayload } from '@/pill/contracts';
+import { islandShowsLiveWords, type DictationContext, type PillPointer, type PillSettings, type RecordingStatePayload } from '@/pill/contracts';
 import { createIsland } from '@/pill/renderer';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
@@ -102,7 +102,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     try {
       const settings = await call<PillSettings>('get_settings');
       if (destroyed || revision !== settingsRevision) return;
-      streamEnabled = settings.transcription_mode === 'live_preview' || settings.streaming_preview_enabled === true;
+      streamEnabled = islandShowsLiveWords(settings);
       island.settings(settings); syncStream();
       // Geometry events are authoritative; this fallback also supports old settings fixtures.
       const anchor = isMacOS ? settings.pill_indicator_position ?? 'bottom-center' : 'bottom-right';

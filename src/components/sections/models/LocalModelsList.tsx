@@ -10,10 +10,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { getModelDisplayName } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
 import { Download, Ellipsis, X } from "lucide-react";
+import type { ReactNode } from "react";
 import type { LocalModelActions, ModelEntry } from "./types";
 
 interface LocalModelsListProps extends LocalModelActions {
   models: ModelEntry[];
+  /** Rendered under the selected model row. */
+  selectedOptions?: ReactNode;
 }
 
 export function LocalModelsList({
@@ -28,6 +31,7 @@ export function LocalModelsList({
   onRepair,
   currentModel,
   activeRemoteServer,
+  selectedOptions,
 }: LocalModelsListProps) {
   return (
     <div className="divide-y divide-border">
@@ -43,10 +47,8 @@ export function LocalModelsList({
             : `${Math.round(bytes / 1024 ** 2)} MB`;
         const detail = `${model.supported_languages?.length ? `${model.supported_languages.length} languages` : model.engine === "parakeet" ? "Multilingual" : "Local transcription"} · ${size}`;
         return (
-          <div
-            key={name}
-            className={cn("flex min-h-[60px] items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}
-          >
+          <div key={name} className={cn(selected && "bg-sage-bg")}>
+          <div className="flex min-h-[60px] items-center gap-3 px-4 py-3">
             <Radio.Root
               value={name}
               aria-label={`Use ${displayName}`}
@@ -111,6 +113,8 @@ export function LocalModelsList({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
+          </div>
+          {selected && selectedOptions ? <div className="px-4 pb-2">{selectedOptions}</div> : null}
           </div>
         );
       })}

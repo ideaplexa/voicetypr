@@ -31,6 +31,8 @@ static IS_INSERTING: AtomicBool = AtomicBool::new(false);
 /// - `https://example.com.` → `https://example.com.` (URL-like, skip)
 /// - `foo@bar.com.` → `foo@bar.com.` (email-like, skip)
 /// - `x = y.` → `x = y.` (code-like, skip)
+/// - `One.\n\nTwo.` → `One.\n\nTwo. ` (paragraphed prose; guards check the last line)
+/// - `One.\nTwo.` → unchanged (single newlines are caller structure)
 fn ensure_trailing_sentence_space(text: &str) -> String {
     let without_trailing_spaces = text.trim_end_matches(' ');
     if without_trailing_spaces.is_empty() {
@@ -38,19 +40,25 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
     }
 
     // Preserve explicit structural whitespace. The helper is for ergonomic
-    // sentence spacing, not for rewriting multiline text or caller-provided
-    // newlines/tabs at the insertion boundary.
+    // sentence spacing, not for rewriting caller-provided newlines/tabs at the
+    // insertion boundary. The one multi-line shape that still gets the space is
+    // paragraphed prose (a blank line between paragraphs, from the shared
+    // formatting stage); its guards then look at the last line only.
     if without_trailing_spaces.ends_with('\n')
         || without_trailing_spaces.ends_with('\r')
         || without_trailing_spaces.ends_with('\t')
-        || without_trailing_spaces.contains('\n')
         || without_trailing_spaces.contains('\r')
     {
         return text.to_string();
     }
+    let last_line = match without_trailing_spaces.rfind('\n') {
+        Some(_) if !without_trailing_spaces.contains("\n\n") => return text.to_string(),
+        Some(index) => &without_trailing_spaces[index + 1..],
+        None => without_trailing_spaces,
+    };
 
     let closing_punctuation = ['"', '\'', '“', '”', '’', ')', ']', '}'];
-    let sentence_end = without_trailing_spaces
+    let sentence_end = last_line
         .chars()
         .rev()
         .find(|c| !closing_punctuation.contains(c));
@@ -62,8 +70,7 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
     }
 
     // Detect contexts where a trailing space would be harmful.
-    let semantic_end =
-        without_trailing_spaces.trim_end_matches(|c| closing_punctuation.contains(&c));
+    let semantic_end = last_line.trim_end_matches(|c| closing_punctuation.contains(&c));
     let before_period = semantic_end.strip_suffix('.').unwrap_or(semantic_end);
     let looks_like_url = semantic_end.contains("://")
         || before_period.ends_with(".com")
@@ -1440,6 +1447,56 @@ mod tests {
         assert_eq!(
             ensure_trailing_sentence_space("Hello.\nWorld."),
             "Hello.\nWorld."
+        );
+    }
+
+    #[test]
+    fn paragraphed_prose_gets_trailing_space() {
+        assert_eq!(
+            ensure_trailing_sentence_space("Hello.\n\nWorld."),
+            "Hello.\n\nWorld. "
+        );
+        assert_eq!(
+            ensure_trailing_sentence_space("One. Two.\n\nThree.\n\nFour?  "),
+            "One. Two.\n\nThree.\n\nFour? "
+        );
+    }
+
+    #[test]
+    fn paragraphed_text_with_no_sentence_end_is_unchanged() {
+        assert_eq!(
+            ensure_trailing_sentence_space("Hello.\n\nWorld"),
+            "Hello.\n\nWorld"
+        );
+    }
+
+    #[test]
+    fn paragraphed_text_guards_apply_to_last_line_only() {
+        // Code-like or URL-like text on an earlier line does not block the space.
+        assert_eq!(
+            ensure_trailing_sentence_space("x = y.\n\nDone."),
+            "x = y.\n\nDone. "
+        );
+        // A URL or code-like last line still blocks it.
+        assert_eq!(
+            ensure_trailing_sentence_space("Hello.\n\nSee https://example.com."),
+            "Hello.\n\nSee https://example.com."
+        );
+        assert_eq!(
+            ensure_trailing_sentence_space("Hello.\n\nresult = ok."),
+            "Hello.\n\nresult = ok."
+        );
+        assert_eq!(
+            ensure_trailing_sentence_space("Hello.\n\nmail user@example.com."),
+            "Hello.\n\nmail user@example.com."
+        );
+    }
+
+    #[test]
+    fn paragraph_break_before_trailing_newline_is_preserved() {
+        assert_eq!(
+            ensure_trailing_sentence_space("Hello.\n\nWorld.\n"),
+            "Hello.\n\nWorld.\n"
         );
     }
 

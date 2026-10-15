@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { getCloudProviderByModel, resolveCloudModelLabel } from "@/lib/cloudProviders";
 import { getModelDisplayName } from "@/lib/model-display";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { type ModelInfo, isCloudModel } from "@/types";
 
@@ -22,6 +23,8 @@ export interface CloudModelCardProps {
   openCloudModal: (providerId: string, mode: "connect" | "update") => void;
   onDisconnect: (modelName: string) => void;
   onModelChange: (providerId: string, modelId: string, requiresSetup: boolean) => void;
+  /** Rendered under the row when this provider is the one in use. */
+  selectedOptions?: ReactNode;
 }
 
 export function CloudModelCard({
@@ -32,6 +35,7 @@ export function CloudModelCard({
   openCloudModal,
   onDisconnect,
   onModelChange,
+  selectedOptions,
 }: CloudModelCardProps) {
   if (!isCloudModel(model)) return null;
   const provider = getCloudProviderByModel(name) ?? getCloudProviderByModel(model.engine);
@@ -50,7 +54,8 @@ export function CloudModelCard({
     name;
   const providerName = provider?.displayName || provider?.providerName || name;
   return (
-    <div className={cn("flex flex-wrap items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}>
+    <div className={cn(selected && "bg-sage-bg")}>
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
       <Radio.Root
         value={name}
         aria-label={`Use ${providerName}`}
@@ -111,6 +116,8 @@ export function CloudModelCard({
           Remove key
         </Button>
       ) : null}
+    </div>
+    {selected && selectedOptions ? <div className="px-4 pb-2">{selectedOptions}</div> : null}
     </div>
   );
 }

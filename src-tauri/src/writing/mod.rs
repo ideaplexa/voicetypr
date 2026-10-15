@@ -1,4 +1,5 @@
 mod app_category;
+mod format;
 mod library_rules;
 mod pipeline;
 mod settings;
@@ -21,10 +22,15 @@ pub use settings::{
 #[allow(unused_imports)]
 pub use vocabulary::{
     compile_context_for_target, compile_deepgram_keyterms, compile_parakeet_custom_vocabulary,
-    compile_soniox_context, ProviderContextCapabilities, ProviderContextTarget, SonioxContext,
-    SonioxContextField,
+    compile_soniox_context, strip_whisper_style_hint, with_whisper_style_hint,
+    ProviderContextCapabilities, ProviderContextTarget, SonioxContext, SonioxContextField,
+    WHISPER_STYLE_HINT,
 };
 
+#[allow(unused_imports)]
+pub(crate) use format::{
+    format_for_transcription, protected_terms, should_run_format_stage, FormatStageSettings,
+};
 #[allow(unused_imports)]
 pub(crate) use library_rules::{
     apply_final_restoration_guard, apply_library_rules, sanitize_transcript,

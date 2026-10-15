@@ -300,13 +300,6 @@ mod menu_id_tests {
         let id = format!("microphone_{}", device_name);
         assert_eq!(id, "microphone_Built-in Microphone");
     }
-
-    #[test]
-    fn test_recent_copy_menu_id_format() {
-        let timestamp = "1705123456789";
-        let id = format!("recent_copy_{}", timestamp);
-        assert_eq!(id, "recent_copy_1705123456789");
-    }
 }
 
 // ============================================================================

@@ -115,6 +115,9 @@ pub struct Settings {
     pub pill_indicator_style: String,
     #[serde(default = "default_island_start_details")]
     pub island_start_details: String,
+    // Island shows words as they arrive while streaming is on (default on).
+    #[serde(default = "default_true")]
+    pub island_live_words: bool,
     #[serde(default = "default_telemetry_enabled")]
     pub telemetry_enabled: bool,
     // Pill indicator screen position
@@ -140,6 +143,12 @@ pub struct Settings {
     // Product-facing streaming preview mode: "regular" | "live_preview"
     #[serde(default = "default_transcription_mode")]
     pub transcription_mode: String,
+    // Shared local formatting stage: paragraph breaks on long takes (pause-based).
+    #[serde(default = "default_true")]
+    pub transcript_paragraphs: bool,
+    // Shared local formatting stage: drop English fillers (um, uh) and obvious stutters.
+    #[serde(default)]
+    pub transcript_remove_fillers: bool,
     // Direct-install updater channel: "stable" | "beta"
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
@@ -173,6 +182,7 @@ impl Default for Settings {
             pill_indicator_mode: "always".to_string(), // New installs keep the resting dot visible
             pill_indicator_style: default_pill_indicator_style(),
             island_start_details: default_island_start_details(),
+            island_live_words: true,
             telemetry_enabled: true,
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
@@ -185,6 +195,8 @@ impl Default for Settings {
             transcription_acceleration: "auto".to_string(),
             whisper_speed_mode: false,
             transcription_mode: TRANSCRIPTION_MODE_REGULAR.to_string(),
+            transcript_paragraphs: true,
+            transcript_remove_fillers: false,
             update_channel: default_update_channel(),
         }
     }
@@ -249,6 +261,24 @@ fn default_transcription_acceleration() -> String {
 
 fn default_transcription_mode() -> String {
     TRANSCRIPTION_MODE_REGULAR.to_string()
+}
+
+/// Defaults to on when never saved (old stores).
+pub(crate) fn read_transcript_paragraphs(app: &AppHandle) -> bool {
+    app.store("settings")
+        .ok()
+        .and_then(|store| store.get("transcript_paragraphs"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+}
+
+/// Defaults to off when never saved (old stores).
+pub(crate) fn read_transcript_remove_fillers(app: &AppHandle) -> bool {
+    app.store("settings")
+        .ok()
+        .and_then(|store| store.get("transcript_remove_fillers"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
 }
 
 pub(crate) fn read_whisper_speed_mode(app: &AppHandle) -> bool {
@@ -637,6 +667,10 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             "analytics_enabled":store.get("analytics_enabled"),
             "crash_reporting_enabled":store.get("crash_reporting_enabled"),
         }))),
+        island_live_words: store
+            .get("island_live_words")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         island_start_details: normalize_island_start_details(
             store
                 .get("island_start_details")
@@ -693,6 +727,14 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .as_deref(),
         ),
+        transcript_paragraphs: store
+            .get("transcript_paragraphs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(|| Settings::default().transcript_paragraphs),
+        transcript_remove_fillers: store
+            .get("transcript_remove_fillers")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(|| Settings::default().transcript_remove_fillers),
         update_channel: UpdateChannel::from_preference(
             stored_update_channel.as_deref(),
             stored_update_channel_explicit,
@@ -918,6 +960,7 @@ pub async fn save_settings(
             &settings.island_start_details
         )),
     );
+    store.set("island_live_words", json!(settings.island_live_words));
     // Retired "first 5 dictations" counter (Smart now reacts to changes only).
     store.delete("island_start_details_shown");
     store.set(
@@ -951,6 +994,14 @@ pub async fn save_settings(
     store.set("polish_keep_words", json!(settings.polish_keep_words));
     store.set("whisper_speed_mode", json!(settings.whisper_speed_mode));
     store.set("transcription_mode", json!(&normalized_transcription_mode));
+    store.set(
+        "transcript_paragraphs",
+        json!(settings.transcript_paragraphs),
+    );
+    store.set(
+        "transcript_remove_fillers",
+        json!(settings.transcript_remove_fillers),
+    );
     match update_channel_to_persist(
         stored_update_channel.as_deref(),
         stored_update_channel_explicit,

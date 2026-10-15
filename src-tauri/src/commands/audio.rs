@@ -2259,7 +2259,13 @@ pub fn compile_remote_request_context(
 }
 
 fn compile_whisper_initial_prompt(app: &AppHandle, language: Option<&str>) -> Option<String> {
-    compile_remote_request_context(app, language)
+    crate::writing::with_whisper_style_hint(
+        compile_remote_request_context(app, language),
+        language,
+        crate::writing::ProviderContextTarget::WhisperInitialPrompt
+            .capabilities()
+            .max_bytes,
+    )
 }
 
 /// Best-effort warm of the Windows Vulkan sidecar when a Whisper model is preloaded.

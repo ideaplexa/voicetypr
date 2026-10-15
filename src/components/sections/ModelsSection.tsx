@@ -12,10 +12,10 @@ import { useEffect, useRef, useState } from "react";
 import { CloudApiKeyModal } from "./models/CloudProvidersBlock";
 import { CloudModelCard } from "./models/CloudModelCard";
 import { LocalModelsList } from "./models/LocalModelsList";
-import { ModelsLanguageRow } from "./models/ModelsLanguageRow";
+import { ModelOptions } from "./models/ModelOptions";
 import { ModelsSourcesHeader } from "./models/ModelsSourcesHeader";
 import { RemoteServersBlock } from "./models/RemoteServersBlock";
-import { TranscriptionControls } from "./models/TranscriptionControls";
+import { WhisperSpeedCard } from "./models/WhisperSpeedCard";
 import { TranscriptionPerformanceCard } from "./recording/TranscriptionPerformanceCard";
 import type { ModelsSectionProps, SourceFilter } from "./models/types";
 import { useCloudProviders } from "./models/useCloudProviders";
@@ -112,6 +112,16 @@ export function ModelsSection({
       : getModelDisplayName(currentModel, Object.fromEntries(models)) ||
         (currentModel ? humanizeModelId(currentModel) : "No model selected");
   const activeSourceFamily = sourceCards.find((source) => source.value === trackedSource)?.label;
+  const selectedOptions = (
+    <ModelOptions
+      engine={language.currentEngine}
+      modelName={language.currentModelName}
+      languageValue={language.languageValue}
+      isEnglishOnlyModel={language.isEnglishOnlyModel}
+      supportedLanguages={language.supportedLanguages}
+      onLanguageChange={language.handleLanguageChange}
+    />
+  );
   const selectModel = (name: string) => {
     void remotes.clearActiveRemote().then(() => onSelect(name));
   };
@@ -165,6 +175,7 @@ export function ModelsSection({
                 currentModel={currentModel}
                 activeRemoteServer={remotes.activeRemoteServer}
                 clearActiveRemote={remotes.clearActiveRemote}
+                selectedOptions={selectedOptions}
               />
             </RadioGroup>
             {local.length === 0 && (
@@ -198,6 +209,7 @@ export function ModelsSection({
                   openCloudModal={cloud.openCloudModal}
                   onDisconnect={cloud.handleCloudDisconnect}
                   onModelChange={cloud.handleCloudModelChange}
+                  selectedOptions={selectedOptions}
                 />
               ))}
             </RadioGroup>
@@ -209,31 +221,7 @@ export function ModelsSection({
           </SettingsCard>
         ) : null}
         <RemoteServersBlock remotes={remotes} visible={sourceFilter === "remote"} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <section
-            data-pencil-name="Opt Spoken language"
-            className="rounded-[14px] border border-border bg-card px-4 py-3"
-          >
-            <ModelsLanguageRow
-              languageValue={language.languageValue}
-              currentEngine={language.currentEngine}
-              isEnglishOnlyModel={language.isEnglishOnlyModel}
-              supportedLanguages={language.supportedLanguages}
-              onLanguageChange={language.handleLanguageChange}
-            />
-          </section>
-          <TranscriptionControls
-            engine={language.currentEngine}
-            modelName={language.currentModelName}
-          />
-        </div>
-        {language.currentEngine === "whisper" ? (
-          <TranscriptionControls
-            engine={language.currentEngine}
-            modelName={language.currentModelName}
-            speedOnly
-          />
-        ) : null}
+        {language.currentEngine === "whisper" ? <WhisperSpeedCard /> : null}
         {sourceFilter === "cloud" &&
         providers.some(
           ([name, model]) => name === "soniox" && model.downloaded && !model.requires_setup,

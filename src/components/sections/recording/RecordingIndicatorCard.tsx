@@ -8,7 +8,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/settings/SettingsSwitch";
+import { useRealtimeWords } from "@/components/sections/models/useRealtimeWords";
+import { islandLiveWordsActive } from "@/components/sections/models/modelOptionRules";
 import { useSettings } from "@/contexts/SettingsContext";
+import { emit } from "@tauri-apps/api/event";
 import { DEFAULT_PILL_INDICATOR_MODE, type PillIndicatorMode, type PillIndicatorPosition, type PillIndicatorStyle, type AppSettings } from "@/types";
 
 type StartDetails = NonNullable<AppSettings["island_start_details"]>;
@@ -21,7 +25,12 @@ const START_DETAILS: Array<{ value: StartDetails; label: string; description: st
 
 export function RecordingIndicatorCard() {
   const { settings, updateSettings } = useSettings();
+  const realtime = useRealtimeWords(
+    settings?.current_model_engine ?? "whisper",
+    settings?.current_model ?? "",
+  );
   if (!settings) return null;
+  const liveWordsAvailable = islandLiveWordsActive(realtime.streams, realtime.realtimeOn);
   const startDetails: StartDetails = settings.island_start_details ?? "changed";
   return (
     <SettingsCard
@@ -150,6 +159,34 @@ export function RecordingIndicatorCard() {
               value={startDetails}
               onValueChange={(value) => void updateSettings({ island_start_details: value as StartDetails })}
               options={START_DETAILS}
+            />
+          }
+        />
+      ) : null}
+      {settings.pill_indicator_mode !== "never" ? (
+        <SettingRow
+          title="Show live words while you talk"
+          description={
+            liveWordsAvailable ? (
+              "The island grows to show words as they come in."
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="underline underline-offset-2"
+                  onClick={() => void emit("navigate-to-section", "transcription")}
+                >
+                  Turn on Real-time words in Transcription
+                </button>
+              </>
+            )
+          }
+          control={
+            <Switch
+              aria-label="Show live words while you talk"
+              checked={liveWordsAvailable && settings.island_live_words !== false}
+              disabled={!liveWordsAvailable}
+              onCheckedChange={(checked) => void updateSettings({ island_live_words: checked })}
             />
           }
         />

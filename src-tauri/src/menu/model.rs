@@ -31,8 +31,8 @@ pub struct Snapshot {
     pub language: String,
     pub languages: Vec<(String, String)>,
     pub hold: bool,
-    pub preview: bool,
-    pub recent: Vec<(String, String)>,
+    /// A copyable dictation exists, so "Copy last dictation" is enabled.
+    pub has_history: bool,
     pub updates: bool,
 }
 fn action(id: &str, label: impl Into<String>) -> Item {
@@ -99,6 +99,13 @@ pub fn build(s: &Snapshot) -> Vec<Item> {
     if s.recording.is_none() && s.blocked.is_some() {
         items.push(action("fix", "Fix…"));
     }
+    let toggle = if s.recording.is_some() {
+        wording("Stop Dictation", "Stop dictation")
+    } else {
+        wording("Start Dictation", "Start dictation")
+    };
+    // Tauri accelerators register actions; label text avoids a second recording shortcut.
+    items.push(action("dictate", format!("{toggle}   {}", s.shortcut)));
     if let Some((id, alternative)) = &s.kept {
         let label = wording("Retry Last Dictation", "Retry last dictation");
         let mut retry = action(
@@ -117,13 +124,6 @@ pub fn build(s: &Snapshot) -> Vec<Item> {
             wording("Discard Last Recording", "Discard last recording"),
         ));
     }
-    let toggle = if s.recording.is_some() {
-        wording("Stop Dictation", "Stop dictation")
-    } else {
-        wording("Start Dictation", "Start dictation")
-    };
-    // Tauri accelerators register actions; label text avoids a second recording shortcut.
-    items.push(action("dictate", format!("{toggle}   {}", s.shortcut)));
     items.push(Item::Separator);
     let mut styles = ["Off", "Clean", "Writing", "Notes", "Message", "Code"]
         .into_iter()
@@ -189,64 +189,18 @@ pub fn build(s: &Snapshot) -> Vec<Item> {
         format!("Language: {current_language}"),
         languages,
     ));
-    let hold = wording("Hold to Talk", "Hold to talk");
-    let toggle = wording("Press to Start and Stop", "Press to start and stop");
-    items.push(submenu(
-        "recording_mode",
-        format!("Mode: {}", if s.hold { &hold } else { &toggle }),
-        vec![
-            check("recording_mode_push_to_talk", hold, s.hold),
-            check("recording_mode_toggle", toggle, !s.hold),
-        ],
-    ));
-    items.push(check(
-        "live_preview",
-        wording("Live Preview", "Live preview"),
-        s.preview,
-    ));
     items.push(Item::Separator);
-    for (id, label) in [
-        (
-            "copy_last_transcription",
-            wording("Copy Last Transcript", "Copy last transcript"),
-        ),
-        (
-            "paste_last",
-            wording("Paste Last Transcript", "Paste last transcript"),
-        ),
-    ] {
-        items.push(if s.recent.is_empty() {
-            disabled(id, label)
-        } else {
-            action(id, label)
-        });
-    }
-    items.push(submenu(
-        "recent",
-        "Recent",
-        if s.recent.is_empty() {
-            vec![disabled(
-                "empty_history",
-                wording("No Transcripts Yet", "No transcripts yet"),
-            )]
-        } else {
-            s.recent
-                .iter()
-                .take(5)
-                .map(|(id, label)| action(&format!("recent_copy_{id}"), label))
-                .collect()
-        },
-    ));
-    items.push(action(
-        "nav_file",
-        wording("Transcribe a File…", "Transcribe a file…"),
-    ));
+    let copy_label = wording("Copy Last Dictation", "Copy last dictation");
+    items.push(if s.has_history {
+        action("copy_last_transcription", copy_label)
+    } else {
+        disabled("copy_last_transcription", copy_label)
+    });
     items.push(Item::Separator);
     items.push(action(
         "nav_home",
         wording("Open Voicetypr", "Open Voicetypr"),
     ));
-    items.push(action("nav_insights", "Insights"));
     let mut settings = action("nav_settings", "Settings…");
     if let Item::Action { accelerator, .. } = &mut settings {
         *accelerator = Some("CmdOrCtrl+,".into());
@@ -258,10 +212,6 @@ pub fn build(s: &Snapshot) -> Vec<Item> {
     } else {
         disabled("check_updates", updates_label)
     });
-    items.push(action(
-        "nav_help",
-        wording("Help & Feedback", "Help & feedback"),
-    ));
     items.push(Item::Separator);
     let mut quit = action("quit", "Quit Voicetypr");
     if !s.windows {
@@ -332,21 +282,69 @@ mod tests {
                     "models",
                     "microphones",
                     "languages",
-                    "recording_mode",
-                    "live_preview",
                     "copy_last_transcription",
-                    "paste_last",
-                    "recent",
-                    "nav_file",
                     "nav_home",
-                    "nav_insights",
                     "nav_settings",
                     "check_updates",
-                    "nav_help",
                     "quit"
                 ]
             );
         }
+    }
+    #[test]
+    fn lean_menu_has_no_removed_items_and_keeps_order_with_kept_clip() {
+        let items = build(&Snapshot {
+            blocked: Some("Microphone missing".into()),
+            kept: Some(("clip".into(), Some("Whisper Tiny".into()))),
+            has_history: true,
+            updates: true,
+            ..Default::default()
+        });
+        let ids = items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Action { id, .. } | Item::Submenu { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            [
+                "status",
+                "fix",
+                "dictate",
+                "retry_clip",
+                "discard_clip",
+                "polish",
+                "models",
+                "microphones",
+                "languages",
+                "copy_last_transcription",
+                "nav_home",
+                "nav_settings",
+                "check_updates",
+                "quit"
+            ]
+        );
+        for removed in [
+            "live_preview",
+            "recording_mode",
+            "nav_file",
+            "recent",
+            "paste_last",
+            "nav_insights",
+            "nav_help",
+        ] {
+            assert!(!ids.contains(&removed));
+        }
+        assert!(matches!(
+            item(&items, "copy_last_transcription"),
+            Item::Action { enabled: true, .. }
+        ));
+        assert!(matches!(
+            item(&build(&Snapshot::default()), "copy_last_transcription"),
+            Item::Action { enabled: false, .. }
+        ));
     }
     #[test]
     fn recording_has_stop_and_clock_without_fix() {
