@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::commands::settings::{
-        get_supported_languages, normalize_final_text_language,
+        get_supported_languages, normalize_final_text_language, normalize_island_start_details,
         normalize_speech_language_for_model, normalize_stored_transcription_acceleration,
         resolve_transcription_complete_sound, task_uses_translate_to_english, Settings,
         FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT, TRANSCRIPTION_TASK_TRANSCRIBE,
@@ -66,7 +66,6 @@ mod tests {
             play_sound_on_paste_success: true,
             pill_indicator_mode: "when_recording".to_string(),
             island_start_details: "changed".into(),
-            island_start_details_shown: 0,
             pill_indicator_style: "full".to_string(),
             pill_indicator_position: "bottom-center".to_string(),
             pill_indicator_offset: 10,
@@ -160,7 +159,6 @@ mod tests {
             play_sound_on_paste_success: false,
             pill_indicator_mode: "never".to_string(),
             island_start_details: "changed".into(),
-            island_start_details_shown: 0,
             pill_indicator_style: "compact".to_string(),
             pill_indicator_position: "top-center".to_string(),
             pill_indicator_offset: 25,
@@ -575,6 +573,24 @@ mod tests {
         assert!(deserialized.play_sound_on_paste_success);
     }
 
+    #[test]
+    fn test_island_start_details_values_and_retired_counter() {
+        assert_eq!(Settings::default().island_start_details, "changed");
+        for value in ["always", "never", "changed"] {
+            assert_eq!(normalize_island_start_details(value), value);
+        }
+        assert_eq!(normalize_island_start_details("bogus"), "changed");
+        // A stored/IPC payload that still carries the retired counter is accepted and drops it.
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        assert!(value.get("island_start_details_shown").is_none());
+        value["island_start_details_shown"] = json!(3);
+        let settings: Settings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.island_start_details, "changed");
+        assert!(!serde_json::to_string(&settings)
+            .unwrap()
+            .contains("island_start_details_shown"));
+    }
+
     // ==================== Recording Mode Tests ====================
 
     #[test]
@@ -902,7 +918,6 @@ mod tests {
             play_sound_on_paste_success: false,
             pill_indicator_mode: "always".to_string(),
             island_start_details: "changed".into(),
-            island_start_details_shown: 0,
             pill_indicator_style: "compact".to_string(),
             pill_indicator_position: "top-left".to_string(),
             pill_indicator_offset: 42,

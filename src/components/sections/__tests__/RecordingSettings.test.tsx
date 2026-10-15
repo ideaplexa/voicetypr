@@ -322,6 +322,29 @@ describe("Recording pill behavior", () => {
     expect(mockUpdateSettings).toHaveBeenCalledWith({ pill_indicator_style: "full" });
   });
 
+  it("names the start details Compact, Smart and Expanded, with Smart as the default", () => {
+    render(<RecordingSettings />);
+    const group = screen.getByRole("group", { name: "Start details" });
+    expect(within(group).getAllByRole("button").map((button) => button.textContent)).toEqual(["Compact", "Smart", "Expanded"]);
+    expect(within(group).getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Expands briefly only when something changed/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Compact", "never"],
+    ["Expanded", "always"],
+  ] as const)("stores %s as island_start_details=%s", (label, value) => {
+    render(<RecordingSettings />);
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ island_start_details: value });
+  });
+
+  it("hides the start details when the pill is never shown", () => {
+    mockSettings.pill_indicator_mode = "never";
+    render(<RecordingSettings />);
+    expect(screen.queryByRole("group", { name: "Start details" })).not.toBeInTheDocument();
+  });
+
   it.each(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"] as const)("offers pill position %s", (position) => {
     render(<RecordingSettings />);
     expect(screen.getByTestId(`select-item-${position}`)).toBeInTheDocument();

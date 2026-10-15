@@ -28,8 +28,8 @@ it.each([
   const card=document.querySelector<HTMLElement>('.escape-hint-card')!;
   expect(card.hidden).toBe(false);
   expect(card.querySelector('.card-title')?.textContent).toBe(`Press Esc again to ${copy}`);
-  expect(card.querySelector('.drain i')).not.toBeNull();
-  expect(document.querySelector('.pill-surface .drain')).toBeNull();
+  expect(card.querySelector('.outline-clock path')).not.toBeNull();
+  expect(document.querySelector('.pill-surface .outline-clock path')).toBeNull(); // no countdown runs inside the island
   expect(document.querySelector(`[data-layer="${layer}"]`)?.getAttribute('aria-hidden')).toBe('false');
   const stack=document.querySelector<HTMLElement>('.feedback-stack')!;
   expect(stack.dataset.anchor).toBe(anchor);

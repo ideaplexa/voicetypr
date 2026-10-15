@@ -21,7 +21,7 @@ export class WaveBuffer {
     while (seconds + 1e-9 >= this.next) {
       this.times[this.head] = this.next; this.levels[this.head] = this.peak;
       const seed = Math.sin(Math.round(this.next / BAR_SECONDS) * 12.9898) * 43758.5453;
-      this.heights[this.head] = this.peak > .02 ? 14 * this.peak ** .7 * (.8 + .2 * (seed - Math.floor(seed))) : 0;
+      this.heights[this.head] = this.peak > .02 ? 14 * this.peak * (.8 + .2 * (seed - Math.floor(seed))) : 0;
       this.head = (this.head + 1) % CAPACITY; this.count = Math.min(CAPACITY, this.count + 1);
       this.peak = 0; this.next += BAR_SECONDS;
     }
@@ -33,15 +33,16 @@ export class WaveBuffer {
       g.fillStyle = '#fff';
       for (let i = 0; i < n; i++) {
         const lv = clamp(this.envelope * 1.6) * (.5 + .5 * Math.sin(Math.PI * (i + .5) / n));
-        const h = 2 + 14 * lv ** .7;
+        const h = 2 + 14 * lv;
         g.globalAlpha = alpha * (lv > .03 ? .93 : .34); g.beginPath(); g.roundRect(x0 + i * 8 - 1.2, 12 - h / 2, 2.4, h, 1.2); g.fill();
       }
     } else {
       if (!this.gradient || this.gradientWidth !== width) {
         this.gradientWidth = width; this.gradient = g.createLinearGradient(0, 0, Math.max(1, width), 0);
-        this.gradient.addColorStop(0, 'rgba(255,255,255,0)');
-        const fade = Math.min(1, 24 / Math.max(1, width));
-        this.gradient.addColorStop(fade, `rgba(255,255,255,${.45 + .55 * fade})`); this.gradient.addColorStop(1, '#fff');
+        // Both ends taper so the strip reads as centred between the icon and the timer; the right (newest) end
+        // tapers less so new sound still shows up at once.
+        const fl = Math.min(.25, 18 / Math.max(1, width)), fr = Math.min(.25, 10 / Math.max(1, width));
+        for (const [at, a] of [[0, 0], [fl, .55], [2 * fl, 1], [1 - 2 * fr, 1], [1 - fr, .6], [1, .15]] as const) this.gradient.addColorStop(at, `rgba(255,255,255,${a})`);
       }
       g.fillStyle = this.gradient;
       // One path and one fill per alpha class (voiced / silent) instead of one per bar; bars never overlap.

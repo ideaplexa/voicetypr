@@ -235,19 +235,8 @@ impl Snapshot {
         self.payload.changed_since_last = last.as_ref() != Some(&key);
         *last = Some(key);
         self.payload.generation = generation;
-        if let Ok(store) = app.store("settings") {
-            let shown = store
-                .get("island_start_details_shown")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0)
-                .min(5);
-            self.payload.show_start_card =
-                show_start_card(&self.details, shown, self.payload.changed_since_last);
-            if shown < 5 {
-                store.set("island_start_details_shown", serde_json::json!(shown + 1));
-                let _ = store.save();
-            }
-        }
+        self.payload.show_start_card =
+            show_start_card(&self.details, self.payload.changed_since_last);
         for (key, value) in [
             ("mode", serde_json::json!(self.payload.mode)),
             (
@@ -335,11 +324,13 @@ fn style(preset: EnhancementPreset) -> Option<&'static str> {
         EnhancementPreset::Code => Some("code"),
     }
 }
-pub fn show_start_card(setting: &str, shown: u64, changed: bool) -> bool {
+/// Compact ("never") never expands, Expanded ("always") always does, Smart ("changed", the
+/// default) only when the style, mic or engine differs from the last take.
+pub fn show_start_card(setting: &str, changed: bool) -> bool {
     match setting {
         "always" => true,
         "never" => false,
-        _ => shown < 5 || changed,
+        _ => changed,
     }
 }
 pub fn mic_display_name(name: &str) -> String {
@@ -491,13 +482,14 @@ mod tests {
     }
     #[test]
     fn details_policy_and_display_names() {
-        for count in 0..5 {
-            assert!(show_start_card("changed", count, false));
-        }
-        assert!(!show_start_card("changed", 5, false));
-        assert!(show_start_card("changed", 5, true));
-        assert!(show_start_card("always", 5, false));
-        assert!(!show_start_card("never", 0, true));
+        // Smart reacts to changes only; there is no "first few dictations" rule.
+        assert!(!show_start_card("changed", false));
+        assert!(show_start_card("changed", true));
+        // Unknown stored values behave like the default.
+        assert!(!show_start_card("bogus", false));
+        assert!(show_start_card("bogus", true));
+        assert!(show_start_card("always", false));
+        assert!(!show_start_card("never", true));
         assert_eq!(
             mic_display_name("Microphone Array (Intel® Smart Sound)"),
             "Microphone Array"

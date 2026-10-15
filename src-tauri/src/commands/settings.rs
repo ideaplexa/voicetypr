@@ -117,8 +117,6 @@ pub struct Settings {
     pub island_start_details: String,
     #[serde(default = "default_telemetry_enabled")]
     pub telemetry_enabled: bool,
-    #[serde(default)]
-    pub island_start_details_shown: u32,
     // Pill indicator screen position
     pub pill_indicator_position: String,
     // Pill indicator offset from screen edge in pixels (10-50)
@@ -176,7 +174,6 @@ impl Default for Settings {
             pill_indicator_style: default_pill_indicator_style(),
             island_start_details: default_island_start_details(),
             telemetry_enabled: true,
-            island_start_details_shown: 0,
             pill_indicator_position: "bottom-center".to_string(), // Default to bottom center of screen
             pill_indicator_offset: DEFAULT_INDICATOR_OFFSET,
             pause_media_during_recording: false, // Default to off; user opts in
@@ -648,11 +645,6 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
                 .unwrap_or("changed"),
         )
         .to_owned(),
-        island_start_details_shown: store
-            .get("island_start_details_shown")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0)
-            .min(5) as u32,
         pill_indicator_style: resolve_pill_indicator_style(
             store
                 .get("pill_indicator_style")
@@ -926,13 +918,8 @@ pub async fn save_settings(
             &settings.island_start_details
         )),
     );
-    // The start counter is backend-owned; a stale settings form must not reset it.
-    let shown = store
-        .get("island_start_details_shown")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0)
-        .min(5);
-    store.set("island_start_details_shown", json!(shown));
+    // Retired "first 5 dictations" counter (Smart now reacts to changes only).
+    store.delete("island_start_details_shown");
     store.set(
         "pill_indicator_style",
         json!(resolve_pill_indicator_style(Some(

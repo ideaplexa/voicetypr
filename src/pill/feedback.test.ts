@@ -213,7 +213,29 @@ it('keeps the Escape deadline and drain when recording hands off to processing',
   h.emit('escape-hint',{generation:1,phase:'recording'}); await h.settle(1000);
   h.emit('transcription-started'); await h.settle(200);
   expect(h.get('.escape-hint-card .card-title').textContent).toBe('Press Esc again to discard');
-  expect(h.get('.escape-hint-card .drain i').style.animationDuration).toBe('1000ms');
-  expect(h.get('.escape-hint-card .drain i').style.getPropertyValue('--drain-start')).toBe('0.5');
+  const outline=h.get('.escape-hint-card .outline-clock path');
+  expect(outline.style.animationDuration).toBe('1000ms');
+  expect(outline.style.getPropertyValue('--clock-from')).toBe('0.5');
+  expect(h.root.querySelector('.drain')).toBeNull();
   await h.settle(1100); expect(h.get('.escape-hint-card')).toBeNull(); h.destroy();
+});
+
+describe('timed card outline countdown',()=>{
+  it('pasted: the card outline drains over 2.4 s, pauses while hovered and restarts on a new outcome',async()=>{
+    const h=await mount();
+    h.emit('paste-outcome',{outcome:'pasted',words:38,polished:false});await h.settle(100);
+    const path=()=>h.get('.done .outline-clock path');
+    expect(path().style.animationDuration).toBe('2400ms');expect(path().style.animationPlayState).toBe('running');
+    expect(h.root.querySelector('.hold')).toBeNull();
+    h.emit('pill-pointer',{inside:true});expect(path().style.animationPlayState).toBe('paused');
+    h.emit('pill-pointer',{inside:false});expect(path().style.animationPlayState).toBe('running');
+    const before=path();h.emit('transcription-started');h.emit('paste-outcome',{outcome:'pasted',words:3,polished:false});
+    expect(path()).not.toBe(before);
+  });
+  it('sizes the outline to the island surface',async()=>{
+    const h=await mount();h.emit('paste-outcome',{outcome:'pasted',words:2,polished:false});await h.settle(300);
+    const svg=h.get('.done .outline-clock');
+    expect(svg.getAttribute('width')).toBe('234');expect(svg.getAttribute('height')).toBe('32');
+    expect(svg.querySelector('path')!.getAttribute('d')).toMatch(/^M117 1H/);
+  });
 });

@@ -14,6 +14,8 @@ import { Spring, clamp } from '@/pill/spring';
 import { AppIcon } from '@/pill/app-icon';
 import { Badge } from '@/pill/badge';
 import { Glyph } from '@/pill/glyph';
+import { OutlineClock } from '@/pill/outline-clock';
+import { groupLeft, waveZone, ZONE } from '@/pill/zones';
 import { IslandMachine } from '@/pill/island';
 import { createPerfProbe, type PerfProbe, type PerfSink } from '@/pill/perf';
 import { copiedTitle, elapsed, contextMicName, shortCopy, styleName } from '@/pill/copy';
@@ -68,11 +70,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let buttonRects: Array<{ button: HTMLButtonElement; rect: DOMRect }> | undefined, lastLayoutKey = '';
   let closeHold = 0;
   let waveSeconds = 0, cancelPending = false, stopPending = false;
-  let enabledStream = false, displayedSeconds = -1;
+  let enabledStream = false, displayedSeconds = -1, timerText = '0:00';
   let badgeFromX = 25, badgeFromY = 56, shortcut = deps.mac ? 'Alt+Space' : 'Ctrl+Space';
   const timerEl = dom.get<HTMLElement>('.pill-timer'), startTimeEl = dom.get<HTMLElement>('.start-time'), workTimeEl = dom.get<HTMLElement>('.work-time');
   const timerElements = [timerEl, startTimeEl, workTimeEl];
   const rowEl = dom.get<HTMLElement>('.listening-row'), ctlEl = dom.get<HTMLElement>('.ctl');
+  // The Pasted card's own outline is its 2.4 s countdown (it pauses while hovered).
+  const pastedClock = new OutlineClock('sage'); dom.get('.done').append(pastedClock.el);
   const rowLayers = ['row', 'work', 'note'].map(name => layers.entries[name as 'row' | 'work' | 'note'].el);
   const timers = () => { for (const id of [startTimer, feedbackTimer, hoverTimer, copiedTimer, finishingTimer, pickTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hoverTimer = copiedTimer = finishingTimer = pickTimer = undefined; finishing = false; };
   const text = (selector: string, value: string) => { const el = dom.get<HTMLElement>(selector); if (el.textContent !== value) el.textContent = value; if (el.matches('.done-label,.note-text')) el.title = value; };
@@ -101,8 +105,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     // While starting the clock waits at 0:00; the bars idle on the same time base.
     const seconds = machine.pending ? 0 : Math.floor(machine.recording ? waveSeconds : machine.frozenSeconds);
     if (seconds === displayedSeconds) return; displayedSeconds = seconds;
-    const t = elapsed(seconds);
+    const t = elapsed(seconds); timerText = t;
     for (const el of timerElements) if (el.textContent !== t) el.textContent = t;
+    // A longer time (10:00) narrows the wave's zone so the gap to the timer stays the same.
+    if (machine.recording && machine.state !== 'start') { const w = waveZone(machine.width, t).width; if (GW.to !== w) { GW.to = w; if (reduced) GW.snap(); } }
   };
   // ---- Geometry (plan 082 F6) ----
   // `layout()` runs on state change only: it sizes the fixed target box that holds the content and places
@@ -145,6 +151,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     icon.borderRadius = `${Math.max(3, iconSide * (deps.mac ? .28 : .22))}px`;
     dom.canvas.style.left = `${targetPose.gx}px`; dom.canvas.style.top = `${glyphTop(targetPose)}px`;
     dom.canvas.style.width = '260px'; dom.canvas.style.height = '24px';
+    pastedClock.size(targetPose.w, targetPose.h, R.to);
     rowEl.style.width = `${Math.max(0, W.to - 2)}px`; rowEl.style.paddingRight = `${12 + HC.to}px`;
     ctlEl.style.left = `${Math.max(0, W.to - HC.to - 14)}px`; ctlEl.inert = HC.to === 0;
     const edge = rowEdge(targetPose);
@@ -242,8 +249,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     IS.to = rest ? 0 : state === 'start' ? 28 : 18;
     IX.to = rest ? 5 : state === 'start' ? 28 : 21;
     IY.to = rest ? 5 : 16;
-    GX.to = state === 'start' ? 52 : machine.recording ? 42 : 34; GY.to = 4;
-    GW.to = machine.recording ? machine.width - (state === 'start' ? 105 : 93) : 22;
+    const zone = waveZone(machine.width, timerText);
+    GX.to = state === 'start' ? 52 : machine.recording ? zone.x : ZONE.glyphMin; GY.to = 4;
+    GW.to = machine.recording ? state === 'start' ? machine.width - 105 : zone.width : 22;
     layers.target(pick ? ['pick'] : machine.layers); glyph.target(state, true);
     badge.target(machine.context, machine.recording && state !== 'start' || machine.processing, fromStart);
     if (machine.committed || machine.tentative || layers.entries.words.alpha === 0) words.update(machine.committed, machine.tentative, reduced);
@@ -292,6 +300,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       dom.get('.acts').hidden = state === 'error';
       // Measure after constraining width so wrapped subtext and actions grow the card.
       H.to = notice.scrollHeight ? notice.scrollHeight + 2 : state === 'no_permission' ? 102 : machine.height;
+    }
+    // Terminal cards: glyph, title and count sit together, centred between the app icon and the right edge.
+    if (state === 'pasted' || state === 'copied' || state === 'no_permission' || state === 'error') {
+      const pasted = state === 'pasted', label = inlineWidth(pasted ? '.done-label' : '.notice-title'), count = inlineWidth(pasted ? '.done-count' : '.notice-count');
+      if (label) {
+        const left = groupLeft(W.to - ZONE.border, ZONE.glyph + label + (count ? (pasted ? 5 : 20) + count : 0));
+        GX.to = left; put(layers.entries[pasted ? 'done' : 'notice'].el, '--grp-x', `${left + ZONE.glyph}px`);
+      }
     }
     if (state === 'peek') { W.to = Math.min(438, Math.max(378, dom.get<HTMLElement>('.peek-chips').scrollWidth + 22)); H.to = 70; }
     if (pick) { W.to = pick.width; H.to = pick.height; }
@@ -411,7 +427,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (machine.state === 'pasted') {
       if (feedbackTimer !== undefined) { deps.clearTimeout(feedbackTimer);feedbackTimer=undefined;pastedLeft=Math.max(0,pastedLeft-(now-pastedSince)); }
       if (!inside) { pastedSince=now;feedbackTimer=deps.setTimeout(rest,pastedLeft); }
-      dom.get<HTMLElement>('.hold i').style.animationPlayState=inside ? 'paused' : 'running';
+      pastedClock.pause(inside);
       sync();
     }
     if (machine.recording) sync();
@@ -589,7 +605,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       pick = undefined;
       polished = value.polished === true; pastedLeft=2400;pastedSince=performance.now();text('.done-label','Pasted');
       timers(); announce(value.outcome === 'pasted' ? `Pasted · ${value.words} words` : value.outcome === 'no_permission' ? 'Copied — allow Accessibility to paste automatically' : copiedTitle(deps.mac));
-      if (value.outcome === 'pasted') dom.get<HTMLElement>('.hold').replaceChildren(document.createElement('i'));
+      if (value.outcome === 'pasted') pastedClock.start(2400);
       if (value.outcome !== 'pasted') copiedTimer=deps.setTimeout(() => {
         copiedTimer=undefined;
         stack.push({key:value.outcome,title: value.outcome === 'no_permission' ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac),sub:value.outcome === 'no_permission' ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : `${machine.context.app.name || 'The app'} didn't accept the paste`,tone:'amber',glyph:'clipboard',duration:null,actions:value.outcome === 'no_permission' ? [{label:deps.mac ? 'Open System Settings' : 'Open Privacy settings',call:{command:'island_action',action:'open_accessibility'}}] : []},dom.surface.getBoundingClientRect(),false);

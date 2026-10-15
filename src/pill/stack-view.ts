@@ -1,10 +1,11 @@
 import { FeedbackStack, type StackItem } from '@/pill/stack';
 import { Spring, clamp } from '@/pill/spring';
 import { icon } from '@/pill/icons';
+import { OutlineClock } from '@/pill/outline-clock';
 import type { CardCommand, FeedbackCard } from '@/pill/feedback';
 import type { PillGeometry } from '@/pill-geometry';
 type Rect = {x:number;y:number;width:number;height:number};
-interface View { el: HTMLElement; w: Spring; h: Spring; y: Spring; scale: Spring; alpha: number; targetAlpha: number; key: string }
+interface View { el: HTMLElement; w: Spring; h: Spring; y: Spring; scale: Spring; alpha: number; targetAlpha: number; key: string; clock?: OutlineClock }
 export class StackView {
   readonly stack = new FeedbackStack();
   private views = new Map<string,View>();
@@ -43,7 +44,7 @@ export class StackView {
     const delay=this.stack.nextDelay;
     this.timer=delay===null ? undefined : this.deps.setTimeout(()=>{this.timer=undefined;this.stack.advance(performance.now());this.sync();this.schedule();this.deps.changed();this.deps.wake();},Math.max(1,delay));
   }
-  private fill(el:HTMLElement,item:StackItem) {
+  private fill(el:HTMLElement,item:StackItem): OutlineClock | undefined {
     el.className=`feedback-card ${item.tone}`;el.dataset.key=item.key;
     const glyph=document.createElement('span');glyph.className='card-glyph';glyph.innerHTML=icon(item.glyph ?? (item.key==='mic_dropped' || item.key==='mic_silent' ? 'mic-off' : item.key==='gpu_fallback' ? 'cpu' : item.key==='polish_skipped' ? 'star' : item.tone==='neutral' ? 'clock' : 'bang'),14);
     const txt=document.createElement('span');txt.className='card-text';
@@ -64,11 +65,11 @@ export class StackView {
     }
     if(item.key.startsWith('escape_hint:')) {
       el.classList.add('escape-hint-card');
-      const drain=document.createElement('span');drain.className='drain';
-      const bar=document.createElement('i'),remaining=Math.max(0,(item.expiresAt ?? performance.now()+2000)-performance.now());
-      bar.style.animationDuration=`${remaining}ms`;bar.style.setProperty('--drain-start',String(Math.min(1,remaining/2000)));
-      drain.append(bar);el.append(drain);
+      // The card's own outline is the 2 s countdown; a handed-off card starts partly drained.
+      const clock=new OutlineClock(item.tone),remaining=Math.max(0,(item.expiresAt ?? performance.now()+2000)-performance.now());
+      clock.start(2000,remaining);el.append(clock.el);return clock;
     }
+    return undefined;
   }
   private sync() {
     const signature=JSON.stringify(this.stack.items.map(i=>[i.key,i.count,i.title,i.sub,i.expiresAt]));
@@ -77,7 +78,7 @@ export class StackView {
       let v=this.views.get(item.key);
       if(!v) {const el=document.createElement('div');this.container.append(el);v={el,w:new Spring(300),h:new Spring(54),y:new Spring(8),scale:new Spring(.96),alpha:0,targetAlpha:1,key:item.key};this.views.set(item.key,v);}
       const content=JSON.stringify([item.count,item.title,item.sub,item.expiresAt]);
-      if(v.el.dataset.content!==content) {this.fill(v.el,item);v.el.dataset.content=content;}
+      if(v.el.dataset.content!==content) {v.clock=this.fill(v.el,item);v.el.dataset.content=content;}
     }
     this.more.textContent=`+${this.stack.more}`;this.more.hidden=!this.stack.more;
   }
@@ -113,6 +114,7 @@ export class StackView {
       v.el.hidden=depth>2 || v.alpha===0;v.el.inert=!displayed || depth!==0;
       v.el.classList.toggle('back',depth>0);v.el.style.zIndex=String(alive ? 3-depth : 4);
       v.el.style.width=`${Math.max(12,v.w.x)}px`;v.el.style.height=`${Math.max(12,v.h.x)}px`;
+      v.clock?.size(Math.max(12,v.w.x),Math.max(12,v.h.x),20);
       v.el.style.opacity=String(v.alpha);v.el.style.transform=`translateY(${v.y.x}px) scale(${v.scale.x})`;
       v.el.style.transformOrigin=top ? '50% 0' : '50% 100%';
       if(!alive && v.alpha===0){v.el.remove();this.views.delete(key);}

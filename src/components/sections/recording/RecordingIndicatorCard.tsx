@@ -1,5 +1,5 @@
 import { IslandPreview } from "@/components/sections/recording/IslandPreview";
-import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
+import { Segmented, SettingsCard, SettingRow } from "@/components/settings/settings-ui";
 import {
   Select,
   SelectContent,
@@ -9,11 +9,20 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/contexts/SettingsContext";
-import { DEFAULT_PILL_INDICATOR_MODE, type PillIndicatorMode, type PillIndicatorPosition, type PillIndicatorStyle } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type PillIndicatorMode, type PillIndicatorPosition, type PillIndicatorStyle, type AppSettings } from "@/types";
+
+type StartDetails = NonNullable<AppSettings["island_start_details"]>;
+// Stored values stay never / changed / always; the labels say what the island does.
+const START_DETAILS: Array<{ value: StartDetails; label: string; description: string }> = [
+  { value: "never", label: "Compact", description: "Always the slim island. Never expands." },
+  { value: "changed", label: "Smart", description: "Expands briefly only when something changed (app style, mic or engine)." },
+  { value: "always", label: "Expanded", description: "Always shows app, style, mic and engine when you start." },
+];
 
 export function RecordingIndicatorCard() {
   const { settings, updateSettings } = useSettings();
   if (!settings) return null;
+  const startDetails: StartDetails = settings.island_start_details ?? "changed";
   return (
     <SettingsCard
       title="Recording pill"
@@ -131,6 +140,20 @@ export function RecordingIndicatorCard() {
           ) : null}
         </div>
       </div>
+      {settings.pill_indicator_mode !== "never" ? (
+        <SettingRow
+          title="Start details"
+          description={START_DETAILS.find((option) => option.value === startDetails)?.description}
+          control={
+            <Segmented
+              label="Start details"
+              value={startDetails}
+              onValueChange={(value) => void updateSettings({ island_start_details: value as StartDetails })}
+              options={START_DETAILS}
+            />
+          }
+        />
+      ) : null}
       {settings.pill_indicator_mode !== "never" ? (
         <SettingRow
           title="Edge offset"

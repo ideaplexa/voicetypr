@@ -65,11 +65,21 @@ button { font:inherit }
 .result-row { width:100%;padding:0 14px 0 60px }
 .done-label { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis }
 .done-count { margin-left:auto;flex:none }
-.drain { position:absolute;left:38px;right:12px;bottom:4px;height:2px;border-radius:1px;background:rgba(255,255,255,.14);overflow:hidden }
-.drain i { display:block;height:100%;background:rgba(255,255,255,.72);animation:hint-drain 2s linear forwards;transform-origin:left }
-@keyframes hint-drain { from { transform:scaleX(var(--drain-start,1)) } to { transform:scaleX(0) } }
-.hold { position:absolute;left:16px;right:16px;bottom:4px;height:2px;background:rgba(255,255,255,.05);overflow:hidden }
-.hold i { display:block;height:100%;background:rgba(255,255,255,.2);animation:hint-drain 2.4s linear forwards;transform-origin:left }
+/* Terminal cards (Pasted, Copied, ...): glyph + text + count are one group, centred between the app icon and the
+   right edge. The renderer sets --grp-x (the text's left edge) from the measured group; 60px is the old left-hug. */
+.done .result-row,.notice .result-row { padding-left:var(--grp-x,60px) }
+.done .result-row { gap:5px }
+.done .done-label,.notice .notice-title { flex:0 1 auto }
+.done .done-count,.notice .notice-count { margin-left:0 }
+/* A timed card's own outline is its countdown (plan 082 G1): one rounded stroke that drains over the lease. The
+   path is sized in JS (outline-clock.ts) and the CSS animation does the rest. */
+.outline-clock { position:absolute;left:0;top:0;pointer-events:none;overflow:visible;--clock:rgba(255,255,255,.72) }
+.outline-clock.amber { --clock:var(--amber) }
+.outline-clock.red { --clock:#F28B7A }
+.outline-clock.sage { --clock:var(--sage) }
+.outline-clock path { fill:none;stroke:var(--clock);stroke-width:2;stroke-dasharray:1 1;stroke-dashoffset:0;animation:outline-drain 2s linear forwards }
+@keyframes outline-drain { from { stroke-dashoffset:var(--clock-from,0) } to { stroke-dashoffset:1 } }
+.feedback-card.back .outline-clock { visibility:hidden }
 .notice { top:0;bottom:auto;flex-direction:column;align-items:stretch }
 .acts { display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:0 12px 10px }
 .notice-sub { font-size:11.5px;white-space:normal;text-wrap:pretty;flex:1 1 auto;min-width:0 }
@@ -86,11 +96,10 @@ button { font:inherit }
 .pill-root[data-pill-position^="top-"] .words-layer { top:32px }
 .pill-root[data-pill-position^="top-"] .start,.pill-root[data-pill-position^="top-"] .notice { top:auto;bottom:0;flex-direction:column-reverse }
 .pill-root[data-pill-position^="top-"] .peek { flex-direction:column-reverse;padding:0 10px 8px }
-.pill-root[data-pill-position^="top-"] .drain { bottom:auto;top:4px }
 .pill-root[data-pill-position^="top-"] .acts { padding:10px 12px 0 }
 .pill-announcement { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);pointer-events:none }
 button:focus-visible { outline:2px solid var(--sage);outline-offset:-2px }
-@media(prefers-reduced-motion:reduce) { .core,.hold i,.drain i { animation:none } .pill-surface,.chip { transition:none } }
+@media(prefers-reduced-motion:reduce) { .core,.outline-clock path { animation:none } .pill-surface,.chip { transition:none } }
 .pill-surface.amber { box-shadow:inset 0 0 0 1px rgba(242,179,91,.66) }
 .pill-surface.red { box-shadow:inset 0 0 0 1px rgba(242,139,122,.66);background:#24151A }
 .notice-title { flex:1;min-width:0 }
@@ -173,4 +182,3 @@ button:focus-visible { outline:2px solid var(--sage);outline-offset:-2px }
 .quick-label { min-width:0;overflow:hidden;text-overflow:ellipsis }
 .quick-icon,.quick-chevron { display:inline-flex;flex:none }
 
-.escape-hint-card .drain { left:12px;right:12px;bottom:2px;top:auto }
