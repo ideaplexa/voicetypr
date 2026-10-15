@@ -104,11 +104,6 @@ const PROVIDER_UI_METADATA: Record<
     apiKeyUrl: "",
     installHint: "Install oh-my-pi (omp) and sign in.",
   },
-  cursor: {
-    color: "text-foreground",
-    apiKeyUrl: "",
-    installHint: "Install the Cursor Agent CLI (cursor-agent), then run `agent login`.",
-  },
 };
 
 export function toProviderConfig(provider: AiProvider): AIProviderConfig {

@@ -80,7 +80,6 @@ struct Prepared {
     stdout: Option<tokio::task::JoinHandle<Result<String, MappedAiProviderError>>>,
     stderr: Option<BoundedReadTask>,
     cwd: Option<TempDir>,
-    isolation: Option<RuntimeIsolation>,
 }
 
 impl HotSpare {
@@ -203,7 +202,6 @@ impl Prepared {
         let cwd = TempDir::new().map_err(|error| map_process_failure(ProcessFailure::Io(error)))?;
         let mut command = Command::new(binary_path);
         command.args(&stream_argv);
-        let isolation = apply_runtime_isolation(&CLAUDE_CODE_SPEC, &mut command)?;
         command.current_dir(cwd.path());
         command.env("PATH", resolved_path(false).await);
         command.env("ZSH_TMUX_AUTOSTART", "false");
@@ -230,7 +228,6 @@ impl Prepared {
             stdout: None,
             stderr: None,
             cwd: Some(cwd),
-            isolation: Some(isolation),
         };
         let child = spare.child.as_mut().unwrap();
         let stdout = child.inner().stdout.take().ok_or_else(bad_response)?;
@@ -307,11 +304,10 @@ impl Drop for Prepared {
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
             let cwd = self.cwd.take();
-            let isolation = self.isolation.take();
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     let _ = terminate_process_group(&mut child).await;
-                    drop((cwd, isolation));
+                    drop(cwd);
                 });
             }
         }

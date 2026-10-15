@@ -159,21 +159,6 @@ const providerModels = vi.hoisted(
         cliDefault: true,
       },
     ],
-    droid: [
-      { id: "", name: "Default", recommended: true, cliDefault: true },
-      {
-        id: "claude-opus-5",
-        name: "Opus 5",
-        recommended: false,
-        reasoning: true,
-      },
-      {
-        id: "gpt-5.6-sol",
-        name: "GPT-5.6 Sol",
-        recommended: false,
-        reasoning: true,
-      },
-    ],
   }),
 );
 const modelDiscovery = vi.hoisted(() => ({
@@ -276,29 +261,11 @@ const providerListResponse = [
     status: "production",
     supportsReasoning: false,
   },
-  {
-    id: "droid",
-    name: "Droid",
-    status: "production",
-    supportsReasoning: false,
-  },
   { id: "grok", name: "Grok", status: "production", supportsReasoning: false },
   {
     id: "opencode",
     name: "OpenCode",
     status: "production",
-    supportsReasoning: false,
-  },
-  {
-    id: "cline",
-    name: "Cline",
-    status: "production",
-    supportsReasoning: false,
-  },
-  {
-    id: "cursor",
-    name: "Cursor Agent",
-    status: "experimental",
     supportsReasoning: false,
   },
 ];
@@ -307,11 +274,8 @@ const localAgentProviderIds = new Set([
   "pi",
   "omp",
   "codex",
-  "droid",
   "grok",
   "opencode",
-  "cline",
-  "cursor",
 ]);
 
 const isAgentCliProviderForTest = (providerId: string) => localAgentProviderIds.has(providerId);
@@ -493,7 +457,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(9);
+      expect(probeCalls).toHaveLength(6);
       expect(eventListeners.has("ai-ready")).toBe(true);
     });
 
@@ -509,7 +473,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(9);
+      expect(probeCalls).toHaveLength(6);
     });
   });
 
@@ -863,7 +827,7 @@ describe("EnhancementsSection", () => {
         name: "Claude Code",
       }),
     ).toBeInTheDocument();
-    for (const providerName of ["Codex", "Droid", "Grok", "OpenCode", "Cline"]) {
+    for (const providerName of ["Codex", "Grok", "OpenCode"]) {
       expect(
         within(providersPanel).getByRole("heading", { name: providerName }),
       ).toBeInTheDocument();
@@ -1949,32 +1913,6 @@ describe("EnhancementsSection", () => {
     ).toHaveTextContent("Medium");
   });
 
-  it("shows experimental Cursor Agent without reasoning or fast controls", async () => {
-    agentCliProbeResponse = {
-      state: "ready",
-      reasoningLevels: [],
-      supportsFastMode: false,
-    };
-    aiSettingsResponse = {
-      ...baseAISettings,
-      provider: "cursor",
-      model: "",
-      modelsByProvider: { cursor: "" },
-    };
-    renderWithProviders();
-    const providersPanel = await getProviderSetupPanel();
-    expect(await within(providersPanel).findByRole("button", {
-      name: "Model for Cursor Agent",
-    })).toBeInTheDocument();
-    expect(within(providersPanel).getAllByText("Experimental").length).toBeGreaterThan(0);
-    expect(within(providersPanel).queryByRole("combobox", {
-      name: /(?:Thinking|Effort) for Cursor Agent/,
-    })).not.toBeInTheDocument();
-    expect(within(providersPanel).queryByRole("switch", {
-      name: "Fast mode for Cursor Agent",
-    })).not.toBeInTheDocument();
-  });
-
   it("discovers local-agent models when its picker is opened", async () => {
     agentCliProbeResponse = {
       state: "ready",
@@ -1998,59 +1936,59 @@ describe("EnhancementsSection", () => {
     });
   });
 
-  it("shows discovered Droid models beside its current default", async () => {
+  it("shows discovered pi models beside its current default", async () => {
     agentCliProbeResponse = {
       state: "ready",
-      reasoningLevels: ["low", "medium"],
+      reasoningLevels: ["off", "low", "medium"],
     };
     const user = userEvent.setup();
     renderWithProviders();
     const providersPanel = await getProviderSetupPanel();
     await user.click(within(providersPanel).getByRole("tab", { name: "Local Agents" }));
-    await user.click(await within(providersPanel).findByRole("button", { name: "Select Droid" }));
+    await user.click(await within(providersPanel).findByRole("button", { name: "Select pi" }));
 
-    const droidModel = await within(providersPanel).findByRole("button", {
-      name: "Model for Droid",
+    const piModel = await within(providersPanel).findByRole("button", {
+      name: "Model for pi",
     });
-    expect(droidModel).toHaveTextContent("Default");
-    await user.click(droidModel);
+    expect(piModel).toHaveTextContent("Default");
+    await user.click(piModel);
     const modelDialog = await screen.findByRole("dialog", {
-      name: "Choose a Droid model",
+      name: "Choose a pi model",
     });
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Default.*droid\/default/i,
+        name: /^Default.*pi\/default/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Opus 5.*droid\/claude-opus-5.*Reasoning/i,
+        name: /^Claude Sonnet 5\.5.*anthropic\/claude-sonnet-5-5/i,
       }),
     ).toBeInTheDocument();
     await user.type(
-      within(modelDialog).getByRole("textbox", { name: "Search Droid models" }),
-      "gpt-5.6",
+      within(modelDialog).getByRole("textbox", { name: "Search pi models" }),
+      "luna",
     );
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-5.6 Sol.*droid\/gpt-5.6-sol.*Reasoning/i,
+        name: /^GPT-6 Luna.*openai\/gpt-6-luna/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).queryByRole("button", {
-        name: /^Opus 5.*Reasoning/i,
+        name: /^Claude Sonnet 5\.5/i,
       }),
     ).not.toBeInTheDocument();
     await user.click(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-5.6 Sol.*droid\/gpt-5.6-sol.*Reasoning/i,
+        name: /^GPT-6 Luna.*openai\/gpt-6-luna/i,
       }),
     );
 
     expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
       enabled: false,
-      provider: "droid",
-      model: "gpt-5.6-sol",
+      provider: "pi",
+      model: "openai/gpt-6-luna",
     });
   });
 

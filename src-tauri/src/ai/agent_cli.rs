@@ -35,8 +35,8 @@ pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::providers::{
-    PROVIDER_CLAUDE_CODE, PROVIDER_CLINE, PROVIDER_CODEX, PROVIDER_CURSOR, PROVIDER_DROID,
-    PROVIDER_GROK, PROVIDER_OMP, PROVIDER_OPENCODE, PROVIDER_PI,
+    PROVIDER_CLAUDE_CODE, PROVIDER_CODEX, PROVIDER_GROK, PROVIDER_OMP, PROVIDER_OPENCODE,
+    PROVIDER_PI,
 };
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
@@ -74,32 +74,26 @@ const MAX_CLI_ERROR_CHARS: usize = 200;
 
 const OPENCODE_ISOLATION_CONFIG: &str = r#"{"permission":"deny"}"#;
 
-pub(crate) struct AgentCliSpec {
+struct AgentCliSpec {
     #[allow(dead_code)]
-    pub(crate) provider_id: &'static str,
-    /// Primary binary resolved on PATH.
-    pub(crate) binary: &'static str,
-    /// Alternate binary names tried in order when the primary is absent
-    /// (e.g. Cursor ships `cursor-agent` and an `agent` alias).
-    pub(crate) binary_aliases: &'static [&'static str],
-    pub(crate) help_argv: &'static [&'static str],
-    pub(crate) cold_argv_prefix: &'static [&'static str],
-    pub(crate) cold_argv_suffix: &'static [&'static str],
-    pub(crate) required_isolation_args: &'static [&'static str],
-    pub(crate) required_capability_flags: &'static [&'static str],
-    pub(crate) default_model: Option<&'static str>,
-    pub(crate) model_flag: Option<&'static str>,
-    pub(crate) reasoning: ReasoningPolicy,
-    pub(crate) system_prompt: SystemPromptPolicy,
-    pub(crate) input_mode: InputMode,
-    pub(crate) output: OutputParser,
-    pub(crate) static_env: &'static [(&'static str, &'static str)],
+    provider_id: &'static str,
+    binary: &'static str,
+    help_argv: &'static [&'static str],
+    cold_argv_prefix: &'static [&'static str],
+    cold_argv_suffix: &'static [&'static str],
+    required_isolation_args: &'static [&'static str],
+    required_capability_flags: &'static [&'static str],
+    default_model: Option<&'static str>,
+    model_flag: Option<&'static str>,
+    reasoning: ReasoningPolicy,
+    system_prompt: SystemPromptPolicy,
+    input_mode: InputMode,
+    output: OutputParser,
+    static_env: &'static [(&'static str, &'static str)],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ReasoningPolicy {
-    /// The CLI documents no reasoning/thinking level control.
-    None,
+enum ReasoningPolicy {
     Flag {
         flag: &'static str,
         default: &'static str,
@@ -110,32 +104,30 @@ pub(crate) enum ReasoningPolicy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SystemPromptPolicy {
+enum SystemPromptPolicy {
     None,
     Flag(&'static str),
     CodexConfig,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InputMode {
+enum InputMode {
     Stdin,
     PositionalArg,
     FlagValue(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OutputParser {
-    /// `{type:"result", is_error, result}` — shared by claude's
-    /// `--output-format json` and cursor-agent's identical contract.
+enum OutputParser {
+    /// `{type:"result", is_error, result}` from claude's `--output-format json`.
     ResultJson,
-    CursorJson,
     CodexJsonl,
     PiJsonl,
     PlainText,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct ClaudeCapabilities {
+struct ClaudeCapabilities {
     safe_mode: bool,
     effort: bool,
     disable_slash_commands: bool,
@@ -144,7 +136,6 @@ pub(super) struct ClaudeCapabilities {
 const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_CLAUDE_CODE,
     binary: "claude",
-    binary_aliases: &[],
     help_argv: &["--help"],
     cold_argv_prefix: &["-p"],
     cold_argv_suffix: &["--output-format", "json"],
@@ -168,7 +159,6 @@ const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
 const PI_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_PI,
     binary: "pi",
-    binary_aliases: &[],
     help_argv: &["--help"],
     cold_argv_prefix: &["-p"],
     cold_argv_suffix: &[],
@@ -205,7 +195,6 @@ const PI_SPEC: AgentCliSpec = AgentCliSpec {
 const OMP_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_OMP,
     binary: "omp",
-    binary_aliases: &[],
     help_argv: &["--help"],
     cold_argv_prefix: &["-p"],
     cold_argv_suffix: &[],
@@ -244,7 +233,6 @@ const OMP_SPEC: AgentCliSpec = AgentCliSpec {
 const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_CODEX,
     binary: "codex",
-    binary_aliases: &[],
     help_argv: &["exec", "--help"],
     cold_argv_prefix: &["exec"],
     cold_argv_suffix: &[],
@@ -295,36 +283,9 @@ const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[],
 };
 
-const DROID_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_DROID,
-    binary: "droid",
-    binary_aliases: &[],
-    help_argv: &["exec", "--help"],
-    cold_argv_prefix: &["exec", "--output-format", "text"],
-    cold_argv_suffix: &[],
-    required_isolation_args: &["--restrict-tools", "TodoWrite", "--disable-builtin-skills"],
-    required_capability_flags: &[
-        "--restrict-tools",
-        "--disable-builtin-skills",
-        "--output-format",
-    ],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--reasoning-effort",
-        default: "medium",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--append-system-prompt"),
-    input_mode: InputMode::PositionalArg,
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
 const GROK_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_GROK,
     binary: "grok",
-    binary_aliases: &[],
     help_argv: &["--help"],
     cold_argv_prefix: &[],
     cold_argv_suffix: &[],
@@ -361,7 +322,6 @@ const GROK_SPEC: AgentCliSpec = AgentCliSpec {
 const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_OPENCODE,
     binary: "opencode",
-    binary_aliases: &[],
     help_argv: &["run", "--help"],
     cold_argv_prefix: &["run", "--pure"],
     cold_argv_suffix: &[],
@@ -380,50 +340,14 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)],
 };
 
-const CLINE_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_CLINE,
-    binary: "cline",
-    binary_aliases: &[],
-    help_argv: &["--help"],
-    cold_argv_prefix: &[],
-    cold_argv_suffix: &[],
-    required_isolation_args: &[
-        "--auto-approve",
-        "false",
-        "--timeout",
-        "9",
-        "--retries",
-        "1",
-        "--compaction",
-        "off",
-        "--hooks-dir",
-        ".",
-    ],
-    required_capability_flags: &["--auto-approve", "--timeout", "--system", "--hooks-dir"],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--thinking",
-        default: "medium",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--system"),
-    input_mode: InputMode::PositionalArg,
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
 fn spec_for(provider_id: &str) -> Option<&'static AgentCliSpec> {
     match provider_id {
         PROVIDER_CLAUDE_CODE => Some(&CLAUDE_CODE_SPEC),
         PROVIDER_PI => Some(&PI_SPEC),
         PROVIDER_OMP => Some(&OMP_SPEC),
         PROVIDER_CODEX => Some(&CODEX_SPEC),
-        PROVIDER_DROID => Some(&DROID_SPEC),
         PROVIDER_GROK => Some(&GROK_SPEC),
         PROVIDER_OPENCODE => Some(&OPENCODE_SPEC),
-        PROVIDER_CLINE => Some(&CLINE_SPEC),
-        PROVIDER_CURSOR => Some(&super::cursor_cli::CURSOR_SPEC),
         _ => None,
     }
 }
@@ -540,7 +464,6 @@ fn cold_argv_for_model_with_options(
         _ => None,
     });
     match spec.reasoning {
-        ReasoningPolicy::None => {}
         ReasoningPolicy::Flag {
             flag,
             default,
@@ -1019,9 +942,6 @@ pub async fn invalidate_polish_capabilities(provider: &str) {
     let Some(spec) = spec_for(provider) else {
         return;
     };
-    if spec.provider_id == PROVIDER_CURSOR {
-        super::cursor_cli::invalidate_resolution().await;
-    }
     // Bump the epoch and drop the entry under the SAME cache lock so the
     // invalidation is atomic for every cache reader: an in-flight probe
     // that snapshotted the previous epoch can never repopulate stale
@@ -1032,7 +952,7 @@ pub async fn invalidate_polish_capabilities(provider: &str) {
     guard.remove(spec.provider_id);
 }
 
-pub(super) async fn discover_capabilities_for_polish(
+async fn discover_capabilities_for_polish(
     binary_path: &Path,
     spec: &'static AgentCliSpec,
     refresh: bool,
@@ -1085,7 +1005,7 @@ pub(super) async fn discover_capabilities_for_polish(
     }
 }
 
-pub(super) fn required_capabilities_present(spec: &AgentCliSpec, help: &[u8]) -> bool {
+fn required_capabilities_present(spec: &AgentCliSpec, help: &[u8]) -> bool {
     spec.required_capability_flags
         .iter()
         .all(|flag| help_advertises_flag(help, flag))
@@ -1124,42 +1044,6 @@ fn apply_no_window(command: &mut Command) {
     }
 }
 
-struct RuntimeIsolation {
-    _cline_data_dir: Option<TempDir>,
-    _cursor_workspace: Option<TempDir>,
-}
-
-fn apply_runtime_isolation(
-    spec: &AgentCliSpec,
-    command: &mut Command,
-) -> Result<RuntimeIsolation, MappedAiProviderError> {
-    let cline_data_dir = if spec.provider_id == PROVIDER_CLINE {
-        let directory = TempDir::new().map_err(|error| {
-            MappedAiProviderError::new(AiProviderError::AgentCli(sanitize_cli_error(
-                &error.to_string(),
-            )))
-        })?;
-        command.arg("--data-dir").arg(directory.path());
-        Some(directory)
-    } else {
-        None
-    };
-
-    // Cursor scopes every run to a workspace; give it a dedicated EMPTY
-    // tempdir so it can neither see the user's project nor confuse the
-    // spawn cwd (which is a second, separate TempDir).
-    let cursor_workspace = if spec.provider_id == PROVIDER_CURSOR {
-        Some(super::cursor_cli::apply_workspace(command)?)
-    } else {
-        None
-    };
-
-    Ok(RuntimeIsolation {
-        _cline_data_dir: cline_data_dir,
-        _cursor_workspace: cursor_workspace,
-    })
-}
-
 /// Spawn the binary, deliver `input_text` per `input_mode`, wait for exit, and
 /// parse the polish result from stdout. A non-zero exit is always an error,
 /// even when stdout looks like a successful JSON response.
@@ -1172,15 +1056,7 @@ async fn cold_spawn_and_collect(
     output: OutputParser,
 ) -> Result<String, MappedAiProviderError> {
     let mut command = Command::new(binary_path);
-    let runtime_isolation = if spec.provider_id == PROVIDER_CURSOR {
-        RuntimeIsolation {
-            _cline_data_dir: None,
-            _cursor_workspace: Some(super::cursor_cli::configure_command(&mut command, argv)?),
-        }
-    } else {
-        command.args(argv);
-        apply_runtime_isolation(spec, &mut command)?
-    };
+    command.args(argv);
 
     match input_mode {
         InputMode::Stdin => {}
@@ -1205,7 +1081,6 @@ async fn cold_spawn_and_collect(
     )
     .await
     .map_err(map_process_failure)?;
-    drop(runtime_isolation);
 
     if !capture.status.success() {
         let detail = extract_process_error(output, &capture.stdout, &capture.stderr);
@@ -1321,7 +1196,6 @@ where
 fn parse_cli_output(output: OutputParser, stdout: &[u8]) -> Result<String, MappedAiProviderError> {
     match output {
         OutputParser::ResultJson => parse_result_json(stdout),
-        OutputParser::CursorJson => super::cursor_cli::parse_result(stdout),
         OutputParser::CodexJsonl => parse_codex_jsonl(stdout),
         OutputParser::PiJsonl => parse_pi_jsonl(stdout),
         OutputParser::PlainText => parse_plain_text(stdout),
@@ -1570,7 +1444,7 @@ static RESOLVED_PATH: OnceLock<Mutex<Option<OsString>>> = OnceLock::new();
 /// historical `Option<PathBuf>` wrapper, while detection can distinguish a
 /// missing binary from a deliberately rejected launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BinaryResolution {
+enum BinaryResolution {
     Found(PathBuf),
     Missing,
     UnsafeLauncher,
@@ -1593,51 +1467,21 @@ fn select_safe_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> Binar
     }
 }
 
-/// Resolve each name in `names` against the same resolved PATH, in order.
-/// Returns the first name that yields a safe executable; when no name
-/// resolves, UnsafeLauncher outranks Missing so the probe reports the
-/// actionable state (an unsafe launcher was seen) rather than "not found".
-pub(super) async fn resolve_binary_names<'a>(
-    names: impl IntoIterator<Item = &'a str>,
-    refresh_path: bool,
-) -> BinaryResolution {
+async fn resolve_binary_state(binary: &str, refresh_path: bool) -> BinaryResolution {
     let path = resolved_path(refresh_path).await;
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let mut saw_unsafe = false;
-    for binary in names {
-        let candidates = which::which_in_all(binary, Some(path.as_os_str()), &cwd)
-            .map(|paths| paths.collect::<Vec<_>>())
-            .unwrap_or_default();
-        match select_safe_candidate(candidates) {
-            BinaryResolution::Found(path) => return BinaryResolution::Found(path),
-            BinaryResolution::UnsafeLauncher => saw_unsafe = true,
-            BinaryResolution::Missing => {}
-        }
-    }
-    if saw_unsafe {
-        BinaryResolution::UnsafeLauncher
-    } else {
-        BinaryResolution::Missing
-    }
-}
-
-/// Every binary name a spec may launch under: the primary name first, then
-/// its declared aliases.
-fn spec_binary_names(spec: &AgentCliSpec) -> impl Iterator<Item = &str> {
-    std::iter::once(spec.binary).chain(spec.binary_aliases.iter().copied())
+    let candidates = which::which_in_all(binary, Some(path), cwd)
+        .map(|paths| paths.collect::<Vec<_>>())
+        .unwrap_or_default();
+    select_safe_candidate(candidates)
 }
 
 async fn resolve_spec_binary_state(spec: &AgentCliSpec, refresh_path: bool) -> BinaryResolution {
-    if spec.provider_id == PROVIDER_CURSOR {
-        super::cursor_cli::resolve_binary(refresh_path).await
-    } else {
-        resolve_binary_names(spec_binary_names(spec), refresh_path).await
-    }
+    resolve_binary_state(spec.binary, refresh_path).await
 }
 
-/// Resolve a spec's binary (or its aliases) to an absolute safe path against
-/// the resolved PATH. Unsafe candidates are skipped rather than stopping at
-/// the first match.
+/// Resolve a spec's binary to an absolute safe path against the resolved
+/// PATH. Unsafe candidates are skipped rather than stopping at the first match.
 async fn resolve_spec_binary(spec: &AgentCliSpec) -> Option<PathBuf> {
     match resolve_spec_binary_state(spec, false).await {
         BinaryResolution::Found(path) => Some(path),
@@ -1649,7 +1493,7 @@ async fn resolve_spec_binary(spec: &AgentCliSpec) -> Option<PathBuf> {
 /// PATH. Unsafe candidates are skipped rather than stopping at the first match.
 #[cfg(test)]
 pub async fn resolve_binary(binary: &str) -> Option<PathBuf> {
-    match resolve_binary_names(std::iter::once(binary), false).await {
+    match resolve_binary_state(binary, false).await {
         BinaryResolution::Found(path) => Some(path),
         BinaryResolution::Missing | BinaryResolution::UnsafeLauncher => None,
     }
@@ -1913,9 +1757,6 @@ impl AgentCliProbe {
     }
 }
 fn supported_reasoning_levels(spec: &AgentCliSpec) -> Vec<String> {
-    if matches!(spec.reasoning, ReasoningPolicy::None) {
-        return Vec::new();
-    }
     // Every CLI exposes its full documented ladder from its floor up to
     // medium; pi, omp, and opencode also document `minimal` between
     // off and low, so it is included wherever the contract has it.
@@ -2006,7 +1847,7 @@ fn cli_default_model(label: impl Into<String>, source_provider: Option<String>) 
     }
 }
 
-pub(crate) fn named_cli_default(
+fn named_cli_default(
     _provider_name: &str,
     _current_name: Option<&str>,
     source_provider: Option<String>,
@@ -2244,61 +2085,6 @@ fn parse_codex_default_model(stdout: &[u8]) -> Result<AgentCliModel, MappedAiPro
     ))
 }
 
-fn parse_droid_models(
-    stdout: &[u8],
-) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
-    let text = String::from_utf8_lossy(stdout);
-    let mut in_models = false;
-    let mut saw_models = false;
-    let mut default_name = None;
-    let mut models = Vec::new();
-
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if matches!(line, "Available Models:" | "Custom Models:") {
-            in_models = true;
-            saw_models = true;
-            continue;
-        }
-        if line == "Model details:" {
-            break;
-        }
-        if !in_models || line.is_empty() {
-            continue;
-        }
-        let Some(split_at) = line.find(char::is_whitespace) else {
-            continue;
-        };
-        let id = &line[..split_at];
-        let raw_name = line[split_at..].trim();
-        if id.is_empty() || raw_name.is_empty() {
-            continue;
-        }
-        let is_default = raw_name.ends_with(" (default)");
-        let name = raw_name.strip_suffix(" (default)").unwrap_or(raw_name);
-        if is_default {
-            default_name = Some(name.to_string());
-        }
-        models.push(AgentCliModel {
-            id: id.to_string(),
-            name: name.to_string(),
-            recommended: false,
-            reasoning: id != "auto",
-            context_window: None,
-            source_provider: None,
-            cli_default: false,
-        });
-    }
-
-    if !saw_models || models.is_empty() {
-        return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
-    }
-    Ok((
-        named_cli_default("Droid", default_name.as_deref(), None),
-        models,
-    ))
-}
-
 fn parse_grok_models(
     stdout: &[u8],
 ) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
@@ -2450,7 +2236,6 @@ const PI_MODEL_LIST_ARGV: &[&str] = &[
 const OMP_MODEL_LIST_ARGV: &[&str] = &["models", "--json", "--no-extensions"];
 const OMP_DEFAULT_MODEL_ARGV: &[&str] = &["config", "get", "modelRoles", "--json"];
 const CODEX_DEFAULT_MODEL_ARGV: &[&str] = &["doctor", "--json"];
-const DROID_MODEL_LIST_ARGV: &[&str] = &["exec", "--help"];
 const GROK_MODEL_LIST_ARGV: &[&str] = &["models"];
 const OPENCODE_MODEL_LIST_ARGV: &[&str] = &["models", "--pure"];
 const OPENCODE_CONFIG_ARGV: &[&str] = &["debug", "config", "--pure"];
@@ -2497,15 +2282,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
                     .await?;
             Ok(vec![parse_codex_default_model(&payload)?])
         }
-        PROVIDER_DROID => {
-            let payload =
-                run_model_list_command(&model_binary(&DROID_SPEC).await?, DROID_MODEL_LIST_ARGV)
-                    .await?;
-            let (default, models) = parse_droid_models(&payload)?;
-            let mut result = vec![default];
-            result.extend(models);
-            Ok(result)
-        }
         PROVIDER_GROK => {
             let payload =
                 run_model_list_command(&model_binary(&GROK_SPEC).await?, GROK_MODEL_LIST_ARGV)
@@ -2534,12 +2310,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             )];
             result.extend(models);
             Ok(result)
-        }
-        PROVIDER_CLINE => Ok(vec![named_cli_default("Cline", None, None)]),
-        PROVIDER_CURSOR => {
-            let binary = model_binary(&super::cursor_cli::CURSOR_SPEC).await?;
-            let payload = run_model_list_command(&binary, &["models"]).await?;
-            super::cursor_cli::parse_models(&payload)
         }
         _ => Err(MappedAiProviderError::new(
             AiProviderError::UnsupportedProvider,
@@ -2780,7 +2550,6 @@ fn pi_response_is_present(output: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::cursor_cli::CURSOR_SPEC;
 
     #[test]
     fn every_agent_cli_uses_the_full_cold_spawn_budget() {
@@ -2789,11 +2558,8 @@ mod tests {
             PROVIDER_PI,
             PROVIDER_OMP,
             PROVIDER_CODEX,
-            PROVIDER_DROID,
             PROVIDER_GROK,
             PROVIDER_OPENCODE,
-            PROVIDER_CLINE,
-            PROVIDER_CURSOR,
         ] {
             assert_eq!(cold_spawn_timeout_ms(provider), 20_000, "{provider}");
         }
@@ -3177,7 +2943,6 @@ mod tests {
             b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n"
         );
         assert_eq!(CODEX_DEFAULT_MODEL_ARGV, &["doctor", "--json"][..]);
-        assert_eq!(DROID_MODEL_LIST_ARGV, &["exec", "--help"][..]);
         assert_eq!(GROK_MODEL_LIST_ARGV, &["models"][..]);
         assert_eq!(OPENCODE_MODEL_LIST_ARGV, &["models", "--pure"][..]);
         assert!(!CODEX_DEFAULT_MODEL_ARGV.contains(&"app-server"));
@@ -3260,19 +3025,6 @@ mod tests {
         .unwrap();
         assert_eq!(codex.name, "Default");
 
-        let (droid_default, droid_models) = parse_droid_models(
-            b"Available Models:\n  auto  Auto Model\n  claude-opus-5  Opus 5 (default)\nCustom Models:\n  custom:glm  GLM\nModel details:\n",
-        )
-        .unwrap();
-        assert_eq!(droid_default.name, "Default");
-        assert_eq!(
-            droid_models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["auto", "claude-opus-5", "custom:glm"]
-        );
-
         let (grok_default, grok_models) = parse_grok_models(
             b"Default model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)\n",
         )
@@ -3290,7 +3042,6 @@ mod tests {
     fn discovery_parsers_reject_missing_model_contracts() {
         assert!(parse_pi_default_model(b"{}").is_err());
         assert!(parse_codex_default_model(b"{}").is_err());
-        assert!(parse_droid_models(b"Available Models:\n").is_err());
         assert!(parse_grok_models(b"Available models:\n").is_err());
         assert!(parse_selector_models(b"not-a-selector\n").is_err());
     }
@@ -3489,25 +3240,18 @@ mod tests {
         assert_eq!(PI_SPEC.input_mode, InputMode::Stdin);
         assert_eq!(PI_SPEC.output, OutputParser::PlainText);
         assert_eq!(OMP_SPEC.output, OutputParser::PiJsonl);
-        assert_eq!(CURSOR_SPEC.input_mode, InputMode::PositionalArg);
-        assert_eq!(CURSOR_SPEC.output, OutputParser::CursorJson);
-        assert_eq!(CURSOR_SPEC.reasoning, ReasoningPolicy::None);
 
         for (provider, binary) in [
             (PROVIDER_CLAUDE_CODE, "claude"),
             (PROVIDER_PI, "pi"),
             (PROVIDER_OMP, "omp"),
             (PROVIDER_CODEX, "codex"),
-            (PROVIDER_DROID, "droid"),
             (PROVIDER_GROK, "grok"),
             (PROVIDER_OPENCODE, "opencode"),
-            (PROVIDER_CLINE, "cline"),
-            (PROVIDER_CURSOR, "cursor-agent"),
         ] {
             let spec = spec_for(provider).expect("provider must have a CLI spec");
             assert_eq!(spec.binary, binary);
         }
-        assert!(CURSOR_SPEC.binary_aliases.is_empty());
         assert!(spec_for("unknown").is_none());
     }
 
@@ -3533,12 +3277,6 @@ mod tests {
             pair[0] == "-c" && pair[1].starts_with("developer_instructions=\"system\"")
         }));
 
-        let droid = cold_argv(&DROID_SPEC, "system");
-        assert!(droid
-            .windows(2)
-            .any(|pair| pair[0] == "--restrict-tools" && pair[1] == "TodoWrite"));
-        assert!(droid.contains(&"--disable-builtin-skills".to_string()));
-
         let grok = cold_argv(&GROK_SPEC, "system");
         assert!(grok
             .windows(2)
@@ -3549,30 +3287,6 @@ mod tests {
             OPENCODE_SPEC.static_env,
             &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)]
         );
-        assert!(cold_argv(&CLINE_SPEC, "system")
-            .windows(2)
-            .any(|pair| pair[0] == "--auto-approve" && pair[1] == "false"));
-        assert!(cold_argv(&CLINE_SPEC, "system")
-            .windows(2)
-            .any(|pair| pair[0] == "--retries" && pair[1] == "1"));
-    }
-
-    #[test]
-    fn cline_runtime_uses_disposable_local_state() {
-        let mut command = Command::new("cline");
-        let isolation =
-            apply_runtime_isolation(&CLINE_SPEC, &mut command).expect("Cline isolation");
-        let args: Vec<OsString> = command
-            .as_std()
-            .get_args()
-            .map(OsStr::to_os_string)
-            .collect();
-        assert_eq!(args.first(), Some(&OsString::from("--data-dir")));
-        let data_dir = PathBuf::from(args.get(1).expect("data directory argument"));
-        assert!(data_dir.is_dir());
-
-        drop(isolation);
-        assert!(!data_dir.exists());
     }
 
     #[test]
@@ -3720,9 +3434,6 @@ mod tests {
             supported_reasoning_levels(&OPENCODE_SPEC),
             ["off", "minimal", "low", "medium"]
         );
-        // Cursor documents no reasoning level — the probe reports no ladder
-        // and the UI hides the thinking selector.
-        assert!(supported_reasoning_levels(&CURSOR_SPEC).is_empty());
     }
 
     #[test]
@@ -3849,15 +3560,6 @@ mod tests {
         let missing = probe_for_resolution(&CLAUDE_CODE_SPEC, &BinaryResolution::Missing);
         assert_eq!(missing.state, AgentCliProbeState::Missing);
         assert!(!missing.supports_fast_mode);
-
-        // Cursor: ready without a reasoning ladder or fast mode.
-        let cursor_ready = probe_for_resolution(
-            &CURSOR_SPEC,
-            &BinaryResolution::Found(PathBuf::from("/safe/cursor-agent")),
-        );
-        assert_eq!(cursor_ready.state, AgentCliProbeState::Ready);
-        assert!(cursor_ready.reasoning_levels.is_empty());
-        assert!(!cursor_ready.supports_fast_mode);
 
         let unsafe_launcher =
             probe_for_resolution(&CLAUDE_CODE_SPEC, &BinaryResolution::UnsafeLauncher);
@@ -4432,7 +4134,7 @@ not a json line\n";
             assert_ne!(default.name, "CLI default");
             if matches!(
                 provider,
-                PROVIDER_PI | PROVIDER_OMP | PROVIDER_DROID | PROVIDER_GROK | PROVIDER_OPENCODE
+                PROVIDER_PI | PROVIDER_OMP | PROVIDER_GROK | PROVIDER_OPENCODE
             ) {
                 assert!(
                     models.len() > 1,
@@ -4515,27 +4217,4 @@ not a json line\n";
         );
         println!("omp polished output: {polished}");
     }
-
-    /// A real `droid exec` round-trip — gated behind `#[ignore]`. Verifies the
-    /// documented `--restrict-tools` isolation contract (an unknown
-    /// `--enabled-tools` would leave default tools on). Run with
-    /// `cargo test agent_cli -- --ignored`.
-    #[tokio::test]
-    #[ignore = "requires droid CLI installed + authenticated; not run in CI"]
-    async fn real_droid_cold_spawn_round_trip() {
-        let runtime = AgentCliRuntime::new();
-        let request = AiPolishRequest { provider_id: PROVIDER_DROID.to_string(), model_id: String::new(), reasoning_level: Some("low".to_string()), fast_mode: false, input_text: "hello; echo $HOME $(whoami)".to_string(), prompt: "Clean up this voice dictation into clear written English. Output only the fixed text.".to_string(), timeout_ms: 9_000 };
-        let result = runtime.polish(&request).await;
-        let polished = result.expect("droid cold-spawn polish should succeed locally");
-        assert!(!polished.trim().is_empty());
-        assert!(
-            polished.contains("echo $HOME $(whoami)"),
-            "droid must preserve shell metacharacters as literal content: {polished}"
-        );
-        println!("droid polished output: {polished}");
-    }
 }
-
-#[cfg(test)]
-#[path = "cursor_cli_tests.rs"]
-mod cursor_tests;

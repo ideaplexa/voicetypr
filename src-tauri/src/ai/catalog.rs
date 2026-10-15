@@ -80,22 +80,18 @@ fn parse_catalog(json: &str) -> Catalog {
     // Subscription-authenticated coding CLIs. Each request uses a fresh child
     // in an empty temporary directory (Claude may consume a prepared spare).
     // Provider-specific flags live in agent_cli.rs.
-    for (id, label, status) in [
-        ("claude-code", "Claude Code", "production"),
-        ("pi", "pi", "production"),
-        ("omp", "oh-my-pi", "production"),
-        ("codex", "Codex", "production"),
-        ("droid", "Droid", "production"),
-        ("grok", "Grok", "production"),
-        ("opencode", "OpenCode", "production"),
-        ("cline", "Cline", "production"),
-        // No headless polish run has been verified end-to-end yet.
-        ("cursor", "Cursor Agent", "experimental"),
+    for (id, label) in [
+        ("claude-code", "Claude Code"),
+        ("pi", "pi"),
+        ("omp", "oh-my-pi"),
+        ("codex", "Codex"),
+        ("grok", "Grok"),
+        ("opencode", "OpenCode"),
     ] {
         catalog.providers.push(CatalogProvider {
             id: id.to_string(),
             label: label.to_string(),
-            status: status.to_string(),
+            status: "production".to_string(),
             runtime: "agent_cli".to_string(),
             adapter: None,
             namespace: None,
@@ -448,17 +444,7 @@ mod tests {
 
     #[test]
     fn agent_cli_providers_share_runtime_contract() {
-        for id in [
-            "claude-code",
-            "pi",
-            "omp",
-            "codex",
-            "droid",
-            "grok",
-            "opencode",
-            "cline",
-            "cursor",
-        ] {
+        for id in ["claude-code", "pi", "omp", "codex", "grok", "opencode"] {
             assert_eq!(runtime_kind(id), Some("agent_cli"), "{id} runtime");
             assert!(!is_native_provider(id), "{id} not native");
             assert_eq!(adapter_name(id), None, "{id} no adapter");

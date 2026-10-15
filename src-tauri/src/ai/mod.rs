@@ -2,7 +2,6 @@ pub mod agent_cli;
 pub mod anthropic_current;
 pub mod catalog;
 pub mod contract;
-mod cursor_cli;
 pub mod error;
 pub mod executor;
 pub mod genai_runtime;
