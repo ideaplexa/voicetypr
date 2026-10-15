@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
@@ -7,13 +7,6 @@ import { SettingsTab } from "./SettingsTab";
 vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({ settings: {}, updateSettings: vi.fn().mockResolvedValue(undefined) }),
 }));
-vi.mock("@/components/sections/general/AppBehaviorCard", () => ({
-  AppBehaviorCard: () => <p>Update preferences</p>,
-}));
-
-const checkForUpdatesManually = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
-vi.mock("@/services/updateService", () => ({ updateService: { checkForUpdatesManually } }));
 vi.mock("@/components/sections/GeneralSettings", () => ({
   GeneralSettings: () => <p>Appearance and app behavior</p>,
 }));
@@ -30,15 +23,23 @@ vi.mock("@/components/sections/AgentCliSection", () => ({
   AgentCliSection: () => <p>CLI and API controls</p>,
 }));
 
-it("opens General by default and checks for updates from About", async () => {
-  const user = userEvent.setup();
-  const view = render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+it("lists seven panes in three groups, with About and Privacy folded away", () => {
+  render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   expect(screen.getByText("Appearance and app behavior")).toBeInTheDocument();
-  view.rerender(<SettingsTab pane="about" onPaneChange={vi.fn()} />);
-  expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Check now" }));
-  expect(checkForUpdatesManually).toHaveBeenCalledOnce();
+  const panes = within(screen.getByRole("navigation", { name: "Settings panes" }));
+  expect(panes.getAllByRole("button").map((button) => button.textContent)).toEqual([
+    "General",
+    "App shortcuts",
+    "Storage",
+    "Network sharing",
+    "CLI & API",
+    "Troubleshooting",
+    "License",
+  ]);
+  expect(panes.getByText("Advanced")).toBeInTheDocument();
+  expect(panes.getByText("Account")).toBeInTheDocument();
+  expect(panes.queryByRole("button", { name: /About|Privacy/ })).not.toBeInTheDocument();
 });
 
 it("keeps every advanced pane reachable", async () => {
@@ -63,17 +64,6 @@ it("keeps every advanced pane reachable", async () => {
   }
 });
 
-it("opens the existing What's new dialog and routes Help & feedback from About", async () => {
-  const onNavigate = vi.fn();
-  render(<SettingsTab pane="about" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
-  await screen.findByText("Voicetypr 2.1.0");
-  await userEvent.click(screen.getByRole("button", { name: "View" }));
-  expect(screen.getByRole("dialog", { name: /What's new/ })).toHaveTextContent("2.1.0");
-  await userEvent.keyboard("{Escape}");
-  await userEvent.click(screen.getByRole("button", { name: "Open" }));
-  expect(onNavigate).toHaveBeenCalledWith("help");
-});
-
 it("keeps the selected pane card-colored while the pointer rests on it", async () => {
   const Harness = () => {
     const [pane, setPane] = useState<"general" | "shortcuts">("general");
@@ -87,7 +77,7 @@ it("keeps the selected pane card-colored while the pointer rests on it", async (
     );
   };
   render(<Harness />);
-  const shortcuts = screen.getByRole("button", { name: "Shortcuts" });
+  const shortcuts = screen.getByRole("button", { name: "App shortcuts" });
   await userEvent.click(shortcuts);
   await userEvent.hover(shortcuts);
   expect(shortcuts).toHaveAttribute("aria-current", "page");

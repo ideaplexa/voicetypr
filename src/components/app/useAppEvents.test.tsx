@@ -114,13 +114,11 @@ describe("useAppEvents registration lifecycle", () => {
     for (const pane of [
       "general",
       "shortcuts",
-      "privacy",
       "storage",
       "network",
       "agent",
       "advanced",
       "license",
-      "about",
     ]) {
       act(() => {
         for (const handler of listeners.get("navigate-to-settings") ?? [])
@@ -163,13 +161,11 @@ describe("useAppEvents registration lifecycle", () => {
       for (const pane of [
         "general",
         "shortcuts",
-        "privacy",
         "storage",
         "network",
         "agent",
         "advanced",
         "license",
-        "about",
       ]) {
         act(() => {
           for (const handler of listeners.get(eventName) ?? [])

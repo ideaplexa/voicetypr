@@ -1,6 +1,7 @@
 import {
   footerNavScreens,
   mainNavScreens,
+  parseSettingsPane,
   resolveScreen,
   screenAliases,
   tuningNavScreens,
@@ -35,18 +36,6 @@ const screenIds = new Set<string>([
   ...Object.keys(screenAliases),
   "license",
 ]);
-const settingsPanes: SettingsPane[] = [
-  "general",
-  "shortcuts",
-  "privacy",
-  "storage",
-  "network",
-  "agent",
-  "advanced",
-  "license",
-  "about",
-];
-
 export function routeMainNavigation(
   destination: MainNavigate,
   setScreen: (screen: ScreenId) => void,
@@ -57,7 +46,7 @@ export function routeMainNavigation(
   const screen = destination.screen as ScreenId;
   const resolved = resolveScreen(screen);
   if (resolved.screen === "settings") {
-    const requestedPane = settingsPanes.find((id) => id === destination.pane);
+    const requestedPane = parseSettingsPane(destination.pane);
     const pane = requestedPane ?? resolved.pane ?? "general";
     if (openSettingsPane) openSettingsPane(pane);
     else setScreen(requestedPane ?? resolved.pane ?? "settings");

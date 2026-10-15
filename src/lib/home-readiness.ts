@@ -10,6 +10,10 @@ export interface HomeStatus {
   screen?: ScreenId;
   pane?: SettingsPane;
   source?: SourceFilter;
+  /** Which kind of problem this is, so Home can word the fix. */
+  kind?: "license" | "microphone" | "source";
+  /** True while a model download is the only thing missing: progress, not a problem. */
+  pending?: boolean;
 }
 
 export function homeStatus({
@@ -39,11 +43,11 @@ export function homeStatus({
 }): HomeStatus {
   const modelLabel = getModelDisplayName(model) ?? model;
   if (!licenseValid && licenseStatus)
-    return { label: "License needs attention", ready: false, screen: "license" };
+    return { label: "License needs attention", ready: false, screen: "license", kind: "license" };
   if (hasMicrophonePermission === false)
     return isMacOS
-      ? { label: "Microphone access needed", ready: false, screen: "settings", pane: "advanced" }
-      : { label: "Microphone access needed", ready: false, screen: "recording" };
+      ? { label: "Microphone access needed", ready: false, screen: "settings", pane: "advanced", kind: "microphone" }
+      : { label: "Microphone access needed", ready: false, screen: "recording", kind: "microphone" };
   if (remoteSelected)
     return canRecord
       ? { label: `Ready · ${remoteLabel ?? "Remote Voicetypr"}`, ready: true }
@@ -65,6 +69,7 @@ export function homeStatus({
       label: `Downloading ${modelLabel} · ${Math.round(downloadProgress)}%`,
       ready: false,
       screen: "transcription",
+      pending: true,
     };
   if (modelAvailable === false)
     return { label: "No model yet", ready: false, screen: "transcription" };

@@ -67,7 +67,7 @@ describe("Sidebar navigation", () => {
     ]);
     expect(main.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
     expect(await screen.findByText("2.1.0")).toHaveClass("text-muted-foreground");
-    expect(screen.queryByRole("button", { name: "Check for updates" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeInTheDocument();
   });
 
   it("overrides the primitive active colors, weight, shadow and icon by composition", async () => {
@@ -147,17 +147,18 @@ describe("Sidebar navigation", () => {
     );
   });
 
-  it("names trial and expired license states in the bottom chip", () => {
+  it("names trial and trial-ended license states in the status bar", () => {
     licenseState.current = { status: "trial", license_type: "pro", trial_days_left: 1 };
     const view = renderSidebar("license");
-    expect(
-      screen.getByRole("button", { name: /Trial · 1 day left. Open License/ }),
-    ).toHaveAttribute("aria-current", "page");
+    const chip = screen.getByRole("button", { name: /Trial · 1 day left. Open License/ });
+    // A status line, not a raised or selected control.
+    expect(chip).not.toHaveAttribute("aria-current");
+    expect(chip).not.toHaveClass("bg-card", "ring-1");
     view.mockClear();
     licenseState.current = { status: "expired", license_type: "pro", trial_days_left: null };
     // A fresh render reflects a backend license state change.
     renderSidebar();
-    expect(screen.getByRole("button", { name: /Trial expired. Open License/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Trial ended. Open License/ })).toBeInTheDocument();
   });
 
   it("collapses to an icon rail while keeping navigation accessible", async () => {

@@ -256,6 +256,42 @@ pub fn tray_recovery() -> Option<(String, Option<String>, Option<String>, bool)>
             )
         })
 }
+/// What Home shows for a kept recording: opaque ID and engine names only.
+#[derive(Serialize)]
+pub struct KeptSummary {
+    id: String,
+    engine_short: String,
+    alt_engine_short: Option<String>,
+    alt_engine_id: Option<String>,
+    remaining_ms: u64,
+    busy: bool,
+}
+/// Failed dictations still waiting for a retry. Quiet kinds (no speech, empty mic) stay in the island.
+#[tauri::command]
+pub fn list_kept_dictations() -> Vec<KeptSummary> {
+    let now = Instant::now();
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clips
+        .iter()
+        .filter(|c| {
+            c.expires > now
+                && !matches!(
+                    c.recovery.kind,
+                    RecoveryKind::NoSpeech | RecoveryKind::MicDroppedEmpty
+                )
+        })
+        .map(|c| KeptSummary {
+            id: c.recovery.id.clone(),
+            engine_short: c.recovery.engine_short.clone(),
+            alt_engine_short: c.recovery.alt_engine_short.clone(),
+            alt_engine_id: c.recovery.alt_engine_id.clone(),
+            remaining_ms: c.expires.saturating_duration_since(now).as_millis() as u64,
+            busy: c.busy,
+        })
+        .collect()
+}
 pub fn cancel_active_retry(app: &AppHandle) {
     let generation = {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());

@@ -1,7 +1,7 @@
 import { AppearanceCard } from "@/components/sections/general/AppearanceCard";
 import { AppBehaviorCard } from "@/components/sections/general/AppBehaviorCard";
 import { TelemetrySection } from "@/components/sections/TelemetrySection";
-import { SettingsPaneCard } from "@/components/settings/settings-ui";
+import { SettingsSection } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
 import {
   Dialog,
@@ -24,7 +24,7 @@ export function GeneralSettings({ embedded = false }: { embedded?: boolean } = {
       <div
         className={
           embedded
-            ? "flex w-full flex-col gap-3.5"
+            ? "flex w-full flex-col"
             : "mx-auto flex w-full max-w-3xl flex-col gap-3.5 pb-4 pl-2 pr-4"
         }
       >
@@ -79,26 +79,44 @@ export function GeneralSettings({ embedded = false }: { embedded?: boolean } = {
         ) : null}
 
         {embedded ? (
-          <SettingsPaneCard>
-            <AppearanceCard
-              pane
-              theme={settings.theme}
-              onThemeChange={(theme) => void updateSettings({ theme })}
-            />
-            <AppBehaviorCard
-              pane
-              rows="startup"
-              updateChannel={settings.update_channel}
-              checkUpdatesAutomatically={settings.check_updates_automatically}
-              onUpdateChannelChange={(channel) => updateSettings({ update_channel: channel })}
-              onCheckUpdatesAutomaticallyChange={(checked) =>
-                void updateSettings({ check_updates_automatically: checked })
-              }
-              onLaunchAtStartupResolved={(enabled) =>
-                updateSettings({ launch_at_startup: enabled })
-              }
-            />
-          </SettingsPaneCard>
+          <>
+            <SettingsSection>
+              <AppearanceCard
+                pane
+                theme={settings.theme}
+                onThemeChange={(theme) => void updateSettings({ theme })}
+              />
+              <AppBehaviorCard
+                pane
+                rows="startup"
+                updateChannel={settings.update_channel}
+                checkUpdatesAutomatically={settings.check_updates_automatically}
+                onUpdateChannelChange={(channel) => updateSettings({ update_channel: channel })}
+                onCheckUpdatesAutomaticallyChange={(checked) =>
+                  void updateSettings({ check_updates_automatically: checked })
+                }
+                onLaunchAtStartupResolved={(enabled) =>
+                  updateSettings({ launch_at_startup: enabled })
+                }
+              />
+            </SettingsSection>
+            <SettingsSection label="Updates">
+              <AppBehaviorCard
+                pane
+                rows="updates"
+                updateChannel={settings.update_channel}
+                checkUpdatesAutomatically={settings.check_updates_automatically}
+                onUpdateChannelChange={(channel) => updateSettings({ update_channel: channel })}
+                onCheckUpdatesAutomaticallyChange={(checked) =>
+                  void updateSettings({ check_updates_automatically: checked })
+                }
+                onLaunchAtStartupResolved={() => {}}
+              />
+            </SettingsSection>
+            <SettingsSection label="Privacy">
+              <TelemetrySection bare />
+            </SettingsSection>
+          </>
         ) : (
           <>
             <AppearanceCard

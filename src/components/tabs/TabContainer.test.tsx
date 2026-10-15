@@ -71,7 +71,7 @@ vi.mock("../sections/ReportProblemSection", () => ({
     <>
       <h1>Help screen</h1>
       <button onClick={() => onNavigateSettingsPane("advanced")}>Troubleshooting</button>
-      <button onClick={() => onNavigateSettingsPane("shortcuts")}>Shortcuts</button>
+      <button onClick={() => onNavigateSettingsPane("shortcuts")}>App shortcuts</button>
     </>
   ),
 }));
@@ -147,7 +147,7 @@ describe("TabContainer destinations", () => {
   it("applies an alias after an inner Settings pane click", async () => {
     const user = userEvent.setup();
     const view = render(<TabContainer activeSection="settings" />);
-    await user.click(await screen.findByRole("button", { name: "Shortcuts" }));
+    await user.click(await screen.findByRole("button", { name: "App shortcuts" }));
     expect(await screen.findByText("Shortcut controls")).toBeInTheDocument();
     view.rerender(<TabContainer activeSection="general" />);
     expect(await screen.findByRole("button", { name: "General" })).toHaveAttribute(
@@ -166,7 +166,7 @@ describe("TabContainer destinations", () => {
         onSettingsPaneChange={onSettingsPaneChange}
       />,
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Shortcuts" }));
+    await userEvent.click(await screen.findByRole("button", { name: "App shortcuts" }));
     expect(onSettingsPaneChange).toHaveBeenCalledWith("shortcuts");
   });
 
@@ -184,7 +184,7 @@ describe("TabContainer destinations", () => {
   });
   it.each([
     ["Troubleshooting", "Troubleshooting controls"],
-    ["Shortcuts", "Shortcut controls"],
+    ["App shortcuts", "Shortcut controls"],
   ])("navigates Help's %s tile to its Settings pane", async (label, controls) => {
     function Shell() {
       const [activeSection, setActiveSection] = useState<ScreenId>("help");
@@ -198,7 +198,7 @@ describe("TabContainer destinations", () => {
   });
   it.each([
     ["Troubleshooting", "Troubleshooting controls"],
-    ["Shortcuts", "Shortcut controls"],
+    ["App shortcuts", "Shortcut controls"],
   ] as const)(
     "keeps Help's %s destination with the app's controlled navigation",
     async (label, controls) => {
@@ -273,7 +273,7 @@ describe("Settings modal navigation", () => {
     render(<TabContainer activeSection="home" />);
     const trigger = screen.getByRole("button", { name: "Status chip" });
     await userEvent.click(trigger);
-    expect(screen.getByRole("dialog", { name: "Shortcuts" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "App shortcuts" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Close Settings" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
@@ -296,12 +296,14 @@ describe("Settings modal navigation", () => {
     "network",
     "agent",
     "advanced",
-    "privacy",
     "storage",
-    "about",
     "license",
   ] as const)("resolves the old %s id to a modal pane", (id) => {
     expect(resolveScreen(id)).toEqual({ screen: "settings", pane: id });
+  });
+
+  it.each(["privacy", "about"] as const)("sends the retired %s id to General", (id) => {
+    expect(resolveScreen(id)).toEqual({ screen: "settings", pane: "general" });
   });
 });
 

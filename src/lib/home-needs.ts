@@ -1,0 +1,104 @@
+import type { ScreenId, SettingsPane } from "@/components/navigation";
+import type { SourceFilter } from "@/components/sections/models/types";
+import type { HomeStatus } from "@/lib/home-readiness";
+
+/** A failed dictation whose audio is still kept, as reported by `list_kept_dictations`. */
+export interface KeptRecording {
+  id: string;
+  engine_short: string;
+  alt_engine_short: string | null;
+  alt_engine_id: string | null;
+  remaining_ms: number;
+  busy: boolean;
+}
+
+export type NeedAction =
+  | { kind: "retry"; id: string; engine: string | null }
+  | { kind: "install" }
+  | { kind: "screen"; screen: ScreenId; source?: SourceFilter }
+  | { kind: "pane"; pane: SettingsPane };
+
+export interface NeedRow {
+  id: string;
+  icon: "retry" | "update" | "license" | "microphone" | "accessibility" | "source";
+  title: string;
+  description: string;
+  button: string;
+  disabled?: boolean;
+  action: NeedAction;
+}
+
+function minutesLeft(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  return `${minutes} more ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
+export function homeNeeds({
+  kept,
+  updateVersion,
+  status,
+  accessibilityMissing,
+}: {
+  kept: KeptRecording[];
+  updateVersion: string | null;
+  status: HomeStatus;
+  accessibilityMissing: boolean;
+}): NeedRow[] {
+  const rows: NeedRow[] = kept.map((clip) => ({
+    id: `kept:${clip.id}`,
+    icon: "retry",
+    title: "A recording was kept",
+    description: `${clip.engine_short} couldn't finish it. Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
+    button: clip.busy ? "Retrying…" : "Retry",
+    disabled: clip.busy,
+    action: { kind: "retry", id: clip.id, engine: clip.alt_engine_id },
+  }));
+  if (updateVersion)
+    rows.push({
+      id: "update",
+      icon: "update",
+      title: `Update ready · ${updateVersion}`,
+      description: "Installs in a few seconds and restarts Voicetypr.",
+      button: "Install",
+      action: { kind: "install" },
+    });
+  if (!status.ready && !status.pending) {
+    const action: NeedAction = status.pane
+      ? { kind: "pane", pane: status.pane }
+      : { kind: "screen", screen: status.screen ?? "transcription", source: status.source };
+    rows.push(
+      status.kind === "license"
+        ? { id: "license", icon: "license", title: status.label, description: "Check or activate your license.", button: "Open", action }
+        : status.kind === "microphone"
+          ? { id: "microphone", icon: "microphone", title: status.label, description: "Voicetypr can't hear you until it's allowed.", button: "Fix", action }
+          : { id: "source", icon: "source", title: status.label, description: "Pick a transcription source to start dictating.", button: "Set up", action },
+    );
+  }
+  if (accessibilityMissing)
+    rows.push({
+      id: "accessibility",
+      icon: "accessibility",
+      title: "Accessibility access needed",
+      description: "Voicetypr can't paste into other apps until it's allowed.",
+      button: "Fix",
+      action: { kind: "pane", pane: "advanced" },
+    });
+  return rows;
+}
+
+export interface TipRow {
+  id: "polish" | "dictionary";
+  title: string;
+  description: string;
+  button: string;
+  screen: ScreenId;
+}
+
+export function homeTips({ polishOn, dictionaryEmpty }: { polishOn: boolean | null; dictionaryEmpty: boolean | null }): TipRow[] {
+  const tips: TipRow[] = [];
+  if (polishOn === false)
+    tips.push({ id: "polish", title: "Turn on Polish", description: "Clean up fillers and punctuation as you paste.", button: "Set up", screen: "polish" });
+  if (dictionaryEmpty === true)
+    tips.push({ id: "dictionary", title: "Teach it your words", description: "Names and terms you use, spelled right every time.", button: "Add words", screen: "dictionary" });
+  return tips;
+}

@@ -48,13 +48,11 @@ describe("native menu and island navigation", () => {
   it.each([
     "general",
     "shortcuts",
-    "privacy",
     "storage",
     "network",
     "agent",
     "advanced",
     "license",
-    "about",
   ] as const)("opens the %s modal pane for both explicit panes and legacy ids", (id) => {
     const navigate = vi.fn();
     const pane = vi.fn();
@@ -62,6 +60,15 @@ describe("native menu and island navigation", () => {
     expect(pane).toHaveBeenLastCalledWith(id);
     routeMainNavigation({ screen: id }, navigate, vi.fn(), pane);
     expect(pane).toHaveBeenLastCalledWith(id);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+  it.each(["privacy", "about"])("sends the retired %s pane to General", (id) => {
+    const navigate = vi.fn();
+    const pane = vi.fn();
+    routeMainNavigation({ screen: "settings", pane: id }, navigate, vi.fn(), pane);
+    expect(pane).toHaveBeenLastCalledWith("general");
+    routeMainNavigation({ screen: id }, navigate, vi.fn(), pane);
+    expect(pane).toHaveBeenLastCalledWith("general");
     expect(navigate).not.toHaveBeenCalled();
   });
   it("defaults Settings to General and rejects unknown screens", () => {

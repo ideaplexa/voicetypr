@@ -1,61 +1,51 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppSettings, TranscriptionHistory } from "@/types";
+import type { AppSettings } from "@/types";
+import type { KeptRecording } from "@/lib/home-needs";
 import { invoke } from "@tauri-apps/api/core";
-import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { OverviewTab } from "./OverviewTab";
 
 const mock = vi.hoisted(() => ({
   settings: { hotkey: "Alt+Space", current_model: "parakeet-tdt-0.6b-v3", current_model_engine: "parakeet", speech_language: "en", recording_mode: "push_to_talk", transcription_mode: "live_preview" } as Partial<AppSettings>,
-  readiness: { canRecord: true, selectedModelAvailable: true as boolean | null, remoteSelected: false, remoteAvailable: true, licenseValid: true, licenseStatus: "licensed" as string | null, hasMicrophonePermission: true },
+  readiness: { hasAccessibilityPermission: true as boolean | null, canRecord: true, selectedModelAvailable: true as boolean | null, remoteSelected: false, remoteAvailable: true, licenseValid: true, licenseStatus: "licensed" as string | null, hasMicrophonePermission: true },
   downloadProgress: {} as Record<string, number>,
   shortcutBindings: [] as Array<{ id: string; action: string; shortcut: string; trigger: string; enabled: boolean; allow_risky_combo: boolean; trigger_kind: string; modifier: { modifier: string; side: string } }>,
-  history: [] as TranscriptionHistory[],
-  usageWords: 0,
-  isLoading: false,
-  loadError: null as string | null,
   mac: true,
-  listeners: {} as Record<string, (event: { payload: unknown }) => void>,
+  polishOn: true,
+  kept: [] as KeptRecording[],
+  update: { available: null as null | { version: string }, checking: false },
+  words: 3,
+  promptInstall: vi.fn(),
+  refreshKept: vi.fn(),
 }));
 
 vi.mock("@/contexts/ReadinessContext", () => ({ useReadiness: () => mock.readiness }));
 vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => ({ settings: mock.settings }) }));
-vi.mock("@/hooks/useTranscriptionHistory", () => ({ useTranscriptionHistory: () => ({ history: mock.history, totalCount: mock.history.length, isLoading: mock.isLoading, loadError: mock.loadError, refreshHistory: vi.fn() }) }));
+vi.mock("@/hooks/useKeptRecordings", () => ({ useKeptRecordings: () => ({ kept: mock.kept, refresh: mock.refreshKept }) }));
+vi.mock("@/hooks/useUpdateStatus", () => ({ useUpdateStatus: () => ({ ...mock.update, lastChecked: null, result: "idle", checkNow: vi.fn(), promptInstall: mock.promptInstall }) }));
+vi.mock("@/state/writingSettings", () => ({ useWritingSettings: (select: (state: unknown) => unknown) => select({ settings: { custom_words: Array.from({ length: mock.words }, () => ({})), replacements: [], snippets: [] }, loaded: true, load: vi.fn() }) }));
 vi.mock("@/contexts/ModelManagementContext", () => ({ useDownloadProgress: (select?: (p: Record<string, number>) => unknown) => select ? select(mock.downloadProgress) : mock.downloadProgress }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_usage_stats" ? {...createUsageFixture(), total_words: mock.usageWords} : command === "get_ai_settings" ? { enabled: true } : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => { mock.listeners[name] = handler; return () => { delete mock.listeners[name]; }; }) }));
-vi.mock("@/components/ShareStatsModal", () => ({ ShareStatsModal: ({ open }: { open: boolean }) => open ? <div>Share stats preview</div> : null }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: mock.polishOn } : command === "retry_kept_dictation" ? undefined : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 beforeEach(() => {
   mock.settings = { hotkey: "Alt+Space", current_model: "parakeet-tdt-0.6b-v3", current_model_engine: "parakeet", speech_language: "en", recording_mode: "push_to_talk", transcription_mode: "live_preview" };
-  mock.readiness = { canRecord: true, selectedModelAvailable: true, remoteSelected: false, remoteAvailable: true, licenseValid: true, licenseStatus: "licensed", hasMicrophonePermission: true };
+  mock.readiness = { canRecord: true, selectedModelAvailable: true, remoteSelected: false, remoteAvailable: true, licenseValid: true, licenseStatus: "licensed", hasMicrophonePermission: true, hasAccessibilityPermission: true };
   mock.downloadProgress = {};
   mock.shortcutBindings = [];
-  mock.history = [];
-  mock.usageWords = 0;
-  mock.isLoading = false;
-  mock.loadError = null;
   mock.mac = true;
-  mock.listeners = {};
+  mock.polishOn = true;
+  mock.kept = [];
+  mock.update = { available: null, checking: false };
+  mock.words = 3;
+  mock.promptInstall.mockClear();
+  mock.refreshKept.mockClear();
 });
 
 describe("Home", () => {
-  it("links the weekly card to Insights", async () => {
-    const onNavigate = vi.fn();
-    render(<OverviewTab onNavigate={onNavigate} />);
-    await userEvent.click(screen.getByRole("button", { name: "See insights →" }));
-    expect(onNavigate).toHaveBeenCalledWith("insights");
-  });
-  it("opens the share card using whole-history usage stats", async () => {
-    render(<OverviewTab />);
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_usage_stats", { since: null }));
-    await userEvent.click(screen.getByRole("button", { name: "Share stats" }));
-    expect(await screen.findByText("Share stats preview")).toBeInTheDocument();
-    expect(invoke).toHaveBeenCalledWith("get_usage_stats", { since: null });
-  });
   it("shows the active local engine, key caps, recording mode and setup chips", async () => {
     const onNavigate = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} />);
@@ -108,13 +98,13 @@ describe("Home", () => {
     ["license", { licenseValid: false, licenseStatus: "expired", canRecord: false }, "License needs attention", "license", undefined],
     ["microphone mac", { hasMicrophonePermission: false, canRecord: false }, "Microphone access needed", undefined, "advanced"],
     ["remote", { remoteSelected: true, remoteAvailable: false, canRecord: false }, "Remote source unavailable", "transcription", undefined],
-  ])("routes %s to its resolution", async (_case, readiness, label, screenId, pane) => {
+    ["missing model", { canRecord: false, selectedModelAvailable: false }, "No model yet", "transcription", undefined],
+  ])("lists %s under Needs you and routes its fix", async (_case, readiness, label, screenId, pane) => {
     mock.readiness = { ...mock.readiness, ...readiness };
     const onNavigate = vi.fn(); const onNavigateSettingsPane = vi.fn();
     render(<OverviewTab onNavigate={onNavigate} onNavigateSettingsPane={onNavigateSettingsPane} />);
-    const warning = screen.getByRole("button", { name: new RegExp(label) });
-    expect(warning).toHaveClass("text-warn");
-    await userEvent.setup().click(warning);
+    const section = screen.getByRole("region", { name: "Needs you" });
+    await userEvent.setup().click(within(section).getByRole("button", { name: new RegExp(label) }));
     if (pane) expect(onNavigateSettingsPane).toHaveBeenCalledWith(pane);
     else expect(onNavigate).toHaveBeenCalledWith(screenId);
   });
@@ -127,26 +117,10 @@ describe("Home", () => {
     expect(onNavigate).toHaveBeenCalledWith("recording");
   });
 
-  it("prioritizes license and microphone blockers over an online remote source", () => {
+  it("puts the license problem ahead of an online remote source", () => {
     mock.readiness = { ...mock.readiness, remoteSelected: true, remoteAvailable: true, licenseValid: false, licenseStatus: "expired", canRecord: false };
-    const { rerender } = render(<OverviewTab />);
+    render(<OverviewTab />);
     expect(screen.getByRole("button", { name: /License needs attention/ })).toBeInTheDocument();
-    mock.readiness = { ...mock.readiness, licenseValid: true, licenseStatus: "licensed", hasMicrophonePermission: false };
-    rerender(<OverviewTab />);
-    expect(screen.getByRole("button", { name: /Microphone access needed/ })).toBeInTheDocument();
-  });
-
-  it.each([
-    ["missing model", "", "parakeet", false, "No model yet"],
-    ["missing cloud key", "soniox", "soniox", false, "Needs an API key"],
-    ["unavailable local model", "parakeet-tdt-0.6b-v3", "parakeet", false, "No model yet"],
-  ])("routes %s to Transcription", async (_case, model, engine, available, label) => {
-    mock.settings = { ...mock.settings, current_model: model, current_model_engine: engine as AppSettings["current_model_engine"] };
-    mock.readiness = { ...mock.readiness, canRecord: false, selectedModelAvailable: available };
-    const onNavigate = vi.fn();
-    render(<OverviewTab onNavigate={onNavigate} />);
-    await userEvent.setup().click(screen.getByRole("button", { name: new RegExp(label) }));
-    expect(onNavigate).toHaveBeenCalledWith("transcription");
   });
 
   it("opens the Cloud card for a missing API key", async () => {
@@ -157,6 +131,16 @@ describe("Home", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /Needs an API key/ }));
     expect(onSourceFilterChange).toHaveBeenCalledWith("cloud");
     expect(onNavigate).toHaveBeenCalledWith("transcription");
+  });
+
+  it("asks for Accessibility on macOS only", () => {
+    mock.readiness = { ...mock.readiness, hasAccessibilityPermission: false };
+    const { unmount } = render(<OverviewTab />);
+    expect(screen.getByText("Accessibility access needed")).toBeInTheDocument();
+    unmount();
+    mock.mac = false;
+    render(<OverviewTab />);
+    expect(screen.queryByText("Accessibility access needed")).not.toBeInTheDocument();
   });
 
   it("uses the selected model's context download state and clears it", async () => {
@@ -172,109 +156,70 @@ describe("Home", () => {
     expect(screen.queryByRole("button", { name: /42%/ })).not.toBeInTheDocument();
   });
 
-  it("shows an empty Recent state and the last four dictations with app and time", async () => {
-    const { rerender } = render(<OverviewTab />);
-    expect(screen.getByText("Your dictations will show up here.")).toBeInTheDocument();
-    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
-    mock.history = Array.from({ length: 5 }, (_, index) => ({ id: String(index), text: `Dictation number ${index}`, timestamp: new Date(Date.now() - index * 60_000), model: "parakeet", writing: { context_hint: { app_name: "Notes" }, audio_duration_ms: 3000 } }));
-    rerender(<OverviewTab />);
-    expect(screen.getByText("Dictation number 0")).toBeInTheDocument();
-    expect(screen.queryByText("Dictation number 4")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Notes")).toHaveLength(4);
-    expect(screen.getByText("2m")).toBeInTheDocument();
-    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /dictations on/ })).toHaveAccessibleName(/5 dictations on/);
-    expect(screen.getAllByText("Notes")[0]).toHaveClass("text-muted-foreground");
+  it("shows only the hero when nothing needs attention", () => {
+    mock.polishOn = true; mock.words = 3;
+    render(<OverviewTab />);
+    expect(screen.getByRole("heading", { name: /Press.*and start talking/ })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Get more out of Voicetypr" })).not.toBeInTheDocument();
+  });
+
+  it("drops Recent, This week and the test dictation from Home", () => {
+    render(<OverviewTab />);
+    expect(screen.queryByText("Recent")).not.toBeInTheDocument();
+    expect(screen.queryByText("This week")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try a test dictation" })).not.toBeInTheDocument();
+  });
+
+  it("follows the real recording mode in the helper line", () => {
+    mock.settings = { ...mock.settings, recording_mode: "toggle" };
+    render(<OverviewTab />);
+    expect(screen.getByText(/Press once to start, again to paste/)).toBeInTheDocument();
+    expect(screen.queryByText(/Hold to talk/)).not.toBeInTheDocument();
+  });
+
+  it("offers Retry for a kept recording and refreshes afterwards", async () => {
+    mock.kept = [{ id: "k1", engine_short: "Soniox", alt_engine_short: "Parakeet v3", alt_engine_id: "parakeet-tdt-0.6b-v3", remaining_ms: 540_000, busy: false }];
+    render(<OverviewTab />);
+    const section = screen.getByRole("region", { name: "Needs you" });
+    expect(within(section).getByText("A recording was kept")).toBeInTheDocument();
+    expect(within(section).getByText(/Audio kept for 9 more minutes/)).toBeInTheDocument();
+    await userEvent.setup().click(within(section).getByRole("button", { name: /Retry/ }));
+    expect(invoke).toHaveBeenCalledWith("retry_kept_dictation", { id: "k1", engine: "parakeet-tdt-0.6b-v3" });
+    await waitFor(() => expect(mock.refreshKept).toHaveBeenCalled());
+  });
+
+  it("shows a ready update with Install that opens the update dialog", async () => {
+    mock.update = { available: { version: "2.1.0-beta.6" }, checking: false };
+    render(<OverviewTab />);
+    expect(screen.getByText("Update ready · 2.1.0-beta.6")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: /Install/ }));
+    expect(mock.promptInstall).toHaveBeenCalledOnce();
+  });
+
+  it("suggests Polish only while it is off and words only while the dictionary is empty", async () => {
+    mock.polishOn = false; mock.words = 0;
     const onNavigate = vi.fn();
-    rerender(<OverviewTab onNavigate={onNavigate} />);
-    await userEvent.setup().click(screen.getByRole("button", { name: /View all history/ }));
-    expect(onNavigate).toHaveBeenCalledWith("history");
-  });
-
-  it("describes a short dictation without treating zero rounded savings as empty", () => {
-    mock.history = [{ id: "short", text: "hello", timestamp: new Date(), model: "parakeet", writing: { audio_duration_ms: 1000 } }];
-    render(<OverviewTab />);
-    expect(screen.getByText("saved vs typing")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "This week" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /1 dictations on/ })).toBeInTheDocument();
-  });
-
-  it("keeps test dictation neutral through input before idle and cancellation", async () => {
-    render(<OverviewTab />);
+    const { unmount } = render(<OverviewTab onNavigate={onNavigate} />);
+    const section = await screen.findByRole("region", { name: "Get more out of Voicetypr" });
+    expect(within(section).getByText("Turn on Polish")).toBeInTheDocument();
+    expect(within(section).getByText("Teach it your words")).toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Try a test dictation" }));
-    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
-    expect(textarea).toHaveFocus();
-    await user.type(textarea, "This really works");
-    expect(screen.getByText("3 words")).toBeInTheDocument();
-    fireEvent.paste(textarea, { clipboardData: { getData: () => "manually pasted" } });
-    fireEvent.change(textarea, { target: { value: "This really works manually pasted" } });
-    expect(screen.getByText("5 words")).toBeInTheDocument();
-    fireEvent.change(textarea, { target: { value: "This really works manually pasted now" } });
-    expect(screen.getByText("6 words")).toBeInTheDocument();
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-    expect(mock.listeners["recording-state-changed"]).toBeUndefined();
-    expect(mock.listeners["transcription-complete"]).toBeUndefined();
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Test dictation" })).not.toBeInTheDocument());
-  });
-
-  it.each(["text-first", "event-first"])("confirms delivery in %s order", async (order) => {
+    await user.click(within(section).getByRole("button", { name: /Set up/ }));
+    await user.click(within(section).getByRole("button", { name: /Add words/ }));
+    expect(onNavigate.mock.calls.map(([id]) => id)).toEqual(["polish", "dictionary"]);
+    unmount();
+    mock.polishOn = true; mock.words = 2;
     render(<OverviewTab />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
-    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
-    const text = () => fireEvent.change(textarea, { target: { value: "hello world" } });
-    const paste = () => act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "pasted", words: 2 } }));
-    if (order === "text-first") { text(); paste(); } else { paste(); text(); }
-    expect(screen.getByText("Worked · 2 words")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /PolishClean/ })).toBeInTheDocument());
+    expect(screen.queryByText("Turn on Polish")).not.toBeInTheDocument();
+    expect(screen.queryByText("Teach it your words")).not.toBeInTheDocument();
   });
 
-  it.each(["text-first", "event-first"])("does not confirm outside three seconds in %s order", async (order) => {
+  it("hides a tip's section when only one applies", async () => {
+    mock.polishOn = false; mock.words = 4;
     render(<OverviewTab />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
-    const now = vi.spyOn(Date, "now").mockReturnValue(10000);
-    const text = () => fireEvent.change(screen.getByRole("textbox", { name: "Test dictation" }), { target: { value: "hello world" } });
-    const paste = () => act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "pasted", words: 2 } }));
-    if (order === "text-first") { text(); now.mockReturnValue(13001); paste(); } else { paste(); now.mockReturnValue(13001); text(); }
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-    now.mockRestore();
+    expect(await screen.findByText("Turn on Polish")).toBeInTheDocument();
+    expect(screen.queryByText("Teach it your words")).not.toBeInTheDocument();
   });
-
-  it.each([true, false])("shows platform copy guidance without claiming success (Mac: %s)", async (mac) => {
-    mock.mac = mac;
-    render(<OverviewTab />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
-    const textarea = screen.getByRole("textbox", { name: "Test dictation" });
-    fireEvent.change(textarea, { target: { value: "typed first" } });
-    act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "copied", words: 2 } }));
-    expect(screen.getByText(`Copied — press ${mac ? "⌘V" : "Ctrl+V"} to paste here`)).toBeInTheDocument();
-    fireEvent.change(textarea, { target: { value: "manually pasted" } });
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-  });
-
-  it("cancellation clears pending delivery evidence", async () => {
-    render(<OverviewTab />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try a test dictation" }));
-    act(() => mock.listeners["paste-outcome"]?.({ payload: { outcome: "pasted", words: 2 } }));
-    act(() => mock.listeners["transcription-stream"]?.({ payload: { type: "cancelled" } }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Test dictation" }), { target: { value: "typed afterwards" } });
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-  });
-
-});
-
-it("hides test dictation after a completed take and keeps it for failed takes", () => {
-  mock.history = [{id:"failed",text:"",status:"failed",timestamp:new Date(),model:"parakeet"}];
-  const {rerender} = render(<OverviewTab />);
-  expect(screen.getByRole("button", {name:"Try a test dictation"})).toBeInTheDocument();
-  mock.history = [{id:"success",text:"A good take",status:"completed",timestamp:new Date(),model:"parakeet"}];
-  rerender(<OverviewTab />);
-  expect(screen.queryByRole("button", {name:"Try a test dictation"})).toBeNull();
-});
-
-it("hides test dictation for a successful take outside the loaded history page", async () => {
-  mock.usageWords = 12;
-  render(<OverviewTab />);
-  await waitFor(() => expect(screen.queryByRole("button", {name:"Try a test dictation"})).toBeNull());
 });

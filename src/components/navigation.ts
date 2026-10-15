@@ -42,13 +42,29 @@ export type ScreenId = MainScreenId | LegacyScreenId;
 export type SettingsPane =
   | "general"
   | "shortcuts"
-  | "privacy"
   | "storage"
   | "network"
   | "agent"
   | "advanced"
-  | "license"
-  | "about";
+  | "license";
+
+export const settingsPaneIds: readonly SettingsPane[] = [
+  "general",
+  "shortcuts",
+  "storage",
+  "network",
+  "agent",
+  "advanced",
+  "license",
+];
+
+/** Panes folded into General in beta.5; old deep links still land somewhere sensible. */
+const retiredSettingsPanes: Record<string, SettingsPane> = { privacy: "general", about: "general" };
+
+export function parseSettingsPane(value: unknown): SettingsPane | undefined {
+  if (typeof value !== "string") return undefined;
+  return settingsPaneIds.find((id) => id === value) ?? retiredSettingsPanes[value];
+}
 
 export interface ScreenDefinition {
   id: MainScreenId;
@@ -58,7 +74,7 @@ export interface ScreenDefinition {
 }
 
 export const mainNavScreens: ScreenDefinition[] = [
-  { id: "home", label: "Home", icon: House, description: "Readiness and recent activity." },
+  { id: "home", label: "Home", icon: House, description: "Your shortcut, what needs you, and ways to get more out of Voicetypr." },
   {
     id: "history",
     label: "History",
@@ -105,7 +121,7 @@ export const footerNavScreens: ScreenDefinition[] = [
     id: "settings",
     label: "Settings",
     icon: Settings2,
-    description: "Appearance, shortcuts, and advanced options.",
+    description: "Appearance, updates, privacy, and advanced options.",
   },
   {
     id: "help",
@@ -136,9 +152,9 @@ export const screenAliases: Record<
   network: { screen: "settings", pane: "network" },
   agent: { screen: "settings", pane: "agent" },
   advanced: { screen: "settings", pane: "advanced" },
-  privacy: { screen: "settings", pane: "privacy" },
+  privacy: { screen: "settings", pane: "general" },
   storage: { screen: "settings", pane: "storage" },
-  about: { screen: "settings", pane: "about" },
+  about: { screen: "settings", pane: "general" },
   "report-problem": { screen: "help" },
 };
 

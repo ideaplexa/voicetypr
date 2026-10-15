@@ -107,6 +107,20 @@ export function SettingsPaneCard({
   );
 }
 
+/** Flat group: a small uppercase label over hairline-separated rows, no card border. */
+export function SettingsSection({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <section className={label ? "pt-5" : undefined}>
+      {label ? (
+        <h3 className="pb-1 text-[10.5px] leading-[13px] font-semibold uppercase tracking-[0.6px] text-muted-foreground">
+          {label}
+        </h3>
+      ) : null}
+      <div className="[&>*:first-child]:border-t-0">{children}</div>
+    </section>
+  );
+}
+
 export function SettingsPaneRow({
   title,
   description,

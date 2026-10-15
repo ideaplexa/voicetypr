@@ -15,6 +15,7 @@ const {
   refreshSettingsMock,
   mockGetVersion,
   mockGetJustUpdatedVersion,
+  mockUpdateStatus,
   mockInvoke,
   tauriEventListeners,
 } = vi.hoisted(() => ({
@@ -29,6 +30,7 @@ const {
   refreshSettingsMock: vi.fn(),
   mockGetVersion: vi.fn(),
   mockGetJustUpdatedVersion: vi.fn(),
+  mockUpdateStatus: { checking: false, available: null, lastChecked: null, result: "idle" },
   mockInvoke: vi.fn(),
   tauriEventListeners: new Map<string, Set<(event: { payload: unknown }) => void>>(),
 }));
@@ -134,6 +136,10 @@ vi.mock("@/services/updateService", () => ({
     getJustUpdatedVersion: () => mockGetJustUpdatedVersion(),
     requestNotificationPermission: requestNotificationPermissionServiceMock,
     checkForUpdatesManually: vi.fn(),
+    getStatus: () => mockUpdateStatus,
+    subscribe: () => () => {},
+    checkNow: vi.fn(),
+    promptInstall: vi.fn(),
   },
 }));
 

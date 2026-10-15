@@ -21,6 +21,8 @@ import type { UpdateChannel } from "@/types";
 import { isStoreDistribution, type DistributionInfo } from "@/types/distribution";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, Rocket } from "lucide-react";
+import { getVersion } from "@tauri-apps/api/app";
+import { useUpdateStatus } from "@/hooks/useUpdateStatus";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingsPaneRow } from "@/components/settings/settings-ui";
@@ -36,6 +38,22 @@ interface AppBehaviorCardProps {
   onCheckUpdatesAutomaticallyChange: (checked: boolean) => void;
   onLaunchAtStartupResolved: (enabled: boolean) => Promise<void> | void;
 }
+function minutesAgo(then: number): string {
+  const minutes = Math.floor((Date.now() - then) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.floor(minutes / 60)} h ago`;
+}
+
+function updateStatusLine(update: ReturnType<typeof useUpdateStatus>): string {
+  if (update.checking) return "Checking…";
+  if (update.available) return `Update ${update.available.version} is ready to install.`;
+  if (update.result === "error") return "Couldn't check. Try again.";
+  if (update.result === "current" && update.lastChecked)
+    return `Up to date · checked ${minutesAgo(update.lastChecked)}`;
+  return "Your installed version";
+}
+
 export function AppBehaviorCard({
   pane = false,
   rows,
@@ -53,6 +71,14 @@ export function AppBehaviorCard({
     "loading" | "direct" | "store" | "error"
   >("loading");
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
+  const [version, setVersion] = useState("—");
+  const update = useUpdateStatus();
+
+  useEffect(() => {
+    void getVersion()
+      .then(setVersion)
+      .catch(() => setVersion("—"));
+  }, []);
 
   useEffect(() => {
     const checkAutostart = async () => {
@@ -161,12 +187,34 @@ export function AppBehaviorCard({
             <>
               <SettingsPaneRow
                 className="min-h-[66px]"
-                title="Updates"
-                description="Get new versions automatically."
+                title={`Voicetypr ${version}`}
+                description={updateStatusLine(update)}
+                control={
+                  update.available ? (
+                    <Button type="button" size="sm" onClick={() => void update.promptInstall()}>
+                      Install
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void update.checkNow()}
+                      disabled={update.checking}
+                    >
+                      Check now
+                    </Button>
+                  )
+                }
+              />
+              <SettingsPaneRow
+                className="min-h-[66px]"
+                title="Check for updates automatically"
+                description="Look once a day and tell you when one is ready."
                 control={
                   <Switch
                     id="check-updates-automatically"
-                    aria-label="Updates"
+                    aria-label="Check for updates automatically"
                     checked={checkUpdatesAutomatically ?? true}
                     onCheckedChange={onCheckUpdatesAutomaticallyChange}
                   />

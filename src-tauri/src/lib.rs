@@ -1325,6 +1325,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             recording::kept::retry_kept_dictation,
             recording::kept::transcribe_anyway,
             recording::kept::discard_kept_dictation,
+            recording::kept::list_kept_dictations,
             recording::island::island_action,
             menu::quick::island_quick_options,
             menu::quick::island_quick_set,

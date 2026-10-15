@@ -5,7 +5,7 @@ export const TELEMETRY_COPY = "Share anonymous crash reports and usage numbers â
 export function WhatsShared() {
   const [open, setOpen] = useState(false);
   return <>
-    <button type="button" className="text-xs underline text-muted-foreground" onClick={() => setOpen(true)}>What's shared</button>
+    <button type="button" className="text-xs underline hover:text-foreground" onClick={() => setOpen(true)}>What's shared</button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader><DialogTitle>What's shared</DialogTitle><DialogDescription>
@@ -17,7 +17,7 @@ export function WhatsShared() {
           <li>Fixed error codes and crash locations inside Voicetypr.</li>
           <li>Random installation and dictation IDs that connect these events.</li>
         </ul>
-        <p className="text-sm text-muted-foreground">Never your words, audio, clipboard, prompts, keys, file paths, app names or window titles. No screen recording or session replay. You can turn sharing off anytime in Privacy settings.</p>
+        <p className="text-sm text-muted-foreground">Never your words, audio, clipboard, prompts, keys, file paths, app names or window titles. No screen recording or session replay. You can turn sharing off anytime in Settings â†’ General.</p>
       </DialogContent>
     </Dialog>
   </>;

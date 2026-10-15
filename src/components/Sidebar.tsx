@@ -2,14 +2,12 @@ import { Brandmark } from "@/components/Brandmark";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   footerNavScreens,
-  licenseScreen,
   mainNavScreens,
   resolveScreen,
   tuningNavScreens,
   type ScreenDefinition,
   type ScreenId,
 } from "@/components/navigation";
-import { getVersion } from "@tauri-apps/api/app";
 import {
   SidebarContent,
   SidebarFooter,
@@ -23,10 +21,9 @@ import {
   Sidebar as SidebarPrimitive,
 } from "@/components/ui/sidebar";
 import { useLicense } from "@/contexts/LicenseContext";
-import type { LicenseStatus } from "@/types";
+import { SidebarStatusBar, licenseState } from "@/components/SidebarStatusBar";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react";
 
 const railTooltipClass =
   "rounded-[6px] px-[9px] py-[5px] text-[12px] leading-[normal] font-medium shadow-[0_4px_12px_#00000026] [&>[aria-hidden=true]]:hidden";
@@ -36,32 +33,13 @@ interface SidebarProps {
   onSectionChange: (section: ScreenId) => void;
 }
 
-function licenseState(status: LicenseStatus | null, daysLeft: number) {
-  if (status?.status === "licensed") return { label: "Pro", color: "text-sage" };
-  if (status?.status === "trial") {
-    if (daysLeft === 0) return { label: "Trial expires today", color: "text-warn" };
-    if (daysLeft === 1) return { label: "Trial · 1 day left", color: "text-warn" };
-    return { label: daysLeft > 1 ? `Trial · ${daysLeft} days left` : "Trial", color: "text-sage" };
-  }
-  return status?.status === "expired"
-    ? { label: "Trial expired", color: "text-destructive" }
-    : { label: "No License", color: "text-muted-foreground" };
-}
-
 export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const { status } = useLicense();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const [version, setVersion] = useState("—");
   const license = licenseState(status, status?.trial_days_left ?? -1);
   const destination = resolveScreen(activeSection);
   const current = destination.screen;
-  const licenseActive = destination.pane === "license";
-  useEffect(() => {
-    void getVersion()
-      .then(setVersion)
-      .catch(() => setVersion("—"));
-  }, []);
 
   return (
     <SidebarPrimitive
@@ -135,46 +113,11 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
             onSectionChange={onSectionChange}
           />
         </nav>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={() => onSectionChange("license")}
-                aria-label={`${license.label}. Open License`}
-                aria-current={licenseActive ? "page" : undefined}
-                className={cn(
-                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex items-center gap-2 rounded-[8px] bg-card text-left ring-1 ring-inset ring-border",
-                  collapsed ? "h-[34px] w-10 justify-center p-0" : "w-full px-[10px] py-2",
-                  licenseActive && "ring-1 ring-sage",
-                )}
-              />
-            }
-          >
-            <licenseScreen.icon className={cn("size-4 shrink-0", collapsed && "size-[17px]", license.color)} />
-            <span
-              className={
-                collapsed
-                  ? "sr-only"
-                  : "min-w-0 truncate text-[12.5px] leading-[normal] font-semibold"
-              }
-            >
-              {license.label}
-            </span>
-            <span className={collapsed ? "sr-only" : "text-[11.5px] leading-[normal] text-muted-foreground"}>
-              {version}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent
-            role="tooltip"
-            side="right"
-            sideOffset={8}
-            hidden={!collapsed}
-            className={railTooltipClass}
-          >
-            {license.label} · License
-          </TooltipContent>
-        </Tooltip>
+        <SidebarStatusBar
+          license={license}
+          collapsed={collapsed}
+          onOpenLicense={() => onSectionChange("license")}
+        />
       </SidebarFooter>
     </SidebarPrimitive>
   );

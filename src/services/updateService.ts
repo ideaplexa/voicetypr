@@ -23,8 +23,18 @@ export interface AppUpdateInfo {
   channel: UpdateChannel;
 }
 
+/** What the UI shows about updates: sidebar footer, Home and Settings → General. */
+export interface UpdateStatus {
+  checking: boolean;
+  available: AppUpdateInfo | null;
+  lastChecked: number | null;
+  result: "idle" | "current" | "error" | "store";
+}
+
 export class UpdateService {
   private static instance: UpdateService;
+  private status: UpdateStatus = { checking: false, available: null, lastChecked: null, result: "idle" };
+  private listeners = new Set<() => void>();
   private checkInProgress = false;
   private updateCheckTimer: number | null = null;
   private isSessionActive = false;
@@ -34,6 +44,53 @@ export class UpdateService {
   private distributionInfoPromise: Promise<DistributionInfo> | null = null;
 
   private constructor() {}
+
+  getStatus = (): UpdateStatus => this.status;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  private setStatus(patch: Partial<UpdateStatus>): void {
+    this.status = { ...this.status, ...patch };
+    this.listeners.forEach((listener) => listener());
+  }
+
+  /**
+   * Quiet check for the status UI: no toasts and no dialog. Resolves to the new status so the
+   * caller can show "Up to date" or offer the install.
+   */
+  async checkNow(): Promise<UpdateStatus> {
+    if (this.checkInProgress) return this.status;
+    this.checkInProgress = true;
+    this.setStatus({ checking: true });
+    try {
+      if (await this.usesStoreUpdates()) {
+        this.setStatus({ result: "store" });
+        return this.status;
+      }
+      const update = await invoke<AppUpdateInfo | null>("check_for_app_update");
+      const now = Date.now();
+      localStorage.setItem(LAST_UPDATE_CHECK_KEY, now.toString());
+      this.setStatus({ available: update, lastChecked: now, result: "current" });
+    } catch (error) {
+      log.error("Update check failed:", error);
+      this.setStatus({ result: "error" });
+    } finally {
+      this.checkInProgress = false;
+      this.setStatus({ checking: false });
+    }
+    return this.status;
+  }
+
+  /** Opens the existing install dialog for the update found by the last check. */
+  async promptInstall(): Promise<void> {
+    const update = this.status.available;
+    if (update) await this.showUpdateDialog(update);
+  }
 
   /**
    * Set whether user is in an active session (recording/transcribing)
@@ -247,6 +304,7 @@ export class UpdateService {
       localStorage.setItem(LAST_UPDATE_CHECK_KEY, Date.now().toString());
 
       if (update) {
+        this.setStatus({ available: update });
         await this.handleUpdateAvailable(update, true);
       }
     } catch (error) {
@@ -281,6 +339,7 @@ export class UpdateService {
       localStorage.setItem(LAST_UPDATE_CHECK_KEY, Date.now().toString());
 
       if (update) {
+        this.setStatus({ available: update });
         await this.handleUpdateAvailable(update, false);
       } else {
         toast.success("You're on the latest version!");

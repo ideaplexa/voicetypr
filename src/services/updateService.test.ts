@@ -201,6 +201,33 @@ describe("UpdateService update checks", () => {
     });
   });
 
+  it("checkNow reports status quietly, then promptInstall opens the existing dialog", async () => {
+    const update = { version: "2.0.0-beta.3", body: "Notes", channel: "beta" } as AppUpdateInfo;
+    mockDirectDistribution(update);
+    vi.mocked(ask).mockResolvedValue(false);
+    const seen: boolean[] = [];
+    service.subscribe(() => seen.push(service.getStatus().checking));
+
+    const status = await service.checkNow();
+
+    expect(seen[0]).toBe(true);
+    expect(status).toMatchObject({ checking: false, available: update, result: "current" });
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(ask).not.toHaveBeenCalled();
+    await service.promptInstall();
+    expect(ask).toHaveBeenCalledOnce();
+  });
+
+  it("checkNow says current when there is no update and error when the check fails", async () => {
+    mockDirectDistribution(null);
+    expect(await service.checkNow()).toMatchObject({ available: null, result: "current" });
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "get_distribution_info") return { channel: "direct", is_store_install: false, package_family_name: null };
+      throw new Error("offline");
+    });
+    expect(await service.checkNow()).toMatchObject({ checking: false, result: "error" });
+  });
+
   it("manual checks still ask before installing", async () => {
     mockDirectDistribution({
       version: "2.0.0-beta.1",

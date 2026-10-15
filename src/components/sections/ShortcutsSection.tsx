@@ -1,18 +1,12 @@
-import {
-  SettingsHeader,
-  SettingsPaneCard,
-  SettingsPaneRow,
-} from "@/components/settings/settings-ui";
-import { Button } from "@/components/settings/SettingsButton";
+import { SettingsHeader } from "@/components/settings/settings-ui";
 import { Spinner } from "@/components/ui/spinner";
 import { AlertTriangle } from "lucide-react";
 import { ShortcutSectionGroup } from "@/components/sections/shortcuts/ShortcutSectionGroup";
 import { MAX_SINGLE_KEY_BINDINGS } from "@/components/sections/shortcuts/shortcutUtils";
 import { useShortcutsSection } from "@/components/sections/shortcuts/useShortcutsSection";
 
-export function ShortcutsSection({
-  onNavigateRecording,
-}: { onNavigateRecording?: () => void } = {}) {
+/** `pane` is the Settings → App shortcuts view; the dictation shortcut lives on Recording. */
+export function ShortcutsSection({ pane = false }: { pane?: boolean } = {}) {
   const {
     groupedActions,
     bindingsByAction,
@@ -33,27 +27,15 @@ export function ShortcutsSection({
   } = useShortcutsSection();
 
   return (
-    <div className={onNavigateRecording ? "flex flex-col gap-0" : "flex flex-col gap-[14px]"}>
-      {!onNavigateRecording ? (
+    <div className={pane ? "flex flex-col gap-0" : "flex flex-col gap-[14px]"}>
+      {!pane ? (
         <SettingsHeader
           title="Shortcuts"
           description="Additional shortcuts for history, Polish, Home, and other app actions."
         />
-      ) : (
-        <SettingsPaneCard className="border-b border-border">
-          <SettingsPaneRow
-            title="Dictation shortcut"
-            description="Change the shortcut that starts recording."
-            control={
-              <Button type="button" variant="outline" size="sm" onClick={onNavigateRecording}>
-                Manage in Recording
-              </Button>
-            }
-          />
-        </SettingsPaneCard>
-      )}
+      ) : null}
 
-      {!onNavigateRecording ? (
+      {!pane ? (
         <div className="rounded-2xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
           <div className="flex gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-sage" />
@@ -107,7 +89,7 @@ export function ShortcutsSection({
           {groupedActions.map(([section, sectionActions]) => (
             <ShortcutSectionGroup
               key={section}
-              pane={Boolean(onNavigateRecording)}
+              pane={pane}
               section={section}
               sectionActions={sectionActions}
               bindingsByAction={bindingsByAction}

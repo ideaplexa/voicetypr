@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/settings/SettingsButton";
-import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
+import { SettingsPaneRow, SettingsSection } from "@/components/settings/settings-ui";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
-import { updateService } from "@/services/updateService";
-import { AppBehaviorCard } from "@/components/sections/general/AppBehaviorCard";
 import { GeneralSettings } from "@/components/sections/GeneralSettings";
 import { ShortcutsSection } from "@/components/sections/ShortcutsSection";
-import { TelemetrySection } from "@/components/sections/TelemetrySection";
 import { StorageCleanupCard } from "@/components/sections/recording/StorageCleanupCard";
 import { AdvancedSection } from "@/components/sections/AdvancedSection";
 import { NetworkSharingCard } from "@/components/sections/NetworkSharingCard";
@@ -16,47 +12,39 @@ import { AgentCliSection } from "@/components/sections/AgentCliSection";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
 import { toast } from "sonner";
-import { isMacOS } from "@/lib/platform";
 import {
   HardDrive,
   Keyboard,
   Settings2,
   Share2,
-  ShieldCheck,
   Terminal,
   Wrench,
   BadgeCheck,
-  Info,
   X,
 } from "lucide-react";
 import { AccountTab } from "@/components/tabs/AccountTab";
-import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { DialogClose } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 const log = createLogger("settings");
 export const settingsPanes = [
   { id: "general", label: "General", icon: Settings2 },
-  { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
-  { id: "privacy", label: "Privacy", icon: ShieldCheck },
+  { id: "shortcuts", label: "App shortcuts", icon: Keyboard },
   { id: "storage", label: "Storage", icon: HardDrive },
   { id: "network", label: "Network sharing", icon: Share2 },
   { id: "agent", label: "CLI & API", icon: Terminal },
   { id: "advanced", label: "Troubleshooting", icon: Wrench },
   { id: "license", label: "License", icon: BadgeCheck },
-  { id: "about", label: "About & updates", icon: Info },
 ] as const;
 
 const paneDescriptions: Record<SettingsPane, string> = {
-  general: "Appearance and startup",
+  general: "Appearance, startup, updates and privacy",
   shortcuts: "Extra shortcuts for app actions. Your dictation shortcut lives in Recording.",
-  privacy: `What stays on this ${isMacOS ? "Mac" : "PC"} and what's sent`,
   storage: "Where your history and recordings live, and how long they stay.",
   network: "Let your other computers use this Voicetypr to transcribe. Local network only.",
   agent: "Use Voicetypr from the terminal and from your AI agents.",
   advanced: "Permissions, quick fixes and reset options.",
   license: "Trial status, license activation, and purchase access.",
-  about: "Your installed version, updates and help.",
 };
 
 export function SettingsTab({
@@ -83,9 +71,9 @@ export function SettingsTab({
             const Icon = entry.icon;
             return (
               <div key={entry.id}>
-                {index === 4 || index === 7 ? (
+                {index === 3 || index === 6 ? (
                   <p className="px-2.5 pt-[14px] pb-1 text-[10.5px] leading-[13px] font-semibold uppercase tracking-[0.6px] text-muted-foreground">
-                    {index === 4 ? "Advanced" : "Account"}
+                    {index === 3 ? "Advanced" : "Account"}
                   </p>
                 ) : null}
                 <button
@@ -157,19 +145,14 @@ export function SettingsTab({
           ) : null}
           {pane === "shortcuts" ? (
             <>
-              <ShortcutsSection onNavigateRecording={() => onNavigate?.("recording")} />
-            </>
-          ) : null}
-          {pane === "privacy" ? (
-            <>
-              <TelemetrySection />
+              <ShortcutsSection pane />
             </>
           ) : null}
           {pane === "storage" ? (
             <>
-              <SettingsPaneCard title="History">
+              <SettingsSection label="History">
                 <StorageCleanupCard pane />
-              </SettingsPaneCard>
+              </SettingsSection>
               <StorageFilesCard onNavigate={onNavigate} />
             </>
           ) : null}
@@ -189,7 +172,6 @@ export function SettingsTab({
             </div>
           ) : null}
           {pane === "license" ? <AccountTab embedded /> : null}
-          {pane === "about" ? <AboutCard onNavigate={onNavigate} /> : null}
         </div>
       </div>
     </div>
@@ -205,7 +187,7 @@ function StorageFilesCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => v
       .catch(() => setFolder(null));
   }, []);
   return (
-    <SettingsPaneCard title="Files">
+    <SettingsSection label="Files">
       {settings?.save_recordings ? (
         <SettingsPaneRow
           title="Recordings folder"
@@ -237,85 +219,6 @@ function StorageFilesCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => v
           </Button>
         }
       />
-    </SettingsPaneCard>
-  );
-}
-
-function AboutCard({ onNavigate }: { onNavigate?: (screen: ScreenId) => void }) {
-  const { settings, updateSettings } = useSettings();
-  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
-  const [version, setVersion] = useState("—");
-  const [checking, setChecking] = useState(false);
-  useEffect(() => {
-    void getVersion()
-      .then(setVersion)
-      .catch(() => setVersion("—"));
-  }, []);
-  const checkUpdates = async () => {
-    setChecking(true);
-    try {
-      await updateService.checkForUpdatesManually();
-    } finally {
-      setChecking(false);
-    }
-  };
-  return (
-    <>
-      <SettingsPaneCard title="About">
-        <SettingsPaneRow
-          title={`Voicetypr ${version}`}
-          description="Your installed version"
-          control={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void checkUpdates()}
-              disabled={checking}
-            >
-              Check now
-            </Button>
-          }
-        />
-        <SettingsPaneRow
-          title="What's new"
-          description="See what's changed in your installed version."
-          control={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={version === "—"}
-              onClick={() => setWhatsNewOpen(true)}
-            >
-              View
-            </Button>
-          }
-        />
-        <SettingsPaneRow
-          title="Help & feedback"
-          description="Get help or report a problem."
-          control={
-            <Button variant="outline" size="sm" onClick={() => onNavigate?.("help")}>
-              Open
-            </Button>
-          }
-        />
-        <AppBehaviorCard
-          pane
-          rows="updates"
-          updateChannel={settings?.update_channel}
-          checkUpdatesAutomatically={settings?.check_updates_automatically}
-          onUpdateChannelChange={(channel) => updateSettings({ update_channel: channel })}
-          onCheckUpdatesAutomaticallyChange={(checked) =>
-            void updateSettings({ check_updates_automatically: checked })
-          }
-          onLaunchAtStartupResolved={() => {}}
-        />
-      </SettingsPaneCard>
-      <WhatsNewDialog
-        version={whatsNewOpen ? version : null}
-        onClose={() => setWhatsNewOpen(false)}
-      />
-    </>
+    </SettingsSection>
   );
 }

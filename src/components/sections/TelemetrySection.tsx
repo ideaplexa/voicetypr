@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/settings-ui";
 import { TELEMETRY_COPY, WhatsShared } from "@/components/WhatsShared";
 interface Status { enabled: boolean; available: boolean }
-export function TelemetrySection() {
+export function TelemetrySection({ bare = false }: { bare?: boolean } = {}) {
   const [status, setStatus] = useState<Status | null>(null);
   const [pending, setPending] = useState(false);
   useEffect(() => {
@@ -22,10 +22,12 @@ export function TelemetrySection() {
     } catch { toast.error("Could not save privacy settings."); }
     finally { setPending(false); }
   };
-  return <SettingsPaneCard title="Anonymous sharing">
-    <SettingsPaneRow title="Crash reports and usage numbers" description={TELEMETRY_COPY} control={
+  const row = <SettingsPaneRow title="Share anonymous crash reports and usage numbers" description={bare ? <>Never your words, audio or app content. <WhatsShared /></> : TELEMETRY_COPY} control={
       <Switch checked={status?.enabled ?? true} disabled={pending || status === null} onCheckedChange={update} aria-label="Share anonymous crash reports and usage numbers" />
-    } />
+    } />;
+  if (bare) return row;
+  return <SettingsPaneCard title="Anonymous sharing">
+    {row}
     <WhatsShared />
   </SettingsPaneCard>;
 }

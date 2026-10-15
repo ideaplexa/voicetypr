@@ -30,8 +30,16 @@ vi.mock("@/hooks/useTauriEvent", () => ({ useTauriEvent: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn().mockResolvedValue(false) }));
+const idleUpdate = vi.hoisted(() => ({ checking: false, available: null, lastChecked: null, result: "idle" }));
+const checkNow = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/services/updateService", () => ({
-  updateService: { checkForUpdatesManually: vi.fn().mockResolvedValue(undefined) },
+  updateService: {
+    checkForUpdatesManually: vi.fn().mockResolvedValue(undefined),
+    getStatus: () => idleUpdate,
+    subscribe: () => () => {},
+    checkNow,
+    promptInstall: vi.fn(),
+  },
 }));
 
 describe("Settings pane controls", () => {
@@ -50,42 +58,41 @@ describe("Settings pane controls", () => {
     });
   });
 
-  it("renders General's real appearance, startup, update and tray controls", async () => {
-    const view = render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+  it("renders General's appearance, startup, updates and privacy as flat sections", async () => {
+    render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByText("Open at login")).toBeInTheDocument();
-    expect(screen.queryByText("Updates")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Updates" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Privacy" })).toBeInTheDocument();
     expect(screen.queryByText("Menu bar icon")).not.toBeInTheDocument();
     screen.getByRole("button", { name: "Dark" }).focus();
     await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ theme: "dark" }));
     fireEvent.click(screen.getByRole("switch", { name: "Open at login" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_autostart", { enabled: true }));
-    view.rerender(<SettingsTab pane="about" onPaneChange={vi.fn()} />);
+    expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
     expect(await screen.findByText("Update channel")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("switch", { name: "Updates" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Check for updates automatically" }));
     await waitFor(() =>
       expect(updateSettings).toHaveBeenCalledWith({ check_updates_automatically: true }),
     );
-    expect(await screen.findByText("Voicetypr 2.1.0")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Check now" }));
+    expect(checkNow).toHaveBeenCalledOnce();
   });
 
-  it("renders shortcut actions and opens Recording for the primary shortcut", async () => {
-    const onNavigate = vi.fn();
-    render(<SettingsTab pane="shortcuts" onPaneChange={vi.fn()} onNavigate={onNavigate} />);
+  it("renders app shortcut actions without the dictation shortcut", async () => {
+    render(<SettingsTab pane="shortcuts" onPaneChange={vi.fn()} />);
     expect(await screen.findByText("Cancel dictation")).toBeInTheDocument();
     expect(screen.getByText("Copy last transcript")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Manage in Recording" }));
-    expect(onNavigate).toHaveBeenCalledWith("recording");
+    expect(screen.queryByText("Dictation shortcut")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage in Recording" })).not.toBeInTheDocument();
   });
 
-  it("renders Privacy's real switches and persists analytics consent", async () => {
-    render(<SettingsTab pane="privacy" onPaneChange={vi.fn()} />);
+  it("keeps the one privacy switch in General and persists analytics consent", async () => {
+    render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
     const analytics = await screen.findByRole("switch", { name: "Share anonymous crash reports and usage numbers" });
-    expect(
-      screen.getByRole("switch", { name: "Share anonymous crash reports and usage numbers" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/never your words, audio or app content/)).toBeInTheDocument();
+    expect(screen.getByText(/Never your words, audio or app content/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "What's shared" })).toBeInTheDocument();
     fireEvent.click(analytics);
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false }),
@@ -172,7 +179,6 @@ describe("Settings pane controls", () => {
     for (const pane of [
       "general",
       "shortcuts",
-      "privacy",
       "storage",
       "network",
       "agent",
