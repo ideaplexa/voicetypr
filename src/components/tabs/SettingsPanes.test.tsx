@@ -30,15 +30,20 @@ vi.mock("@/hooks/useTauriEvent", () => ({ useTauriEvent: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0") }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn().mockResolvedValue(false) }));
-const idleUpdate = vi.hoisted(() => ({ checking: false, available: null, lastChecked: null, result: "idle" }));
+const updateState = vi.hoisted(() => ({
+  status: { checking: false, available: null as null | { version: string }, lastChecked: null, result: "idle", install: "idle", restartVersion: null as string | null },
+}));
+const restartNow = vi.hoisted(() => vi.fn());
 const checkNow = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/services/updateService", () => ({
   updateService: {
     checkForUpdatesManually: vi.fn().mockResolvedValue(undefined),
-    getStatus: () => idleUpdate,
+    getStatus: () => updateState.status,
     subscribe: () => () => {},
     checkNow,
     promptInstall: vi.fn(),
+    restartNow,
+    notifyChannelChanged: vi.fn(),
   },
 }));
 
@@ -56,6 +61,18 @@ describe("Settings pane controls", () => {
       configurable: true,
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     });
+  });
+
+  it("disables the Updates Install button while installing and offers Restart once installed", async () => {
+    updateState.status = { ...updateState.status, available: { version: "2.1.0-beta.6" }, install: "installing" };
+    const view = render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "Installing…" })).toBeDisabled();
+    view.unmount();
+    updateState.status = { ...updateState.status, available: null, install: "restart_pending", restartVersion: "2.1.0-beta.6" };
+    render(<SettingsTab pane="general" onPaneChange={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(restartNow).toHaveBeenCalledOnce();
+    updateState.status = { checking: false, available: null, lastChecked: null, result: "idle", install: "idle", restartVersion: null };
   });
 
   it("renders General's appearance, startup, updates and privacy as flat sections", async () => {

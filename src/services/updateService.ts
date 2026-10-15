@@ -24,18 +24,43 @@ export interface AppUpdateInfo {
 }
 
 /** What the UI shows about updates: sidebar footer, Home and Settings → General. */
+export type InstallState = "idle" | "prompting" | "installing" | "restart_pending";
+
 export interface UpdateStatus {
   checking: boolean;
   available: AppUpdateInfo | null;
   lastChecked: number | null;
   result: "idle" | "current" | "error" | "store";
+  /** One shared install state: every Install control reads it, so installs never overlap. */
+  install: InstallState;
+  /** The version that is installed and waiting for a restart (`install === "restart_pending"`). */
+  restartVersion: string | null;
 }
+
+type CheckOutcome =
+  | { kind: "update"; update: AppUpdateInfo }
+  | { kind: "current" }
+  | { kind: "error" }
+  | { kind: "store" }
+  | { kind: "skipped" }
+  | { kind: "stale" };
 
 export class UpdateService {
   private static instance: UpdateService;
-  private status: UpdateStatus = { checking: false, available: null, lastChecked: null, result: "idle" };
+  private status: UpdateStatus = {
+    checking: false,
+    available: null,
+    lastChecked: null,
+    result: "idle",
+    install: "idle",
+    restartVersion: null,
+  };
   private listeners = new Set<() => void>();
-  private checkInProgress = false;
+  /** The one in-flight check. Startup, tray, manual, footer and channel-change checks all join it. */
+  private pendingCheck: Promise<CheckOutcome> | null = null;
+  /** Bumped when the update channel changes; a check started under an older epoch is dropped. */
+  private channelEpoch = 0;
+  private channel: UpdateChannel | null = null;
   private updateCheckTimer: number | null = null;
   private isSessionActive = false;
   private pendingRelaunch = false;
@@ -60,36 +85,90 @@ export class UpdateService {
   }
 
   /**
-   * Quiet check for the status UI: no toasts and no dialog. Resolves to the new status so the
-   * caller can show "Up to date" or offer the install.
+   * One check at a time. A caller that arrives while a check is running joins it, so nobody sees a
+   * half-finished snapshot. `background` honours the 24 h interval and resolves `skipped` without
+   * touching the status.
    */
-  async checkNow(): Promise<UpdateStatus> {
-    if (this.checkInProgress) return this.status;
-    this.checkInProgress = true;
-    this.setStatus({ checking: true });
-    try {
-      if (await this.usesStoreUpdates()) {
-        this.setStatus({ result: "store" });
-        return this.status;
+  private runCheck(background: boolean): Promise<CheckOutcome> {
+    if (this.pendingCheck) return this.pendingCheck;
+    const epoch = this.channelEpoch;
+    const stale = () => epoch !== this.channelEpoch;
+    const run = async (): Promise<CheckOutcome> => {
+      let started = false;
+      try {
+        if (await this.usesStoreUpdates()) {
+          if (stale()) return { kind: "stale" };
+          this.setStatus({ result: "store" });
+          return { kind: "store" };
+        }
+        if (background) {
+          const lastCheck = localStorage.getItem(LAST_UPDATE_CHECK_KEY);
+          if (lastCheck && Date.now() - parseInt(lastCheck, 10) < UPDATE_CHECK_INTERVAL) {
+            log.debug("Skipping update check - too soon since last check");
+            return { kind: "skipped" };
+          }
+        }
+        started = true;
+        this.setStatus({ checking: true });
+        const update = await invoke<AppUpdateInfo | null>("check_for_app_update");
+        if (stale()) return { kind: "stale" };
+        const now = Date.now();
+        localStorage.setItem(LAST_UPDATE_CHECK_KEY, now.toString());
+        // Null results are published too, so a stale offer disappears. A restart already pending
+        // keeps the install state; the offer stays empty until the app restarts.
+        this.setStatus({
+          available: this.status.install === "restart_pending" ? null : update,
+          lastChecked: now,
+          result: "current",
+        });
+        return update ? { kind: "update", update } : { kind: "current" };
+      } catch (error) {
+        if (stale()) return { kind: "stale" };
+        log.error("Update check failed:", error);
+        this.setStatus({ result: "error" });
+        return { kind: "error" };
+      } finally {
+        if (!stale()) {
+          this.pendingCheck = null;
+          if (started) this.setStatus({ checking: false });
+        }
       }
-      const update = await invoke<AppUpdateInfo | null>("check_for_app_update");
-      const now = Date.now();
-      localStorage.setItem(LAST_UPDATE_CHECK_KEY, now.toString());
-      this.setStatus({ available: update, lastChecked: now, result: "current" });
-    } catch (error) {
-      log.error("Update check failed:", error);
-      this.setStatus({ result: "error" });
-    } finally {
-      this.checkInProgress = false;
-      this.setStatus({ checking: false });
-    }
+    };
+    const promise = run();
+    this.pendingCheck = promise;
+    return promise;
+  }
+
+  /** Quiet check for the status UI: no toasts and no dialog. Resolves to the status after the check ends. */
+  async checkNow(): Promise<UpdateStatus> {
+    let outcome = await this.runCheck(false);
+    // A background check that skipped itself has not checked anything; run a real one.
+    if (outcome.kind === "skipped") outcome = await this.runCheck(false);
     return this.status;
+  }
+
+  /**
+   * The update channel changed. The offer, the last result and any check started under the old
+   * channel no longer apply; callers start a fresh check afterwards.
+   */
+  notifyChannelChanged(channel: UpdateChannel): void {
+    if (this.channel === channel) return;
+    this.channel = channel;
+    this.channelEpoch += 1;
+    this.pendingCheck = null;
+    this.setStatus({ checking: false, available: null, lastChecked: null, result: "idle" });
   }
 
   /** Opens the existing install dialog for the update found by the last check. */
   async promptInstall(): Promise<void> {
     const update = this.status.available;
-    if (update) await this.showUpdateDialog(update);
+    if (update) await this.beginInstall(update);
+  }
+
+  /** Restarts into an installed update (defers while a recording is active). */
+  async restartNow(): Promise<void> {
+    if (this.status.install !== "restart_pending") return;
+    await this.performRelaunch();
   }
 
   /**
@@ -207,6 +286,7 @@ export class UpdateService {
    * - Sets up daily update checks
    */
   async initialize(settings: AppSettings): Promise<void> {
+    this.channel ??= settings.update_channel ?? "stable";
     if (await this.usesStoreUpdates()) {
       return;
     }
@@ -276,79 +356,34 @@ export class UpdateService {
    * Runs on startup and daily when automatic update checks are enabled.
    */
   async checkForUpdatesInBackground(): Promise<void> {
-    if (this.checkInProgress) {
-      log.debug("Update check already in progress");
-      return;
-    }
-
-    this.checkInProgress = true;
-    try {
-      if (await this.usesStoreUpdates()) {
-        return;
-      }
-      // Check if we should skip based on last check time
-      const lastCheck = localStorage.getItem(LAST_UPDATE_CHECK_KEY);
-      if (lastCheck) {
-        const lastCheckTime = parseInt(lastCheck, 10);
-        const now = Date.now();
-        if (now - lastCheckTime < UPDATE_CHECK_INTERVAL) {
-          log.debug("Skipping update check - too soon since last check");
-          return;
-        }
-      }
-
-      log.debug("Checking for updates in background...");
-      const update = await invoke<AppUpdateInfo | null>("check_for_app_update");
-
-      // Update last check time
-      localStorage.setItem(LAST_UPDATE_CHECK_KEY, Date.now().toString());
-
-      if (update) {
-        this.setStatus({ available: update });
-        await this.handleUpdateAvailable(update, true);
-      }
-    } catch (error) {
-      log.error("Background update check failed:", error);
-      // Don't show error toast for background checks
-    } finally {
-      this.checkInProgress = false;
-    }
+    const outcome = await this.runCheck(true);
+    if (outcome.kind === "update") await this.handleUpdateAvailable(outcome.update, true);
+    // Background failures stay quiet: the status shows them, no toast.
   }
 
   /**
    * Check for updates with user feedback (manual check)
    */
   async checkForUpdatesManually(): Promise<void> {
-    if (this.checkInProgress) {
-      toast.info("Update check already in progress");
+    if (await this.usesStoreUpdates()) {
+      toast.info("Updates are handled by Microsoft Store");
       return;
     }
-
-    this.checkInProgress = true;
-    try {
-      if (await this.usesStoreUpdates()) {
-        toast.info("Updates are handled by Microsoft Store");
-        return;
-      }
-
-      toast.info("Checking for updates...");
-
-      const update = await invoke<AppUpdateInfo | null>("check_for_app_update");
-
-      // Update last check time
-      localStorage.setItem(LAST_UPDATE_CHECK_KEY, Date.now().toString());
-
-      if (update) {
-        this.setStatus({ available: update });
-        await this.handleUpdateAvailable(update, false);
-      } else {
+    toast.info("Checking for updates...");
+    let outcome = await this.runCheck(false);
+    if (outcome.kind === "skipped") outcome = await this.runCheck(false);
+    switch (outcome.kind) {
+      case "update":
+        await this.handleUpdateAvailable(outcome.update, false);
+        break;
+      case "current":
         toast.success("You're on the latest version!");
-      }
-    } catch (error) {
-      log.error("Update check failed:", error);
-      toast.error("Failed to check for updates");
-    } finally {
-      this.checkInProgress = false;
+        break;
+      case "error":
+        toast.error("Failed to check for updates");
+        break;
+      default:
+        break;
     }
   }
 
@@ -359,6 +394,7 @@ export class UpdateService {
     update: AppUpdateInfo,
     isBackgroundCheck: boolean,
   ): Promise<void> {
+    if (this.status.install === "restart_pending") return;
     if (isBackgroundCheck) {
       toast.info(`Update ${update.version} is available. Open Settings to install it.`);
       await this.sendSystemNotification(
@@ -368,44 +404,59 @@ export class UpdateService {
       return;
     }
 
-    await this.showUpdateDialog(update);
+    await this.beginInstall(update);
   }
 
   /**
-   * Show update dialog and handle user response
+   * Show update dialog and handle user response. Only one prompt or install runs at a time; a
+   * second call while one is open, downloading or waiting for a restart does nothing.
    */
-  private async showUpdateDialog(update: AppUpdateInfo): Promise<void> {
-    const yes = await ask(
-      `Update ${update.version} is available!\n\nRelease notes:\n${update.body}\n\nDo you want to download and install it now?`,
-      {
-        title: "Update Available",
-        kind: "info",
-        okLabel: "Update",
-        cancelLabel: "Later",
-      },
-    );
-
-    if (yes) {
-      toast.info("Downloading update...");
-
-      try {
-        await invoke("install_app_update", {
-          expectedVersion: update.version,
-        });
-        // Notify if relaunch will be deferred due to active session
-        if (this.isSessionActive) {
-          await this.sendSystemNotification(
-            "Update Ready",
-            "Voicetypr will restart when recording ends",
-          );
-        }
-        this.pendingUpdateVersion = update.version;
-        await this.performRelaunch();
-      } catch (error) {
-        log.error("Update installation failed:", error);
-        toast.error("Failed to install update");
+  private async beginInstall(update: AppUpdateInfo): Promise<void> {
+    if (this.status.install !== "idle") return;
+    this.setStatus({ install: "prompting" });
+    try {
+      const yes = await ask(
+        `Update ${update.version} is available!\n\nRelease notes:\n${update.body}\n\nDo you want to download and install it now?`,
+        {
+          title: "Update Available",
+          kind: "info",
+          okLabel: "Update",
+          cancelLabel: "Later",
+        },
+      );
+      if (!yes) {
+        this.setStatus({ install: "idle" });
+        return;
       }
+    } catch (error) {
+      log.error("Update dialog failed:", error);
+      this.setStatus({ install: "idle" });
+      return;
     }
+
+    this.setStatus({ install: "installing" });
+    toast.info("Downloading update...");
+    try {
+      await invoke("install_app_update", {
+        expectedVersion: update.version,
+      });
+    } catch (error) {
+      log.error("Update installation failed:", error);
+      toast.error("Failed to install update");
+      this.setStatus({ install: "idle" });
+      return;
+    }
+    // Installed: the offer is replaced by "restart pending" until the app restarts.
+    this.pendingUpdateVersion = update.version;
+    this.setStatus({ install: "restart_pending", restartVersion: update.version, available: null });
+    // Notify if relaunch will be deferred due to active session
+    if (this.isSessionActive) {
+      await this.sendSystemNotification(
+        "Update Ready",
+        "Voicetypr will restart when recording ends",
+      );
+    }
+    await this.performRelaunch();
   }
 
   /**

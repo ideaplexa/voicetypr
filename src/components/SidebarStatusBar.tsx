@@ -34,7 +34,8 @@ export function SidebarStatusBar({
   const [version, setVersion] = useState("—");
   const [feedback, setFeedback] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
-  const { checking, available, checkNow, promptInstall } = useUpdateStatus();
+  const { checking, available, install, restartVersion, checkNow, promptInstall, restartNow } = useUpdateStatus();
+  const installing = install === "prompting" || install === "installing";
   useEffect(() => {
     void getVersion()
       .then(setVersion)
@@ -44,14 +45,18 @@ export function SidebarStatusBar({
 
   const check = async () => {
     const next = await checkNow();
-    if (next.available) return;
-    setFeedback(
+    // "Up to date" only after a check that finished and found nothing.
+    if (next.available || next.checking) return;
+    const message =
       next.result === "error"
         ? "Check failed"
         : next.result === "store"
           ? "Updated by Store"
-          : "Up to date",
-    );
+          : next.result === "current"
+            ? "Up to date"
+            : null;
+    if (!message) return;
+    setFeedback(message);
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setFeedback(null), 3000);
   };
@@ -74,15 +79,28 @@ export function SidebarStatusBar({
     </button>
   );
 
-  const updateButton = available ? (
+  const hasOffer = install === "restart_pending" || available !== null;
+  const updateButton = install === "restart_pending" ? (
+    <button
+      type="button"
+      onClick={() => void restartNow()}
+      aria-label={`Update ${restartVersion ?? ""} installed. Restart`.replace("  ", " ")}
+      title="Restart to finish updating"
+      className={cn("relative flex size-6 items-center justify-center rounded-[6px] bg-sage-bg text-sage", focusRing)}
+    >
+      <RefreshCw className="size-[13px]" />
+      <span aria-hidden className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-sage" />
+    </button>
+  ) : available ? (
     <button
       type="button"
       onClick={() => void promptInstall()}
-      aria-label={`Update ${available.version} available. Install`}
-      title={`Update ${available.version} available`}
+      disabled={installing}
+      aria-label={installing ? `Installing update ${available.version}` : `Update ${available.version} available. Install`}
+      title={installing ? "Installing…" : `Update ${available.version} available`}
       className={cn("relative flex size-6 items-center justify-center rounded-[6px] bg-sage-bg text-sage", focusRing)}
     >
-      <Download className="size-[13px]" />
+      <Download className={cn("size-[13px]", installing && "animate-pulse")} />
       <span aria-hidden className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-sage" />
     </button>
   ) : (
@@ -107,7 +125,7 @@ export function SidebarStatusBar({
             {license.label} · License
           </TooltipContent>
         </Tooltip>
-        {available ? updateButton : null}
+        {hasOffer ? updateButton : null}
       </div>
     );
 

@@ -22,6 +22,15 @@ describe("homeNeeds", () => {
     expect(rows[0].description).toContain("2 more minutes");
     expect(rows[0].action).toEqual({ kind: "retry", id: "a", engine: null });
   });
+  it("disables the update row while installing and offers Restart once installed", () => {
+    const [installing] = homeNeeds({ ...none, updateVersion: "2.1.0", updateInstall: "installing" });
+    expect(installing).toMatchObject({ button: "Installing…", disabled: true, action: { kind: "install" } });
+    const [prompting] = homeNeeds({ ...none, updateVersion: "2.1.0", updateInstall: "prompting" });
+    expect(prompting.disabled).toBe(true);
+    const [pending] = homeNeeds({ ...none, updateVersion: "2.1.0", updateInstall: "restart_pending" });
+    expect(pending).toMatchObject({ button: "Restart", action: { kind: "restart" } });
+    expect(pending.disabled).toBeUndefined();
+  });
   it("disables Retry while a retry is running", () => {
     const [row] = homeNeeds({ ...none, kept: [{ id: "a", engine_short: "X", alt_engine_short: null, alt_engine_id: null, remaining_ms: 1000, busy: true }] });
     expect(row.disabled).toBe(true);

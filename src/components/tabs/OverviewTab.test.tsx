@@ -14,16 +14,17 @@ const mock = vi.hoisted(() => ({
   mac: true,
   polishOn: true,
   kept: [] as KeptRecording[],
-  update: { available: null as null | { version: string }, checking: false },
+  update: { available: null as null | { version: string }, checking: false, install: "idle" as "idle" | "prompting" | "installing" | "restart_pending", restartVersion: null as string | null },
   words: 3,
   promptInstall: vi.fn(),
+  restartNow: vi.fn(),
   refreshKept: vi.fn(),
 }));
 
 vi.mock("@/contexts/ReadinessContext", () => ({ useReadiness: () => mock.readiness }));
 vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => ({ settings: mock.settings }) }));
 vi.mock("@/hooks/useKeptRecordings", () => ({ useKeptRecordings: () => ({ kept: mock.kept, refresh: mock.refreshKept }) }));
-vi.mock("@/hooks/useUpdateStatus", () => ({ useUpdateStatus: () => ({ ...mock.update, lastChecked: null, result: "idle", checkNow: vi.fn(), promptInstall: mock.promptInstall }) }));
+vi.mock("@/hooks/useUpdateStatus", () => ({ useUpdateStatus: () => ({ ...mock.update, lastChecked: null, result: "idle", checkNow: vi.fn(), promptInstall: mock.promptInstall, restartNow: mock.restartNow }) }));
 vi.mock("@/state/writingSettings", () => ({ useWritingSettings: (select: (state: unknown) => unknown) => select({ settings: { custom_words: Array.from({ length: mock.words }, () => ({})), replacements: [], snippets: [] }, loaded: true, load: vi.fn() }) }));
 vi.mock("@/contexts/ModelManagementContext", () => ({ useDownloadProgress: (select?: (p: Record<string, number>) => unknown) => select ? select(mock.downloadProgress) : mock.downloadProgress }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
@@ -39,7 +40,7 @@ beforeEach(() => {
   mock.mac = true;
   mock.polishOn = true;
   mock.kept = [];
-  mock.update = { available: null, checking: false };
+  mock.update = { available: null, checking: false, install: "idle", restartVersion: null };
   mock.words = 3;
   mock.promptInstall.mockClear();
   mock.refreshKept.mockClear();
@@ -190,11 +191,24 @@ describe("Home", () => {
   });
 
   it("shows a ready update with Install that opens the update dialog", async () => {
-    mock.update = { available: { version: "2.1.0-beta.6" }, checking: false };
+    mock.update = { available: { version: "2.1.0-beta.6" }, checking: false, install: "idle", restartVersion: null };
     render(<OverviewTab />);
     expect(screen.getByText("Update ready · 2.1.0-beta.6")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: /Install/ }));
     expect(mock.promptInstall).toHaveBeenCalledOnce();
+  });
+
+  it("disables Install while an install runs, then offers Restart", async () => {
+    mock.update = { available: { version: "2.1.0-beta.6" }, checking: false, install: "installing", restartVersion: null };
+    const view = render(<OverviewTab />);
+    expect(screen.getByRole("button", { name: /Installing/ })).toBeDisabled();
+    view.unmount();
+    mock.update = { available: null, checking: false, install: "restart_pending", restartVersion: "2.1.0-beta.6" };
+    render(<OverviewTab />);
+    expect(screen.queryByRole("button", { name: /Install:/ })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: /Restart/ }));
+    expect(mock.restartNow).toHaveBeenCalledOnce();
+    expect(mock.promptInstall).not.toHaveBeenCalled();
   });
 
   it("suggests Polish only while it is off and words only while the dictionary is empty", async () => {

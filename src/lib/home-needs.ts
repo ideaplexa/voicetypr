@@ -15,6 +15,7 @@ export interface KeptRecording {
 export type NeedAction =
   | { kind: "retry"; id: string; engine: string | null }
   | { kind: "install" }
+  | { kind: "restart" }
   | { kind: "screen"; screen: ScreenId; source?: SourceFilter }
   | { kind: "pane"; pane: SettingsPane };
 
@@ -36,11 +37,14 @@ function minutesLeft(ms: number): string {
 export function homeNeeds({
   kept,
   updateVersion,
+  updateInstall = "idle",
   status,
   accessibilityMissing,
 }: {
   kept: KeptRecording[];
   updateVersion: string | null;
+  /** Shared install state: the row never offers a second install while one runs. */
+  updateInstall?: "idle" | "prompting" | "installing" | "restart_pending";
   status: HomeStatus;
   accessibilityMissing: boolean;
 }): NeedRow[] {
@@ -53,15 +57,29 @@ export function homeNeeds({
     disabled: clip.busy,
     action: { kind: "retry", id: clip.id, engine: clip.alt_engine_id },
   }));
-  if (updateVersion)
-    rows.push({
-      id: "update",
-      icon: "update",
-      title: `Update ready · ${updateVersion}`,
-      description: "Installs in a few seconds and restarts Voicetypr.",
-      button: "Install",
-      action: { kind: "install" },
-    });
+  if (updateVersion) {
+    const busy = updateInstall === "prompting" || updateInstall === "installing";
+    rows.push(
+      updateInstall === "restart_pending"
+        ? {
+            id: "update",
+            icon: "update",
+            title: `Update installed · ${updateVersion}`,
+            description: "Restart Voicetypr to finish updating.",
+            button: "Restart",
+            action: { kind: "restart" },
+          }
+        : {
+            id: "update",
+            icon: "update",
+            title: `Update ready · ${updateVersion}`,
+            description: busy ? "Installing the update…" : "Installs in a few seconds and restarts Voicetypr.",
+            button: busy ? "Installing…" : "Install",
+            disabled: busy,
+            action: { kind: "install" },
+          },
+    );
+  }
   if (!status.ready && !status.pending) {
     const action: NeedAction = status.pane
       ? { kind: "pane", pane: status.pane }

@@ -8,5 +8,6 @@ export function useUpdateStatus() {
     ...status,
     checkNow: () => updateService.checkNow(),
     promptInstall: () => updateService.promptInstall(),
+    restartNow: () => updateService.restartNow(),
   };
 }

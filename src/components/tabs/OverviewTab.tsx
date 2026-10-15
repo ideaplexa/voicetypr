@@ -53,13 +53,14 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   }, []);
   useEffect(() => { void loadWriting(); }, [loadWriting]);
 
-  const needs = homeNeeds({ kept, updateVersion: update.available?.version ?? null, status, accessibilityMissing: isMacOS && readiness.hasAccessibilityPermission === false });
+  const needs = homeNeeds({ kept, updateVersion: update.install === "restart_pending" ? update.restartVersion : (update.available?.version ?? null), updateInstall: update.install, status, accessibilityMissing: isMacOS && readiness.hasAccessibilityPermission === false });
   const tips = homeTips({ polishOn: polish.on, dictionaryEmpty: writingLoaded ? writing.custom_words.length + writing.replacements.length + writing.snippets.length === 0 : null });
 
   const goToStatus = () => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } };
   const act = (row: NeedRow) => {
     const action = row.action;
     if (action.kind === "install") void update.promptInstall();
+    else if (action.kind === "restart") void update.restartNow();
     else if (action.kind === "pane") onNavigateSettingsPane?.(action.pane);
     else if (action.kind === "screen") { if (action.source) onSourceFilterChange?.(action.source); onNavigate?.(action.screen); }
     else void invoke("retry_kept_dictation", { id: action.id, engine: action.engine }).catch((error: unknown) => { toast.error(typeof error === "string" && error ? error : "Couldn't retry that recording."); }).finally(() => void refreshKept());

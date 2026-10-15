@@ -344,7 +344,6 @@ describe("UpdateService update checks", () => {
     const backgroundCheck = service.checkForUpdatesInBackground();
     const manualCheck = service.checkForUpdatesManually();
 
-    expect(toast.info).toHaveBeenCalledWith("Update check already in progress");
     expect(
       vi.mocked(invoke).mock.calls.filter(([command]) => command === "check_for_app_update"),
     ).toHaveLength(0);
@@ -360,6 +359,144 @@ describe("UpdateService update checks", () => {
     expect(
       vi.mocked(invoke).mock.calls.filter(([command]) => command === "check_for_app_update"),
     ).toHaveLength(1);
+  });
+
+  describe("channel changes, installs and shared checks", () => {
+    const beta = { version: "2.1.0-beta.6", body: "Notes", channel: "beta" } as AppUpdateInfo;
+    const direct = { channel: "direct", is_store_install: false, package_family_name: null };
+    function deferredCheck() {
+      const resolvers: Array<(value: AppUpdateInfo | null) => void> = [];
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === "get_distribution_info") return direct;
+        if (command === "check_for_app_update")
+          return new Promise<AppUpdateInfo | null>((resolve) => resolvers.push(resolve));
+        return { state: "idle" };
+      });
+      return resolvers;
+    }
+
+    it("publishes a null result so a Beta offer disappears when Stable has nothing", async () => {
+      mockDirectDistribution(beta);
+      await service.checkNow();
+      expect(service.getStatus().available).toEqual(beta);
+      mockDirectDistribution(null);
+      await service.checkNow();
+      expect(service.getStatus()).toMatchObject({ available: null, result: "current" });
+    });
+
+    it("a channel change clears the offer and drops a check started under the old channel", async () => {
+      mockDirectDistribution(beta);
+      await service.initialize(testSettings({ update_channel: "beta", check_updates_automatically: false }));
+      await service.checkNow();
+      expect(service.getStatus().available).toEqual(beta);
+
+      const resolvers = deferredCheck();
+      const old = service.checkNow();
+      await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+      service.notifyChannelChanged("stable");
+      expect(service.getStatus()).toMatchObject({ available: null, checking: false, result: "idle" });
+
+      const fresh = service.checkNow();
+      await vi.waitFor(() => expect(resolvers).toHaveLength(2));
+      resolvers[0](beta); // the stale Beta answer arrives late
+      await old;
+      expect(service.getStatus().available).toBeNull();
+      resolvers[1](null);
+      await fresh;
+      expect(service.getStatus()).toMatchObject({ available: null, checking: false, result: "current" });
+    });
+
+    it("joins an in-flight check instead of returning a half-finished snapshot", async () => {
+      const resolvers = deferredCheck();
+      const background = service.checkForUpdatesInBackground();
+      await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+      let settled = false;
+      const click = service.checkNow().then((status) => {
+        settled = true;
+        return status;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(service.getStatus()).toMatchObject({ checking: true, result: "idle" });
+      resolvers[0](null);
+      expect(await click).toMatchObject({ checking: false, result: "current" });
+      await background;
+      expect(resolvers).toHaveLength(1);
+    });
+
+    it("a joined check that fails reports an error, never current", async () => {
+      let reject: (error: Error) => void = () => {};
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === "get_distribution_info") return direct;
+        if (command === "check_for_app_update") return new Promise((_, r) => { reject = r; });
+        return undefined;
+      });
+      const background = service.checkForUpdatesInBackground();
+      await vi.waitFor(() => expect(service.getStatus().checking).toBe(true));
+      const click = service.checkNow();
+      reject(new Error("offline"));
+      expect(await click).toMatchObject({ checking: false, result: "error" });
+      await background;
+    });
+
+    it("never starts a second install while one is prompting or installing", async () => {
+      mockDirectDistribution(beta);
+      await service.checkNow();
+      let answer: (yes: boolean) => void = () => {};
+      vi.mocked(ask).mockImplementation(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+      const first = service.promptInstall();
+      await vi.waitFor(() => expect(service.getStatus().install).toBe("prompting"));
+      await service.promptInstall();
+      expect(ask).toHaveBeenCalledTimes(1);
+
+      let finish: () => void = () => {};
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === "install_app_update") return new Promise<void>((resolve) => { finish = resolve; });
+        if (command === "get_current_recording_state") return { state: "recording" };
+        return direct;
+      });
+      answer(true);
+      await vi.waitFor(() => expect(service.getStatus().install).toBe("installing"));
+      await service.promptInstall();
+      expect(ask).toHaveBeenCalledTimes(1);
+      finish();
+      await first;
+      expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "install_app_update")).toHaveLength(1);
+    });
+
+    it("after a successful install the offer becomes restart pending, with a restart action", async () => {
+      mockDirectDistribution(beta);
+      await service.checkNow();
+      vi.mocked(ask).mockResolvedValue(true);
+      service.setSessionActive(true);
+      vi.mocked(invoke).mockImplementation(async (command) =>
+        command === "get_current_recording_state" ? { state: "recording" } : command === "get_distribution_info" ? direct : undefined,
+      );
+      await service.promptInstall();
+      expect(service.getStatus()).toMatchObject({ install: "restart_pending", restartVersion: beta.version, available: null });
+      expect(relaunch).not.toHaveBeenCalled();
+      // A later check must not bring the offer back.
+      mockDirectDistribution(beta);
+      await service.checkNow();
+      expect(service.getStatus().available).toBeNull();
+      vi.mocked(invoke).mockImplementation(async (command) =>
+        command === "get_current_recording_state" ? { state: "idle" } : command === "get_distribution_info" ? direct : undefined,
+      );
+      await service.restartNow();
+      expect(relaunch).toHaveBeenCalledTimes(1);
+    });
+
+    it("a failed install returns to idle and keeps the offer", async () => {
+      mockDirectDistribution(beta);
+      await service.checkNow();
+      vi.mocked(ask).mockResolvedValue(true);
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === "install_app_update") throw new Error("boom");
+        return command === "get_distribution_info" ? direct : undefined;
+      });
+      await service.promptInstall();
+      expect(service.getStatus()).toMatchObject({ install: "idle", available: beta });
+    });
   });
 
   it("skips direct updater checks for Microsoft Store installs", async () => {

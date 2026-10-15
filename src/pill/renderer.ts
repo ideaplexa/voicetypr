@@ -605,13 +605,15 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       pick = undefined;
       polished = value.polished === true; pastedLeft=2400;pastedSince=performance.now();text('.done-label','Pasted');
       timers(); announce(value.outcome === 'pasted' ? `Pasted · ${value.words} words` : value.outcome === 'no_permission' ? 'Copied — allow Accessibility to paste automatically' : copiedTitle(deps.mac));
+      // A new outcome never inherits the previous take's pause: the clock and the dismissal timer both follow the pointer as it is now.
+      pastedClock.pause(value.outcome === 'pasted' && hovering);
       if (value.outcome === 'pasted') pastedClock.start(2400);
       if (value.outcome !== 'pasted') copiedTimer=deps.setTimeout(() => {
         copiedTimer=undefined;
         stack.push({key:value.outcome,title: value.outcome === 'no_permission' ? 'Allow Accessibility to paste automatically' : copiedTitle(deps.mac),sub:value.outcome === 'no_permission' ? `Your words are copied — press ${deps.mac ? '⌘V' : 'Ctrl+V'} for now` : `${machine.context.app.name || 'The app'} didn't accept the paste`,tone:'amber',glyph:'clipboard',duration:null,actions:value.outcome === 'no_permission' ? [{label:deps.mac ? 'Open System Settings' : 'Open Privacy settings',call:{command:'island_action',action:'open_accessibility'}}] : []},dom.surface.getBoundingClientRect(),false);
         rest();
       },2400);
-      if (value.outcome === 'pasted') feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, 2400);
+      if (value.outcome === 'pasted' && !hovering) feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, 2400);
       sync();
     },
     escapeHint() {

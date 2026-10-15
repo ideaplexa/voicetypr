@@ -232,6 +232,26 @@ describe('timed card outline countdown',()=>{
     const before=path();h.emit('transcription-started');h.emit('paste-outcome',{outcome:'pasted',words:3,polished:false});
     expect(path()).not.toBe(before);
   });
+  it('pasted: a new outcome does not inherit the previous take\'s hover pause',async()=>{
+    const h=await mount();
+    h.emit('paste-outcome',{outcome:'pasted',words:38,polished:false});await h.settle(100);
+    const path=()=>h.get('.done .outline-clock path');
+    h.emit('pill-pointer',{inside:true});expect(path().style.animationPlayState).toBe('paused');
+    h.emit('transcription-started');h.emit('pill-pointer',{inside:false});
+    h.emit('paste-outcome',{outcome:'pasted',words:3,polished:false});
+    expect(path().style.animationPlayState).toBe('running');
+    await h.settle(2500);expect(h.get('.pill-root').dataset.state).toBe('idle');
+  });
+  it('pasted: an outcome that lands under the pointer pauses the outline and the dismissal together',async()=>{
+    const h=await mount();
+    h.emit('pill-pointer',{inside:true});
+    h.emit('paste-outcome',{outcome:'pasted',words:3,polished:false});
+    const path=()=>h.get('.done .outline-clock path');
+    expect(path().style.animationPlayState).toBe('paused');
+    await h.settle(5000);expect(h.get('.pill-root').dataset.state).toBe('pasted');
+    h.emit('pill-pointer',{inside:false});expect(path().style.animationPlayState).toBe('running');
+    await h.settle(2500);expect(h.get('.pill-root').dataset.state).toBe('idle');
+  });
   it('sizes the outline to the island surface',async()=>{
     const h=await mount();h.emit('paste-outcome',{outcome:'pasted',words:2,polished:false});await h.settle(300);
     const svg=h.get('.done .outline-clock');

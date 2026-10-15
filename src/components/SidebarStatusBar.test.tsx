@@ -6,14 +6,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("2.1.0-beta.5") }));
 
-type Status = { checking: boolean; available: { version: string } | null; lastChecked: number | null; result: "idle" | "current" | "error" | "store" };
+type Status = { checking: boolean; available: { version: string } | null; lastChecked: number | null; result: "idle" | "current" | "error" | "store"; install: "idle" | "prompting" | "installing" | "restart_pending"; restartVersion: string | null };
 const update = vi.hoisted(() => ({
-  status: { checking: false, available: null, lastChecked: null, result: "idle" } as Status,
+  status: { checking: false, available: null, lastChecked: null, result: "idle", install: "idle", restartVersion: null } as Status,
   checkNow: vi.fn(),
   promptInstall: vi.fn(),
+  restartNow: vi.fn(),
 }));
 vi.mock("@/hooks/useUpdateStatus", () => ({
-  useUpdateStatus: () => ({ ...update.status, checkNow: update.checkNow, promptInstall: update.promptInstall }),
+  useUpdateStatus: () => ({ ...update.status, checkNow: update.checkNow, promptInstall: update.promptInstall, restartNow: update.restartNow }),
 }));
 
 const license = { label: "Pro", color: "text-sage" };
@@ -28,9 +29,10 @@ const renderBar = (collapsed = false) => {
 };
 
 beforeEach(() => {
-  update.status = { checking: false, available: null, lastChecked: null, result: "idle" };
+  update.status = { checking: false, available: null, lastChecked: null, result: "idle", install: "idle", restartVersion: null };
   update.checkNow.mockReset();
   update.promptInstall.mockReset();
+  update.restartNow.mockReset();
 });
 
 describe("Sidebar status bar", () => {
@@ -77,11 +79,39 @@ describe("Sidebar status bar", () => {
     update.status = { ...update.status, checking: true };
     view.rerender(<TooltipProvider><SidebarStatusBar license={license} collapsed={false} onOpenLicense={vi.fn()} /></TooltipProvider>);
     expect(screen.getByRole("button", { name: "Checking for updates" })).toBeDisabled();
-    update.status = { checking: false, available: { version: "2.1.0-beta.6" }, lastChecked: 1, result: "current" };
+    update.status = { checking: false, available: { version: "2.1.0-beta.6" }, lastChecked: 1, result: "current", install: "idle", restartVersion: null };
     await act(async () => finish(update.status));
     view.rerender(<TooltipProvider><SidebarStatusBar license={license} collapsed={false} onOpenLicense={vi.fn()} /></TooltipProvider>);
     await waitFor(() => expect(screen.getByRole("button", { name: /Install/ })).toBeInTheDocument());
     expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
+  });
+
+  it("does not say Up to date when the check has not finished or the result is unknown", async () => {
+    update.checkNow.mockResolvedValue({ ...update.status, checking: true, result: "idle" });
+    renderBar();
+    await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    await waitFor(() => expect(update.checkNow).toHaveBeenCalled());
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
+  });
+
+  it("reports a failed check instead of Up to date", async () => {
+    update.checkNow.mockResolvedValue({ ...update.status, result: "error" });
+    renderBar();
+    await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByText("Check failed")).toBeInTheDocument();
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
+  });
+
+  it("installing: the badge is disabled; restart pending: it offers Restart", async () => {
+    update.status = { ...update.status, available: { version: "2.1.0-beta.6" }, install: "installing" };
+    const { unmount } = renderBar();
+    expect(screen.getByRole("button", { name: /Installing update/ })).toBeDisabled();
+    unmount();
+    update.status = { ...update.status, available: null, install: "restart_pending", restartVersion: "2.1.0-beta.6" };
+    renderBar();
+    await userEvent.click(screen.getByRole("button", { name: /Restart/ }));
+    expect(update.restartNow).toHaveBeenCalledOnce();
+    expect(update.promptInstall).not.toHaveBeenCalled();
   });
 
   it("collapsed: keeps the licence icon and only surfaces an available update", () => {

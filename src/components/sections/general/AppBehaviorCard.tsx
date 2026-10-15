@@ -46,6 +46,8 @@ function minutesAgo(then: number): string {
 }
 
 function updateStatusLine(update: ReturnType<typeof useUpdateStatus>): string {
+  if (update.install === "restart_pending") return `Update ${update.restartVersion ?? ""} installed. Restart to finish.`.replace("  ", " ");
+  if (update.install === "installing") return "Installing the update…";
   if (update.checking) return "Checking…";
   if (update.available) return `Update ${update.available.version} is ready to install.`;
   if (update.result === "error") return "Couldn't check. Try again.";
@@ -142,6 +144,8 @@ export function AppBehaviorCard({
     try {
       const channel: UpdateChannel = value;
       await onUpdateChannelChange(channel);
+      // The offer found under the old channel no longer applies.
+      updateService.notifyChannelChanged(channel);
       toast.success(channel === "beta" ? "Beta updates enabled" : "Stable updates enabled", {
         description:
           channel === "beta"
@@ -190,9 +194,18 @@ export function AppBehaviorCard({
                 title={`Voicetypr ${version}`}
                 description={updateStatusLine(update)}
                 control={
-                  update.available ? (
-                    <Button type="button" size="sm" onClick={() => void update.promptInstall()}>
-                      Install
+                  update.install === "restart_pending" ? (
+                    <Button type="button" size="sm" onClick={() => void update.restartNow()}>
+                      Restart
+                    </Button>
+                  ) : update.available ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void update.promptInstall()}
+                      disabled={update.install !== "idle"}
+                    >
+                      {update.install === "idle" ? "Install" : "Installing…"}
                     </Button>
                   ) : (
                     <Button
