@@ -72,14 +72,20 @@ impl Take {
     }
 
     fn timing_line(&self) -> String {
+        self.timing_line_for(crate::pill::native::show_mode())
+    }
+
+    /// `show_mode` lets an A/B run tell the hide/show and alpha-0 takes apart.
+    fn timing_line_for(&self, mode: crate::pill::native::ShowMode) -> String {
         format!(
-            "[PERF] take={} hotkey_ms={} starting_ms={} recording_ms={} pill_show_called_ms={} pill_shown_ms={}",
+            "[PERF] take={} hotkey_ms={} starting_ms={} recording_ms={} pill_show_called_ms={} pill_shown_ms={} show_mode={}",
             self.generation,
             stamp(self.hotkey_ms),
             stamp(self.starting_ms),
             stamp(self.recording_ms),
             stamp(self.show_called_ms),
             stamp(self.shown_ms),
+            mode.as_str(),
         )
     }
 }
@@ -348,9 +354,12 @@ mod tests {
             ..Take::new()
         };
         assert_eq!(
-            take.timing_line(),
-            "[PERF] take=7 hotkey_ms=1000 starting_ms=1004 recording_ms=1120 pill_show_called_ms=- pill_shown_ms=-"
+            take.timing_line_for(crate::pill::native::ShowMode::Hide),
+            "[PERF] take=7 hotkey_ms=1000 starting_ms=1004 recording_ms=1120 pill_show_called_ms=- pill_shown_ms=- show_mode=hide"
         );
+        assert!(take
+            .timing_line_for(crate::pill::native::ShowMode::Alpha)
+            .ends_with("show_mode=alpha"));
     }
 
     #[test]

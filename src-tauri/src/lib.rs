@@ -1015,6 +1015,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     pill_mode == "always"
                 );
 
+                // Pre-create the hidden pill window (idle, never focused) so the first
+                // recording only shows it. Skipped for the "never" mode.
+                let window_manager = app_handle_for_pill
+                    .state::<AppState>()
+                    .get_window_manager();
+                if let Some(window_manager) = window_manager {
+                    match window_manager.precreate_pill_window().await {
+                        Ok(true) => log::info!("Startup: pill window pre-created hidden"),
+                        Ok(false) => {}
+                        Err(e) => log::warn!("Failed to pre-create pill window: {}", e),
+                    }
+                }
+
                 // Only show pill on startup if mode is "always"
                 if pill_mode == "always" && app_handle_for_pill.store("settings").ok().and_then(|store| store.get("onboarding_completed")).and_then(|v| v.as_bool()).unwrap_or(false) {
                     log::info!("Startup: Showing pill because mode is 'always'");

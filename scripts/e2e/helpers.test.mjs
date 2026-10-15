@@ -94,6 +94,14 @@ test("island metric keeps hidden-start and already-visible takes apart", () => {
   assert.equal(perfColumns([]).hotkey_to_island_already_visible_ms, null);
 });
 
+test("[PERF] parser keeps show_mode as text and exposes it as a report column", () => {
+  const lines = ["[PERF] take=1 hotkey_ms=1000 starting_ms=1004 recording_ms=1100 pill_show_called_ms=1005 pill_shown_ms=1030 show_mode=alpha", "[PERF] take=1 island_visible_ms=1040"];
+  assert.equal(parsePerfLines(lines)[0].show_mode, "alpha");
+  assert.equal(perfColumns(lines).show_mode, "alpha");
+  assert.equal(perfColumns(PERF_LOG).show_mode, null);
+  assert.equal(perfColumns([]).show_mode, null);
+});
+
 test("soak growth flags DOM growth and large RSS growth, and ignores flat runs", () => {
   const make = (dom, rss) => ({ case: "regular", engine: "parakeet", model: "m", language: "en", mode: "regular", pill_dom_nodes: dom, rss_mb: rss });
   const [flat] = soakGrowth([make(200, 300), make(200, 305), make(200, 310)]);

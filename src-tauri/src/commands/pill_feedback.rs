@@ -90,7 +90,7 @@ pub(crate) fn schedule_terminal_hide(app: &AppHandle, generation: u64, outcome: 
                 if keep_visible_for_terminal(&hide_app) {
                     if let Some(window) = hide_app.get_webview_window("pill") {
                         crate::pill::hit_test::stop(&hide_app);
-                        if let Err(error) = window.hide() {
+                        if let Err(error) = crate::pill::native::hide(&window) {
                             log::error!("Failed to hide terminal pill window: {}", error);
                         }
                     }

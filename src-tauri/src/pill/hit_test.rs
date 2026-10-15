@@ -92,7 +92,7 @@ pub fn start(window: &WebviewWindow) {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            if !window.is_visible().unwrap_or(false) {
+            if !crate::pill::native::is_shown(&window) {
                 reset_pointer(&task_app);
                 break;
             }

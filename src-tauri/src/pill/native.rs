@@ -1,7 +1,58 @@
 //! Non-activating native configuration, for the island panel.
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 use tauri::{Runtime, WebviewWindow};
+
+/// Debug-only A/B switch for how the idle island is concealed (plan 082 F0).
+pub const SHOW_MODE_ENV: &str = "VOICETYPR_PILL_SHOW_MODE";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShowMode {
+    /// Default: `hide()` while idle, `orderFrontRegardless` on show.
+    Hide,
+    /// macOS debug experiment: stay ordered in at alpha 0 and click-through while idle.
+    Alpha,
+}
+
+impl ShowMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hide => "hide",
+            Self::Alpha => "alpha",
+        }
+    }
+}
+
+/// Pure gate: only a debug build with the exact value `alpha` leaves the default.
+pub fn parse_show_mode(var: Option<&str>, debug_build: bool) -> ShowMode {
+    if debug_build && var == Some("alpha") {
+        ShowMode::Alpha
+    } else {
+        ShowMode::Hide
+    }
+}
+
+pub fn show_mode() -> ShowMode {
+    static MODE: OnceLock<ShowMode> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        // TODO(windows): a layered window at alpha 0 with WS_EX_TRANSPARENT; until
+        // then Windows always uses the default hide/show.
+        if !cfg!(target_os = "macos") {
+            return ShowMode::Hide;
+        }
+        parse_show_mode(
+            std::env::var(SHOW_MODE_ENV).ok().as_deref(),
+            cfg!(debug_assertions),
+        )
+    })
+}
+
+/// Logical visibility in alpha mode, where the native window never leaves the screen list.
+static ALPHA_SHOWN: AtomicBool = AtomicBool::new(false);
 
 #[allow(deprecated)] // The pinned v2 API accepts cocoa collection-behavior flags.
 fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
@@ -59,10 +110,14 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
         panel.set_becomes_key_only_if_needed(true);
         panel.set_floating_panel(true);
         panel.set_level(objc2_app_kit::NSStatusWindowLevel as i32);
-        panel.set_collection_behaviour(
-            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary,
-        );
+        let mut behaviour = NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary;
+        if show_mode() == ShowMode::Alpha {
+            // A panel that stays ordered in must not move with Spaces or join Cmd-Tab/Cmd-`.
+            behaviour |= NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle;
+        }
+        panel.set_collection_behaviour(behaviour);
         panel.set_hides_on_deactivate(false);
         panel.set_has_shadow(false);
     }
@@ -94,16 +149,45 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
     Ok(())
 }
 
+/// Alpha mode idle state: ordered in, fully transparent and click-through.
+fn conceal_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        let panel = window
+            .app_handle()
+            .get_webview_panel(window.label())
+            .map_err(|e| format!("{e:?}"))?;
+        panel.set_alpha_value(0.0);
+        panel.set_ignore_mouse_events(true);
+        if !panel.is_visible() {
+            // Never RawNSPanel::show(): it makes the panel key.
+            panel.order_front_regardless();
+        }
+    }
+    let _ = window;
+    Ok(())
+}
+
 fn show_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use tauri_nspanel::ManagerExt;
         // Never call RawNSPanel::show(): it explicitly makes the panel key.
-        window
+        let panel = window
             .app_handle()
             .get_webview_panel(window.label())
-            .map_err(|e| format!("{e:?}"))?
-            .order_front_regardless();
+            .map_err(|e| format!("{e:?}"))?;
+        if show_mode() == ShowMode::Alpha {
+            // The hit-region task restores the pointer-driven click-through state.
+            panel.set_alpha_value(1.0);
+            panel.set_ignore_mouse_events(true);
+            if !panel.is_visible() {
+                panel.order_front_regardless();
+            }
+            return Ok(());
+        }
+        panel.order_front_regardless();
     }
     #[cfg(target_os = "windows")]
     {
@@ -147,5 +231,49 @@ pub fn configure<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
     on_main(window, configure_native)
 }
 pub fn show<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
-    on_main(window, show_native)
+    on_main(window, show_native)?;
+    ALPHA_SHOWN.store(true, Ordering::SeqCst);
+    Ok(())
+}
+/// Idle state for a freshly configured window: alpha mode orders it in at alpha 0
+/// (so the first show is only a repaint); the default mode leaves it hidden.
+pub fn prepare_idle<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    ALPHA_SHOWN.store(false, Ordering::SeqCst);
+    if show_mode() == ShowMode::Alpha {
+        on_main(window, conceal_native)?;
+    }
+    Ok(())
+}
+/// Conceal the island: `hide()` by default, alpha 0 + click-through in alpha mode.
+pub fn hide<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    ALPHA_SHOWN.store(false, Ordering::SeqCst);
+    if show_mode() == ShowMode::Alpha {
+        on_main(window, conceal_native)
+    } else {
+        window.hide().map_err(|e| e.to_string())
+    }
+}
+/// Whether the island is shown to the user (not merely ordered in at alpha 0).
+pub fn is_shown<R: Runtime>(window: &WebviewWindow<R>) -> bool {
+    if show_mode() == ShowMode::Alpha {
+        ALPHA_SHOWN.load(Ordering::SeqCst)
+    } else {
+        window.is_visible().unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn show_mode_is_debug_only_and_exact() {
+        assert_eq!(parse_show_mode(Some("alpha"), true), ShowMode::Alpha);
+        assert_eq!(parse_show_mode(Some("alpha"), false), ShowMode::Hide);
+        assert_eq!(parse_show_mode(Some("Alpha"), true), ShowMode::Hide);
+        assert_eq!(parse_show_mode(Some("hide"), true), ShowMode::Hide);
+        assert_eq!(parse_show_mode(None, true), ShowMode::Hide);
+        assert_eq!(ShowMode::Hide.as_str(), "hide");
+        assert_eq!(ShowMode::Alpha.as_str(), "alpha");
+    }
 }

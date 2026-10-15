@@ -112,6 +112,9 @@ export function compareReports(current, baseline, { werThreshold, latencyThresho
 
 // ---- Debug-only [PERF] measurement (VOICETYPR_PERF=1, plan 082 F0) ----
 
+/** The only non-numeric [PERF] fields: the pill show mode (`hide` or `alpha`) for A/B runs. */
+const PERF_TEXT_FIELDS = new Set(["show_mode"]);
+
 /** Parse `[PERF] take=<n> key=value ...` log lines into one merged record per take. Numbers only; `-` means not reached. */
 export function parsePerfLines(lines) {
   const takes = new Map();
@@ -124,7 +127,8 @@ export function parsePerfLines(lines) {
       const eq = field.indexOf("=");
       if (eq <= 0) continue;
       const value = field.slice(eq + 1);
-      record[field.slice(0, eq)] = value === "-" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+      const key = field.slice(0, eq);
+      record[key] = PERF_TEXT_FIELDS.has(key) ? (value === "-" ? null : value) : value === "-" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
     }
     const id = record.take;
     if (!Number.isInteger(id)) continue;
@@ -141,9 +145,10 @@ export function perfColumns(lines) {
   const takes = parsePerfLines(lines);
   const take = [...takes].reverse().find((item) => item.frames != null) ?? takes.at(-1);
   if (!take) {
-    return { hotkey_to_island_ms: null, hotkey_to_island_already_visible_ms: null, frame_p50_ms: null, frame_p95_ms: null, frame_max_ms: null, frame_over33: null, level_gap_p95_ms: null, pill_dom_nodes: null, rss_mb: null };
+    return { show_mode: null, hotkey_to_island_ms: null, hotkey_to_island_already_visible_ms: null, frame_p50_ms: null, frame_p95_ms: null, frame_max_ms: null, frame_over33: null, level_gap_p95_ms: null, pill_dom_nodes: null, rss_mb: null };
   }
   return {
+    show_mode: take.show_mode ?? null,
     // Only a take that started from a hidden pill measures hotkey -> island; a window
     // left up by the previous take reports its own field so the two never mix.
     hotkey_to_island_ms: diff(take.island_visible_ms, take.hotkey_ms),

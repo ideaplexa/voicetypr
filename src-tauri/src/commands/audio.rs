@@ -5035,7 +5035,7 @@ impl EarlyPillShow {
                 // Only a take that starts from a hidden window measures hotkey -> island.
                 let visible = task_app
                     .get_webview_window("pill")
-                    .and_then(|window| window.is_visible().ok())
+                    .map(|window| crate::pill::native::is_shown(&window))
                     .unwrap_or(false);
                 crate::perf::note_window_hidden(generation, !visible);
             }
@@ -5092,7 +5092,7 @@ fn hide_unneeded_early_pill(app: &AppHandle) {
         }
         if let Some(window) = hide_app.get_webview_window("pill") {
             crate::pill::hit_test::stop(&hide_app);
-            if let Err(error) = window.hide() {
+            if let Err(error) = crate::pill::native::hide(&window) {
                 log::error!("Failed to hide unused early pill window: {}", error);
             }
         }

@@ -35,6 +35,16 @@ pub struct WindowManager {
     pill_creation: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// Creation is idempotent: an existing, live pill window is always reused.
+fn needs_pill_creation(window_exists: bool) -> bool {
+    !window_exists
+}
+
+/// The hidden window is only worth its idle webview when the island can ever show.
+fn should_precreate_pill(mode: &str) -> bool {
+    mode != "never"
+}
+
 fn calculate_pill_position(
     position: &str,
     desktop_area: DesktopArea,
@@ -235,19 +245,43 @@ impl WindowManager {
     async fn show_pill_window_internal(&self) -> Result<(), String> {
         let _creation = self.pill_creation.lock().await;
         // Serialize creation, and drop the cache lock before dispatching UI work.
-        if let Some(window) = self.get_pill_window() {
-            let (x, y) = self.calculate_center_position();
-            window
-                .set_position(tauri::LogicalPosition::new(x, y))
-                .map_err(|e| e.to_string())?;
-            self.emit_pill_geometry(&window);
-            crate::pill::native::show(&window)?;
-            crate::pill::hit_test::start(&window);
+        let existing = self.get_pill_window();
+        if !needs_pill_creation(existing.is_some()) {
+            if let Some(window) = existing {
+                let (x, y) = self.calculate_center_position();
+                window
+                    .set_position(tauri::LogicalPosition::new(x, y))
+                    .map_err(|e| e.to_string())?;
+                self.emit_pill_geometry(&window);
+                crate::pill::native::show(&window)?;
+                crate::pill::hit_test::start(&window);
+            }
             return Ok(());
         }
+        self.create_pill_window(true).await?;
+        Ok(())
+    }
 
+    /// Create the hidden pill window once, shortly after startup, so the first
+    /// recording only has to show it. Idempotent, and skipped for the "never" mode.
+    /// Must run from an async task (the builder hops to the main thread), never
+    /// from a sync command (Windows can deadlock).
+    pub async fn precreate_pill_window(&self) -> Result<bool, String> {
+        if !should_precreate_pill(&crate::commands::pill_feedback::pill_mode(&self.app_handle)) {
+            return Ok(false);
+        }
+        let _creation = self.pill_creation.lock().await;
+        if !needs_pill_creation(self.get_pill_window().is_some()) {
+            return Ok(false);
+        }
+        self.create_pill_window(false).await?;
+        Ok(true)
+    }
+
+    /// Build, natively configure (panel conversion + focus safety, exactly once per
+    /// window) and cache the pill window. The caller holds `pill_creation`.
+    async fn create_pill_window(&self, show: bool) -> Result<WebviewWindow, String> {
         // Close any orphaned pill window that might exist in Tauri but not in our cache
-        // (This is outside the lock so the await is safe)
         if let Some(orphan) = self.app_handle.get_webview_window("pill") {
             log::debug!("Closing orphaned pill window before creating new one");
             let _ = orphan.close();
@@ -256,7 +290,14 @@ impl WindowManager {
         }
 
         // Create new window
-        log::info!("Creating new pill window (lazy-loaded on recording start)");
+        log::info!(
+            "Creating new pill window ({})",
+            if show {
+                "on first show"
+            } else {
+                "pre-created hidden at startup"
+            }
+        );
 
         // Always use fixed center-bottom position
         let (position_x, position_y) = self.calculate_center_position();
@@ -308,9 +349,12 @@ impl WindowManager {
         }
 
         crate::pill::native::configure(&pill_window)?;
+        crate::pill::native::prepare_idle(&pill_window)?;
         self.emit_pill_geometry(&pill_window);
-        crate::pill::native::show(&pill_window)?;
-        crate::pill::hit_test::start(&pill_window);
+        if show {
+            crate::pill::native::show(&pill_window)?;
+            crate::pill::hit_test::start(&pill_window);
+        }
 
         // Emit current recording state to the pill window
         let app_state = pill_window.app_handle().state::<crate::AppState>();
@@ -330,10 +374,11 @@ impl WindowManager {
             }),
         );
 
-        self.set_pill_window(pill_window);
+        self.set_pill_window(pill_window.clone());
 
         log::info!(
-            "Pill window created and shown at ({}, {})",
+            "Pill window created{} at ({}, {})",
+            if show { " and shown" } else { " hidden" },
             position_x,
             position_y
         );
@@ -344,7 +389,7 @@ impl WindowManager {
             crate::flush_pill_event_queue(&app_for_flush).await;
         });
 
-        Ok(())
+        Ok(pill_window)
     }
 
     /// Hide the pill window (don't close it) with retry logic
@@ -382,7 +427,7 @@ impl WindowManager {
                     return Ok(());
                 }
 
-                match window.hide() {
+                match crate::pill::native::hide(&window) {
                     Ok(_) => {
                         log::info!("Pill window hidden");
                         return Ok(());
@@ -552,7 +597,7 @@ impl WindowManager {
         if let Some(ref window) = *pill_guard {
             // Check both that window is valid and visible
             if window.is_closable().is_ok() {
-                window.is_visible().unwrap_or(false)
+                crate::pill::native::is_shown(window)
             } else {
                 false
             }
@@ -687,7 +732,10 @@ impl WindowManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{calculate_pill_position, logical_desktop_area, DesktopArea};
+    use super::{
+        calculate_pill_position, logical_desktop_area, needs_pill_creation, should_precreate_pill,
+        DesktopArea,
+    };
 
     fn full_screen() -> DesktopArea {
         DesktopArea::new(0.0, 0.0, 1920.0, 1080.0)
@@ -696,6 +744,19 @@ mod tests {
     // Screen: 1920x1080, pill: 260x64, edge_offset: 10
     // x_left = 10, x_center = 830, x_right = 1650
     // y_top = 10, y_bottom = 1006
+
+    #[test]
+    fn pill_creation_is_idempotent() {
+        assert!(needs_pill_creation(false));
+        assert!(!needs_pill_creation(true));
+    }
+
+    #[test]
+    fn precreate_is_skipped_for_never_mode() {
+        assert!(!should_precreate_pill("never"));
+        assert!(should_precreate_pill("when_recording"));
+        assert!(should_precreate_pill("always"));
+    }
 
     #[test]
     fn taskbar_selection_keeps_ten_pixel_offset() {
