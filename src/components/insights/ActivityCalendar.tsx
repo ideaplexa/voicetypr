@@ -2,6 +2,14 @@ import { calendarWeeks } from "@/components/insights/stats";
 import type { UsageDay } from "@/types/usage";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+const MONTH_SHORT = new Intl.DateTimeFormat("en-US", { month: "short" });
+const FULL_DAY = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
+
 export function ActivityCalendar({ days }: { days: UsageDay[] }) {
   const weeks = calendarWeeks(days, 43);
   const activeDays = weeks.flat().filter((cell) => cell.active && !cell.future).length;
@@ -43,7 +51,7 @@ export function ActivityCalendar({ days }: { days: UsageDay[] }) {
               return (
                 <div key={week[0].key} className="w-3 shrink-0">
                   {i === 0 || month !== weeks[i - 1][0].date.getMonth()
-                    ? week[0].date.toLocaleDateString("en-US", { month: "short" })
+                    ? MONTH_SHORT.format(week[0].date)
                     : ""}
                 </div>
               );
@@ -86,12 +94,7 @@ export function ActivityCalendar({ days }: { days: UsageDay[] }) {
                         }
                       />
                       <TooltipContent>
-                        {cell.date.toLocaleDateString("en-US", {
-                          weekday: "long",
-                          month: "long",
-                          day: "numeric",
-                          year: "numeric",
-                        })}{" "}
+                        {FULL_DAY.format(cell.date)}{" "}
                         · {cell.words.toLocaleString()} words
                       </TooltipContent>
                     </Tooltip>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TranscriptionHistory } from "@/types";
 import { RecentRecordingsFilters } from "./RecentRecordingsFilters";
 import { RecentRecordingsHeader } from "./RecentRecordingsHeader";
@@ -87,6 +87,13 @@ export function RecentRecordings({
   }
   const selected = recordings.filteredHistory.find((item) => item.id === selectedId);
 
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId(id);
+    setDrawerOpen(true);
+  }, []);
+  const { setVisibleCount } = recordings;
+  const handleLoadMore = useCallback(() => setVisibleCount((count) => count + 60), [setVisibleCount]);
+
   const handleDelete = async (event: React.MouseEvent, id: string) => {
     const index = recordings.filteredHistory.findIndex((item) => item.id === id);
     const next = recordings.filteredHistory[index + 1] ?? recordings.filteredHistory[index - 1];
@@ -146,12 +153,9 @@ export function RecentRecordings({
             filteredHistory={recordings.filteredHistory}
             groupedHistory={recordings.groupedHistory}
             visibleCount={recordings.visibleCount}
-            onLoadMore={() => recordings.setVisibleCount((count) => count + 60)}
+            onLoadMore={handleLoadMore}
             selectedId={selectedId}
-            onSelect={(id) => {
-              setSelectedId(id);
-              setDrawerOpen(true);
-            }}
+            onSelect={handleSelect}
             isLoading={isLoading}
             loadError={loadError}
             onRetry={onHistoryUpdate}

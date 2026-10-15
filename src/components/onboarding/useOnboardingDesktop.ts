@@ -30,6 +30,7 @@ import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 const DEFAULT_HOTKEY = isMacOS ? "Alt+Space" : "Control+Space";
 
 const log = createLogger("onboarding");
+const NO_DOWNLOAD_ERRORS: Readonly<Record<string, string>> = Object.freeze({});
 
 export function useOnboardingDesktop({
   onCompletionStart,
@@ -63,7 +64,7 @@ export function useOnboardingDesktop({
     modelOrder,
     downloadProgress,
     verifyingModels,
-    downloadErrors = {},
+    downloadErrors = NO_DOWNLOAD_ERRORS,
     downloadModel,
     cancelDownload,
     deleteModel,

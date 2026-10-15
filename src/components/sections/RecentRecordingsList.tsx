@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { AlertTriangle, Search, History } from "lucide-react";
 import { KeyCaps } from "@/components/KeyCaps";
@@ -5,8 +6,7 @@ import { Button } from "@/components/settings/SettingsButton";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { isMacOS } from "@/lib/platform";
 import type { TranscriptionHistory } from "@/types";
-import { sourceLabel } from "./recentRecordingsHelpers";
-import { RecentRecordingApplicationIcon } from "./RecentRecordingApplicationIcon";
+import { RecentRecordingsListItem } from "./RecentRecordingsListItem";
 import type { HomeStatus } from "@/lib/home-readiness";
 
 export interface RecentRecordingsListProps {
@@ -43,15 +43,25 @@ export function RecentRecordingsList({
   onReadinessAction,
 }: RecentRecordingsListProps) {
   const visible = filteredHistory.slice(0, visibleCount);
-  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: string) => {
+  // Keyboard handler reads the latest list/select through refs so its identity
+  // never changes and memoised rows aren't invalidated by it.
+  const visibleRef = useRef(visible);
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => {
+    visibleRef.current = visible;
+    onSelectRef.current = onSelect;
+  });
+  const handleSelect = useCallback((id: string) => onSelectRef.current(id), []);
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, id: string) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    const index = visible.findIndex((item) => item.id === id);
-    const next = visible[index + (event.key === "ArrowDown" ? 1 : -1)];
+    const list = visibleRef.current;
+    const index = list.findIndex((item) => item.id === id);
+    const next = list[index + (event.key === "ArrowDown" ? 1 : -1)];
     if (!next) return;
-    onSelect(next.id);
+    onSelectRef.current(next.id);
     document.getElementById(`history-item-${next.id}`)?.focus();
-  };
+  }, []);
 
   if (historyLength === 0 && isLoading)
     return (
@@ -119,46 +129,15 @@ export function RecentRecordingsList({
           <div className="px-4 pb-[6px] pt-3 text-[10.5px] font-semibold tracking-[0.5px] text-muted-foreground">
             {day.toUpperCase()}
           </div>
-          {items.map((item) => {
-            const app = item.writing?.context_hint?.app_name;
-            const name = app && app !== "Other" ? app : sourceLabel(item.writing?.source);
-            const selected = item.id === selectedId;
-            return (
-              <button
-                id={`history-item-${item.id}`}
-                key={item.id}
-                type="button"
-                aria-current={selected ? "true" : undefined}
-                onClick={() => onSelect(item.id)}
-                onKeyDown={(event) => handleKeyDown(event, item.id)}
-                className={`block min-h-[77px] w-full border-b border-border px-4 py-[11px] text-left transition-colors focus-visible:outline-2 focus-visible:outline-sage ${selected ? "bg-sage-bg" : "hover:bg-muted/60"}`}
-              >
-                <span className="mb-1 flex items-start justify-between gap-2 text-[11.5px] font-semibold text-muted-foreground">
-                  <span
-                    className={`inline-flex min-w-0 items-center gap-1 truncate ${selected ? "text-[14px] text-sage" : ""}`}
-                  >
-                    {app && app !== "Other" && item.writing?.context_hint?.process_path ? (
-                      <RecentRecordingApplicationIcon
-                        appName={app}
-                        processPath={item.writing.context_hint.process_path}
-                      />
-                    ) : null}
-                    {name}
-                  </span>
-                  <time className="shrink-0 font-mono font-normal text-muted-foreground">
-                    {new Date(item.timestamp).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    })}
-                  </time>
-                </span>
-                <span className="line-clamp-2 text-[12.5px] leading-[18px] text-muted-foreground">
-                  {item.text}
-                </span>
-              </button>
-            );
-          })}
+          {items.map((item) => (
+            <RecentRecordingsListItem
+              key={item.id}
+              item={item}
+              selected={item.id === selectedId}
+              onSelect={handleSelect}
+              onKeyDown={handleKeyDown}
+            />
+          ))}
         </div>
       ))}
       {filteredHistory.length > visibleCount && (

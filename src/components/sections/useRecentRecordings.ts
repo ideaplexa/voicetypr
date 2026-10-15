@@ -8,6 +8,18 @@ import { useRecentRecordingsActions } from "./useRecentRecordingsActions";
 
 const log = createLogger("recordings");
 
+const DAY_GROUP = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "short",
+  day: "numeric",
+});
+const DAY_GROUP_WITH_YEAR = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
 export function useRecentRecordings({
   history,
   onHistoryUpdate,
@@ -110,12 +122,9 @@ export function useRecentRecordings({
       } else if (itemDate.getTime() === yesterday.getTime()) {
         groupKey = "Yesterday";
       } else {
-        groupKey = itemDate.toLocaleDateString("en-US", {
-          weekday: "long",
-          month: "short",
-          day: "numeric",
-          year: itemDate.getFullYear() !== today.getFullYear() ? "numeric" : undefined,
-        });
+        groupKey = (
+          itemDate.getFullYear() !== today.getFullYear() ? DAY_GROUP_WITH_YEAR : DAY_GROUP
+        ).format(itemDate);
       }
       if (!groups[groupKey]) {
         groups[groupKey] = [];

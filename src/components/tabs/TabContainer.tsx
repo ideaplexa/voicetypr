@@ -1,6 +1,6 @@
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import type { MainNavigate } from "@/components/app/mainNavigation";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { OverviewTab } from "@/components/tabs/OverviewTab";
 import { RecordingsTab } from "@/components/tabs/RecordingsTab";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -78,10 +78,14 @@ export function TabContainer({
     });
   }
   const destination = resolveScreen(route.page);
-  const openPane = (pane: SettingsPane) => {
+  const onSettingsPaneChangeRef = useRef(onSettingsPaneChange);
+  useEffect(() => {
+    onSettingsPaneChangeRef.current = onSettingsPaneChange;
+  });
+  const openPane = useCallback((pane: SettingsPane) => {
     setRoute((current) => ({ ...current, pane }));
-    onSettingsPaneChange?.(pane);
-  };
+    onSettingsPaneChangeRef.current?.(pane);
+  }, []);
   const closeSettings = () => {
     setRoute((current) => ({ ...current, pane: undefined }));
     onSettingsClose?.();
@@ -110,7 +114,7 @@ export function TabContainer({
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  });
+  }, [openPane]);
 
   let content;
   switch (destination.screen) {

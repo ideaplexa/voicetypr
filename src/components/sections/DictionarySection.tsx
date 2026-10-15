@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/settings/SettingsButton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -127,32 +127,34 @@ export function DictionarySection() {
     if (editing?.source === item) setEditing(null);
   };
   const normalized = search.trim().toLocaleLowerCase();
-  const visible =
-    tab === "words"
-      ? settings.custom_words.map((item, index) => ({
-          item,
-          index,
-          values: [
-            item.phrase,
-            item.spoken_form ?? "",
-            item.language ?? "",
-            item.enabled ? "On" : "Off",
-          ],
-        }))
-      : tab === "corrections"
-        ? settings.replacements.map((item, index) => ({
+  const filtered = useMemo(() => {
+    const rows =
+      tab === "words"
+        ? settings.custom_words.map((item, index) => ({
             item,
             index,
-            values: [item.from, item.to, item.language ?? "", item.enabled ? "On" : "Off"],
+            values: [
+              item.phrase,
+              item.spoken_form ?? "",
+              item.language ?? "",
+              item.enabled ? "On" : "Off",
+            ],
           }))
-        : settings.snippets.map((item, index) => ({
-            item,
-            index,
-            values: [item.trigger, item.body, item.language ?? "", item.enabled ? "On" : "Off"],
-          }));
-  const filtered = visible.filter((row) =>
-    row.values.some((value) => value.toLocaleLowerCase().includes(normalized)),
-  );
+        : tab === "corrections"
+          ? settings.replacements.map((item, index) => ({
+              item,
+              index,
+              values: [item.from, item.to, item.language ?? "", item.enabled ? "On" : "Off"],
+            }))
+          : settings.snippets.map((item, index) => ({
+              item,
+              index,
+              values: [item.trigger, item.body, item.language ?? "", item.enabled ? "On" : "Off"],
+            }));
+    return rows.filter((row) =>
+      row.values.some((value) => value.toLocaleLowerCase().includes(normalized)),
+    );
+  }, [tab, normalized, settings.custom_words, settings.replacements, settings.snippets]);
   const label = tab === "words" ? "word" : tab === "corrections" ? "correction" : "snippet";
   const error = activeEditor
     ? dictionaryEntryError(tab, activeEditor.draft, settings, activeEditor.source)
