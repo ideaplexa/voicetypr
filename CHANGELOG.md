@@ -8,12 +8,12 @@
 
 * **ai:** Polish with Claude Code, Codex, pi and the other local CLIs no longer turns itself off when the app restarts (the startup check wrongly required an API key)
 * **ai:** The model you picked for a local CLI (Claude Code, pi, and others) is no longer reset to the CLI default on every restart
-* **ai:** The model pickers for oh-my-pi, Codex and Grok list every model the CLI offers again (they showed none or only the default)
+* **ai:** The model pickers for oh-my-pi and Codex list every model the CLI offers again (they showed none or only the default)
 * **ai:** OpenCode Polish works with OpenCode 2.x (and still with 1.x), including OpenCode's free models
 
 ### BREAKING CHANGES
 
-* **ai:** Removed Cline and Droid Polish providers; if one was selected, Polish switches to Claude Code
+* **ai:** Removed Cline, Droid and Grok Polish providers; if one was selected, Polish switches to Claude Code
 
 ## 2.0.9 (2026-10-10)
 

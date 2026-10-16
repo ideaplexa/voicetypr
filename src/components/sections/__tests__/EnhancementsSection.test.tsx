@@ -261,7 +261,6 @@ const providerListResponse = [
     status: "production",
     supportsReasoning: false,
   },
-  { id: "grok", name: "Grok", status: "production", supportsReasoning: false },
   {
     id: "opencode",
     name: "OpenCode",
@@ -274,7 +273,6 @@ const localAgentProviderIds = new Set([
   "pi",
   "omp",
   "codex",
-  "grok",
   "opencode",
 ]);
 
@@ -457,7 +455,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(6);
+      expect(probeCalls).toHaveLength(5);
       expect(eventListeners.has("ai-ready")).toBe(true);
     });
 
@@ -473,7 +471,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(6);
+      expect(probeCalls).toHaveLength(5);
     });
   });
 
@@ -827,7 +825,7 @@ describe("EnhancementsSection", () => {
         name: "Claude Code",
       }),
     ).toBeInTheDocument();
-    for (const providerName of ["Codex", "Grok", "OpenCode"]) {
+    for (const providerName of ["Codex", "OpenCode"]) {
       expect(
         within(providersPanel).getByRole("heading", { name: providerName }),
       ).toBeInTheDocument();

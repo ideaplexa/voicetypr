@@ -1874,8 +1874,9 @@ fn migrate_ai_settings_before_key_cache(app: &tauri::AppHandle) {
     }
 }
 
-/// Polish providers that were removed; a saved selection switches to Claude Code.
-const REMOVED_AGENT_CLI_PROVIDERS: [&str; 2] = ["cline", "droid"];
+/// Agent-CLI Polish providers that were removed (Cline, Droid, Grok); a saved
+/// selection switches to Claude Code.
+const REMOVED_AGENT_CLI_PROVIDERS: [&str; 3] = ["cline", "droid", "grok"];
 
 fn migrate_removed_agent_cli_provider(
     values: &mut serde_json::Map<String, serde_json::Value>,

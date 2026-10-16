@@ -1811,7 +1811,7 @@ mod tests {
 
     #[test]
     fn expanded_cli_reasoning_policy_matches_runtime_support() {
-        for provider in ["claude-code", "pi", "omp", "codex", "grok"] {
+        for provider in ["claude-code", "pi", "omp", "codex"] {
             assert!(validate_agent_cli_reasoning(provider, "low").is_ok());
         }
         assert!(validate_agent_cli_reasoning("opencode", "low").is_ok());

@@ -35,8 +35,7 @@ pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::providers::{
-    PROVIDER_CLAUDE_CODE, PROVIDER_CODEX, PROVIDER_GROK, PROVIDER_OMP, PROVIDER_OPENCODE,
-    PROVIDER_PI,
+    PROVIDER_CLAUDE_CODE, PROVIDER_CODEX, PROVIDER_OMP, PROVIDER_OPENCODE, PROVIDER_PI,
 };
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
@@ -125,7 +124,6 @@ enum SystemPromptPolicy {
 enum InputMode {
     Stdin,
     PositionalArg,
-    FlagValue(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,42 +292,6 @@ const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[],
 };
 
-const GROK_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_GROK,
-    binary: "grok",
-    help_argv: &["--help"],
-    cold_argv_prefix: &[],
-    cold_argv_suffix: &[],
-    required_isolation_args: &[
-        "--no-memory",
-        "--no-subagents",
-        "--disable-web-search",
-        "--tools",
-        "",
-        "--no-plan",
-        "--verbatim",
-    ],
-    required_capability_flags: &[
-        "--single",
-        "--no-memory",
-        "--no-subagents",
-        "--disable-web-search",
-        "--tools",
-        "--system-prompt-override",
-    ],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--reasoning-effort",
-        default: "medium",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--system-prompt-override"),
-    input_mode: InputMode::FlagValue("--single"),
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
 const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_OPENCODE,
     binary: "opencode",
@@ -394,7 +356,6 @@ fn spec_for(provider_id: &str) -> Option<&'static AgentCliSpec> {
         PROVIDER_PI => Some(&PI_SPEC),
         PROVIDER_OMP => Some(&OMP_SPEC),
         PROVIDER_CODEX => Some(&CODEX_SPEC),
-        PROVIDER_GROK => Some(&GROK_SPEC),
         PROVIDER_OPENCODE => Some(&OPENCODE_SPEC),
         _ => None,
     }
@@ -1176,9 +1137,6 @@ async fn cold_spawn_and_collect(
         InputMode::Stdin => {}
         InputMode::PositionalArg => {
             command.arg(input_text);
-        }
-        InputMode::FlagValue(flag) => {
-            command.arg(flag).arg(input_text);
         }
     }
     command.env("PATH", resolved_path(false).await);
@@ -2225,55 +2183,6 @@ fn parse_codex_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProvi
     Ok(listed.into_iter().map(|(_, model)| model).collect())
 }
 
-fn parse_grok_models(
-    stdout: &[u8],
-) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
-    let text = String::from_utf8_lossy(stdout);
-    let configured_default = text.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("Default model:")
-            .map(str::trim)
-            .filter(|model| !model.is_empty())
-    });
-    let mut in_models = false;
-    let mut models = Vec::new();
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line == "Available models:" {
-            in_models = true;
-            continue;
-        }
-        if !in_models || line.is_empty() {
-            continue;
-        }
-        let without_marker = line.strip_prefix(['*', '-']).map(str::trim).unwrap_or(line);
-        let id = without_marker
-            .strip_suffix(" (default)")
-            .unwrap_or(without_marker)
-            .trim();
-        if id.is_empty() || id.chars().any(char::is_whitespace) {
-            continue;
-        }
-        models.push(AgentCliModel {
-            id: id.to_string(),
-            name: humanize_cli_model_id(id),
-            recommended: false,
-            reasoning: true,
-            context_window: None,
-            source_provider: Some("xAI".to_string()),
-            cli_default: false,
-        });
-    }
-    if models.is_empty() {
-        return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
-    }
-    let default_name = configured_default.map(humanize_cli_model_id);
-    Ok((
-        named_cli_default("Grok", default_name.as_deref(), Some("xAI".to_string())),
-        models,
-    ))
-}
-
 fn parse_selector_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProviderError> {
     let text = String::from_utf8_lossy(stdout);
     let models = text
@@ -2389,7 +2298,6 @@ const PI_MODEL_LIST_ARGV: &[&str] = &[
 const OMP_MODEL_LIST_ARGV: &[&str] = &["models", "--json", "--no-extensions"];
 const OMP_DEFAULT_MODEL_ARGV: &[&str] = &["config", "get", "modelRoles", "--json"];
 const CODEX_MODEL_LIST_ARGV: &[&str] = &["debug", "models"];
-const GROK_MODEL_LIST_ARGV: &[&str] = &["models"];
 const OPENCODE_MODEL_LIST_ARGV: &[&str] = &["models", "--pure"];
 const OPENCODE_CONFIG_ARGV: &[&str] = &["debug", "config", "--pure"];
 const OPENCODE_V2_MODEL_LIST_ARGV: &[&str] = &["models", "--standalone"];
@@ -2441,15 +2349,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             .await?;
             let mut result = vec![named_cli_default("Codex", None, None)];
             result.extend(parse_codex_models(&payload)?);
-            Ok(result)
-        }
-        PROVIDER_GROK => {
-            let payload =
-                run_model_list_command(&model_binary(&GROK_SPEC).await?, GROK_MODEL_LIST_ARGV, &[])
-                    .await?;
-            let (default, models) = parse_grok_models(&payload)?;
-            let mut result = vec![default];
-            result.extend(models);
             Ok(result)
         }
         PROVIDER_OPENCODE => {
@@ -2735,7 +2634,6 @@ mod tests {
             PROVIDER_PI,
             PROVIDER_OMP,
             PROVIDER_CODEX,
-            PROVIDER_GROK,
             PROVIDER_OPENCODE,
         ] {
             assert_eq!(cold_spawn_timeout_ms(provider), 20_000, "{provider}");
@@ -3123,7 +3021,6 @@ mod tests {
             b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n"
         );
         assert_eq!(CODEX_MODEL_LIST_ARGV, &["debug", "models"][..]);
-        assert_eq!(GROK_MODEL_LIST_ARGV, &["models"][..]);
         assert_eq!(OPENCODE_MODEL_LIST_ARGV, &["models", "--pure"][..]);
         assert_eq!(OPENCODE_V2_MODEL_LIST_ARGV, &["models", "--standalone"][..]);
         assert!(!CODEX_MODEL_LIST_ARGV.contains(&"app-server"));
@@ -3212,20 +3109,6 @@ mod tests {
         assert_eq!(codex[1].name, "GPT 6.1 Mini");
         assert!(!codex[1].reasoning);
 
-        let (grok_default, grok_models) = parse_grok_models(
-            b"You are logged in with grok.com.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n  - grok-4.7-build-fast\n  - grok-4.6\n  - grok-4.5\n",
-        )
-        .unwrap();
-        assert_eq!(grok_default.name, "Default");
-        let grok_ids = grok_models
-            .iter()
-            .map(|model| model.id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            grok_ids,
-            ["grok-4.7", "grok-4.7-build-fast", "grok-4.6", "grok-4.5"]
-        );
-
         let selectors =
             parse_selector_models(b"openai/gpt-5.6-sol\nanthropic/claude-sonnet-5\n").unwrap();
         assert_eq!(selectors[0].name, "GPT 5.6 Sol");
@@ -3248,7 +3131,6 @@ mod tests {
     fn discovery_parsers_reject_missing_model_contracts() {
         assert!(parse_pi_default_model(b"{}").is_err());
         assert!(parse_codex_models(b"{}").is_err());
-        assert!(parse_grok_models(b"Available models:\n").is_err());
         assert!(parse_selector_models(b"not-a-selector\n").is_err());
     }
 
@@ -3496,7 +3378,6 @@ mod tests {
             (PROVIDER_PI, "pi"),
             (PROVIDER_OMP, "omp"),
             (PROVIDER_CODEX, "codex"),
-            (PROVIDER_GROK, "grok"),
             (PROVIDER_OPENCODE, "opencode"),
         ] {
             let spec = spec_for(provider).expect("provider must have a CLI spec");
@@ -3526,12 +3407,6 @@ mod tests {
         assert!(codex.windows(2).any(|pair| {
             pair[0] == "-c" && pair[1].starts_with("developer_instructions=\"system\"")
         }));
-
-        let grok = cold_argv(&GROK_SPEC, "system");
-        assert!(grok
-            .windows(2)
-            .any(|pair| pair[0] == "--tools" && pair[1].is_empty()));
-        assert_eq!(GROK_SPEC.input_mode, InputMode::FlagValue("--single"));
 
         assert_eq!(
             OPENCODE_SPEC.static_env,
@@ -4399,10 +4274,7 @@ not a json line\n";
             assert!(default.cli_default);
             assert!(default.recommended);
             assert_ne!(default.name, "CLI default");
-            if matches!(
-                provider,
-                PROVIDER_PI | PROVIDER_OMP | PROVIDER_GROK | PROVIDER_OPENCODE
-            ) {
+            if matches!(provider, PROVIDER_PI | PROVIDER_OMP | PROVIDER_OPENCODE) {
                 assert!(
                     models.len() > 1,
                     "{provider} should expose selectable models: {models:?}"

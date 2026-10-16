@@ -46,7 +46,6 @@ const AGENT_CLI_PROVIDER_IDS = [
   "pi",
   "omp",
   "codex",
-  "grok",
   "opencode",
 ] as const;
 
