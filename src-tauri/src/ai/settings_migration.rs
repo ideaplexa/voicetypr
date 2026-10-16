@@ -168,11 +168,11 @@ pub(crate) fn migrate_ai_settings_values(
     changed
 }
 
-/// Cline and Droid Polish were removed; a saved selection falls back to Claude Code.
+/// Cline, Droid and Grok Polish were removed; a saved selection falls back to Claude Code.
 fn migrate_removed_agent_cli_provider(
     values: &mut serde_json::Map<String, serde_json::Value>,
 ) -> bool {
-    const REMOVED_PROVIDERS: [&str; 2] = ["cline", "droid"];
+    const REMOVED_PROVIDERS: [&str; 3] = ["cline", "droid", "grok"];
     let Some(old) = values
         .get("ai_provider")
         .and_then(|value| value.as_str())

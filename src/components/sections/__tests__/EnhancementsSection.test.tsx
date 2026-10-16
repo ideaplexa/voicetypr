@@ -132,14 +132,6 @@ const providerModels = vi.hoisted(
       },
     ],
     codex: [
-      {
-        id: "",
-        name: "Default",
-        recommended: true,
-        cliDefault: true,
-      },
-    ],
-    grok: [
       { id: "", name: "Default", recommended: true, cliDefault: true },
       {
         id: "claude-opus-5-5",
@@ -256,7 +248,6 @@ const providerListResponse = [
     status: "production",
     supportsReasoning: false,
   },
-  { id: "grok", name: "Grok", status: "production", supportsReasoning: false },
   {
     id: "opencode",
     name: "OpenCode",
@@ -269,7 +260,6 @@ const localAgentProviderIds = new Set([
   "pi",
   "omp",
   "codex",
-  "grok",
   "opencode",
 ]);
 
@@ -465,7 +455,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(6);
+      expect(probeCalls).toHaveLength(5);
       expect(eventListeners.has("ai-ready")).toBe(true);
     });
 
@@ -481,7 +471,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(6);
+      expect(probeCalls).toHaveLength(5);
     });
   });
 
@@ -844,7 +834,7 @@ describe("EnhancementsSection", () => {
         name: "Claude Code",
       }),
     ).toBeInTheDocument();
-    for (const providerName of ["Codex", "Grok", "OpenCode"]) {
+    for (const providerName of ["Codex", "OpenCode"]) {
       expect(
         within(providersPanel).getByRole("heading", { name: providerName }),
       ).toBeInTheDocument();
@@ -1925,7 +1915,7 @@ describe("EnhancementsSection", () => {
     });
   });
 
-  it("shows discovered Grok models beside its current default", async () => {
+  it("shows discovered Codex models beside its current default", async () => {
     agentCliProbeResponse = {
       state: "ready",
       reasoningLevels: ["low", "medium"],
@@ -1934,33 +1924,33 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
     const providersPanel = await getProviderSetupPanel();
     await user.click(within(providersPanel).getByRole("tab", { name: "Local Agents" }));
-    await user.click(await within(providersPanel).findByRole("button", { name: "Select Grok" }));
+    await user.click(await within(providersPanel).findByRole("button", { name: "Select Codex" }));
 
-    const grokModel = await within(providersPanel).findByRole("button", {
-      name: "Model for Grok",
+    const codexModel = await within(providersPanel).findByRole("button", {
+      name: "Model for Codex",
     });
-    expect(grokModel).toHaveTextContent("Default");
-    await user.click(grokModel);
+    expect(codexModel).toHaveTextContent("Default");
+    await user.click(codexModel);
     const modelDialog = await screen.findByRole("dialog", {
-      name: "Choose a Grok model",
+      name: "Choose a Codex model",
     });
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Default.*grok\/default/i,
+        name: /^Default.*codex\/default/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Opus 5.5.*grok\/claude-opus-5-5.*Reasoning/i,
+        name: /^Opus 5.5.*codex\/claude-opus-5-5.*Reasoning/i,
       }),
     ).toBeInTheDocument();
     await user.type(
-      within(modelDialog).getByRole("textbox", { name: "Search Grok models" }),
+      within(modelDialog).getByRole("textbox", { name: "Search Codex models" }),
       "gpt-6.1",
     );
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-6.1 Sol.*grok\/gpt-6.1-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*codex\/gpt-6.1-sol.*Reasoning/i,
       }),
     ).toBeInTheDocument();
     expect(
@@ -1970,13 +1960,13 @@ describe("EnhancementsSection", () => {
     ).not.toBeInTheDocument();
     await user.click(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-6.1 Sol.*grok\/gpt-6.1-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*codex\/gpt-6.1-sol.*Reasoning/i,
       }),
     );
 
     expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
       enabled: false,
-      provider: "grok",
+      provider: "codex",
       model: "gpt-6.1-sol",
     });
   });

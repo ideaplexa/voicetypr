@@ -8,11 +8,11 @@
 
 * **formatting:** explain that speech models infer punctuation, document Clean Dictation's AI correction role, and add privacy-safe decision diagnostics showing whether AI formatting ran or was skipped
 * **ci:** keep routine PR feedback cheap on GitHub-hosted runners, make Intel a manual/release-only legacy lane, and reserve Store packaging for immutable release-candidate commits on `main`
-* **ai:** removed Cline and Droid Polish providers; if one was selected, Polish switches to Claude Code
+* **ai:** removed Cline, Droid and Grok Polish providers; if one was selected, Polish switches to Claude Code
 
 ### Bug Fixes
 
-* **ai:** The model pickers for oh-my-pi, Codex and Grok list every model the CLI offers again (they showed none or only the default)
+* **ai:** The model pickers for oh-my-pi and Codex list every model the CLI offers again (they showed none or only the default)
 * **ai:** OpenCode Polish works with OpenCode 2.x (and still with 1.x), including OpenCode's free models
 * **ai:** reject truncated or nonzero-exit CLI output, preserve raw dictation on every CLI failure, kill entire CLI process groups on timeout or cancellation, and safely resolve native executables without running Windows script shims
 * **tray:** recover from transient system-tray startup failures, keep the dashboard reachable, expose retry help, and attach tray diagnostics to support reports
