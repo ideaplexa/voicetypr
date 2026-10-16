@@ -67,8 +67,9 @@ fn codex_defaults_and_explicit_overrides() {
 #[test]
 fn codex_discovery_keeps_default_and_recommends_luna() {
     let models = parse_codex_models(
-        br#"{"checks":{"config.load":{"details":{"model":"different-model","model_provider":"openai"}}}}"#,
-    ).unwrap();
+        br#"{"models":[{"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","visibility":"list","priority":1,"supported_reasoning_levels":[{"effort":"low"}]},{"slug":"gpt-6-luna","display_name":"GPT-6-Luna","visibility":"list","priority":4,"supported_reasoning_levels":[{"effort":"low"}]}]}"#,
+    )
+    .unwrap();
     assert!(models[0].id.is_empty());
     assert!(models[0].cli_default);
     let luna = models
