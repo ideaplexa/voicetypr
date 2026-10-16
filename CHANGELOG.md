@@ -13,6 +13,7 @@
 ### Bug Fixes
 
 * **ai:** The model pickers for oh-my-pi, Codex and Grok list every model the CLI offers again (they showed none or only the default)
+* **ai:** OpenCode Polish works with OpenCode 2.x (and still with 1.x), including OpenCode's free models
 * **ai:** reject truncated or nonzero-exit CLI output, preserve raw dictation on every CLI failure, kill entire CLI process groups on timeout or cancellation, and safely resolve native executables without running Windows script shims
 * **tray:** recover from transient system-tray startup failures, keep the dashboard reachable, expose retry help, and attach tray diagnostics to support reports
 * **uploads:** constrain long speaker timelines so Copy and Save remain reachable, and keep an in-flight transcript bound to its original file when another file is dropped
