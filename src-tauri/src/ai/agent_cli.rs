@@ -40,7 +40,7 @@ use super::providers::{
 };
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 #[cfg(test)]
 use std::future::Future;
@@ -72,7 +72,13 @@ fn cold_spawn_timeout(provider: &str) -> Duration {
 const MAX_CAPTURE_BYTES: usize = 128 * 1024;
 const MAX_CLI_ERROR_CHARS: usize = 200;
 
-const OPENCODE_ISOLATION_CONFIG: &str = r#"{"permission":"deny"}"#;
+/// `ask` keeps OpenCode's toolset declared but auto-rejects every tool action
+/// in non-interactive runs; `deny` would also work but makes OpenCode refuse
+/// its free models ("free tier can only be used from within OpenCode").
+const OPENCODE_ISOLATION_CONFIG: &str = r#"{"permission":"ask"}"#;
+/// OpenCode 2.x has no `--pure`; the `integration.use` policy keeps every
+/// plugin, MCP server, and skill unloaded.
+const OPENCODE_V2_ISOLATION_CONFIG: &str = r#"{"permission":"ask","policies":[{"action":"integration.use","resource":"*","effect":"deny"}]}"#;
 
 struct AgentCliSpec {
     #[allow(dead_code)]
@@ -101,6 +107,11 @@ enum ReasoningPolicy {
     },
     CodexConfig,
     ClaudeEffortIfSupported,
+    /// Appended to the selected model as `provider/model#level`; omitted
+    /// with no explicit model or at `off`.
+    ModelVariantSuffix {
+        default: &'static str,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,6 +351,43 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)],
 };
 
+/// OpenCode 2.x (`@opencode/cli`). `--standalone` runs a private server so
+/// Polish never uses or starts the user's shared background service.
+const OPENCODE_V2_SPEC: AgentCliSpec = AgentCliSpec {
+    provider_id: PROVIDER_OPENCODE,
+    binary: "opencode",
+    help_argv: &["run", "--help"],
+    cold_argv_prefix: &["run", "--standalone"],
+    cold_argv_suffix: &[],
+    required_isolation_args: &[],
+    required_capability_flags: &["--standalone", "--model"],
+    default_model: None,
+    model_flag: Some("--model"),
+    reasoning: ReasoningPolicy::ModelVariantSuffix { default: "medium" },
+    system_prompt: SystemPromptPolicy::None,
+    input_mode: InputMode::PositionalArg,
+    output: OutputParser::PlainText,
+    static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_V2_ISOLATION_CONFIG)],
+};
+
+/// Pick the spec whose required flags the probed help advertises. OpenCode
+/// 1.x and 2.x ship the same `opencode` binary and `run --help` probe.
+fn compatible_spec(spec: &'static AgentCliSpec, help: &[u8]) -> Option<&'static AgentCliSpec> {
+    if required_capabilities_present(spec, help) {
+        Some(spec)
+    } else if spec.provider_id == PROVIDER_OPENCODE && is_opencode_v2(help) {
+        Some(&OPENCODE_V2_SPEC)
+    } else {
+        None
+    }
+}
+
+/// OpenCode 2.x dropped `--pure`/`--variant` and added `--standalone`.
+fn is_opencode_v2(help: &[u8]) -> bool {
+    !required_capabilities_present(&OPENCODE_SPEC, help)
+        && required_capabilities_present(&OPENCODE_V2_SPEC, help)
+}
+
 fn spec_for(provider_id: &str) -> Option<&'static AgentCliSpec> {
     match provider_id {
         PROVIDER_CLAUDE_CODE => Some(&CLAUDE_CODE_SPEC),
@@ -442,13 +490,29 @@ fn cold_argv_for_model_with_options(
         }
     }
 
+    let valid_level = requested_reasoning.and_then(|level| match level {
+        "off" | "low" | "medium" => Some(level),
+        "minimal" if supports_minimal_thinking(spec) => Some("minimal"),
+        "high" => Some("medium"),
+        _ => None,
+    });
+
     let model = if selected_model.trim().is_empty() {
         spec.default_model.unwrap_or_default()
     } else {
         selected_model
     };
     if let Some(model_flag) = spec.model_flag.filter(|_| !model.is_empty()) {
-        argv.extend([model_flag.to_string(), model.to_string()]);
+        let model = match spec.reasoning {
+            ReasoningPolicy::ModelVariantSuffix { default } => {
+                match valid_level.unwrap_or(default) {
+                    "off" => model.to_string(),
+                    level => format!("{model}#{level}"),
+                }
+            }
+            _ => model.to_string(),
+        };
+        argv.extend([model_flag.to_string(), model]);
     }
 
     argv.extend(
@@ -457,12 +521,6 @@ fn cold_argv_for_model_with_options(
             .map(|s| (*s).to_string()),
     );
 
-    let valid_level = requested_reasoning.and_then(|level| match level {
-        "off" | "low" | "medium" => Some(level),
-        "minimal" if supports_minimal_thinking(spec) => Some("minimal"),
-        "high" => Some("medium"),
-        _ => None,
-    });
     match spec.reasoning {
         ReasoningPolicy::Flag {
             flag,
@@ -489,7 +547,7 @@ fn cold_argv_for_model_with_options(
                 argv.extend(["--effort".to_string(), level.to_string()]);
             }
         }
-        ReasoningPolicy::ClaudeEffortIfSupported => {}
+        ReasoningPolicy::ClaudeEffortIfSupported | ReasoningPolicy::ModelVariantSuffix { .. } => {}
     }
 
     if spec.output == OutputParser::PiJsonl {
@@ -557,11 +615,11 @@ impl AgentCliRuntime {
             capability_started.elapsed().as_millis(),
             cached_capabilities
         );
-        if !required_capabilities_present(spec, &help) {
+        let Some(spec) = compatible_spec(spec, &help) else {
             return Err(MappedAiProviderError::new(AiProviderError::AgentCli(
                 "The installed CLI does not support the required isolation flags.".to_string(),
             )));
-        }
+        };
 
         let prompt = request.prompt.clone();
         let input_text = if spec.system_prompt == SystemPromptPolicy::None {
@@ -571,7 +629,7 @@ impl AgentCliRuntime {
         };
         let input_mode = spec.input_mode;
         let output = spec.output;
-        let argv = cold_argv_for_model_with_options(
+        let mut argv = cold_argv_for_model_with_options(
             spec,
             &prompt,
             &request.model_id,
@@ -579,6 +637,10 @@ impl AgentCliRuntime {
             request.reasoning_level.as_deref(),
             request.fast_mode,
         );
+        let variant_suffix = matches!(spec.reasoning, ReasoningPolicy::ModelVariantSuffix { .. });
+        if variant_suffix && model_variant_rejected_before(&argv) {
+            strip_model_variant(&mut argv);
+        }
         let invocation_started = Instant::now();
         let hot_result = if spec.provider_id == PROVIDER_CLAUDE_CODE {
             CLAUDE_SPARE
@@ -588,13 +650,30 @@ impl AgentCliRuntime {
             invalidate_hot_spare();
             None
         };
-        let result = match hot_result {
+        let mut result = match hot_result {
             Some(Ok(text)) => Ok(text),
             Some(Err(_)) | None => {
                 cold_spawn_and_collect(spec, &binary_path, &argv, input_mode, &input_text, output)
                     .await
             }
         };
+        if variant_suffix && result.as_ref().is_err_and(is_variant_unavailable) {
+            if let Some(selector) = strip_model_variant(&mut argv) {
+                log::warn!(
+                    "OpenCode has no reasoning variant {selector}; retrying once without it"
+                );
+                rejected_model_variants().insert(selector);
+                result = cold_spawn_and_collect(
+                    spec,
+                    &binary_path,
+                    &argv,
+                    input_mode,
+                    &input_text,
+                    output,
+                )
+                .await;
+            }
+        }
         log::info!(
             "agent_cli_stage_timing provider={} stage=model_invocation duration_ms={} outcome={}",
             spec.provider_id,
@@ -607,6 +686,36 @@ impl AgentCliRuntime {
         );
         result
     }
+}
+
+/// `provider/model#variant` selectors OpenCode 2.x rejected as "Variant
+/// unavailable"; for the process lifetime they are sent without the suffix.
+static OPENCODE_REJECTED_VARIANTS: LazyLock<std::sync::Mutex<HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+fn rejected_model_variants() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    OPENCODE_REJECTED_VARIANTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn model_variant_rejected_before(argv: &[String]) -> bool {
+    argv.iter()
+        .position(|arg| arg == "--model")
+        .and_then(|index| argv.get(index + 1))
+        .is_some_and(|selector| rejected_model_variants().contains(selector))
+}
+
+/// Drop the `#variant` suffix from the `--model` value, returning the
+/// selector it replaced.
+fn strip_model_variant(argv: &mut [String]) -> Option<String> {
+    let index = argv.iter().position(|arg| arg == "--model")? + 1;
+    let model = argv.get(index)?.rsplit_once('#')?.0.to_string();
+    Some(std::mem::replace(&mut argv[index], model))
+}
+
+fn is_variant_unavailable(error: &MappedAiProviderError) -> bool {
+    matches!(&error.error, AiProviderError::AgentCli(detail) if detail.contains("Variant unavailable for "))
 }
 
 /// Owns a process group/job until it has been explicitly killed and reaped.
@@ -2196,10 +2305,22 @@ fn parse_selector_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiPr
     }
 }
 
+/// OpenCode 1.x prints its merged config object; 2.x lists its config
+/// sources in load order, each document under `info`, so the last source
+/// that sets `model` wins.
 fn parse_configured_model(stdout: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(stdout);
+    if let Ok(Value::Array(sources)) = serde_json::from_str::<Value>(text.trim()) {
+        return sources
+            .iter()
+            .rev()
+            .find_map(|source| configured_model(source.get("info")?));
+    }
     let payload = extract_json_payload(&text).unwrap_or(text.trim());
-    let value = serde_json::from_str::<Value>(payload).ok()?;
+    configured_model(&serde_json::from_str::<Value>(payload).ok()?)
+}
+
+fn configured_model(value: &Value) -> Option<String> {
     value
         .get("model")
         .and_then(Value::as_str)
@@ -2271,6 +2392,8 @@ const CODEX_MODEL_LIST_ARGV: &[&str] = &["debug", "models"];
 const GROK_MODEL_LIST_ARGV: &[&str] = &["models"];
 const OPENCODE_MODEL_LIST_ARGV: &[&str] = &["models", "--pure"];
 const OPENCODE_CONFIG_ARGV: &[&str] = &["debug", "config", "--pure"];
+const OPENCODE_V2_MODEL_LIST_ARGV: &[&str] = &["models", "--standalone"];
+const OPENCODE_V2_CONFIG_ARGV: &[&str] = &["debug", "config"];
 const PI_MODEL_LIST_REQUEST: &[u8] = b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n";
 
 async fn model_binary(spec: &AgentCliSpec) -> Result<PathBuf, MappedAiProviderError> {
@@ -2301,24 +2424,28 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
         }
         PROVIDER_OMP => {
             let binary = model_binary(&OMP_SPEC).await?;
-            let models_payload = run_model_list_command(&binary, OMP_MODEL_LIST_ARGV).await?;
+            let models_payload = run_model_list_command(&binary, OMP_MODEL_LIST_ARGV, &[]).await?;
             let models = parse_omp_models(&models_payload)?;
-            let default_payload = run_model_list_command(&binary, OMP_DEFAULT_MODEL_ARGV).await?;
+            let default_payload =
+                run_model_list_command(&binary, OMP_DEFAULT_MODEL_ARGV, &[]).await?;
             let mut result = vec![parse_omp_default_model(&default_payload, &models)?];
             result.extend(models);
             Ok(result)
         }
         PROVIDER_CODEX => {
-            let payload =
-                run_model_list_command(&model_binary(&CODEX_SPEC).await?, CODEX_MODEL_LIST_ARGV)
-                    .await?;
+            let payload = run_model_list_command(
+                &model_binary(&CODEX_SPEC).await?,
+                CODEX_MODEL_LIST_ARGV,
+                &[],
+            )
+            .await?;
             let mut result = vec![named_cli_default("Codex", None, None)];
             result.extend(parse_codex_models(&payload)?);
             Ok(result)
         }
         PROVIDER_GROK => {
             let payload =
-                run_model_list_command(&model_binary(&GROK_SPEC).await?, GROK_MODEL_LIST_ARGV)
+                run_model_list_command(&model_binary(&GROK_SPEC).await?, GROK_MODEL_LIST_ARGV, &[])
                     .await?;
             let (default, models) = parse_grok_models(&payload)?;
             let mut result = vec![default];
@@ -2327,9 +2454,22 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
         }
         PROVIDER_OPENCODE => {
             let binary = model_binary(&OPENCODE_SPEC).await?;
-            let payload = run_model_list_command(&binary, OPENCODE_MODEL_LIST_ARGV).await?;
+            let (_, help, _) =
+                discover_capabilities_for_polish(&binary, &OPENCODE_SPEC, false).await;
+            // 2.x listing starts a private server, so it carries the same
+            // isolation config that keeps Polish free of plugins.
+            let (list_argv, config_argv, env) = if is_opencode_v2(&help) {
+                (
+                    OPENCODE_V2_MODEL_LIST_ARGV,
+                    OPENCODE_V2_CONFIG_ARGV,
+                    OPENCODE_V2_SPEC.static_env,
+                )
+            } else {
+                (OPENCODE_MODEL_LIST_ARGV, OPENCODE_CONFIG_ARGV, &[][..])
+            };
+            let payload = run_model_list_command(&binary, list_argv, env).await?;
             let models = parse_selector_models(&payload)?;
-            let configured = run_model_list_command(&binary, OPENCODE_CONFIG_ARGV)
+            let configured = run_model_list_command(&binary, config_argv, env)
                 .await
                 .ok()
                 .and_then(|payload| parse_configured_model(&payload));
@@ -2353,9 +2493,11 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
 async fn run_model_list_command(
     binary_path: &Path,
     argv: &[&str],
+    env: &[(&str, &str)],
 ) -> Result<Vec<u8>, MappedAiProviderError> {
     let mut command = Command::new(binary_path);
     command.args(argv);
+    command.envs(env.iter().copied());
     command.env("PATH", resolved_path(false).await);
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
@@ -2983,6 +3125,7 @@ mod tests {
         assert_eq!(CODEX_MODEL_LIST_ARGV, &["debug", "models"][..]);
         assert_eq!(GROK_MODEL_LIST_ARGV, &["models"][..]);
         assert_eq!(OPENCODE_MODEL_LIST_ARGV, &["models", "--pure"][..]);
+        assert_eq!(OPENCODE_V2_MODEL_LIST_ARGV, &["models", "--standalone"][..]);
         assert!(!CODEX_MODEL_LIST_ARGV.contains(&"app-server"));
         assert!(!PI_MODEL_LIST_ARGV.contains(&"-p"));
         assert!(!OMP_MODEL_LIST_ARGV.contains(&"-p"));
@@ -3087,6 +3230,18 @@ mod tests {
             parse_selector_models(b"openai/gpt-5.6-sol\nanthropic/claude-sonnet-5\n").unwrap();
         assert_eq!(selectors[0].name, "GPT 5.6 Sol");
         assert_eq!(selectors[0].source_provider.as_deref(), Some("openai"));
+
+        assert_eq!(
+            parse_configured_model(br#"{"model":"openai/gpt-5.6-sol"}"#).as_deref(),
+            Some("openai/gpt-5.6-sol")
+        );
+        assert_eq!(
+            parse_configured_model(
+                br#"[{"type":"document","path":"a","info":{"model":"openai/gpt-6"}},{"type":"document","path":"b","info":{"model":"zai/glm-5"}},{"type":"directory","path":"c"}]"#
+            )
+            .as_deref(),
+            Some("zai/glm-5")
+        );
     }
 
     #[test]
@@ -3282,6 +3437,50 @@ mod tests {
         assert!(has_pair(&omp, "--model", "openai/gpt-4o@exact"));
         assert!(!has_pair(&omp, "--model", ""));
         assert!(has_pair(&omp, "--thinking", "medium"));
+
+        let opencode = |spec, model, reasoning| {
+            cold_argv_for_model_with_reasoning(
+                spec,
+                "prompt",
+                model,
+                ClaudeCapabilities::default(),
+                reasoning,
+            )
+        };
+        assert_eq!(
+            opencode(&OPENCODE_SPEC, "openai/gpt-6", None),
+            [
+                "run",
+                "--pure",
+                "--model",
+                "openai/gpt-6",
+                "--variant",
+                "medium"
+            ]
+        );
+        assert_eq!(
+            opencode(&OPENCODE_V2_SPEC, "openai/gpt-6", None),
+            ["run", "--standalone", "--model", "openai/gpt-6#medium"]
+        );
+        assert_eq!(
+            opencode(&OPENCODE_V2_SPEC, "openai/gpt-6", Some("minimal")),
+            ["run", "--standalone", "--model", "openai/gpt-6#minimal"]
+        );
+        assert_eq!(
+            opencode(&OPENCODE_V2_SPEC, "openai/gpt-6", Some("off")),
+            ["run", "--standalone", "--model", "openai/gpt-6"]
+        );
+        assert_eq!(
+            opencode(&OPENCODE_V2_SPEC, "", Some("low")),
+            ["run", "--standalone"]
+        );
+        let mut rejected = opencode(&OPENCODE_V2_SPEC, "openai/gpt-6", Some("minimal"));
+        assert_eq!(
+            strip_model_variant(&mut rejected).as_deref(),
+            Some("openai/gpt-6#minimal")
+        );
+        assert_eq!(rejected, ["run", "--standalone", "--model", "openai/gpt-6"]);
+        assert_eq!(strip_model_variant(&mut rejected), None);
     }
 
     #[test]
@@ -3338,6 +3537,17 @@ mod tests {
             OPENCODE_SPEC.static_env,
             &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)]
         );
+        assert_eq!(
+            OPENCODE_V2_SPEC.static_env,
+            &[("OPENCODE_CONFIG_CONTENT", OPENCODE_V2_ISOLATION_CONFIG)]
+        );
+        // `deny` makes OpenCode refuse its free models; `ask` auto-rejects
+        // every tool action in non-interactive runs instead.
+        for config in [OPENCODE_ISOLATION_CONFIG, OPENCODE_V2_ISOLATION_CONFIG] {
+            assert!(config.starts_with(r#"{"permission":"ask""#));
+        }
+        assert!(OPENCODE_V2_ISOLATION_CONFIG
+            .contains(r#"{"action":"integration.use","resource":"*","effect":"deny"}"#));
     }
 
     #[test]
@@ -3481,10 +3691,12 @@ mod tests {
             supported_reasoning_levels(&OMP_SPEC),
             ["off", "minimal", "low", "medium"]
         );
-        assert_eq!(
-            supported_reasoning_levels(&OPENCODE_SPEC),
-            ["off", "minimal", "low", "medium"]
-        );
+        for spec in [&OPENCODE_SPEC, &OPENCODE_V2_SPEC] {
+            assert_eq!(
+                supported_reasoning_levels(spec),
+                ["off", "minimal", "low", "medium"]
+            );
+        }
     }
 
     #[test]
@@ -3516,10 +3728,7 @@ mod tests {
             &OMP_SPEC,
             b"--no-tools --no-session --no-extensions --no-lsp"
         ));
-        assert!(!required_capabilities_present(
-            &OPENCODE_SPEC,
-            b"--pure --format"
-        ));
+        assert!(compatible_spec(&OPENCODE_SPEC, b"--pure --format --model").is_none());
         assert!(required_capabilities_present(
             &PI_SPEC,
             b"--no-tools --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --thinking"
@@ -3532,10 +3741,16 @@ mod tests {
             &OMP_SPEC,
             b"--no-tools --no-session --no-skills --no-rules --no-extensions --no-lsp --no-title --thinking"
         ));
-        assert!(required_capabilities_present(
-            &OPENCODE_SPEC,
-            b"--pure --format --variant"
-        ));
+        let opencode_prefix =
+            |help: &[u8]| compatible_spec(&OPENCODE_SPEC, help).map(|spec| spec.cold_argv_prefix);
+        assert_eq!(
+            opencode_prefix(b"--pure --format --variant"),
+            Some(&["run", "--pure"][..])
+        );
+        assert_eq!(
+            opencode_prefix(b"--standalone --model provider/model#variant --format"),
+            Some(&["run", "--standalone"][..])
+        );
     }
 
     #[test]
