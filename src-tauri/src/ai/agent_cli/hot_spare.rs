@@ -233,7 +233,7 @@ impl Prepared {
         let stdout = child.inner().stdout.take().ok_or_else(bad_response)?;
         let stderr = child.inner().stderr.take().ok_or_else(bad_response)?;
         spare.stdout = Some(tokio::spawn(read_result(stdout)));
-        spare.stderr = Some(tokio::spawn(drain_bounded(stderr)));
+        spare.stderr = Some(tokio::spawn(drain_bounded(stderr, MAX_CAPTURE_BYTES)));
         Ok(spare)
     }
 

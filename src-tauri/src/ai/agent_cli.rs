@@ -692,9 +692,11 @@ async fn terminate_process_group(child: &mut ProcessGroupGuard) -> std::io::Resu
 struct ProcessCapture {
     status: ExitStatus,
     stdout: Vec<u8>,
-    /// True when stdout exceeded [`MAX_CAPTURE_BYTES`] and the drain dropped
-    /// the tail. The retained bytes are a partial payload.
+    /// True when stdout exceeded `capture_limit` and the drain dropped the
+    /// tail. The retained bytes are a partial payload.
     stdout_truncated: bool,
+    /// Per-stream byte ceiling this capture was drained with.
+    capture_limit: usize,
     stderr: Vec<u8>,
 }
 
@@ -707,7 +709,7 @@ impl ProcessCapture {
         if self.stdout_truncated {
             log::warn!(
                 "CLI stdout exceeded the {} KiB capture ceiling; refusing partial output",
-                MAX_CAPTURE_BYTES / 1024
+                self.capture_limit / 1024
             );
             return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
         }
@@ -724,10 +726,12 @@ enum ProcessFailure {
 
 /// Run a configured command from a unique temporary cwd. The `TempDir` stays
 /// alive until the child has been reaped and both drain tasks have completed.
+/// Each stream retains at most `max_capture` bytes.
 async fn run_isolated_command(
     mut command: Command,
     stdin_bytes: Option<&[u8]>,
     timeout: Duration,
+    max_capture: usize,
 ) -> Result<ProcessCapture, ProcessFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
     let temp_dir = TempDir::new().map_err(ProcessFailure::Io)?;
@@ -760,8 +764,8 @@ async fn run_isolated_command(
             )));
         }
     };
-    let mut stdout_task = Some(tokio::spawn(drain_bounded(stdout)));
-    let mut stderr_task = Some(tokio::spawn(drain_bounded(stderr)));
+    let mut stdout_task = Some(tokio::spawn(drain_bounded(stdout, max_capture)));
+    let mut stderr_task = Some(tokio::spawn(drain_bounded(stderr, max_capture)));
 
     if let Some(input) = stdin_bytes {
         let mut stdin = match child.inner().stdin.take() {
@@ -868,6 +872,7 @@ async fn run_isolated_command(
         status,
         stdout,
         stdout_truncated,
+        capture_limit: max_capture,
         stderr,
     })
 }
@@ -876,15 +881,15 @@ async fn run_isolated_command(
 ///
 /// Draining always runs to EOF so the child can never block on a full pipe
 /// (which would deadlock the capture). Returns the retained bytes plus
-/// whether anything beyond [`MAX_CAPTURE_BYTES`] was dropped — a set flag
+/// whether anything beyond `max_capture` bytes was dropped — a set flag
 /// means callers must not parse the prefix as a complete payload.
-async fn drain_bounded<R>(mut reader: R) -> std::io::Result<(Vec<u8>, bool)>
+async fn drain_bounded<R>(mut reader: R, max_capture: usize) -> std::io::Result<(Vec<u8>, bool)>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     use tokio::io::AsyncReadExt;
 
-    let mut retained = Vec::with_capacity(MAX_CAPTURE_BYTES.min(8192));
+    let mut retained = Vec::with_capacity(max_capture.min(8192));
     let mut chunk = [0_u8; 8192];
     let mut truncated = false;
     loop {
@@ -892,7 +897,7 @@ where
         if read == 0 {
             break;
         }
-        let take = (MAX_CAPTURE_BYTES - retained.len()).min(read);
+        let take = (max_capture - retained.len()).min(read);
         retained.extend_from_slice(&chunk[..take]);
         if read > take {
             truncated = true;
@@ -978,7 +983,7 @@ async fn discover_capabilities_for_polish(
     command.env("PATH", resolved_path(false).await);
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
-    match run_isolated_command(command, None, Duration::from_secs(3)).await {
+    match run_isolated_command(command, None, Duration::from_secs(3), MAX_CAPTURE_BYTES).await {
         // A help payload that hit the capture ceiling is unusable; fall back
         // to conservative defaults exactly like a failed probe.
         Ok(capture) if capture.status.success() && !capture.stdout_truncated => {
@@ -1078,6 +1083,7 @@ async fn cold_spawn_and_collect(
         command,
         (input_mode == InputMode::Stdin).then_some(input_text.as_bytes()),
         cold_spawn_timeout(spec.provider_id),
+        MAX_CAPTURE_BYTES,
     )
     .await
     .map_err(map_process_failure)?;
@@ -1650,7 +1656,7 @@ async fn resolve_login_shell_path() -> Option<String> {
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
 
-    let capture = run_isolated_command(command, None, LOGIN_SHELL_PATH_TIMEOUT)
+    let capture = run_isolated_command(command, None, LOGIN_SHELL_PATH_TIMEOUT, MAX_CAPTURE_BYTES)
         .await
         .ok()?;
     if !capture.status.success() || capture.stdout_truncated {
@@ -2058,31 +2064,56 @@ fn strip_reasoning_suffix(selector: &str) -> &str {
     }
 }
 
-fn parse_codex_default_model(stdout: &[u8]) -> Result<AgentCliModel, MappedAiProviderError> {
+/// Parse `codex debug models`: only `visibility == "list"` models, in
+/// ascending `priority` order. Entries without a slug are skipped; a payload
+/// without a `models` array is a broken contract.
+fn parse_codex_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProviderError> {
     let text = String::from_utf8_lossy(stdout);
     let payload = extract_json_payload(&text).unwrap_or(text.trim());
     let value: Value = serde_json::from_str(payload)
         .map_err(|_| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let details = value
-        .get("checks")
-        .and_then(|checks| checks.get("config.load"))
-        .and_then(|check| check.get("details"))
+    let entries = value
+        .get("models")
+        .and_then(Value::as_array)
         .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let model = details
-        .get("model")
-        .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let provider = details
-        .get("model_provider")
-        .and_then(Value::as_str)
-        .filter(|provider| !provider.trim().is_empty())
-        .map(str::to_string);
-    Ok(named_cli_default(
-        "Codex",
-        Some(&humanize_cli_model_id(model)),
-        provider,
-    ))
+    let mut listed = entries
+        .iter()
+        .filter(|entry| entry.get("visibility").and_then(Value::as_str) == Some("list"))
+        .filter_map(|entry| {
+            let slug = entry
+                .get("slug")
+                .and_then(Value::as_str)
+                .filter(|slug| !slug.trim().is_empty())?;
+            let name = entry
+                .get("display_name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| humanize_cli_model_id(slug));
+            let reasoning = entry
+                .get("supported_reasoning_levels")
+                .and_then(Value::as_array)
+                .is_some_and(|levels| !levels.is_empty());
+            let priority = entry
+                .get("priority")
+                .and_then(Value::as_i64)
+                .unwrap_or(i64::MAX);
+            Some((
+                priority,
+                AgentCliModel {
+                    id: slug.to_string(),
+                    name,
+                    recommended: false,
+                    reasoning,
+                    context_window: None,
+                    source_provider: None,
+                    cli_default: false,
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    listed.sort_by_key(|(priority, _)| *priority);
+    Ok(listed.into_iter().map(|(_, model)| model).collect())
 }
 
 fn parse_grok_models(
@@ -2106,7 +2137,7 @@ fn parse_grok_models(
         if !in_models || line.is_empty() {
             continue;
         }
-        let without_marker = line.strip_prefix('*').map(str::trim).unwrap_or(line);
+        let without_marker = line.strip_prefix(['*', '-']).map(str::trim).unwrap_or(line);
         let id = without_marker
             .strip_suffix(" (default)")
             .unwrap_or(without_marker)
@@ -2221,7 +2252,8 @@ fn humanize_cli_model_id(id: &str) -> String {
 }
 
 const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(5);
-const MODEL_LIST_MAX_OUTPUT: usize = 512 * 1024;
+// `codex debug models` alone prints ~560 KB (per-model instructions included).
+const MODEL_LIST_MAX_OUTPUT: usize = 4 * 1024 * 1024;
 static MODEL_DISCOVERY_PERMIT: Semaphore = Semaphore::const_new(1);
 const PI_MODEL_LIST_ARGV: &[&str] = &[
     "--mode",
@@ -2235,7 +2267,7 @@ const PI_MODEL_LIST_ARGV: &[&str] = &[
 ];
 const OMP_MODEL_LIST_ARGV: &[&str] = &["models", "--json", "--no-extensions"];
 const OMP_DEFAULT_MODEL_ARGV: &[&str] = &["config", "get", "modelRoles", "--json"];
-const CODEX_DEFAULT_MODEL_ARGV: &[&str] = &["doctor", "--json"];
+const CODEX_MODEL_LIST_ARGV: &[&str] = &["debug", "models"];
 const GROK_MODEL_LIST_ARGV: &[&str] = &["models"];
 const OPENCODE_MODEL_LIST_ARGV: &[&str] = &["models", "--pure"];
 const OPENCODE_CONFIG_ARGV: &[&str] = &["debug", "config", "--pure"];
@@ -2278,9 +2310,11 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
         }
         PROVIDER_CODEX => {
             let payload =
-                run_model_list_command(&model_binary(&CODEX_SPEC).await?, CODEX_DEFAULT_MODEL_ARGV)
+                run_model_list_command(&model_binary(&CODEX_SPEC).await?, CODEX_MODEL_LIST_ARGV)
                     .await?;
-            Ok(vec![parse_codex_default_model(&payload)?])
+            let mut result = vec![named_cli_default("Codex", None, None)];
+            result.extend(parse_codex_models(&payload)?);
+            Ok(result)
         }
         PROVIDER_GROK => {
             let payload =
@@ -2325,7 +2359,7 @@ async fn run_model_list_command(
     command.env("PATH", resolved_path(false).await);
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
-    let capture = run_isolated_command(command, None, MODEL_LIST_TIMEOUT)
+    let capture = run_isolated_command(command, None, MODEL_LIST_TIMEOUT, MODEL_LIST_MAX_OUTPUT)
         .await
         .map_err(|failure| {
             MappedAiProviderError::new(match failure {
@@ -2433,7 +2467,8 @@ async fn run_pi_model_listing(binary_path: &Path) -> Result<Vec<u8>, MappedAiPro
             ));
         }
     };
-    let stderr_task = tokio::spawn(async move { drain_bounded(&mut stderr).await });
+    let stderr_task =
+        tokio::spawn(async move { drain_bounded(&mut stderr, MAX_CAPTURE_BYTES).await });
     let mut stdout_task =
         tokio::spawn(async move { read_until_pi_model_response(&mut stdout).await });
     let mut stdin = match child.inner().stdin.take() {
@@ -2635,9 +2670,10 @@ mod tests {
         // the partial payload instead of pasting it.
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "yes a | head -c 160000"]);
-        let capture = run_isolated_command(command, None, Duration::from_secs(30))
-            .await
-            .expect("overflowing child must be captured without deadlock");
+        let capture =
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES)
+                .await
+                .expect("overflowing child must be captured without deadlock");
 
         assert!(capture.status.success());
         assert!(
@@ -2657,9 +2693,10 @@ mod tests {
     async fn successful_stdout_within_cap_completes() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "printf 'polished text'"]);
-        let capture = run_isolated_command(command, None, Duration::from_secs(30))
-            .await
-            .unwrap();
+        let capture =
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES)
+                .await
+                .unwrap();
 
         assert!(capture.status.success());
         assert!(!capture.stdout_truncated);
@@ -2673,9 +2710,10 @@ mod tests {
         // the capture over dropped diagnostics, and never grow unbounded.
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "yes noise | head -c 160000 >&2; printf 'done'"]);
-        let capture = run_isolated_command(command, None, Duration::from_secs(30))
-            .await
-            .unwrap();
+        let capture =
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES)
+                .await
+                .unwrap();
 
         assert!(capture.status.success());
         assert_eq!(capture.stderr.len(), MAX_CAPTURE_BYTES);
@@ -2942,10 +2980,10 @@ mod tests {
             PI_MODEL_LIST_REQUEST,
             b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n"
         );
-        assert_eq!(CODEX_DEFAULT_MODEL_ARGV, &["doctor", "--json"][..]);
+        assert_eq!(CODEX_MODEL_LIST_ARGV, &["debug", "models"][..]);
         assert_eq!(GROK_MODEL_LIST_ARGV, &["models"][..]);
         assert_eq!(OPENCODE_MODEL_LIST_ARGV, &["models", "--pure"][..]);
-        assert!(!CODEX_DEFAULT_MODEL_ARGV.contains(&"app-server"));
+        assert!(!CODEX_MODEL_LIST_ARGV.contains(&"app-server"));
         assert!(!PI_MODEL_LIST_ARGV.contains(&"-p"));
         assert!(!OMP_MODEL_LIST_ARGV.contains(&"-p"));
         assert!(!String::from_utf8_lossy(PI_MODEL_LIST_REQUEST).contains("transcript"));
@@ -3019,18 +3057,31 @@ mod tests {
         .unwrap();
         assert_eq!(omp_default.name, "Default");
 
-        let codex = parse_codex_default_model(
-            br#"{"checks":{"config.load":{"details":{"model":"gpt-5.6-sol","model_provider":"openai"}}}}"#,
+        let codex = parse_codex_models(
+            br#"{"models":[{"slug":"gpt-reserve","display_name":"GPT-Reserve","visibility":"hide","priority":0,"supported_reasoning_levels":[]},{"slug":"gpt-6.1-mini","visibility":"list","priority":2,"supported_reasoning_levels":[]},{"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","visibility":"list","priority":1,"supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}"#,
         )
         .unwrap();
-        assert_eq!(codex.name, "Default");
+        assert_eq!(codex.len(), 2);
+        assert_eq!(codex[0].id, "gpt-6.1-sol");
+        assert_eq!(codex[0].name, "GPT-6.1-Sol");
+        assert!(codex[0].reasoning);
+        assert_eq!(codex[1].id, "gpt-6.1-mini");
+        assert_eq!(codex[1].name, "GPT 6.1 Mini");
+        assert!(!codex[1].reasoning);
 
         let (grok_default, grok_models) = parse_grok_models(
-            b"Default model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)\n",
+            b"You are logged in with grok.com.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n  - grok-4.7-build-fast\n  - grok-4.6\n  - grok-4.5\n",
         )
         .unwrap();
         assert_eq!(grok_default.name, "Default");
-        assert_eq!(grok_models[0].id, "grok-4.5");
+        let grok_ids = grok_models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            grok_ids,
+            ["grok-4.7", "grok-4.7-build-fast", "grok-4.6", "grok-4.5"]
+        );
 
         let selectors =
             parse_selector_models(b"openai/gpt-5.6-sol\nanthropic/claude-sonnet-5\n").unwrap();
@@ -3041,7 +3092,7 @@ mod tests {
     #[test]
     fn discovery_parsers_reject_missing_model_contracts() {
         assert!(parse_pi_default_model(b"{}").is_err());
-        assert!(parse_codex_default_model(b"{}").is_err());
+        assert!(parse_codex_models(b"{}").is_err());
         assert!(parse_grok_models(b"Available models:\n").is_err());
         assert!(parse_selector_models(b"not-a-selector\n").is_err());
     }
@@ -3751,7 +3802,8 @@ not a json line\n";
             .arg("(sleep 0.25; printf survived > \"$MARKER\") & wait")
             .env("MARKER", &marker);
 
-        let result = run_isolated_command(command, None, Duration::from_millis(50)).await;
+        let result =
+            run_isolated_command(command, None, Duration::from_millis(50), MAX_CAPTURE_BYTES).await;
         assert!(matches!(result, Err(ProcessFailure::Timeout)));
 
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -3774,7 +3826,7 @@ not a json line\n";
 
         let cancelled = tokio::time::timeout(
             Duration::from_millis(50),
-            run_isolated_command(command, None, Duration::from_secs(30)),
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES),
         )
         .await;
         assert!(cancelled.is_err(), "outer deadline must cancel the command");

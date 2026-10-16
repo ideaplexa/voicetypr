@@ -8,6 +8,7 @@
 
 * **ai:** Polish with Claude Code, Codex, pi and the other local CLIs no longer turns itself off when the app restarts (the startup check wrongly required an API key)
 * **ai:** The model you picked for a local CLI (Claude Code, pi, and others) is no longer reset to the CLI default on every restart
+* **ai:** The model pickers for oh-my-pi, Codex and Grok list every model the CLI offers again (they showed none or only the default)
 
 ### BREAKING CHANGES
 
