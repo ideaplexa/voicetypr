@@ -196,4 +196,18 @@ describe("ModelsTab", () => {
       speech_language: "en",
     });
   });
+
+  it.each([
+    ["nemotron-multilingual-1120ms", false],
+    ["parakeet-unified-640ms", true],
+  ] as const)("keeps Auto only when %s supports it", async (model, resets) => {
+    mockSettings.speech_language = "auto";
+    render(<ModelsTab />);
+    await capturedOnSelect(model);
+    expect(mockUpdateSettings).toHaveBeenCalledWith({
+      current_model: model,
+      current_model_engine: "parakeet",
+      ...(resets ? { speech_language: "en" } : {}),
+    });
+  });
 });

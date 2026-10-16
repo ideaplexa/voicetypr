@@ -1,0 +1,40 @@
+[package]
+name = "whisper-rs-sys"
+version = "0.15.0"
+edition = "2021"
+rust-version = "1.88.0"
+links = "whisper"
+license = "Unlicense"
+publish = false
+description = "Pinned whisper-rs-sys with target-correct optional Windows bindings"
+
+[workspace]
+
+[features]
+coreml = []
+cuda = []
+force-debug = []
+hipblas = []
+intel-sycl = []
+metal = []
+openblas = []
+openmp = []
+vulkan = []
+verify-bindings = ["dep:cc"]
+generate-bindings = ["dep:bindgen"]
+
+[[bin]]
+name = "generate-windows-bindings"
+path = "tools/generate.rs"
+required-features = ["generate-bindings"]
+
+[dependencies]
+bindgen = { version = "0.72", optional = true }
+
+[build-dependencies]
+bindgen = "0.72"
+cmake = "0.1"
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.10"
+cc = { version = "1", optional = true }

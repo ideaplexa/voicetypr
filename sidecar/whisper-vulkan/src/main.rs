@@ -9,6 +9,9 @@ use whisper_rs::{
     SamplingStrategy, WhisperContext, WhisperContextParameters,
 };
 
+#[path = "../../../src-tauri/src/transcription/language.rs"]
+mod language;
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
@@ -356,18 +359,14 @@ fn resolve_transcript_language(
     language: Option<&str>,
     translate: bool,
     state: &whisper_rs::WhisperState,
-    threads: usize,
 ) -> Option<String> {
     if translate {
         return Some("en".to_string());
     }
 
-    match language {
-        Some(lang) if lang != "auto" => Some(lang.to_string()),
-        _ => state
-            .lang_detect(0, threads)
-            .ok()
-            .and_then(|(lang_id, _)| get_lang_str(lang_id).map(str::to_string)),
+    match language::explicit_language(language) {
+        Some(lang) => Some(lang.to_string()),
+        None => get_lang_str(state.full_lang_id_from_state()).map(str::to_string),
     }
 }
 
@@ -390,11 +389,7 @@ fn transcribe_with_context(
         patience: -1.0,
     });
 
-    let final_language = match language {
-        Some("auto") | None => Some("en"),
-        Some(language) => Some(language),
-    };
-    params.set_language(final_language);
+    params.set_language(Some(language::whisper_language(language)));
     params.set_translate(translate);
 
     let hw = std::thread::available_parallelism()
@@ -430,8 +425,7 @@ fn transcribe_with_context(
         .full(params, &audio)
         .map_err(|err| format!("Whisper inference failed: {err}"))?;
 
-    let transcript_language =
-        resolve_transcript_language(language, translate, &state, threads);
+    let transcript_language = resolve_transcript_language(language, translate, &state);
 
     let mut text = String::new();
     let mut segments = Vec::new();

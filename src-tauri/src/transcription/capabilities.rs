@@ -27,6 +27,7 @@ mod tests {
         let expectations = [
             (ProviderEngine::Whisper, true, true, true),
             (ProviderEngine::Parakeet, false, true, true),
+            (ProviderEngine::Crispasr, false, false, false),
             (ProviderEngine::Soniox, false, true, false),
             (ProviderEngine::Openai, false, true, false),
             (ProviderEngine::Groq, false, true, false),

@@ -184,6 +184,13 @@ async fn route_once(
     let translate = matches!(request.task, TranscriptionTask::TranslateToEnglish);
 
     match active {
+        ActiveEngineSelection::Crispasr { model_name } => {
+            if translate { return Err(TranscriptionError::new(TranscriptionErrorCode::EngineUnavailable, source, "This model cannot translate to English. Use Whisper or Polish translation.")); }
+            let output = app.state::<crate::crispasr::CrispasrManager>()
+                .transcribe(app, model_name, input_path, language, request.cancellation.as_arc()).await
+                .map_err(|error| from_local_engine_string(&error, source))?;
+            Ok(output.into_result(job))
+        }
         ActiveEngineSelection::Whisper { model_path, .. } => {
             let token = request.cancellation.clone();
             let output = transcribe_whisper_with_acceleration(
@@ -352,7 +359,9 @@ async fn run_with_policy(
         ActiveEngineSelection::Whisper { .. } | ActiveEngineSelection::Parakeet { .. } => {
             Some(prepare_normalized_input(input_path, source).await?)
         }
-        ActiveEngineSelection::Cloud { .. } | ActiveEngineSelection::Remote { .. } => None,
+        ActiveEngineSelection::Cloud { .. }
+        | ActiveEngineSelection::Remote { .. }
+        | ActiveEngineSelection::Crispasr { .. } => None,
     };
     let attempt_path = prepared
         .as_ref()

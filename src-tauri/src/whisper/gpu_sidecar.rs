@@ -303,6 +303,16 @@ impl GpuSidecarClient {
         self.status.read().await.clone()
     }
 
+    /// Release cached weights for another local engine without interrupting an
+    /// in-flight transcription: requests own this lock for their full lifetime.
+    pub(crate) async fn unload_if_idle(&self) {
+        if let Ok(mut guard) = self.process.try_lock() {
+            if let Some(mut process) = guard.take() {
+                let _ = tokio::time::timeout(Duration::from_secs(2), process.kill_and_wait()).await;
+            }
+        }
+    }
+
     pub async fn abort_active_process(&self) {
         self.abort_requested.store(true, Ordering::SeqCst);
         self.abort_notify.notify_waiters();

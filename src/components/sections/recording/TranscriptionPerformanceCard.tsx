@@ -45,7 +45,7 @@ export function TranscriptionPerformanceCard() {
       void loadAccelerationStatus();
     }, 0);
     return () => window.clearTimeout(timeoutId);
-  }, [loadAccelerationStatus]);
+  }, [loadAccelerationStatus, settings?.current_model_engine, settings?.current_model]);
 
   if (!settings || !isWindows) return null;
 
@@ -95,7 +95,7 @@ export function TranscriptionPerformanceCard() {
             {(settings.transcription_acceleration ?? "auto") === "auto"
               ? "Use GPU when available, fall back to CPU (recommended)"
               : (settings.transcription_acceleration ?? "auto") === "gpu"
-                ? "Always use the GPU"
+                ? "Prefer GPU, with CPU fallback if unavailable"
                 : "Always use the CPU"}
           </FieldDescription>
         </FieldContent>

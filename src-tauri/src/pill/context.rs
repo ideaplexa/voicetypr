@@ -355,6 +355,9 @@ pub fn mic_display_name(name: &str) -> String {
 }
 /// Shared by island and tray. Catalog identifiers never become raw user-facing labels.
 pub fn engine_short_name(model: &str, engine: &str) -> String {
+    if let Some(definition) = crate::crispasr::models::get(model) {
+        return definition.display_name.to_string();
+    }
     if engine == "remote" {
         return if model.is_empty() || model == "remote" {
             "Network".into()

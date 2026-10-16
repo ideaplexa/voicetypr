@@ -115,8 +115,15 @@ pub fn get_language_name(code: &str) -> &'static str {
 
 /// Build the base prompt with the specified language
 fn build_base_prompt(language: Option<&str>) -> String {
-    let lang_name = language.map(get_language_name).unwrap_or("English");
-    BASE_PROMPT_TEMPLATE.replace("{language}", lang_name)
+    match language {
+        Some(language) => BASE_PROMPT_TEMPLATE.replace("{language}", get_language_name(language)),
+        // Auto recognition does not always return a detected language (TDT is
+        // one example). Preserve the speaker's language rather than smuggling
+        // an English output instruction into otherwise same-language cleanup.
+        None => BASE_PROMPT_TEMPLATE
+            .replace("written {language}", "text in its original language(s)")
+            .replace("{language}", "the original language"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

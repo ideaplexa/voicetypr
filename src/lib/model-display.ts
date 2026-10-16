@@ -1,5 +1,12 @@
 import type { ModelInfo } from "@/types";
 
+// Keep aligned with crispasr::models::DEFAULT_MODEL_ID in the native selector.
+export const DEFAULT_LOCAL_MODEL_NAME = "parakeet-ultra-q8_0";
+
+export function hasRecommendedModelLabel(model: ModelInfo): boolean {
+  return model.recommended || model.name === DEFAULT_LOCAL_MODEL_NAME;
+}
+
 const KNOWN_MODEL_DISPLAY_NAMES: Record<string, string> = {
   "base.en": "Base (English)",
   "small.en": "Small (English)",

@@ -166,6 +166,40 @@ beforeEach(() => {
 });
 
 describe("OnboardingDesktop", () => {
+  it.each([
+    ["", false, "Parakeet Ultra Q8", "parakeet-ultra-q8_0"],
+    ["base.en", false, "Base English", "base.en"],
+    ["", true, "Base English", "base.en"],
+  ] as const)(
+    "chooses the setup download (saved=%s, Ultra runtime missing=%s)",
+    async (saved, runtimeMissing, displayName, expectedModel) => {
+      const user = userEvent.setup();
+      settingsState.current_model = saved;
+      modelManagement.models["base.en"].downloaded = false;
+      modelManagement.models["base.en"].recommended = true;
+      modelManagement.models["parakeet-ultra-q8_0"] = {
+        ...modelManagement.models["base.en"],
+        name: "parakeet-ultra-q8_0",
+        display_name: "Parakeet Ultra Q8",
+        engine: "crispasr",
+        size: 674_342_400,
+        requires_setup: runtimeMissing,
+      };
+      // Exercise both orderings: Ultra wins over an older recommendation, but an
+      // unavailable Ultra must not win again through the recommended fallback.
+      modelManagement.modelOrder = runtimeMissing
+        ? ["parakeet-ultra-q8_0", "base.en"]
+        : ["base.en", "parakeet-ultra-q8_0"];
+      renderOnboarding();
+      const next = await screen.findByRole("button", {
+        name: new RegExp(`^Continue — download ${displayName}`),
+      });
+      expect(modelManagement.downloadModel).not.toHaveBeenCalled();
+      await user.click(next);
+      expect(modelManagement.downloadModel).toHaveBeenCalledWith(expectedModel);
+    },
+  );
+
   it("saves the hotkey and reaches success without a sample transcription", async () => {
     const user = userEvent.setup();
     renderOnboarding();

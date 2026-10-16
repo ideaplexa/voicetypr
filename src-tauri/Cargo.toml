@@ -7,7 +7,13 @@ edition = "2021"
 
 [workspace]
 members = [".", "crates/keytrigger", "crates/transcript-text", "crates/vulkan-device-select"]
+exclude = ["vendor/whisper-rs-sys"]
 resolver = "2"
+
+# Same pinned native sources as upstream; the opt-in shipped bindings now
+# select the Windows target ABI instead of the bundled Linux snapshot.
+[patch.crates-io]
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

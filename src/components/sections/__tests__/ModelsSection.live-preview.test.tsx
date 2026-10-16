@@ -147,17 +147,48 @@ describe("ModelsSection live preview mode", () => {
     });
   });
 
-  it.each(["downloading", "verifying"] as const)("keeps %s status in the model list, outside Spoken language", async (phase) => {
-    const pendingModel: ModelInfo = { ...parakeetModel, name: "pending-model", display_name: "Pending model", downloaded: false };
-    render(<ModelsSection {...baseProps}
-      models={[...baseProps.models, [pendingModel.name, pendingModel]]}
-      downloadProgress={phase === "downloading" ? { [pendingModel.name]: 42 } : {}}
-      verifyingModels={new Set(phase === "verifying" ? [pendingModel.name] : [])} />);
-    await screen.findByRole("switch", { name: "Live preview" });
-    const language = screen.getByRole("heading", { name: "Spoken language" }).closest("section")!;
-    expect(screen.getByText(phase === "downloading" ? "Downloading 42%" : "Verifying")).toBeInTheDocument();
-    expect(within(language).queryByText(/Downloading|Verifying/)).not.toBeInTheDocument();
-    expect(within(language).getByTestId("language-selection")).toBeInTheDocument();
+  it.each(["downloading", "verifying"] as const)(
+    "keeps %s status in the model list, outside Spoken language",
+    async (phase) => {
+      const pendingModel: ModelInfo = {
+        ...parakeetModel,
+        name: "pending-model",
+        display_name: "Pending model",
+        downloaded: false,
+      };
+      render(
+        <ModelsSection
+          {...baseProps}
+          models={[...baseProps.models, [pendingModel.name, pendingModel]]}
+          downloadProgress={phase === "downloading" ? { [pendingModel.name]: 42 } : {}}
+          verifyingModels={new Set(phase === "verifying" ? [pendingModel.name] : [])}
+        />,
+      );
+      await screen.findByRole("switch", { name: "Live preview" });
+      const language = screen.getByRole("heading", { name: "Spoken language" }).closest("section")!;
+      expect(
+        screen.getByText(phase === "downloading" ? "Downloading 42%" : "Verifying"),
+      ).toBeInTheDocument();
+      expect(within(language).queryByText(/Downloading|Verifying/)).not.toBeInTheDocument();
+      expect(within(language).getByTestId("language-selection")).toBeInTheDocument();
+    },
+  );
+
+  it("explains a missing CrispASR runtime instead of downloading the weights again", async () => {
+    const model: ModelInfo = {
+      ...parakeetModel,
+      name: "confucius4-r2t2-q4_k",
+      display_name: "R2T2 Q4_K",
+      engine: "crispasr",
+      requires_setup: true,
+    };
+    mockSettings.current_model = model.name;
+    mockSettings.current_model_engine = "crispasr";
+    render(
+      <ModelsSection {...baseProps} currentModel={model.name} models={[[model.name, model]]} />,
+    );
+    expect(await screen.findByText("Runtime missing · reinstall app")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download" })).not.toBeInTheDocument();
   });
 
   it("shows a disabled switch and reason when streaming is unavailable", async () => {

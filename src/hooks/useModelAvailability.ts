@@ -28,6 +28,7 @@ interface ModelStatusResponse {
 interface RecognitionAvailabilitySnapshot {
   whisper_available: boolean;
   parakeet_available: boolean;
+  crispasr_available?: boolean;
   cloud_selected: boolean;
   cloud_ready: boolean;
   remote_selected: boolean;
@@ -135,6 +136,7 @@ function deriveAvailabilityState(
   const hasLocalReadySource =
     snapshot.whisper_available ||
     snapshot.parakeet_available ||
+    snapshot.crispasr_available ||
     (snapshot.cloud_selected && snapshot.cloud_ready);
 
   const hasModels =

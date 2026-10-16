@@ -262,7 +262,10 @@ impl ParakeetManager {
                     app,
                     model_id: definition.id.to_string(),
                     model_version: Some(Self::model_version_for(definition).to_string()),
-                    language,
+                    language: crate::transcription::language::explicit_language(
+                        language.as_deref(),
+                    )
+                    .map(str::to_owned),
                     sample_rate,
                     channels,
                     engine,
@@ -716,7 +719,10 @@ impl ParakeetManager {
         let inference_start = Instant::now();
         let command = ParakeetCommand::Transcribe {
             audio_path: audio_path.to_string_lossy().to_string(),
-            language: options.language,
+            language: crate::transcription::language::explicit_language(
+                options.language.as_deref(),
+            )
+            .map(str::to_owned),
             translate_to_english: options.translate,
             prompt: None,
             use_word_timestamps: Some(true),

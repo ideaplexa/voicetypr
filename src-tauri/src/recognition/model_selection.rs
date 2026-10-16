@@ -11,6 +11,7 @@ use crate::whisper;
 pub struct RecognitionAvailabilitySnapshot {
     pub whisper_available: bool,
     pub parakeet_available: bool,
+    pub crispasr_available: bool,
     pub cloud_selected: bool,
     pub cloud_ready: bool,
     pub remote_selected: bool,
@@ -23,6 +24,7 @@ impl RecognitionAvailabilitySnapshot {
     pub fn any_available(&self) -> bool {
         self.whisper_available
             || self.parakeet_available
+            || self.crispasr_available
             || (self.cloud_selected && self.cloud_ready)
             || self.remote_available
     }
@@ -107,6 +109,14 @@ pub async fn recognition_availability_snapshot(
     RecognitionAvailabilitySnapshot {
         whisper_available,
         parakeet_available,
+        crispasr_available: app
+            .try_state::<crate::crispasr::CrispasrManager>()
+            .is_some_and(|manager| {
+                crate::crispasr::models::MODELS
+                    .iter()
+                    .any(|model| manager.is_downloaded(model.id))
+            })
+            && crate::crispasr::sidecar::runtime_path(app, false).is_some(),
         cloud_selected,
         cloud_ready,
         remote_selected,
@@ -217,9 +227,22 @@ pub async fn auto_select_model_if_needed(
         return Ok(());
     }
 
-    let mut selection: Option<(String, String)> = None;
+    // A default is a preference among usable downloads, never permission to
+    // download silently or replace the saved choice handled above.
+    let mut selection = app
+        .try_state::<crate::crispasr::CrispasrManager>()
+        .filter(|manager| {
+            availability.crispasr_available
+                && manager.is_downloaded(crate::crispasr::models::DEFAULT_MODEL_ID)
+        })
+        .map(|_| {
+            (
+                "crispasr".to_string(),
+                crate::crispasr::models::DEFAULT_MODEL_ID.to_string(),
+            )
+        });
 
-    if availability.parakeet_available {
+    if selection.is_none() && availability.parakeet_available {
         if let Some(parakeet_manager) = app.try_state::<parakeet::ParakeetManager>() {
             if let Some(model) = pick_best_parakeet_model(parakeet_manager.list_models()) {
                 selection = Some(("parakeet".to_string(), model));
@@ -233,6 +256,17 @@ pub async fn auto_select_model_if_needed(
         {
             if let Some(model) = pick_best_whisper_model(app, &whisper_state).await {
                 selection = Some(("whisper".to_string(), model));
+            }
+        }
+    }
+
+    if selection.is_none() && availability.crispasr_available {
+        if let Some(manager) = app.try_state::<crate::crispasr::CrispasrManager>() {
+            if let Some(model) = crate::crispasr::models::MODELS
+                .iter()
+                .find(|model| manager.is_downloaded(model.id))
+            {
+                selection = Some(("crispasr".to_string(), model.id.to_string()));
             }
         }
     }
@@ -338,6 +372,7 @@ mod tests {
         let snapshot = RecognitionAvailabilitySnapshot {
             whisper_available: false,
             parakeet_available: false,
+            crispasr_available: false,
             cloud_selected: false,
             cloud_ready: false,
             remote_selected: true,
@@ -354,6 +389,7 @@ mod tests {
         let snapshot = RecognitionAvailabilitySnapshot {
             whisper_available: false,
             parakeet_available: false,
+            crispasr_available: false,
             cloud_selected: false,
             cloud_ready: false,
             remote_selected: true,
@@ -370,6 +406,7 @@ mod tests {
         let snapshot = RecognitionAvailabilitySnapshot {
             whisper_available: false,
             parakeet_available: false,
+            crispasr_available: false,
             cloud_selected: false,
             cloud_ready: false,
             remote_selected: false,

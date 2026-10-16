@@ -89,6 +89,31 @@ beforeEach(() => {
 });
 
 describe("useModelAvailability", () => {
+  it("recognizes a ready CrispASR model without another local engine", async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "get_model_status") {
+        return {
+          models: [
+            {
+              name: "local-model",
+              engine: "crispasr",
+              kind: "local",
+              downloaded: true,
+              requires_setup: false,
+            },
+          ],
+        };
+      }
+      if (command === "get_recognition_availability_snapshot") {
+        return { ...unknownRemoteSnapshot, remote_selected: false, crispasr_available: true };
+      }
+      return null;
+    });
+    const { result } = renderHook(() => useModelAvailability());
+    await waitFor(() => expect(result.current.selectedModelAvailable).toBe(true));
+    expect(result.current.hasModels).toBe(true);
+  });
+
   it("treats a selected remote with unknown status as unresolved rather than unavailable", async () => {
     const { result } = renderHook(() => useModelAvailability());
 

@@ -190,15 +190,17 @@ mod behavior_tests {
         }
     }
 
-    // Language directive: en->English, es->Spanish, ja->Japanese, None->English.
+    // Explicit language directives retain their wording; unknown language stays unconstrained.
     #[test]
     fn language_directive_in_prompt() {
         let opts = options(EnhancementPreset::CleanDictation);
         assert!(build_enhancement_prompt(None, &opts, Some("en")).contains("written English"));
         assert!(build_enhancement_prompt(None, &opts, Some("es")).contains("written Spanish"));
         assert!(build_enhancement_prompt(None, &opts, Some("ja")).contains("written Japanese"));
-        // None defaults to English.
-        assert!(build_enhancement_prompt(None, &opts, None).contains("written English"));
+        let automatic = build_enhancement_prompt(None, &opts, None);
+        assert!(automatic.contains("original language"));
+        assert!(!automatic.contains("written English"));
+        assert!(!automatic.contains("translate it into"));
     }
 
     #[test]

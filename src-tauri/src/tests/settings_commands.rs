@@ -256,6 +256,31 @@ mod tests {
     }
 
     #[test]
+    fn auto_speech_language_survives_supported_model_normalization() {
+        for (engine, model) in [("whisper", "base"), ("parakeet", "parakeet-tdt-0.6b-v3")] {
+            assert_eq!(
+                normalize_speech_language_for_model(engine, model, "auto"),
+                "auto"
+            );
+        }
+        for (engine, model) in [
+            ("whisper", "base.en"),
+            ("parakeet", "parakeet-unified-640ms"),
+            ("cohere", "cohere"),
+        ] {
+            assert_eq!(
+                normalize_speech_language_for_model(engine, model, "auto"),
+                "en"
+            );
+        }
+        // Auto is not a translation target; retain the existing invalid-target fallback.
+        assert_eq!(
+            normalize_final_text_language(Some("auto"), TRANSCRIPTION_TASK_TRANSCRIBE),
+            "en"
+        );
+    }
+
+    #[test]
     fn test_model_selection() {
         // Empty model means auto-select
         let auto_settings = Settings {

@@ -2,6 +2,7 @@ pub mod capabilities;
 pub(crate) mod engines;
 pub mod error;
 pub mod executor;
+pub mod language;
 pub mod request;
 pub mod stream;
 
@@ -34,7 +35,7 @@ impl TranscriptionTask {
 
     pub fn fallback_transcript_language(self, spoken_language: Option<&str>) -> Option<String> {
         match self {
-            Self::Transcribe => spoken_language.map(str::to_string),
+            Self::Transcribe => language::explicit_language(spoken_language).map(str::to_string),
             Self::TranslateToEnglish => Some("en".to_string()),
         }
     }
@@ -131,8 +132,8 @@ impl TranscriptionResult {
     }
 
     pub fn with_transcript_language(mut self, transcript_language: Option<String>) -> Self {
-        if transcript_language.is_some() {
-            self.transcript_language = transcript_language;
+        if let Some(language) = language::explicit_language(transcript_language.as_deref()) {
+            self.transcript_language = Some(language.to_string());
         }
         self
     }
@@ -161,6 +162,22 @@ impl TranscriptionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_language_is_not_a_transcript_language() {
+        for language in [Some("auto"), Some(""), None] {
+            assert_eq!(
+                TranscriptionTask::Transcribe.fallback_transcript_language(language),
+                None
+            );
+            assert_eq!(
+                TranscriptionTask::TranslateToEnglish
+                    .fallback_transcript_language(language)
+                    .as_deref(),
+                Some("en")
+            );
+        }
+    }
 
     #[test]
     fn test_translate_task_falls_back_to_english_transcript_language() {

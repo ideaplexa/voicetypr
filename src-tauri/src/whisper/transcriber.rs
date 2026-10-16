@@ -299,11 +299,7 @@ impl Transcriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
 
-        // English default everywhere; auto-detect is intentionally not offered.
-        let final_lang = match language {
-            Some("auto") | None => "en",
-            Some(lang) => super::languages::validate_language(Some(lang)),
-        };
+        let final_lang = super::languages::whisper_language(language);
         params.set_language(Some(final_lang));
 
         let mut state = self
@@ -592,25 +588,16 @@ impl Transcriber {
         // Set language - use centralized validation
         log::info!("[LANGUAGE] Received language: {:?}", language);
 
-        let final_lang = if let Some(lang) = language {
-            if lang == "auto" {
-                // Auto-detect removed due to 30-second requirement, default to English
-                log::info!("[LANGUAGE] Auto-detection no longer supported, defaulting to English");
-                Some("en")
+        let final_lang = super::languages::whisper_language(language);
+        log::info!(
+            "[LANGUAGE] Final language set to: {}",
+            if final_lang.is_empty() {
+                "auto"
             } else {
-                let validated = super::languages::validate_language(Some(lang));
-                log::info!("[LANGUAGE] Using language: {}", validated);
-                Some(validated)
+                final_lang
             }
-        } else {
-            log::info!("[LANGUAGE] No language specified, using English");
-            Some("en")
-        };
-
-        if let Some(lang) = final_lang {
-            log::info!("[LANGUAGE] Final language set to: {}", lang);
-            params.set_language(Some(lang));
-        }
+        );
+        params.set_language(Some(final_lang));
 
         // Set translate mode
         if translate {
@@ -875,8 +862,12 @@ impl Transcriber {
 
         let transcript_language = if translate {
             Some("en".to_string())
+        } else if final_lang.is_empty() {
+            // Read the detection already performed by whisper_full; a second
+            // lang_detect pass would add inference cost after the user stops.
+            whisper_rs::get_lang_str(state.full_lang_id_from_state()).map(str::to_string)
         } else {
-            final_lang.map(str::to_string)
+            Some(final_lang.to_string())
         };
 
         Ok(WhisperTranscriptionOutput {

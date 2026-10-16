@@ -14,6 +14,7 @@ export default defineConfig({
       '**/dist/**',
       '**/.worktrees/**',
       '**/scripts/e2e/**', // Node's test runner owns these suites.
+      '**/sidecar/**', // Native sidecar harnesses use Node's test runner / CTest.
     ],
   },
   resolve: {

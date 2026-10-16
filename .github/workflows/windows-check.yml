@@ -25,6 +25,7 @@ jobs:
     env:
       # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep deps.
       CARGO_TARGET_DIR: D:\cargo-target
+      WHISPER_DONT_GENERATE_BINDINGS: '1'
     steps:
       - uses: actions/checkout@v5
 
@@ -57,6 +58,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path sidecar/whisper-vulkan/dist | Out-Null
           New-Item -ItemType File -Force -Path sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe | Out-Null
+          New-Item -ItemType Directory -Force -Path sidecar/crispasr/dist | Out-Null
+          foreach ($f in @('crispasr-sidecar-cpu-x86_64-pc-windows-msvc.exe','crispasr-sidecar-gpu-x86_64-pc-windows-msvc.exe','CrispASR-LICENSE','ggml-LICENSE')) {
+            New-Item -ItemType File -Force -Path "sidecar/crispasr/dist/$f" | Out-Null
+          }
           New-Item -ItemType Directory -Force -Path src-tauri/windows/resources | Out-Null
           foreach ($f in @('vc_redist.x64.exe','VulkanRT-Installer.exe','voicetypr.pdb')) {
             New-Item -ItemType File -Force -Path "src-tauri/windows/resources/$f" | Out-Null

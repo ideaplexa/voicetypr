@@ -39,7 +39,7 @@ pub(crate) struct WhisperStreamConfig {
     pub transcriber: Arc<Transcriber>,
     pub input_sample_rate: u32,
     pub channels: u16,
-    /// Preview language (English default; auto is not offered).
+    /// Preview language (English default; explicit "auto" enables detection).
     pub language: Option<String>,
 }
 

@@ -13,6 +13,7 @@ import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel
 import { ReadinessRemotePanel } from "@/components/onboarding/ReadinessRemotePanel";
 import { type OnboardingDesktopProps } from "@/components/onboarding/onboardingTypes";
 import { useOnboardingDesktop } from "@/components/onboarding/useOnboardingDesktop";
+import { DEFAULT_LOCAL_MODEL_NAME } from "@/lib/model-display";
 
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
   const {
@@ -71,9 +72,15 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
       setSavingShortcut(false);
     });
   }, [currentStep, phase, editingShortcut, handleNext]);
+  const defaultModel = local.models[DEFAULT_LOCAL_MODEL_NAME];
+  // Offer Ultra independently of score ordering, but only when its runtime is
+  // installed. The saved selection below still takes precedence on re-onboarding.
   const recommendedName =
-    local.localModelNames.find((name) => local.models[name]?.recommended) ??
-    local.localModelNames[0];
+    defaultModel?.kind === "local" && !defaultModel.requires_setup
+      ? DEFAULT_LOCAL_MODEL_NAME
+      : local.localModelNames.find(
+          (name) => local.models[name]?.recommended && !local.models[name]?.requires_setup,
+        ) ?? local.localModelNames.find((name) => !local.models[name]?.requires_setup);
   const modelName =
     local.currentModel && local.models[local.currentModel]?.kind === "local"
       ? local.currentModel

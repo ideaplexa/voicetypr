@@ -8,7 +8,7 @@ mod tests {
         assert_eq!(validate_language(Some("en")), "en");
         assert_eq!(validate_language(Some("es")), "es");
         assert_eq!(validate_language(Some("zh")), "zh");
-        // Auto-detect removed, should default to English
+        // The explicit-language validator excludes recognition modes.
         assert_eq!(validate_language(Some("auto")), "en");
 
         // Invalid languages should default to English
@@ -21,7 +21,7 @@ mod tests {
     fn test_language_names() {
         assert_eq!(get_language_name("en"), Some("English"));
         assert_eq!(get_language_name("es"), Some("Spanish"));
-        // Auto-detect removed
+        // Auto is labelled separately by the spoken-language controls.
         assert_eq!(get_language_name("auto"), None);
         assert_eq!(get_language_name("invalid"), None);
     }

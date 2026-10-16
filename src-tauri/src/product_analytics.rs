@@ -90,6 +90,7 @@ impl JourneyOutcome {
 pub enum EngineKind {
     Whisper,
     Parakeet,
+    Crispasr,
     Cloud,
     Remote,
 }
@@ -99,6 +100,7 @@ impl EngineKind {
         match self {
             Self::Whisper => "whisper",
             Self::Parakeet => "parakeet",
+            Self::Crispasr => "crispasr",
             Self::Cloud => "cloud",
             Self::Remote => "remote",
         }
@@ -224,6 +226,7 @@ fn words_bucket(words: usize) -> &'static str {
 
 fn safe_dictation_model(engine: EngineKind, model: &str) -> String {
     let known = match engine {
+        EngineKind::Crispasr => crate::crispasr::models::get(model).is_some(),
         EngineKind::Whisper => matches!(
             model,
             "base.en" | "small.en" | "large-v3" | "large-v3-turbo"

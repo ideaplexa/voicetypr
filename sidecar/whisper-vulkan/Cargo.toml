@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[patch.crates-io]
+whisper-rs-sys = { path = "../../src-tauri/vendor/whisper-rs-sys" }
+
 [[bin]]
 name = "whisper-vulkan-sidecar"
 path = "src/main.rs"

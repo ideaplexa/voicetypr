@@ -243,6 +243,17 @@ pub(super) async fn snapshot(
             log::warn!("ParakeetManager not available for tray menu");
         }
 
+        for model in crate::crispasr::model_status(app) {
+            if model.downloaded && !model.requires_setup {
+                models.push((
+                    model.name,
+                    model.display_name,
+                    model.accuracy_score,
+                    model.speed_score,
+                ));
+            }
+        }
+
         for provider in crate::cloud_stt::CloudProvider::ALL {
             if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
                 models.push((

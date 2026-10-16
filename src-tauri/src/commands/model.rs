@@ -216,6 +216,7 @@ pub(crate) fn clear_active_download(
 enum ModelEngine {
     Whisper,
     Parakeet,
+    Crispasr,
 }
 
 impl ModelEngine {
@@ -223,6 +224,7 @@ impl ModelEngine {
         match self {
             ModelEngine::Whisper => "whisper",
             ModelEngine::Parakeet => "parakeet",
+            ModelEngine::Crispasr => "crispasr",
         }
     }
 }
@@ -345,6 +347,17 @@ pub async fn download_model(
 
         let progress_tx_clone = progress_tx.clone();
         let result = match download_target.engine {
+            ModelEngine::Crispasr => {
+                app.state::<crate::crispasr::CrispasrManager>()
+                    .download(
+                        &model_name,
+                        cancel_flag.clone(),
+                        move |downloaded, total, phase| {
+                            let _ = progress_tx_clone.send((downloaded, total, phase));
+                        },
+                    )
+                    .await
+            }
             ModelEngine::Whisper => {
                 let (model_info, output_path, models_dir) = {
                     let manager = whisper_state.read().await;
@@ -441,6 +454,15 @@ pub async fn download_model(
 
             // Refresh/verify downloaded status
             match download_target.engine {
+                ModelEngine::Crispasr => {
+                    if !app
+                        .state::<crate::crispasr::CrispasrManager>()
+                        .is_downloaded(&model_name)
+                    {
+                        clear_active_download(&active_downloads, &model_name);
+                        return Err("CrispASR model verification failed".into());
+                    }
+                }
                 ModelEngine::Whisper => {
                     let verified = {
                         let mut manager = whisper_state.write().await;
@@ -617,6 +639,7 @@ pub async fn get_model_status(
 
     let parakeet_models = parakeet_manager.list_models();
     models.extend(parakeet_models.into_iter().map(convert_parakeet_model));
+    models.extend(crate::crispasr::model_status(&app));
 
     // Inject cloud providers (e.g., Soniox)
     models.extend(collect_cloud_models(&app));
@@ -791,6 +814,11 @@ pub async fn delete_model(
         ensure_model_is_not_currently_shared(&app, &model_name).await?;
 
         match engine {
+            ModelEngine::Crispasr => {
+                app.state::<crate::crispasr::CrispasrManager>()
+                    .delete(&model_name)
+                    .await?
+            }
             ModelEngine::Whisper => {
                 let mut manager = whisper_state.write().await;
                 manager.delete_model_file(&model_name)?;
@@ -874,6 +902,12 @@ async fn identify_download_target(
                 ))
             }
         }
+        ModelEngine::Crispasr => Ok(DownloadTarget {
+            engine,
+            size_bytes: crate::crispasr::models::get(model_name)
+                .ok_or("Unknown CrispASR model")?
+                .size,
+        }),
     }
 }
 
@@ -882,6 +916,9 @@ async fn determine_model_engine(
     whisper_state: &State<'_, RwLock<WhisperManager>>,
     parakeet_manager: &ParakeetManager,
 ) -> Result<ModelEngine, String> {
+    if crate::crispasr::models::get(model_name).is_some() {
+        return Ok(ModelEngine::Crispasr);
+    }
     {
         let manager = whisper_state.read().await;
         if manager.get_models_status().contains_key(model_name) {

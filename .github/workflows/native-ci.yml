@@ -96,6 +96,10 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+      - name: Build CrispASR sidecars
+        # Compile the new sidecars before Tauri validates externalBin paths.
+        run: pnpm sidecar:crispasr
+
       - name: Rust tests
         run: cd src-tauri && cargo test
 
@@ -120,7 +124,9 @@ jobs:
     env:
       # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep dependency trees.
       CARGO_TARGET_DIR: D:\b\app
+      VOICETYPR_CRISPASR_CACHE: D:\b\crispasr
       VULKAN_RUNTIME_VERSION: 1.3.296.0
+      WHISPER_DONT_GENERATE_BINDINGS: '1'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -158,12 +164,15 @@ jobs:
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@d17de7e2f5e50efb5d2123efed18497d3c58c533  # v1.7.0
         with:
-          vulkan_version: 1.3.296.0
+          vulkan_version: 1.4.363.0
           install_runtime: true
           cache: true
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build CrispASR sidecars
+        run: pnpm sidecar:crispasr
 
       - name: Build Whisper Vulkan sidecar
         shell: pwsh

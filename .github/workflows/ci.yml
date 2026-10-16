@@ -217,6 +217,9 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+      - name: Build CrispASR sidecars (Intel)
+        run: pnpm sidecar:crispasr --target x86_64-apple-darwin
+
       - name: Rust tests (Intel compile-only)
         run: cd src-tauri && cargo test --no-run
 

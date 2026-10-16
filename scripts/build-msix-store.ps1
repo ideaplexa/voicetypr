@@ -44,6 +44,8 @@ $SidecarTargetDir = if ([string]::IsNullOrWhiteSpace($env:WHISPER_VULKAN_TARGET_
 }
 
 if (-not $SkipGpuSidecarBuild) {
+    node scripts/prepare-crispasr-sidecars.mjs --target $TargetTriple
+    if ($LASTEXITCODE -ne 0) { throw "CrispASR sidecar build failed with exit code $LASTEXITCODE" }
     $env:RUSTFLAGS = "-C target-feature=+crt-static"
     cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release --target-dir $SidecarTargetDir
     if ($LASTEXITCODE -ne 0) { throw "Whisper Vulkan sidecar build failed with exit code $LASTEXITCODE" }
@@ -74,14 +76,18 @@ $MainExe = Join-Path $TargetDir "release\voicetypr.exe"
 if (-not (Test-Path $MainExe)) { throw "Voicetypr release binary not found: $MainExe" }
 Copy-Item $MainExe (Join-Path $StageDir "voicetypr.exe") -Force
 
-$Sidecars = @(
+$RuntimeFiles = @(
     "sidecar\whisper-vulkan\dist\whisper-vulkan-sidecar.exe",
-    "sidecar\whisper-vulkan\dist\whisper-vulkan-sidecar-$TargetTriple.exe"
+    "sidecar\whisper-vulkan\dist\whisper-vulkan-sidecar-$TargetTriple.exe",
+    "sidecar\crispasr\dist\crispasr-sidecar-cpu-$TargetTriple.exe",
+    "sidecar\crispasr\dist\crispasr-sidecar-gpu-$TargetTriple.exe",
+    "sidecar\crispasr\dist\CrispASR-LICENSE",
+    "sidecar\crispasr\dist\ggml-LICENSE"
 )
 
-foreach ($RelativePath in $Sidecars) {
+foreach ($RelativePath in $RuntimeFiles) {
     $Source = Join-Path $RepoRoot $RelativePath
-    if (-not (Test-Path $Source)) { throw "Required Store sidecar missing: $Source" }
+    if (-not (Test-Path $Source)) { throw "Required Store runtime file missing: $Source" }
     Copy-Item $Source (Join-Path $StageDir (Split-Path -Leaf $Source)) -Force
 }
 

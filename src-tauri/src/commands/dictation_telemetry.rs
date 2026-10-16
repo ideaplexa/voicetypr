@@ -159,6 +159,7 @@ impl Drop for DictationCompletionGuard {
 pub(crate) fn dictation_engine_from_id(engine: &str) -> crate::product_analytics::EngineKind {
     match engine {
         "parakeet" => crate::product_analytics::EngineKind::Parakeet,
+        "crispasr" => crate::product_analytics::EngineKind::Crispasr,
         "whisper" => crate::product_analytics::EngineKind::Whisper,
         id if crate::cloud_stt::CloudProvider::from_id(id).is_some() => {
             crate::product_analytics::EngineKind::Cloud
@@ -173,9 +174,9 @@ pub(crate) fn dictation_transport(
 ) -> crate::product_analytics::DictationTransport {
     use crate::product_analytics::DictationTransport;
     match selection {
-        ActiveEngineSelection::Whisper { .. } | ActiveEngineSelection::Parakeet { .. } => {
-            DictationTransport::Local
-        }
+        ActiveEngineSelection::Whisper { .. }
+        | ActiveEngineSelection::Parakeet { .. }
+        | ActiveEngineSelection::Crispasr { .. } => DictationTransport::Local,
         ActiveEngineSelection::Remote { .. } => DictationTransport::Remote,
         ActiveEngineSelection::Cloud { .. } => match ws_final_supplied_text {
             Some(true) => DictationTransport::Ws,

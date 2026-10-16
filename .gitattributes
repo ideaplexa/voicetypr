@@ -1,0 +1,4 @@
+# Regenerated from the pinned native headers; review the generator and C ABI
+# tests alongside these snapshots rather than treating them as handwritten Rust.
+src-tauri/vendor/whisper-rs-sys/bindings/*.rs linguist-generated=true
+src-tauri/vendor/whisper-rs-sys/upstream/*.crate binary

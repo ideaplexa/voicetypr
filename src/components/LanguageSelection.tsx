@@ -15,6 +15,10 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import * as React from "react";
 import { languages } from "./languages";
 
+// Spoken Auto is deliberately separate from the shared list of explicit
+// languages, which also supplies translation-target selectors.
+const autoLanguage = { value: "auto", label: "Auto" };
+
 interface LanguageSelectionProps {
   value: string;
   onValueChange: (value: string) => void;
@@ -164,6 +168,12 @@ export function LanguageSelection({
     return languages;
   }, [engine, parakeetAllowed, sonioxAllowed, cohereAllowed, englishOnly, supportedLanguages]);
 
+  const supportsAuto =
+    !englishOnly &&
+    supportedLanguages?.length !== 1 &&
+    (engine === "whisper" || engine === "parakeet" || engine === "crispasr");
+  const choices = supportsAuto ? [autoLanguage, ...displayed] : displayed;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -180,9 +190,11 @@ export function LanguageSelection({
       >
         {englishOnly
           ? "English"
-          : value
-            ? languages.find((language) => language.value === value)?.label
-            : "Select language"}
+          : value === "auto"
+            ? autoLanguage.label
+            : value
+              ? languages.find((language) => language.value === value)?.label
+              : "Select language"}
         <ChevronsUpDown className="opacity-50" />
       </PopoverTrigger>
       <PopoverContent className="w-[200px] p-0">
@@ -191,7 +203,7 @@ export function LanguageSelection({
           <CommandList>
             <CommandEmpty>No language found.</CommandEmpty>
             <CommandGroup>
-              {displayed.map((language) => (
+              {choices.map((language) => (
                 <CommandItem
                   key={language.value}
                   // Use label for search instead of value so users can search by language name

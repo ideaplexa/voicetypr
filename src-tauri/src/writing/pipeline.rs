@@ -264,7 +264,7 @@ fn resolve_output_language(
                     .task
                     .fallback_transcript_language(transcription.spoken_language.as_deref())
             })
-            .unwrap_or_else(|| "en".to_string())
+            .unwrap_or_else(|| FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string())
     } else {
         profile.final_text_language.clone()
     }
@@ -381,7 +381,8 @@ async fn run_smart_formatting(
         &request.app,
         request.text,
         &options,
-        Some(request.output_language.as_str()),
+        (request.output_language.as_str() != FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT)
+            .then_some(request.output_language.as_str()),
         request.transcript_language.as_deref(),
         ai_context.as_deref(),
         app_category_hint.as_deref(),
@@ -733,6 +734,19 @@ mod tests {
     use super::*;
     use crate::ai::prompts::EnhancementPreset;
     use crate::transcription::{TranscriptionJob, TranscriptionSource, TranscriptionTask};
+
+    #[test]
+    fn auto_language_without_detection_keeps_the_source_language() {
+        let profile = WritingProfile {
+            mode: EnhancementPreset::PersonalDictation,
+            final_text_language: FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string(),
+        };
+        let result = make_result("bonjour", Some("auto"), None, TranscriptionTask::Transcribe);
+        assert_eq!(
+            resolve_output_language(&profile, &result),
+            FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT
+        );
+    }
 
     fn make_result(
         raw_text: &str,

@@ -6,7 +6,6 @@ use crate::commands::remote::{resolve_shareable_model_config, save_remote_settin
 use crate::commands::shortcuts;
 use crate::commands::updater::{UpdateChannel, UPDATE_CHANNEL_EXPLICIT_KEY};
 use crate::menu::should_include_remote_connection_in_tray;
-use crate::parakeet::models::AVAILABLE_MODELS;
 use crate::parakeet::ParakeetManager;
 use crate::remote::lifecycle::RemoteServerManager;
 use crate::remote::settings::{ConnectionStatus, RemoteSettings};
@@ -81,6 +80,7 @@ pub struct Settings {
     pub hotkey: String,
     pub current_model: String,
     pub current_model_engine: String,
+    /// Explicit language code, or "auto" for supported multilingual recognizers.
     pub speech_language: String,
     pub transcription_task: String,
     pub final_text_language: String,
@@ -435,67 +435,9 @@ pub(crate) fn recording_retention_days_to_value(days: Option<u32>) -> serde_json
     }
 }
 
-pub fn model_requires_english_speech(engine: &str, model_name: &str) -> bool {
-    match engine {
-        "whisper" => model_name.ends_with(".en"),
-        "parakeet" => model_name.contains("-v2"),
-        _ => false,
-    }
-}
-
-pub fn normalize_speech_language_for_model(
-    engine: &str,
-    model_name: &str,
-    speech_language: &str,
-) -> String {
-    let validated = validate_language(Some(speech_language));
-    match engine {
-        "whisper" if model_requires_english_speech(engine, model_name) => "en".to_string(),
-        "parakeet" => {
-            if let Some(definition) = AVAILABLE_MODELS.iter().find(|m| m.id == model_name) {
-                if definition.languages.contains(&validated) {
-                    validated.to_string()
-                } else {
-                    definition
-                        .languages
-                        .first()
-                        .copied()
-                        .unwrap_or("en")
-                        .to_string()
-                }
-            } else if model_requires_english_speech(engine, model_name) {
-                "en".to_string()
-            } else {
-                validated.to_string()
-            }
-        }
-        "soniox" => {
-            const SONIOX_SUPPORTED_LANGUAGES: &[&str] = &[
-                "en", "es", "fr", "de", "it", "pt", "nl", "ru", "zh", "ja", "ko", "ar", "hi", "tr",
-                "pl", "sv", "no", "da", "fi", "el", "cs", "ro", "hu", "sk", "uk", "he", "id", "vi",
-                "th", "ms", "tl", "fa", "ur", "bn", "ta", "te", "gu", "pa", "bg", "hr", "sr", "sl",
-                "lv", "lt", "et", "is", "ca", "gl",
-            ];
-            if SONIOX_SUPPORTED_LANGUAGES.contains(&validated) {
-                validated.to_string()
-            } else {
-                "en".to_string()
-            }
-        }
-        "cohere" => {
-            const COHERE_SUPPORTED_LANGUAGES: &[&str] = &[
-                "en", "de", "fr", "it", "es", "pt", "el", "nl", "pl", "vi", "zh", "ar", "ja", "ko",
-            ];
-            if COHERE_SUPPORTED_LANGUAGES.contains(&validated) {
-                validated.to_string()
-            } else {
-                "en".to_string()
-            }
-        }
-        "openai" | "groq" | "deepgram" => validated.to_string(),
-        _ => validated.to_string(),
-    }
-}
+pub use super::speech_language::{
+    model_requires_english_speech, normalize_speech_language_for_model,
+};
 
 #[tauri::command]
 pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
@@ -1030,6 +972,9 @@ pub async fn save_settings(
         crate::cloud_stt::CloudProvider::from_id(&settings.current_model_engine).is_some();
 
     if !settings.current_model.is_empty() && old_model != settings.current_model {
+        if settings.current_model_engine != "crispasr" {
+            crate::crispasr::unload_if_unselected(app.clone());
+        }
         use crate::commands::model::preload_model;
         use tauri::async_runtime::RwLock as AsyncRwLock;
 
@@ -1039,7 +984,9 @@ pub async fn save_settings(
             settings.current_model
         );
 
-        if is_parakeet_engine {
+        if settings.current_model_engine == "crispasr" {
+            crate::crispasr::preload(app.clone(), settings.current_model.clone());
+        } else if is_parakeet_engine {
             // Warm the selected Parakeet model in the background.
             let app_clone = app.clone();
             let model_name = settings.current_model.clone();
@@ -1460,7 +1407,9 @@ pub async fn set_model_from_tray(app: AppHandle, model_name: String) -> Result<(
     // Get current settings
     let mut settings = get_settings(app.clone()).await?;
 
-    let engine = if let Some(p) = crate::cloud_stt::CloudProvider::from_id(&model_name) {
+    let engine = if crate::crispasr::models::get(&model_name).is_some() {
+        "crispasr".to_string()
+    } else if let Some(p) = crate::cloud_stt::CloudProvider::from_id(&model_name) {
         p.id().to_string()
     } else {
         let whisper_state = app.state::<tauri::async_runtime::RwLock<WhisperManager>>();
@@ -1736,6 +1685,13 @@ pub async fn get_transcription_acceleration_status(
         });
     }
 
+    if settings.current_model_engine == "crispasr" {
+        return Ok(app
+            .state::<crate::crispasr::CrispasrManager>()
+            .acceleration_status(&mode)
+            .await);
+    }
+
     #[cfg(not(target_os = "windows"))]
     {
         Ok(crate::whisper::gpu_sidecar::AccelerationRuntimeStatus {
@@ -1774,6 +1730,16 @@ pub async fn test_transcription_acceleration(
     #[cfg(target_os = "windows")]
     {
         let settings = get_settings(app.clone()).await?;
+        if settings.current_model_engine == "crispasr" {
+            return app
+                .state::<crate::crispasr::CrispasrManager>()
+                .test_acceleration(
+                    &app,
+                    &settings.current_model,
+                    &settings.transcription_acceleration,
+                )
+                .await;
+        }
         if settings.current_model_engine != "whisper" {
             return Err(
                 "GPU acceleration testing is only available for local Whisper models.".to_string(),

@@ -171,7 +171,7 @@ impl StreamTapSink for ParakeetPreviewStreamSink {
     }
 }
 
-fn emit_stream_event(
+pub(crate) fn emit_stream_event(
     app: &AppHandle,
     gate: &Arc<Mutex<StreamSessionGate>>,
     event: TranscriptionStreamEvent,
@@ -181,11 +181,11 @@ fn emit_stream_event(
         .map(|mut gate| gate.admit(&event))
         .unwrap_or(crate::transcription::stream::Admit::StaleSession);
     if !matches!(admitted, crate::transcription::stream::Admit::Accept) {
-        log::debug!("Dropping stale Parakeet stream event: {:?}", admitted);
+        log::debug!("Dropping stale stream event: {:?}", admitted);
         return;
     }
     if let Err(error) = emit_to_window(app, "pill", TRANSCRIPTION_STREAM_EVENT, event) {
-        log::warn!("Failed to emit Parakeet stream event: {}", error);
+        log::warn!("Failed to emit stream event: {}", error);
     }
 }
 
@@ -1659,6 +1659,7 @@ fn engine_kind_label(selection: &ActiveEngineSelection) -> &'static str {
     match selection {
         ActiveEngineSelection::Whisper { .. } => "whisper",
         ActiveEngineSelection::Parakeet { .. } => "parakeet",
+        ActiveEngineSelection::Crispasr { .. } => "crispasr",
         ActiveEngineSelection::Cloud { provider, .. } => provider.id(),
         ActiveEngineSelection::Remote { .. } => "remote",
     }
@@ -1670,6 +1671,7 @@ fn engine_model_label(selection: &ActiveEngineSelection) -> String {
     match selection {
         ActiveEngineSelection::Whisper { model_name, .. }
         | ActiveEngineSelection::Parakeet { model_name, .. }
+        | ActiveEngineSelection::Crispasr { model_name, .. }
         | ActiveEngineSelection::Cloud { model_name, .. } => model_name.clone(),
         ActiveEngineSelection::Remote { .. } => String::new(),
     }
@@ -1931,6 +1933,19 @@ fn build_desktop_transcription_request(
         audio_ctx: None,
         speed_mode_override: None,
     })
+}
+
+async fn execute_desktop_request(
+    app: &AppHandle,
+    active: &ActiveEngineSelection,
+    job: &TranscriptionJob,
+    language: Option<String>,
+    path: PathBuf,
+) -> Result<TranscriptionResult, TranscriptionFailure> {
+    let request = build_desktop_transcription_request(app, active, job, language, path)?;
+    transcribe_with_app(app, request)
+        .await
+        .map_err(desktop_failure_from_transcription_error)
 }
 
 /// Map the executor's typed [`TranscriptionError`] back onto the desktop's
@@ -5395,18 +5410,29 @@ pub async fn start_recording(
         let soniox_realtime = config.current_engine == "soniox"
             && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
             && !remote_server_online;
+        let crispasr_realtime = config.current_engine == "crispasr"
+            && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
+            && !remote_server_online;
         let streaming_engine_supported = matches!(
             config.current_engine.as_str(),
-            "parakeet" | "whisper" | "soniox" | "deepgram"
+            "parakeet" | "whisper" | "soniox" | "deepgram" | "crispasr"
         );
-        let streaming_tap_enabled =
-            (streaming_tap_enabled || soniox_realtime) && streaming_engine_supported;
+        let streaming_tap_enabled = (streaming_tap_enabled || soniox_realtime || crispasr_realtime)
+            && streaming_engine_supported;
         let streaming_engine_enabled =
-            (streaming_engine_enabled || soniox_realtime) && streaming_engine_supported;
+            (streaming_engine_enabled || soniox_realtime || crispasr_realtime)
+                && streaming_engine_supported;
         let cancellation_flag = app_state.should_cancel_recording.clone();
         let stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync> =
             Arc::new(move || cancellation_flag.load(AtomicOrdering::SeqCst));
         let stream_sink_factory = match config.current_engine.as_str() {
+            "crispasr" if crispasr_realtime => Some(crate::crispasr::stream::factory(
+                app.clone(),
+                config.current_model.clone(),
+                config.speech_language.clone(),
+                recording_generation,
+                live_preview_mode,
+            )),
             "soniox" | "deepgram" if remote_server_online => None,
             "parakeet" => build_parakeet_stream_sink_factory(
                 &app,
@@ -6214,6 +6240,29 @@ async fn stop_recording_with_mode_at(
         }
     } else {
         match config.current_engine.as_str() {
+            "crispasr" => {
+                match crate::transcription::engines::resolve_engine_for_model(
+                    &app,
+                    &config.current_model,
+                    Some("crispasr"),
+                )
+                .await
+                {
+                    Ok(selection) => selection,
+                    Err(_) => {
+                        dictation_telemetry.facts.outcome =
+                            crate::product_analytics::DictationOutcome::Failed;
+                        return abort_due_to_missing_model(
+                            &app,
+                            &audio_path,
+                            task_generation,
+                            "CrispASR model unavailable",
+                            "Select and download a CrispASR model before recording.",
+                        )
+                        .await;
+                    }
+                }
+            }
             "parakeet" => {
                 if config.current_model.is_empty() {
                     dictation_telemetry.facts.outcome =
@@ -6435,6 +6484,9 @@ async fn stop_recording_with_mode_at(
     let mut prepared_metrics = None;
     // For Whisper/Parakeet: normalize and duration gate; for Cloud/Remote: skip both
     let audio_path = match &engine_selection {
+        // CrispASR prepares the same raw PCM as its capture stream; applying
+        // Whisper's whole-clip gain/dither/trim here would change the fallback.
+        ActiveEngineSelection::Crispasr { .. } => audio_path,
         ActiveEngineSelection::Cloud { provider, .. } => {
             log::info!(
                 "[RECORD] {} selected — skipping normalization",
@@ -6719,18 +6771,23 @@ async fn stop_recording_with_mode_at(
                         );
                         Ok(TranscriptionResult::new(&transcription_job_for_task, text))
                     } else {
-                        match build_desktop_transcription_request(
+                        execute_desktop_request(
                             &app_for_task,
                             &engine_selection_for_task,
                             &transcription_job_for_task,
                             language_for_task.clone(),
                             audio_path_clone.clone(),
-                        ) {
-                            Ok(request) => transcribe_with_app(&app_for_task, request)
-                                .await
-                                .map_err(desktop_failure_from_transcription_error),
-                            Err(failure) => Err(failure),
-                        }
+                        ).await
+                    }
+                }
+                ActiveEngineSelection::Crispasr { model_name } => {
+                    let streamed = app_for_task.state::<crate::crispasr::CrispasrManager>().finals
+                        .take(task_generation, model_name, language_for_task.as_deref().unwrap_or("auto")).await;
+                    if let Some(result) = streamed {
+                        Ok(result.into_result(&transcription_job_for_task))
+                    } else {
+                        execute_desktop_request(&app_for_task, &engine_selection_for_task,
+                            &transcription_job_for_task, language_for_task.clone(), audio_path_clone.clone()).await
                     }
                 }
                 // Local + cloud run through the shared transcription executor (plan
@@ -6739,18 +6796,13 @@ async fn stop_recording_with_mode_at(
                 ActiveEngineSelection::Whisper { .. }
                 | ActiveEngineSelection::Parakeet { .. }
                 | ActiveEngineSelection::Cloud { .. } => {
-                    match build_desktop_transcription_request(
+                    execute_desktop_request(
                         &app_for_task,
                         &engine_selection_for_task,
                         &transcription_job_for_task,
                         language_for_task.clone(),
                         audio_path_clone.clone(),
-                    ) {
-                        Ok(request) => transcribe_with_app(&app_for_task, request)
-                            .await
-                            .map_err(desktop_failure_from_transcription_error),
-                        Err(failure) => Err(failure),
-                    }
+                    ).await
                 }
                 ActiveEngineSelection::Remote {
                     server_id,

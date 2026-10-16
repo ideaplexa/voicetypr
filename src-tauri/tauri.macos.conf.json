@@ -6,7 +6,13 @@
   },
   "bundle": {
     "externalBin": [
-      "../sidecar/parakeet-swift/dist/parakeet-sidecar"
+      "../sidecar/parakeet-swift/dist/parakeet-sidecar",
+      "../sidecar/crispasr/dist/crispasr-sidecar-cpu",
+      "../sidecar/crispasr/dist/crispasr-sidecar-gpu"
+    ],
+    "resources": [
+      "../sidecar/crispasr/dist/CrispASR-LICENSE",
+      "../sidecar/crispasr/dist/ggml-LICENSE"
     ]
   }
 }

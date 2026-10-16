@@ -97,7 +97,7 @@ struct TranscribeArgs {
     /// Model to use (e.g. "base", "large-v3-turbo"); defaults to the app's selected model. Run `voicetypr models` to list installed models.
     #[arg(long)]
     model: Option<String>,
-    /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine.
+    /// Engine override ("whisper", "parakeet" or "crispasr"); defaults to the selected model's engine.
     #[arg(long)]
     engine: Option<String>,
     /// Override the app's speech_language setting for this transcription run.
@@ -132,7 +132,7 @@ struct RecordArgs {
     /// Model to use (e.g. "base", "large-v3-turbo"); defaults to the app's selected model. Run `voicetypr models` to list installed models.
     #[arg(long)]
     model: Option<String>,
-    /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine.
+    /// Engine override ("whisper", "parakeet" or "crispasr"); defaults to the selected model's engine.
     #[arg(long)]
     engine: Option<String>,
     /// Transcribe via a remote Voicetypr server given as host:port (e.g. 192.168.1.10:47842) instead of locally.
@@ -1071,6 +1071,7 @@ mod tests {
         let snap = crate::RecognitionAvailabilitySnapshot {
             whisper_available: false,
             parakeet_available: false,
+            crispasr_available: false,
             cloud_selected: false,
             cloud_ready: false,
             remote_selected: false,
@@ -1086,6 +1087,7 @@ mod tests {
         let snap = crate::RecognitionAvailabilitySnapshot {
             whisper_available: true,
             parakeet_available: false,
+            crispasr_available: false,
             cloud_selected: true,
             cloud_ready: true,
             remote_selected: false,
@@ -1101,6 +1103,7 @@ mod tests {
         let snap = crate::RecognitionAvailabilitySnapshot {
             whisper_available: false,
             parakeet_available: false,
+            crispasr_available: false,
             cloud_selected: true,
             cloud_ready: false, // selected but not ready
             remote_selected: false,

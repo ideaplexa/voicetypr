@@ -1,6 +1,7 @@
 export type SpeechModelEngine =
   | "whisper"
   | "parakeet"
+  | "crispasr"
   | "soniox"
   | "openai"
   | "groq"
@@ -104,6 +105,7 @@ export interface AppSettings {
   polish_keep_words?: boolean;
   hotkey: string;
   current_model: string;
+  /** Explicit language code, or "auto" for supported multilingual recognizers. */
   speech_language: string;
   transcription_task?: "transcribe" | "translate_to_english";
   final_text_language?: string;

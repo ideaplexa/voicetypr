@@ -456,6 +456,17 @@ pub fn validate_language(code: Option<&str>) -> &'static str {
     }
 }
 
+/// Recognition accepts Auto, while explicit output-language validation above
+/// intentionally does not. Share native parameter mapping with the GPU sidecar.
+pub(crate) fn whisper_language(language: Option<&str>) -> &'static str {
+    let language = crate::transcription::language::whisper_language(language);
+    if language.is_empty() {
+        ""
+    } else {
+        validate_language(Some(language))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,7 +474,7 @@ mod tests {
     #[test]
     fn test_language_support() {
         assert!(is_language_supported("en"));
-        assert!(!is_language_supported("auto")); // Auto-detect removed
+        assert!(!is_language_supported("auto")); // Recognition mode, not an explicit language code
         assert!(is_language_supported("zh"));
         assert!(!is_language_supported("xyz"));
         assert!(!is_language_supported(""));
@@ -472,7 +483,7 @@ mod tests {
     #[test]
     fn test_validate_language() {
         assert_eq!(validate_language(Some("en")), "en");
-        assert_eq!(validate_language(Some("auto")), "en"); // Auto-detect removed, defaults to English
+        assert_eq!(validate_language(Some("auto")), "en"); // Output-language validation stays explicit
         assert_eq!(validate_language(Some("invalid")), "en");
         assert_eq!(validate_language(None), "en");
     }

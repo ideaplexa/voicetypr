@@ -109,9 +109,13 @@ export function ModelsTab(sourceFilterProps: SourceFilterProps) {
           "uk",
         ]);
         const supportedLanguages = selectedModel?.supported_languages;
+        // Auto is a capability, not an explicit language in the model catalog.
+        const preservesAuto = previousSpeechLanguage === "auto" &&
+          (supportedLanguages ? supportedLanguages.length > 1 : !modelName.includes("-v2"));
         const requiresSpeechLanguageReset =
           (engine === "whisper" && /\.en$/i.test(modelName) && previousSpeechLanguage !== "en") ||
           (engine === "parakeet" &&
+            !preservesAuto &&
             (supportedLanguages
               ? !supportedLanguages.includes(previousSpeechLanguage)
               : (modelName.includes("-v2") && previousSpeechLanguage !== "en") ||

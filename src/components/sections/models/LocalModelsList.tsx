@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
-import { getModelDisplayName } from "@/lib/model-display";
+import { getModelDisplayName, hasRecommendedModelLabel } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
 import { Download, Ellipsis, X } from "lucide-react";
 import type { LocalModelActions, ModelEntry } from "./types";
@@ -34,6 +34,7 @@ export function LocalModelsList({
       {models.map(([name, model]) => {
         const displayName = getModelDisplayName(name, { [name]: model });
         const usable = model.downloaded && !model.requires_setup;
+        const runtimeMissing = model.engine === "crispasr" && model.requires_setup;
         const selected = usable && !activeRemoteServer && currentModel === name;
         const progress = downloadProgress[name];
         const bytes = model.size ?? 0;
@@ -45,7 +46,10 @@ export function LocalModelsList({
         return (
           <div
             key={name}
-            className={cn("flex min-h-[60px] items-center gap-3 px-4 py-3", selected && "bg-sage-bg")}
+            className={cn(
+              "flex min-h-[60px] items-center gap-3 px-4 py-3",
+              selected && "bg-sage-bg",
+            )}
           >
             <Radio.Root
               value={name}
@@ -58,13 +62,20 @@ export function LocalModelsList({
               )}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13.5px] leading-[normal] font-medium text-foreground">{displayName}</p>
-              <p className="mt-0.5 truncate text-xs leading-[normal] text-muted-foreground">{detail}</p>
+              <p className="truncate text-[13.5px] leading-[normal] font-medium text-foreground">
+                {displayName}
+              </p>
+              <p className="mt-0.5 truncate text-xs leading-[normal] text-muted-foreground">
+                {detail}
+                {hasRecommendedModelLabel(model) ? " · Recommended" : ""}
+              </p>
               {downloadErrors[name] && !usable && progress === undefined ? (
                 <p className="text-xs text-destructive">{downloadErrors[name]}</p>
               ) : null}
             </div>
-            {selected ? (
+            {runtimeMissing ? (
+              <span className="text-xs text-muted-foreground">Runtime missing · reinstall app</span>
+            ) : selected ? (
               <span className="text-xs font-medium text-sage">In use</span>
             ) : usable ? (
               <span className="text-xs text-muted-foreground">Downloaded</span>
@@ -102,7 +113,7 @@ export function LocalModelsList({
                   <Ellipsis className="size-4" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  {onRepair ? (
+                  {onRepair && !runtimeMissing ? (
                     <DropdownMenuItem onClick={() => onRepair(name)}>Repair</DropdownMenuItem>
                   ) : null}
                   {onDelete ? (

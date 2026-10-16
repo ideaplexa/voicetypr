@@ -25,6 +25,7 @@ src-tauri/                   Rust backend (workspace: ., crates/keytrigger,
                              crates/transcript-text, crates/vulkan-device-select)
 sidecar/parakeet-swift/      macOS Parakeet engine (Swift + FluidAudio 0.17.4)
 sidecar/whisper-vulkan/      Windows GPU Whisper engine (Rust + whisper-rs/Vulkan)
+sidecar/crispasr/            C++ Parakeet Ultra / R2T2 runtime (CPU, Vulkan, Metal)
 plans/                       plan ledger (README.md), SMOKE.md, MASTER-PLAN-2026-Q4.md
 docs/                        research, reports, reviews, this file, RELEASING.md
 ```
@@ -42,6 +43,7 @@ docs/                        research, reports, reviews, this file, RELEASING.md
 | `transcription/` | engine-agnostic layer: `executor.rs` (`transcribe_with_app`), `engines.rs`, `stream.rs` (live preview contract), `capabilities.rs` |
 | `whisper/` | in-process Whisper, model cache, decode-ahead preview, Windows GPU sidecar client |
 | `parakeet/` | Parakeet sidecar process client, protocol messages, model catalog |
+| `crispasr/` | pinned GGUF catalog/downloads, warm native process, shared PCM conversion, capture stream and generation-keyed final handoff |
 | `cloud_stt/` | Soniox and Deepgram (REST + realtime WebSocket), OpenAI, Groq, Cohere |
 | `remote/` | LAN network sharing (warp HTTP server/client, UDP discovery) |
 | `writing/` | post-recognition text: vocabulary, library rules, app category, Polish pipeline |
@@ -92,6 +94,8 @@ Idle`; any → `Error`; `Error → Idle`. Transitions happen in
 | Parakeet TDT v3 | Swift sidecar | full-context decode-ahead (plan 070) | 25 European languages; optional CTC custom vocabulary |
 | Parakeet Unified (EN) | Swift sidecar | native streaming | best English preview |
 | Nemotron multilingual | Swift sidecar | native streaming | |
+| Parakeet Ultra Q8 | CrispASR C++ sidecar | full-context tentative preview | one complete final decode; 25 languages |
+| R2T2 Q4_K / Q8 | CrispASR C++ sidecar | native prefix-rollback recipe | complete stream final authoritative; 30 languages |
 | Soniox | cloud | realtime WS (`stt-rt-v5`) | WS final authoritative; REST `stt-async-v5` fallback |
 | Deepgram | cloud | realtime WS | same authority model as Soniox |
 | OpenAI, Groq, Cohere | cloud | final only | |
@@ -104,6 +108,21 @@ after a terminal event, and the committed prefix only grows
 (`assert_committed_monotonic`). The pasted text is the batch result, except
 Soniox/Deepgram, where a complete WS final (via `CLOUD_WS_FINAL`, keyed by
 recording generation, invalidated by dropped frames) is authoritative.
+
+CrispASR also reuses a completed stream final, keyed by generation, model and
+language and checked against every acknowledged sample. Background recognition
+runs even with preview hidden. A five-second ingress backlog or 120-second stream
+limit invalidates the stream and uses the complete WAV; final inference never
+extends the recorder join deadline. Batch and streaming share `crispasr/pcm.rs`
+without Whisper-only gain/dither/trimming. Dropped IPC futures kill and poison
+their process; failed native Qwen3 graphs throw through a checked C++ adapter
+instead of becoming partial successful finals. Models stay warm between takes;
+unselection waits for active work, then rechecks selection before unloading.
+
+Auto spoken language is separate from explicit output-language selection.
+Multilingual local engines accept Auto, English-only models remain English,
+and missing detected-language metadata stays unknown through Polish. Whisper
+receives `Some("")` and reports its decoder-detected language without another pass.
 
 ## Settings
 
@@ -157,3 +176,12 @@ PostHog dashboard definition (all insights filter to `dictation_completed`):
   `--decode-ahead-token-harness`.
 - Windows GPU: CI/release build `sidecar/whisper-vulkan` into
   `sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar-x86_64-pc-windows-msvc.exe`.
+- CrispASR: run `pnpm sidecar:crispasr` before a fresh development build.
+  `scripts/prepare-crispasr-sidecars.mjs` stages target-qualified CPU/GPU binaries
+  and licenses; Tauri external binaries and Windows Store staging include them.
+  `--source` / `--cache` (or `VOICETYPR_CRISPASR_CACHE`) reuse native build caches.
+  Windows GPU needs Vulkan SDK 1.4.363.0 to build. The independent CPU binary has
+  no Vulkan dependency; both use the installed Visual C++ runtime on Windows.
+  Apple Silicon builds Metal; Intel macOS uses CPU. Native platform and packaged
+  validation status is in [the evidence report](reports/2026-10-05-crispasr.md)
+  and [plan 082 smoke](../plans/SMOKE.md#082--crispasr-and-auto-language-needs-smoke).

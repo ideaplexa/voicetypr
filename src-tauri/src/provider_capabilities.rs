@@ -8,6 +8,7 @@
 pub enum ProviderEngine {
     Whisper,
     Parakeet,
+    Crispasr,
     Soniox,
     Openai,
     Groq,
@@ -30,6 +31,7 @@ impl ProviderEngine {
         match engine.trim().to_ascii_lowercase().as_str() {
             "whisper" => Some(Self::Whisper),
             "parakeet" => Some(Self::Parakeet),
+            "crispasr" => Some(Self::Crispasr),
             "soniox" => Some(Self::Soniox),
             "openai" => Some(Self::Openai),
             "groq" => Some(Self::Groq),
@@ -44,6 +46,7 @@ impl ProviderEngine {
         match self {
             Self::Whisper => "whisper",
             Self::Parakeet => "parakeet",
+            Self::Crispasr => "crispasr",
             Self::Soniox => "soniox",
             Self::Openai => "openai",
             Self::Groq => "groq",
@@ -55,6 +58,13 @@ impl ProviderEngine {
 
     pub fn capabilities(self) -> ProviderCapabilities {
         match self {
+            Self::Crispasr => ProviderCapabilities {
+                shareable_remote: false,
+                supports_initial_prompt: false,
+                supports_structured_terms: false,
+                supports_vocabulary_terms: false,
+                supports_translate_task: false,
+            },
             Self::Whisper => ProviderCapabilities {
                 shareable_remote: true,
                 supports_initial_prompt: true,

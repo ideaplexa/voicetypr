@@ -126,6 +126,7 @@ impl EngineStreamCapabilities {
         match engine {
             ProviderEngine::Whisper => Self::WHISPER,
             ProviderEngine::Parakeet => Self::PARAKEET,
+            ProviderEngine::Crispasr => Self::PARAKEET,
             // Soniox realtime streaming is result-authoritative (plan 043b): the WS
             // final is the pasted text; REST-on-WAV runs only as fallback.
             ProviderEngine::Soniox => Self::SONIOX,

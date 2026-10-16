@@ -9,6 +9,7 @@
     "ci:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\ci-local-windows.ps1",
     "ci:win:full": "powershell -ExecutionPolicy Bypass -File .\\scripts\\ci-local-windows.ps1 -Full",
     "sidecar:build": "bash ./scripts/build-parakeet-sidecar.sh",
+    "sidecar:crispasr": "node scripts/prepare-crispasr-sidecars.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "ui:preview": "node scripts/ui-preview/shoot.mjs",

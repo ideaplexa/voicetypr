@@ -8,7 +8,9 @@ const COHERE: &str = "en de fr it es pt el nl pl vi zh ar ja ko";
 const NOVA_2: &str = "bg ca zh cs da nl en et fi fr de el hi hu id it ja ko lv lt ms no pl pt ro ru sk es sv th tr uk vi";
 const NOVA_3: &str = "af ar hy as be bn bs bg ca zh hr cs da nl en et fi fr ka de el gu he hi hu id it ja kn kk ko lv lt mk ms mr mn ne no ps fa pl pt pa ro ru sr sk sl es sv tl ta te th tr uk ur vi";
 pub fn supported(model: &str, engine: &str, cloud_model: Option<&str>) -> Vec<(String, String)> {
-    let codes = if let Some(definition) = crate::parakeet::models::AVAILABLE_MODELS
+    let codes = if let Some(model) = crate::crispasr::models::get(model) {
+        model.languages().to_vec()
+    } else if let Some(definition) = crate::parakeet::models::AVAILABLE_MODELS
         .iter()
         .find(|m| m.id == model)
     {
@@ -49,6 +51,9 @@ pub fn supported(model: &str, engine: &str, cloud_model: Option<&str>) -> Vec<(S
             name.clone(),
         )
     });
+    if crate::commands::speech_language::supports_auto_speech_language(engine, model) {
+        languages.insert(0, ("auto".into(), "Auto".into()));
+    }
     languages
 }
 #[cfg(test)]
@@ -62,7 +67,10 @@ mod tests {
         );
         for model in crate::parakeet::models::AVAILABLE_MODELS.iter() {
             assert_eq!(
-                supported(model.id, "parakeet", None).len(),
+                supported(model.id, "parakeet", None)
+                    .iter()
+                    .filter(|(code, _)| code != "auto")
+                    .count(),
                 model.languages.len()
             );
         }

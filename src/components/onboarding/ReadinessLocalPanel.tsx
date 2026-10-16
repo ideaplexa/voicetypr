@@ -4,6 +4,7 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { isWindows } from "@/lib/platform";
+import { hasRecommendedModelLabel } from "@/lib/model-display";
 import type { ModelInfo, TranscriptionAcceleration } from "@/types";
 
 export interface ReadinessLocalPanelProps {
@@ -72,7 +73,7 @@ export function ReadinessLocalPanel({
                       : ready
                         ? "Downloaded"
                         : `${Math.round((model.size ?? 0) / (1024 * 1024))} MB`}
-                    {model.recommended ? " · Recommended" : ""}
+                    {hasRecommendedModelLabel(model) ? " · Recommended" : ""}
                   </span>
                 </button>
                 {verifyingModels.has(name) ? (

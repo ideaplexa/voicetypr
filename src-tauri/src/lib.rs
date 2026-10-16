@@ -17,6 +17,7 @@ mod audio;
 pub mod cli;
 mod cloud_stt;
 mod commands;
+mod crispasr;
 mod license;
 mod media;
 mod menu;
@@ -816,6 +817,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             log_file_operation("CREATE_DIR", &format!("{:?}", parakeet_dir), true, None, None);
             let parakeet_manager = parakeet::ParakeetManager::new(parakeet_dir);
             app.manage(parakeet_manager);
+            app.manage(crispasr::CrispasrManager::new(models_dir.join("crispasr")));
             log::info!("🦜 Parakeet manager initialized");
 
             // Manage active downloads for cancellation
@@ -1532,6 +1534,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     {
                         remote.lock().await.stop().await;
                     }
+                    if let Some(manager) = app_handle.try_state::<crispasr::CrispasrManager>() {
+                        manager.shutdown().await;
+                    }
                 });
                 #[cfg(target_os = "macos")]
                 crate::commands::audio::cleanup_media_pause_on_exit();
@@ -1697,8 +1702,8 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
             .and_then(|v| v.as_str().map(|s| s.to_string()));
 
         if let Some(lang) = speech_language {
-            use crate::whisper::languages::validate_language;
-            let validated = validate_language(Some(&lang));
+            let validated =
+                crate::commands::speech_language::normalize_stored_speech_language(&store, &lang);
             if validated != lang.as_str() {
                 log::warn!(
                     "Invalid speech language '{}' in settings, resetting to '{}'",
@@ -1733,6 +1738,9 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                     // it as a Whisper id would reset the user's choice on every
                     // launch. Key readiness is checked before recording.
                     log::debug!("Keeping cloud model selection for engine '{}'", engine);
+                } else if engine == "crispasr" {
+                    selection_was_reset |=
+                        crispasr::restore_selection(&app, &store, &current_model);
                 } else if engine == "parakeet" {
                     // Check ParakeetManager for Parakeet models
                     if let Some(parakeet_manager) = app.try_state::<parakeet::ParakeetManager>() {

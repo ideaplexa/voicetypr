@@ -7,10 +7,14 @@
     "resources": [
       "windows/resources/vc_redist.x64.exe",
       "windows/resources/VulkanRT-Installer.exe",
-      "windows/resources/voicetypr.pdb"
+      "windows/resources/voicetypr.pdb",
+      "../sidecar/crispasr/dist/CrispASR-LICENSE",
+      "../sidecar/crispasr/dist/ggml-LICENSE"
     ],
     "externalBin": [
-      "../sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar"
+      "../sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar",
+      "../sidecar/crispasr/dist/crispasr-sidecar-cpu",
+      "../sidecar/crispasr/dist/crispasr-sidecar-gpu"
     ],
     "windows": {
       "allowDowngrades": false,

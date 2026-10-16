@@ -219,6 +219,9 @@ pub(crate) enum ActiveEngineSelection {
     Parakeet {
         model_name: String,
     },
+    Crispasr {
+        model_name: String,
+    },
     Cloud {
         provider: crate::cloud_stt::CloudProvider,
         model_name: String,
@@ -237,6 +240,7 @@ impl ActiveEngineSelection {
         match self {
             ActiveEngineSelection::Whisper { .. } => "whisper",
             ActiveEngineSelection::Parakeet { .. } => "parakeet",
+            ActiveEngineSelection::Crispasr { .. } => "crispasr",
             ActiveEngineSelection::Cloud { provider, .. } => provider.id(),
             ActiveEngineSelection::Remote { .. } => "remote",
         }
@@ -246,6 +250,7 @@ impl ActiveEngineSelection {
         match self {
             Self::Whisper { .. } => crate::product_analytics::EngineKind::Whisper,
             Self::Parakeet { .. } => crate::product_analytics::EngineKind::Parakeet,
+            Self::Crispasr { .. } => crate::product_analytics::EngineKind::Crispasr,
             Self::Cloud { .. } => crate::product_analytics::EngineKind::Cloud,
             Self::Remote { .. } => crate::product_analytics::EngineKind::Remote,
         }
@@ -253,7 +258,7 @@ impl ActiveEngineSelection {
 
     pub(crate) const fn route(&self) -> &'static str {
         match self {
-            Self::Whisper { .. } | Self::Parakeet { .. } => "local",
+            Self::Whisper { .. } | Self::Parakeet { .. } | Self::Crispasr { .. } => "local",
             Self::Cloud { .. } => "cloud",
             Self::Remote { .. } => "remote",
         }
@@ -263,6 +268,7 @@ impl ActiveEngineSelection {
         match self {
             ActiveEngineSelection::Whisper { model_name, .. } => model_name,
             ActiveEngineSelection::Parakeet { model_name } => model_name,
+            ActiveEngineSelection::Crispasr { model_name } => model_name,
             ActiveEngineSelection::Cloud { model_name, .. } => model_name,
             ActiveEngineSelection::Remote { server_name, .. } => server_name,
         }
@@ -309,6 +315,7 @@ pub(crate) async fn resolve_engine_for_model(
     let parakeet_manager = app.state::<ParakeetManager>();
 
     match engine_hint.map(|e| e.to_lowercase()) {
+        Some(ref engine) if engine == "crispasr" => resolve_crispasr(app, model_name),
         Some(ref engine) if crate::cloud_stt::CloudProvider::from_id(engine).is_some() => {
             let provider = crate::cloud_stt::CloudProvider::from_id(engine).unwrap();
             if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
@@ -357,6 +364,9 @@ pub(crate) async fn resolve_engine_for_model(
         }
         Some(engine) => Err(format!("Unknown model engine '{}'.", engine)),
         None => {
+            if crate::crispasr::models::get(model_name).is_some() {
+                return resolve_crispasr(app, model_name);
+            }
             if let Some(provider) = crate::cloud_stt::CloudProvider::from_id(model_name) {
                 if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
                     return Ok(ActiveEngineSelection::Cloud {
@@ -401,6 +411,21 @@ pub(crate) async fn resolve_engine_for_model(
             ))
         }
     }
+}
+
+fn resolve_crispasr(app: &AppHandle, model_name: &str) -> Result<ActiveEngineSelection, String> {
+    if crate::crispasr::models::get(model_name).is_none() {
+        return Err("Unknown CrispASR model".into());
+    }
+    if !app
+        .state::<crate::crispasr::CrispasrManager>()
+        .is_downloaded(model_name)
+    {
+        return Err("CrispASR model is not downloaded. Download it first.".into());
+    }
+    Ok(ActiveEngineSelection::Crispasr {
+        model_name: model_name.to_string(),
+    })
 }
 
 #[cfg(test)]

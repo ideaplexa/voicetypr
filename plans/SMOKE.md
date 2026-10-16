@@ -6,6 +6,34 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
+## 082 — CrispASR and Auto language (NEEDS-SMOKE)
+
+Local Windows native-protocol and real-speech evidence is recorded in
+[`docs/reports/2026-10-05-crispasr.md`](../docs/reports/2026-10-05-crispasr.md).
+It does not establish packaged microphone-to-cursor behavior.
+
+- [ ] **082-S1 — Packages/platforms:** Apple Silicon Metal, Intel macOS CPU,
+  Windows direct installer and Store package: install, find both sidecars and
+  license resources, download/repair/cancel/delete each model. Test a clean
+  Windows machine without Vulkan: CPU recognition still starts. Verify runtime
+  dependencies, code signing, and no console window/focus stealing.
+- [ ] **082-S2 — Dictation:** each of Ultra Q8, R2T2 Q4_K and Q8, preview on/off:
+  short/long and quiet real speech, words crossing stop/post-roll boundaries,
+  paste/history/Polish, back-to-back takes and cancellation during inference.
+  Measure actual first-audio, first-text and stop-to-cursor latency separately.
+- [ ] **082-S3 — Recovery/lifecycle:** exceed 120 seconds, induce capture loss,
+  interrupt the sidecar and switch models during warmup. Full-file fallback
+  preserves all speech; no stale insertion, stranded native process, or second
+  decode after a valid stream final. Check GPU failure and CPU fallback status.
+- [ ] **082-S4 — Languages:** supported non-English real speech and code-switching
+  in Auto and explicit modes; restart and switch through React/tray/island menus.
+  Auto remains selected where supported; English-only models remain English.
+  Unknown language metadata must not force English in Polish. Compare batch and
+  streaming WER/tail words with a real-speech corpus, not synthetic TTS.
+- [ ] **082-S5 — Other entry points/ABI:** uploads and CLI use the chosen model
+  and language; unsupported translation gets clear guidance. Run shipped-binding
+  ABI checks on native Windows ARM64. LAN hosting remains unadvertised for CrispASR.
+
 ## 068 — Whisper callback correctness (beta.11 candidate, not released)
 
 - [ ] **068-S1 — Packaged desktop:** Base English on macOS Metal and Windows

@@ -18,6 +18,7 @@ pub mod remote;
 pub mod reset;
 pub mod settings;
 pub mod shortcuts;
+pub(crate) mod speech_language;
 pub mod stt;
 pub mod system_info;
 pub mod telemetry;
