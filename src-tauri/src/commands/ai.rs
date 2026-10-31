@@ -1,7 +1,7 @@
 use crate::ai::agent_cli::{cold_spawn_timeout_ms, supports_fast_mode};
 use crate::ai::catalog;
 use crate::ai::contract::AiPolishRequest;
-use crate::ai::error::{user_facing_message, AiProviderError};
+use crate::ai::error::{persisted_message, user_facing_message, AiProviderError};
 use crate::ai::executor::{AiExecutor, OpenAiCompatibleConfig};
 use crate::ai::genai_runtime::AiKeyResolver;
 use crate::ai::providers::{
@@ -728,9 +728,10 @@ pub async fn validate_ai_api_key(
             log::warn!(
                 "AI provider validation failed: provider={} category={}",
                 provider,
-                user_facing_message(&error)
+                persisted_message(&error)
             );
-            user_facing_message(&error).to_string()
+            // Command errors can be logged by frontend callers.
+            persisted_message(&error).into_owned()
         })
 }
 
@@ -1765,7 +1766,7 @@ pub async fn list_provider_models(
     if catalog::runtime_kind(&provider) == Some("agent_cli") {
         let models = crate::ai::agent_cli::list_models(&provider)
             .await
-            .map_err(|error| user_facing_message(&error.error).into_owned())?;
+            .map_err(|error| persisted_message(&error.error).into_owned())?;
         return Ok(models
             .into_iter()
             .map(provider_model_from_agent_cli)

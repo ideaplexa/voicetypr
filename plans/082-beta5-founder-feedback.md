@@ -32,6 +32,11 @@ Source line numbers below are review anchors, not claims about the changing work
    `--disable-slash-commands`, pi/omp model cache and the stale AGENTS.md local-CLI note.
    **NEEDS-SMOKE:** supported CLI versions, model refresh, hot-spare isolation and quit on both OSes.
 2. **Agent-CLI argv exposure fix, moved from beta.6.**
+   - Slice 2b: private instruction files now live under per-user LocalAppData
+     (`agent-input`), with a background startup sweep of directories older than
+     15 minutes there and in legacy system temp. Windows inherits AppData ACLs:
+     an owner-only protected DACL needs new Security_Authorization crate features,
+     so customized broad AppData ACLs remain a documented residual privacy risk.
    - Dynamic system prompts for Claude/pi/omp and Codex `developer_instructions` go via argv
      (`ai/agent_cli.rs` around 523). omp's transcript and OpenCode's prompt/transcript also go via argv
      (around 1137). The hot spare reuses those args.

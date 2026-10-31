@@ -4,7 +4,7 @@ use active_win_pos_rs::get_active_window;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
-use crate::ai::error::{user_facing_message, AiProviderError};
+use crate::ai::error::{persisted_message, AiProviderError};
 use crate::ai::prompts::EnhancementPreset;
 use crate::commands::settings::{
     normalize_final_text_language, normalize_transcription_task,
@@ -468,14 +468,14 @@ fn resolve_smart_formatting_outcome(
         }),
         Err(error) if needs_output_language_transform => Err(WritingError::TranslationFailed {
             target_language: output_language.to_string(),
-            detail: user_facing_message(&error.error).to_string(),
+            detail: persisted_message(&error.error).into_owned(),
         }),
         Err(error) => {
             warnings.push(WritingWarning {
                 code: "ai_formatting_failed".to_string(),
                 message: format!(
                     "AI formatting failed ({}); used deterministic text instead",
-                    user_facing_message(&error.error)
+                    persisted_message(&error.error)
                 ),
             });
             let execution = (!error.provider_id.is_empty()).then_some(AiExecutionMetadata {
@@ -788,6 +788,44 @@ mod tests {
             provider_id: "openai".to_string(),
             model_id: "gpt-6-luna".to_string(),
         }
+    }
+
+    #[test]
+    fn cli_error_content_stays_out_of_warnings_and_translation_details() {
+        let cli_error = AiProviderError::AgentCli("failed: CANARY-TRANSCRIPT-123".to_string());
+        let mut warnings = Vec::new();
+        let outcome = resolve_smart_formatting_outcome(
+            Err(attempt_error(cli_error.clone())),
+            "library text",
+            false,
+            Some("en"),
+            "en",
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(outcome.error, Some(cli_error.clone()));
+        assert_eq!(
+            warnings[0].message,
+            "AI formatting failed (agent CLI error); used deterministic text instead"
+        );
+        assert!(!serde_json::to_string(&warnings)
+            .unwrap()
+            .contains("CANARY-TRANSCRIPT-123"));
+
+        let error = resolve_smart_formatting_outcome(
+            Err(attempt_error(cli_error)),
+            "library text",
+            true,
+            Some("en"),
+            "fr",
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(!error.to_string().contains("CANARY-TRANSCRIPT-123"));
+        let WritingError::TranslationFailed { detail, .. } = error else {
+            panic!("expected translation failure");
+        };
+        assert_eq!(detail, "agent CLI error");
     }
 
     #[test]

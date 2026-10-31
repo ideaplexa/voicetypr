@@ -72,6 +72,16 @@ pub fn user_facing_message(error: &AiProviderError) -> Cow<'static, str> {
     }
 }
 
+/// Content-free diagnostics for logs, history and other persisted output.
+/// CLI messages may echo transcripts, prompts or paths; only the transient
+/// user-facing error surface may use `user_facing_message` for those errors.
+pub fn persisted_message(error: &AiProviderError) -> Cow<'static, str> {
+    match error {
+        AiProviderError::AgentCli(_) => Cow::Borrowed("agent CLI error"),
+        _ => user_facing_message(error),
+    }
+}
+
 pub(crate) fn map_http_status(
     status: StatusCode,
     body: Option<&str>,
@@ -167,7 +177,7 @@ fn retry_after_from_headers(headers: &HeaderMap) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_http_status, AiProviderError};
+    use super::{map_http_status, persisted_message, user_facing_message, AiProviderError};
     use reqwest::StatusCode;
 
     #[test]
@@ -175,5 +185,18 @@ mod tests {
         let mapped = map_http_status(StatusCode::REQUEST_TIMEOUT, None, None);
 
         assert_eq!(mapped.error, AiProviderError::ServiceUnavailable);
+    }
+
+    #[test]
+    fn persisted_messages_never_include_cli_content_but_toasts_keep_details() {
+        let error = AiProviderError::AgentCli("failed: CANARY-TRANSCRIPT-123".to_string());
+        assert_eq!(persisted_message(&error), "agent CLI error");
+        assert!(!persisted_message(&error).contains("CANARY-TRANSCRIPT-123"));
+        assert_eq!(user_facing_message(&error), "failed: CANARY-TRANSCRIPT-123");
+        assert_eq!(persisted_message(&AiProviderError::Timeout), "timed out");
+        assert_eq!(
+            persisted_message(&AiProviderError::Network),
+            "network error"
+        );
     }
 }

@@ -1,7 +1,7 @@
 use super::agent_cli::AgentCliRuntime;
 use super::catalog;
 use super::contract::{AiPolishRequest, AiPolishResult};
-use super::error::{AiProviderError, MappedAiProviderError};
+use super::error::{persisted_message, AiProviderError, MappedAiProviderError};
 use super::genai_runtime::{AiKeyResolver, GenaiRuntime};
 use super::openai_compatible::OpenAiCompatibleRuntime;
 use super::providers::PROVIDER_CUSTOM;
@@ -134,8 +134,8 @@ impl AiExecutor {
                         {
                             attempt += 1;
                             log::warn!(
-                                "AI cleanup response failed validation; retrying once category={:?}",
-                                error
+                                "AI cleanup response failed validation; retrying once category={}",
+                                persisted_message(&error)
                             );
                             continue;
                         }

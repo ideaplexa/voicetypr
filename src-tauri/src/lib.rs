@@ -656,6 +656,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .setup(move |app| {
+            ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
             app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);

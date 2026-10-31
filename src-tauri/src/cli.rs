@@ -382,6 +382,8 @@ async fn build_cli_app(
         .plugin(tauri_plugin_shell::init())
         .build(context)?;
 
+    crate::ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+
     #[cfg(target_os = "windows")]
     crate::secure_store::windows_identity::initialize(&app.path().app_data_dir()?)?;
 

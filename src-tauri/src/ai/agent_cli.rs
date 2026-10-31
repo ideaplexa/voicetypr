@@ -35,6 +35,7 @@ mod model_cache;
 mod opencode_acp;
 mod private_input;
 use private_input::cold_spawn_and_collect;
+pub(crate) use private_input::initialize as initialize_private_input;
 #[cfg(test)]
 mod transport_tests;
 use hot_spare::CLAUDE_SPARE;

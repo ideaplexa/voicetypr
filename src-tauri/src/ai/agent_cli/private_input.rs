@@ -3,16 +3,106 @@
 //! alive until the child exits (including a prepared Claude spare).
 use super::*;
 use std::io::Write;
+use std::sync::OnceLock;
+use std::time::SystemTime;
+
+const DIRECTORY_PREFIX: &str = "voicetypr-agent-";
+const STALE_AFTER: Duration = Duration::from_secs(15 * 60);
+static BASE_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set before any GUI/CLI Polish work. Filesystem cleanup never blocks startup.
+pub(crate) fn initialize(local_data_directory: PathBuf) {
+    let base = local_data_directory.join("agent-input");
+    if BASE_DIRECTORY.set(base.clone()).is_err() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("agent-input-cleanup".to_string())
+        .spawn(move || {
+            let now = SystemTime::now();
+            let mut removed = sweep_stale_directories(&base, now);
+            let legacy_base = std::env::temp_dir();
+            if legacy_base != base {
+                removed += sweep_stale_directories(&legacy_base, now);
+            }
+            log::info!("Agent input cleanup removed {} stale directories", removed);
+        });
+}
+
+fn sweep_stale_directories(base: &Path, now: SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            if !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(DIRECTORY_PREFIX)
+            {
+                return false;
+            }
+            // Do not follow symlinks, or remove fresh/future-dated directories
+            // that may belong to an app or CLI running alongside this process.
+            let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+                return false;
+            };
+            let stale = metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age > STALE_AFTER);
+            metadata.is_dir() && stale && std::fs::remove_dir_all(entry.path()).is_ok()
+        })
+        .count()
+}
+
+fn prepare_base(base: &Path) -> Result<(), MappedAiProviderError> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(base).map_err(|_| failure())?;
+    let metadata = std::fs::symlink_metadata(base).map_err(|_| failure())?;
+    if !metadata.is_dir() {
+        return Err(failure());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(base, std::fs::Permissions::from_mode(0o700))
+            .map_err(|_| failure())?;
+    }
+    // Windows inherits the per-user LocalAppData ACL. Explicit owner-only
+    // protected DACLs need Security_Authorization features we do not enable;
+    // a user-customized broad AppData ACL remains a residual privacy risk.
+    Ok(())
+}
 
 pub(super) fn private_directory() -> Result<TempDir, MappedAiProviderError> {
+    private_directory_in(BASE_DIRECTORY.get().map(PathBuf::as_path))
+}
+
+fn private_directory_in(base: Option<&Path>) -> Result<TempDir, MappedAiProviderError> {
+    if let Some(base) = base {
+        prepare_base(base)?;
+    }
+    // Tests and callers before startup initialization retain the legacy fallback.
+    let fallback = std::env::temp_dir();
     let mut builder = tempfile::Builder::new();
-    builder.prefix("voicetypr-agent-");
+    builder.prefix(DIRECTORY_PREFIX);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         builder.permissions(std::fs::Permissions::from_mode(0o700));
     }
-    builder.tempdir().map_err(|_| failure())
+    builder
+        .tempdir_in(base.unwrap_or(&fallback))
+        .map_err(|_| failure())
 }
 
 pub(super) fn private_argv(
@@ -143,6 +233,67 @@ pub(super) fn assert_no_canaries(command: &Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_directories_use_the_configured_base_and_fail_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let base = root.path().join("agent-input");
+        let directory = private_directory_in(Some(&base)).unwrap();
+        assert_eq!(directory.path().parent(), Some(base.as_path()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&base).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        let not_a_directory = root.path().join("file");
+        std::fs::write(&not_a_directory, []).unwrap();
+        assert!(private_directory_in(Some(&not_a_directory)).is_err());
+    }
+
+    #[test]
+    fn startup_sweep_removes_only_old_matching_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join(format!("{DIRECTORY_PREFIX}old"));
+        let fresh = root.path().join(format!("{DIRECTORY_PREFIX}fresh"));
+        let unrelated = root.path().join("unrelated");
+        let matching_file = root.path().join(format!("{DIRECTORY_PREFIX}file"));
+        for directory in [&old, &fresh, &unrelated] {
+            std::fs::create_dir(directory).unwrap();
+        }
+        std::fs::write(old.join("instructions"), "private").unwrap();
+        std::fs::write(&matching_file, "keep").unwrap();
+        let now = SystemTime::now();
+        let mut options = std::fs::File::options();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows::Win32::Storage::FileSystem::{
+                FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES,
+            };
+            options
+                .access_mode(FILE_WRITE_ATTRIBUTES.0)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0);
+        }
+        for directory in [&old, &unrelated] {
+            options
+                .open(directory)
+                .unwrap()
+                .set_modified(now - STALE_AFTER - Duration::from_secs(1))
+                .unwrap();
+        }
+        assert_eq!(sweep_stale_directories(root.path(), now), 1);
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(unrelated.exists());
+        assert!(matching_file.exists());
+        // Future timestamps and clock rollback also fail safe.
+        assert_eq!(sweep_stale_directories(root.path(), now - STALE_AFTER), 0);
+        assert!(fresh.exists());
+    }
 
     #[test]
     fn every_spawn_variant_keeps_private_content_out_of_args_and_env() {
