@@ -1565,6 +1565,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(target_os = "macos")]
                 crate::commands::audio::cleanup_media_pause_on_exit();
                 recording::kept::cleanup();
+                crate::commands::ai_lifecycle::cancel_recording();
                 product_analytics::shutdown();
             }
             #[cfg(target_os = "macos")]

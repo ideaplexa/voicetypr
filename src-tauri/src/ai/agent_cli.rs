@@ -1,8 +1,8 @@
-//! Cold-spawn runtime for agent-CLI polish providers.
+//! Isolated, single-use runtime for agent-CLI polish providers.
 //!
 //! Agent CLIs are deliberately launched as isolated, one-shot subprocesses.
-//! There is no warm-session manager: every request gets a fresh process and a
-//! fresh temporary working directory.
+//! Claude may consume a prepared spare once; conversations are never reused.
+//! Every request gets an isolated process and a fresh temporary working directory.
 //!
 //! # Spawning model
 //!
@@ -28,6 +28,13 @@
 //! Dictated text is fed via discrete stdin/argv values — NEVER a shell string,
 //! NEVER `sh -c`. Isolation flags are provider policy in `AgentCliSpec`; the
 //! child also runs from an EMPTY temp cwd so it discovers no project config.
+
+mod hot_spare;
+mod invocation;
+mod model_cache;
+use hot_spare::CLAUDE_SPARE;
+pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_spare_if_current};
+pub use invocation::AgentCliRuntime;
 
 mod catalog_refresh;
 use catalog_refresh::{
@@ -146,6 +153,7 @@ enum OutputParser {
 struct ClaudeCapabilities {
     safe_mode: bool,
     effort: bool,
+    disable_slash_commands: bool,
 }
 
 const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
@@ -434,6 +442,10 @@ fn cold_argv_for_model_with_options(
         }
     }
 
+    if spec.provider_id == PROVIDER_CLAUDE_CODE && capabilities.disable_slash_commands {
+        argv.push("--disable-slash-commands".to_string());
+    }
+
     if fast_mode {
         match spec.provider_id {
             PROVIDER_CLAUDE_CODE => {
@@ -546,108 +558,6 @@ fn compose_cli_input(prompt: &str, input_text: &str) -> String {
 #[cfg(test)]
 fn cold_argv(spec: &AgentCliSpec, prompt: &str) -> Vec<String> {
     cold_argv_for_model(spec, prompt, "", ClaudeCapabilities::default())
-}
-
-/// Cold-spawn runtime. Each `polish` call spawns a fresh child in a unique
-/// temporary cwd; no warm session is retained.
-#[derive(Clone, Default)]
-pub struct AgentCliRuntime;
-
-impl AgentCliRuntime {
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Polish `request.input_text` under `request.prompt`, returning the RAW
-    /// model string. The executor outer loop (executor.rs) sanitizes, validates,
-    /// and retries — this method does NOT duplicate that. Any spawn/timeout/parse
-    /// failure returns `Err`, which the executor surfaces as `ai_error` → the
-    /// existing raw-transcript fallback delivers deterministic text + toast.
-    pub async fn polish(&self, request: &AiPolishRequest) -> Result<String, MappedAiProviderError> {
-        let spec = spec_for(&request.provider_id)
-            .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
-
-        // pi/omp own their catalogs; never pass a removed saved selector or
-        // delegate to an unavailable CLI default. Discovery also lets the
-        // chooser offer valid models when the external default has gone stale.
-        if matches!(request.provider_id.as_str(), PROVIDER_PI | PROVIDER_OMP) {
-            validate_discovered_selection(
-                &list_models(&request.provider_id).await?,
-                &request.model_id,
-            )?;
-        }
-
-        let binary_path = resolve_binary(spec.binary)
-            .await
-            .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
-        let capability_started = Instant::now();
-        let (claude_capabilities, help, cached_capabilities) =
-            discover_capabilities_for_polish(&binary_path, spec, false).await;
-        log::info!(
-            "agent_cli_stage_timing provider={} stage=capability_probe duration_ms={} cached={}",
-            spec.provider_id,
-            capability_started.elapsed().as_millis(),
-            cached_capabilities
-        );
-        let Some(spec) = compatible_spec(spec, &help) else {
-            return Err(MappedAiProviderError::new(AiProviderError::AgentCli(
-                "The installed CLI does not support the required isolation flags.".to_string(),
-            )));
-        };
-
-        let prompt = request.prompt.clone();
-        let input_text = if spec.system_prompt == SystemPromptPolicy::None {
-            compose_cli_input(&prompt, &request.input_text)
-        } else {
-            request.input_text.clone()
-        };
-        let input_mode = spec.input_mode;
-        let output = spec.output;
-        let mut argv = cold_argv_for_model_with_options(
-            spec,
-            &prompt,
-            &request.model_id,
-            claude_capabilities,
-            request.reasoning_level.as_deref(),
-            request.fast_mode,
-        );
-        let variant_suffix = matches!(spec.reasoning, ReasoningPolicy::ModelVariantSuffix { .. });
-        if variant_suffix && model_variant_rejected_before(&argv) {
-            strip_model_variant(&mut argv);
-        }
-        let invocation_started = Instant::now();
-        let mut result =
-            cold_spawn_and_collect(spec, &binary_path, &argv, input_mode, &input_text, output)
-                .await;
-        if variant_suffix && result.as_ref().is_err_and(is_variant_unavailable) {
-            if let Some(selector) = strip_model_variant(&mut argv) {
-                log::warn!(
-                    "OpenCode has no reasoning variant {selector}; retrying once without it"
-                );
-                rejected_model_variants().insert(selector);
-                result = cold_spawn_and_collect(
-                    spec,
-                    &binary_path,
-                    &argv,
-                    input_mode,
-                    &input_text,
-                    output,
-                )
-                .await;
-            }
-        }
-        log::info!(
-            "agent_cli_stage_timing provider={} stage=model_invocation duration_ms={} outcome={}",
-            spec.provider_id,
-            invocation_started.elapsed().as_millis(),
-            if result.is_ok() {
-                "succeeded"
-            } else {
-                "failed"
-            }
-        );
-        result
-    }
 }
 
 /// `provider/model#variant` selectors OpenCode 2.x rejected as "Variant
@@ -1014,6 +924,8 @@ static POLISH_CAPABILITY_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// capabilities learned from a binary that has since been updated or
 /// replaced on PATH.
 pub async fn invalidate_polish_capabilities(provider: &str) {
+    crate::commands::ai_lifecycle::invalidate();
+    model_cache::invalidate(provider);
     let Some(spec) = spec_for(provider) else {
         return;
     };
@@ -1102,6 +1014,7 @@ fn claude_capabilities_from_help(help: &[u8]) -> ClaudeCapabilities {
     ClaudeCapabilities {
         safe_mode: help_advertises_flag(help, "--safe-mode"),
         effort: help_advertises_flag(help, "--effort"),
+        disable_slash_commands: help_advertises_flag(help, "--disable-slash-commands"),
     }
 }
 
@@ -2242,25 +2155,9 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
 
     match provider {
         PROVIDER_CLAUDE_CODE => Ok(curated_claude_models()),
-        PROVIDER_PI => {
-            let payload = run_pi_model_listing(&model_binary(&PI_SPEC).await?).await?;
-            let mut models = parse_pi_models(&payload)?;
-            if let Ok(default) = parse_pi_default_model(&payload) {
-                models.insert(0, default);
-            }
-            Ok(models)
-        }
-        PROVIDER_OMP => {
-            let binary = model_binary(&OMP_SPEC).await?;
-            let models_payload = run_model_list_command(&binary, OMP_MODEL_LIST_ARGV, &[]).await?;
-            let models = parse_omp_models(&models_payload)?;
-            let default_payload =
-                run_model_list_command(&binary, OMP_DEFAULT_MODEL_ARGV, &[]).await?;
-            let mut result = models;
-            if let Ok(default) = parse_omp_default_model(&default_payload, &result) {
-                result.insert(0, default);
-            }
-            Ok(result)
+        PROVIDER_PI | PROVIDER_OMP => {
+            let spec = spec_for(provider).expect("known model-list provider");
+            model_cache::list(spec, &model_binary(spec).await?).await
         }
         PROVIDER_CODEX => {
             let payload = run_model_list_command(
@@ -3319,13 +3216,15 @@ mod tests {
 
     #[test]
     fn claude_help_capabilities_choose_safe_mode_and_effort() {
-        let help = b"Options:\n  --safe-mode\n  --effort <low|medium|high>\n";
+        let help =
+            b"Options:\n  --safe-mode\n  --effort <low|medium|high>\n  --disable-slash-commands\n";
         let capabilities = claude_capabilities_from_help(help);
         assert_eq!(
             capabilities,
             ClaudeCapabilities {
                 safe_mode: true,
-                effort: true
+                effort: true,
+                disable_slash_commands: true,
             }
         );
         let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "sonnet", capabilities);
@@ -3346,6 +3245,14 @@ mod tests {
         assert!(medium
             .windows(2)
             .any(|pair| pair[0] == "--effort" && pair[1] == "medium"));
+        assert!(argv.contains(&"--disable-slash-commands".to_string()));
+        let legacy = cold_argv_for_model(
+            &CLAUDE_CODE_SPEC,
+            "prompt",
+            "sonnet",
+            ClaudeCapabilities::default(),
+        );
+        assert!(!legacy.contains(&"--disable-slash-commands".to_string()));
         assert!(argv.contains(&"--safe-mode".to_string()));
         assert!(!argv.contains(&"--setting-sources".to_string()));
     }

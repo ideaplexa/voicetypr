@@ -6,6 +6,7 @@
 
 ### Improvements
 
+* **ai:** speed up Claude Code Polish with single-use prepared processes and capability-gated slash-command disabling; cache pi and oh-my-pi model lists until Refresh, executable changes, or model/auth failures
 * **formatting:** explain that speech models infer punctuation, document Clean Dictation's AI correction role, and add privacy-safe decision diagnostics showing whether AI formatting ran or was skipped
 * **ci:** keep routine PR feedback cheap on GitHub-hosted runners, make Intel a manual/release-only legacy lane, and reserve Store packaging for immutable release-candidate commits on `main`
 * **ai:** removed Cline, Droid and Grok Polish providers; if one was selected, Polish switches to Claude Code

@@ -1219,9 +1219,14 @@ pub(crate) async fn warm_ai_provider(app: tauri::AppHandle, provider_id: String)
 /// Recording-start prefetch for the selected polish provider. HTTP providers
 /// get a pooled HEAD on their resolved origin; agent-CLI providers get a
 /// binary + `--help` capability prefetch. No user text is sent on either path.
-pub(crate) async fn prefetch_ai_provider(app: tauri::AppHandle, provider_id: String) {
+pub(crate) async fn prefetch_ai_provider(
+    app: tauri::AppHandle,
+    provider_id: String,
+    generation: u64,
+) {
     if crate::ai::catalog::runtime_kind(&provider_id) == Some("agent_cli") {
         crate::ai::agent_cli::prefetch_polish_capabilities(&provider_id).await;
+        super::ai_lifecycle::prefetch(app, generation).await;
     } else if should_warm_ai_provider(&app, &provider_id) {
         warm_ai_provider(app, provider_id).await;
     }
@@ -1607,6 +1612,7 @@ pub async fn set_openai_config(
     store
         .save()
         .map_err(|e| format!("Failed to save AI settings: {}", e))?;
+    super::ai_lifecycle::invalidate();
     Ok(())
 }
 

@@ -66,7 +66,8 @@ Windows run Rust tests with `src-tauri/run-tests.ps1`.
 - Tauri permissions live in `src-tauri/capabilities/`.
 - Failing to detect speech is not proof of silence; new pre-engine gates start
   in shadow mode.
-- The CLI skips vocabulary and Polish for local engines (CLI parity is planned).
+- CLI local and remote transcription use the shared writing pipeline (vocabulary,
+  library rules and optional Polish); CLI/file jobs have no recording hot-spare lifecycle.
 - Base UI, not Radix: tests mock pointer capture and `getAnimations`.
 - `dist/` folders are gitignored; a new Windows worktree needs the Vulkan
   sidecar built or copied.

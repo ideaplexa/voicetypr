@@ -181,13 +181,14 @@ impl AiExecutor {
             biased;
             _ = tokio::time::sleep(remaining) => Err(MappedAiProviderError::new(AiProviderError::Timeout)),
             _ = cancellation_token.cancelled() => Err(MappedAiProviderError::new(AiProviderError::Canceled)),
-            result = self.execute_once(request) => result,
+            result = self.execute_once(request, remaining) => result,
         }
     }
 
     async fn execute_once(
         &self,
         request: &AiPolishRequest,
+        remaining: Duration,
     ) -> Result<String, MappedAiProviderError> {
         if crate::ai::catalog::is_native_provider(&request.provider_id) {
             self.genai_runtime.polish(request).await
@@ -196,7 +197,9 @@ impl AiExecutor {
         {
             self.openai_compatible_runtime.polish(request).await
         } else if crate::ai::catalog::runtime_kind(&request.provider_id) == Some("agent_cli") {
-            self.agent_cli_runtime.polish(request).await
+            self.agent_cli_runtime
+                .polish_with_budget(request, remaining)
+                .await
         } else {
             Err(MappedAiProviderError::new(
                 AiProviderError::UnsupportedProvider,

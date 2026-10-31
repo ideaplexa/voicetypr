@@ -56,7 +56,17 @@ pub(crate) async fn execute_prompt(
     timings: &mut PolishTimings,
     needs_output_language_transform: bool,
 ) -> Result<AiPolishResult, AiProviderError> {
-    runtime
+    let remembered = AiPolishRequest {
+        provider_id: runtime.provider.clone(),
+        model_id: runtime.model.clone(),
+        reasoning_level: runtime.reasoning_level.clone(),
+        fast_mode: runtime.fast_mode,
+        input_text: String::new(),
+        needs_output_language_transform,
+        prompt: prompt.clone(),
+        timeout_ms: runtime.timeout_ms,
+    };
+    let result = runtime
         .executor
         .polish_with_timings(
             AiPolishRequest {
@@ -69,10 +79,14 @@ pub(crate) async fn execute_prompt(
                 prompt,
                 timeout_ms: runtime.timeout_ms,
             },
-            tokio_util::sync::CancellationToken::new(),
+            crate::commands::ai_lifecycle::polish_cancellation(),
             timings,
         )
-        .await
+        .await;
+    if result.is_ok() {
+        crate::commands::ai_lifecycle::remember_request(&remembered);
+    }
+    result
 }
 
 // The writing pipeline's existing raw fallback, also used by measurement results.

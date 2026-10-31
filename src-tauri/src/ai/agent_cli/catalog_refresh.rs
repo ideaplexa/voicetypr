@@ -139,6 +139,7 @@ mod tests {
                 ClaudeCapabilities {
                     safe_mode: true,
                     effort: true,
+                    disable_slash_commands: false,
                 },
                 level,
             );
@@ -164,6 +165,7 @@ mod tests {
         let capabilities = ClaudeCapabilities {
             safe_mode: true,
             effort: true,
+            disable_slash_commands: false,
         };
         for (selected, expected) in [("", "sonnet"), ("haiku", "haiku"), ("fable", "fable")] {
             let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", selected, capabilities);
@@ -190,5 +192,57 @@ mod tests {
             &models
         )
         .is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn omp_catalog_is_cached_until_refresh_or_executable_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let binary = dir.path().join("omp");
+        let counter = dir.path().join("calls");
+        let script = format!(
+            r#"#!/bin/sh
+printf call >> '{}'
+if [ "$1" = models ]; then
+    printf '%s\n' '{{"models":[{{"selector":"test/model","name":"Test"}}]}}'
+else
+    printf '%s\n' '{{"value":{{"default":"test/model"}}}}'
+fi
+"#,
+            counter.display()
+        );
+        std::fs::write(&binary, &script).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _permit = MODEL_DISCOVERY_PERMIT.acquire().await.unwrap();
+        model_cache::invalidate(PROVIDER_OMP);
+        let first = model_cache::list(&OMP_SPEC, &binary).await.unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[1].id, "test/model");
+        model_cache::list(&OMP_SPEC, &binary).await.unwrap();
+        assert_eq!(std::fs::read(&counter).unwrap().len(), 8);
+
+        // Use the same public invalidation as the Refresh action.
+        invalidate_polish_capabilities(PROVIDER_OMP).await;
+        model_cache::list(&OMP_SPEC, &binary).await.unwrap();
+        assert_eq!(std::fs::read(&counter).unwrap().len(), 16);
+        std::fs::write(&binary, format!("{script}\n# updated executable\n")).unwrap();
+        model_cache::list(&OMP_SPEC, &binary).await.unwrap();
+        assert_eq!(std::fs::read(&counter).unwrap().len(), 24);
+        model_cache::invalidate(PROVIDER_OMP);
+
+        for error in [
+            AiProviderError::InvalidModel,
+            AiProviderError::InvalidApiKey,
+            AiProviderError::AgentCli("Please log in".to_string()),
+        ] {
+            assert!(model_cache::is_model_or_auth_failure(
+                &MappedAiProviderError::new(error)
+            ));
+        }
+        assert!(!model_cache::is_model_or_auth_failure(
+            &MappedAiProviderError::new(AiProviderError::Timeout)
+        ));
     }
 }
