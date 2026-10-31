@@ -32,6 +32,11 @@
 mod hot_spare;
 mod invocation;
 mod model_cache;
+mod opencode_acp;
+mod private_input;
+use private_input::cold_spawn_and_collect;
+#[cfg(test)]
+mod transport_tests;
 use hot_spare::CLAUDE_SPARE;
 pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_spare_if_current};
 pub use invocation::AgentCliRuntime;
@@ -139,6 +144,7 @@ enum SystemPromptPolicy {
 enum InputMode {
     Stdin,
     PositionalArg,
+    Acp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,7 +255,7 @@ const OMP_SPEC: AgentCliSpec = AgentCliSpec {
         omit_off: false,
     },
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
-    input_mode: InputMode::PositionalArg,
+    input_mode: InputMode::Stdin,
     output: OutputParser::PiJsonl,
     static_env: &[],
 };
@@ -328,8 +334,8 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)],
 };
 
-/// OpenCode 2.x (`@opencode/cli`). `--standalone` runs a private server so
-/// Polish never uses or starts the user's shared background service.
+/// OpenCode 2.x (`@opencode/cli`). The help probe identifies 2.x; invocation
+/// uses a dedicated ACP process, not `run` or the shared background service.
 const OPENCODE_V2_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_OPENCODE,
     binary: "opencode",
@@ -342,7 +348,7 @@ const OPENCODE_V2_SPEC: AgentCliSpec = AgentCliSpec {
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::ModelVariantSuffix { default: "low" },
     system_prompt: SystemPromptPolicy::None,
-    input_mode: InputMode::PositionalArg,
+    input_mode: InputMode::Acp,
     output: OutputParser::PlainText,
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_V2_ISOLATION_CONFIG)],
 };
@@ -1028,57 +1034,6 @@ fn apply_no_window(command: &mut Command) {
     {
         let _ = command;
     }
-}
-
-/// Spawn the binary, deliver `input_text` per `input_mode`, wait for exit, and
-/// parse the polish result from stdout. A non-zero exit is always an error,
-/// even when stdout looks like a successful JSON response.
-async fn cold_spawn_and_collect(
-    spec: &AgentCliSpec,
-    binary_path: &Path,
-    argv: &[String],
-    input_mode: InputMode,
-    input_text: &str,
-    output: OutputParser,
-) -> Result<String, MappedAiProviderError> {
-    let mut command = Command::new(binary_path);
-    command.args(argv);
-
-    match input_mode {
-        InputMode::Stdin => {}
-        InputMode::PositionalArg => {
-            command.arg(input_text);
-        }
-    }
-    command.env("PATH", resolved_path(false).await);
-    command.env("ZSH_TMUX_AUTOSTART", "false");
-    for (name, value) in spec.static_env {
-        command.env(name, value);
-    }
-    apply_claude_effort_env(&mut command, spec, argv);
-    apply_no_window(&mut command);
-
-    let capture = run_isolated_command(
-        command,
-        (input_mode == InputMode::Stdin).then_some(input_text.as_bytes()),
-        cold_spawn_timeout(spec.provider_id),
-        MAX_CAPTURE_BYTES,
-    )
-    .await
-    .map_err(map_process_failure)?;
-
-    if !capture.status.success() {
-        let detail = extract_process_error(output, &capture.stdout, &capture.stderr);
-        log::warn!(
-            "agent-cli polish exited non-zero ({}); returning bounded CLI error",
-            capture.status
-        );
-        return Err(MappedAiProviderError::new(AiProviderError::AgentCli(
-            detail,
-        )));
-    }
-
-    parse_cli_output(output, capture.complete_stdout()?)
 }
 
 fn map_process_failure(failure: ProcessFailure) -> MappedAiProviderError {
@@ -3040,7 +2995,7 @@ mod tests {
         );
         assert!(!argv.iter().any(|arg| arg == "--model"));
         assert!(argv.iter().all(|arg| !arg.contains("sh -c")));
-        assert_eq!(OMP_SPEC.input_mode, InputMode::PositionalArg);
+        assert_eq!(OMP_SPEC.input_mode, InputMode::Stdin);
         assert_eq!(OMP_SPEC.cold_argv_suffix.len(), 0);
     }
 
@@ -3147,7 +3102,7 @@ mod tests {
         assert_eq!(CLAUDE_CODE_SPEC.output, OutputParser::ClaudeJson);
         assert_eq!(PI_SPEC.input_mode, InputMode::Stdin);
         assert_eq!(PI_SPEC.output, OutputParser::PlainText);
-        assert_eq!(OMP_SPEC.input_mode, InputMode::PositionalArg);
+        assert_eq!(OMP_SPEC.input_mode, InputMode::Stdin);
         assert_eq!(OMP_SPEC.output, OutputParser::PiJsonl);
 
         for (provider, binary) in [

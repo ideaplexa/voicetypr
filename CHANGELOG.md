@@ -13,6 +13,7 @@
 
 ### Bug Fixes
 
+* **ai:** keep Polish transcripts off Claude, Codex, pi and oh-my-pi command lines using stdin and private instruction files (also for Claude's prepared spare); use ACP stdio for OpenCode 2.x. OpenCode 1.x still exposes its composed prompt/transcript in positional argv; upgrade to 2.x or use another provider for private input.
 * **ai:** The model pickers for oh-my-pi and Codex list every model the CLI offers again (they showed none or only the default)
 * **ai:** OpenCode Polish works with OpenCode 2.x (and still with 1.x), including OpenCode's free models
 * **ai:** reject truncated or nonzero-exit CLI output, preserve raw dictation on every CLI failure, kill entire CLI process groups on timeout or cancellation, and safely resolve native executables without running Windows script shims

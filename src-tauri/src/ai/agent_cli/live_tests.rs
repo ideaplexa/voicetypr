@@ -79,9 +79,9 @@ async fn real_pi_cold_spawn_round_trip() {
     println!("pi polished output: {polished}");
 }
 
-/// A real `omp` (oh-my-pi) round-trip — gated behind `#[ignore]`. Empirically
-/// omp takes dictation as a positional argv arg (it did not read stdin in
-/// `--mode json`). Run with `cargo test agent_cli -- --ignored`.
+/// A real `omp` (oh-my-pi) stdin round-trip — gated behind `#[ignore]`.
+/// Supported omp versions read piped input before print/JSON processing.
+/// Run with `cargo test agent_cli -- --ignored`.
 #[tokio::test]
 #[ignore = "requires omp CLI installed + authenticated; not run in CI"]
 async fn real_omp_cold_spawn_round_trip() {

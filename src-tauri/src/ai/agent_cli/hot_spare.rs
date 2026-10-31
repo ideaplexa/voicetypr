@@ -80,6 +80,7 @@ struct Prepared {
     stdout: Option<tokio::task::JoinHandle<Result<String, MappedAiProviderError>>>,
     stderr: Option<BoundedReadTask>,
     cwd: Option<TempDir>,
+    prompt_files: Option<TempDir>,
 }
 
 impl HotSpare {
@@ -215,6 +216,9 @@ impl Prepared {
         }
         stream_argv.extend(["--input-format", "stream-json", "--verbose"].map(str::to_string));
         let cwd = TempDir::new().map_err(|error| map_process_failure(ProcessFailure::Io(error)))?;
+        let prompt_files = private_input::private_directory()?;
+        let stream_argv =
+            private_input::private_argv(&CLAUDE_CODE_SPEC, &stream_argv, prompt_files.path())?;
         let mut command = Command::new(binary_path);
         command.args(&stream_argv);
         apply_claude_effort_env(&mut command, &CLAUDE_CODE_SPEC, argv);
@@ -230,6 +234,8 @@ impl Prepared {
             .stderr(Stdio::piped());
         command.kill_on_drop(true);
         apply_no_window(&mut command);
+        #[cfg(test)]
+        private_input::assert_no_canaries(&command);
         let child = ProcessGroupGuard::new(
             command
                 .group_spawn()
@@ -244,6 +250,7 @@ impl Prepared {
             stdout: None,
             stderr: None,
             cwd: Some(cwd),
+            prompt_files: Some(prompt_files),
         };
         let child = spare.child.as_mut().unwrap();
         let stdout = child.inner().stdout.take().ok_or_else(bad_response)?;
@@ -320,10 +327,12 @@ impl Drop for Prepared {
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
             let cwd = self.cwd.take();
+            let prompt_files = self.prompt_files.take();
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     let _ = terminate_process_group(&mut child).await;
                     drop(cwd);
+                    drop(prompt_files);
                 });
             }
         }
@@ -441,7 +450,7 @@ done
             r#"
 [ "$1" = --print ] && [ "$2" = --output-format ] && [ "$3" = stream-json ] || exit 9
 [ "$4" = --model ] && [ "$5" = sonnet ] && [ "$6" = --effort ] && [ "$7" = low ] || exit 9
-[ "$8" = --system-prompt ] && [ "$9" = polish ] || exit 9
+[ "$8" = --system-prompt-file ] && [ "$(cat "$9")" = polish ] || exit 9
 shift 9
 [ "$1" = --input-format ] && [ "$2" = stream-json ] && [ "$3" = --verbose ] || exit 9
 IFS= read -r input
@@ -535,13 +544,64 @@ printf '{"type":"result","result":"ok"}\n'
             ("IFS= read -r input\nhead -c 140000 /dev/zero", false),
         ] {
             let (_dir, binary) = fake_binary(script);
-            let spare = Prepared::spawn(&binary, &argv()).await.unwrap();
+            let mut args = argv();
+            let index = args
+                .iter()
+                .position(|arg| arg == "--system-prompt")
+                .unwrap()
+                + 1;
+            args[index] = "SYSTEM_CANARY_082".to_string();
+            let spare = Prepared::spawn(&binary, &args).await.unwrap();
             let error = spare.run("text", Duration::from_secs(1)).await.unwrap_err();
             if times_out {
                 assert!(matches!(error.error, AiProviderError::Timeout));
             } else {
                 assert!(!matches!(error.error, AiProviderError::Timeout));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_prompt_files_are_private_and_removed_on_every_exit() {
+        for mode in ["success", "error", "timeout", "cancel", "invalidate"] {
+            let body = match mode {
+                "success" => {
+                    "IFS= read -r input\nprintf '{\"type\":\"result\",\"result\":\"ok\"}\\n'"
+                }
+                "error" => "IFS= read -r input\nexit 7",
+                _ => "IFS= read -r input\nexec sleep 30",
+            };
+            let (_dir, binary) = fake_binary(body);
+            let spare = Prepared::spawn(&binary, &argv()).await.unwrap();
+            let path = spare.prompt_files.as_ref().unwrap().path().to_path_buf();
+            assert_eq!(std::fs::read_dir(&path).unwrap().count(), 1);
+            match mode {
+                "invalidate" => drop(spare),
+                "cancel" => {
+                    assert!(tokio::time::timeout(
+                        Duration::from_millis(100),
+                        spare.run("TRANSCRIPT_CANARY_082", Duration::from_secs(30))
+                    )
+                    .await
+                    .is_err());
+                }
+                _ => {
+                    let timeout = if mode == "timeout" {
+                        Duration::from_millis(100)
+                    } else {
+                        Duration::from_secs(2)
+                    };
+                    let result = spare.run("TRANSCRIPT_CANARY_082", timeout).await;
+                    assert_eq!(result.is_ok(), mode == "success");
+                }
+            }
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while path.exists() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("prepared prompt directory must be removed after cleanup");
         }
     }
 
