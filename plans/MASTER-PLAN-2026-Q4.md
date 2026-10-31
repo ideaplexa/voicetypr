@@ -80,6 +80,12 @@ released without the founder's OK.
 
 ## Release cadence (founder, 2026-09-27)
 
+**Founder update (2026-10-31):** beta.5 grows to finish the 2.0.10 fold-in, private stdin agent input,
+recordings privacy, four formatting fixes, Windows downloader hardening and three minor bugs (082 addendum).
+beta.6 is Windows Parakeet v3, default-on context when Polish is on, selected-CLI warming, shadow-first
+Silero VAD, clipboard receipts and Secure Input fallback (083). Our Liquid local Polish model moves to
+084 and a separate beta only after eval passes. This supersedes the older local-Polish release placement.
+
 Ship 2.1 as small betas on the beta channel, each with tests for what it
 changes; promote the tested final beta to 2.1.0 stable; then start
 2.2.0-beta.1. Any change after a beta is published goes into the next beta.

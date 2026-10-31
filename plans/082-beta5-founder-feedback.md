@@ -23,6 +23,60 @@ Left:
 - Leading space from the cursor context (needs real-app tests).
 - Release: Whisper Metal check on a CI-built app, full-branch Codex review, Windows CI, PR, beta.5.
 
+## beta.5 scope addendum (2026-10-31)
+
+Founder decision: finish these in order so beta.5 ships clean. This supersedes the beta.6 placement in 083.
+Source line numbers below are review anchors, not claims about the changing worktree.
+
+1. **Finish the 2.0.10 fold-in.** In progress: Claude hot spare, capability-gated
+   `--disable-slash-commands`, pi/omp model cache and the stale AGENTS.md local-CLI note.
+   **NEEDS-SMOKE:** supported CLI versions, model refresh, hot-spare isolation and quit on both OSes.
+2. **Agent-CLI argv exposure fix, moved from beta.6.**
+   - Dynamic system prompts for Claude/pi/omp and Codex `developer_instructions` go via argv
+     (`ai/agent_cli.rs` around 523). omp's transcript and OpenCode's prompt/transcript also go via argv
+     (around 1137). The hot spare reuses those args.
+   - Move dynamic content to stdin, preserving system/user roles and injection defenses. Keep private
+     content out of environment, shell strings, errors, debug argv and temp files too.
+   - Stdin support is confirmed for Claude, Codex and pi; for omp, per upstream source.
+     OpenCode 2.2.3 `run` stdin is unconfirmed: verify per version or use ACP stdio.
+   - Tests capture the child's argv and assert no canary prompt or transcript appears, including hot-spare
+     launches. Cover EOF, backpressure, timeout, cancellation and semantic/injection regressions.
+   - **NEEDS-SMOKE:** macOS/Windows process inspection, supported CLI versions, Unicode/multiline input
+     and child cleanup. This blocks beta.6 agent context and warm-session work.
+3. **Recordings privacy.**
+   - Capture always writes `recordings/recording_*.wav` (`commands/audio.rs` around 5401), even with
+     `save_recordings` off. Crashes, cancel-stop errors (around 8652–8669) and no-speech recovery can leave
+     files behind. Retention runs only after a successful save (around 4337–4341); no independent sweep.
+   - Add startup and periodic sweeps regardless of the setting. Separate capture/recovery storage from
+     opted-in recordings. Sweep unfinished files, but skip files still being written. Reset clears both.
+   - **NEEDS-SMOKE:** crash/restart, cancel-stop errors, no-speech recovery, saving off/on, retention,
+     active capture during a sweep and reset on both OSes.
+4. **Four word-changing formatting bugs from the Codex review of the committed branch.**
+   - `writing/library_rules.rs:373`: style-hint stripping deletes real speech matching the hint.
+   - `writing/format.rs:556`: filler removal deletes the acronym "ER".
+   - `writing/format.rs:623`: stutter removal turns "what it is is" into "what it is".
+   - `writing/format.rs:478`: pronoun capitalisation turns "-i" and "/i" into "-I" and "/I".
+   - Add regression cases for all four. **NEEDS-SMOKE:** faithful final text on real speech with Polish off,
+     plus code/URL insertion on both OSes; synthetic clips do not establish accuracy.
+5. **Windows model downloader hardening.**
+   - Large v3 Turbo's root cause is unproven; still need the user's exact Windows error.
+   - `whisper/manager.rs` does not reject HTTP error status (around 300–305), writes to the final path
+     (around 325), leaves partial files on errors (around 346, 362) and shows 100% too early (around 388–389).
+   - Use atomic verified staging. Reject bad HTTP status, clean failed staging and publish the final file
+     and 100% only after verification succeeds.
+   - **NEEDS-SMOKE:** the reported Windows failure once supplied, interrupted downloads, retry, antivirus
+     locks, disk-full/error paths and successful model loading. Hardening is not proof of the root cause.
+6. **Three minor bugs.**
+   - `src/components/sections/ModelsSection.tsx:223`: no language control while remote transcription is active.
+   - `cloud_stt/deepgram.rs:84`: the paragraph option does nothing while Deepgram streams.
+   - `src/components/sections/useRecentRecordings.ts:127`: an invalid timestamp crashes History grouping.
+   - Add targeted regressions. **NEEDS-SMOKE:** remote language selection, streamed Deepgram paragraphs and
+     History with invalid timestamps in the packaged app.
+
+beta.6 retains Windows Parakeet v3, default-on context capture when Polish is on, selected-CLI warming,
+shadow-first Silero VAD, clipboard receipt restore and Secure Input fallback (083).
+Our Liquid local Polish model moves to 084 and ships in a separate beta only after eval passes.
+
 ## ★ Island track: priority #1 (founder, 2026-10-04)
 
 The island is the most frequent touchpoint. Every everyday interaction must feel instant and smooth.
