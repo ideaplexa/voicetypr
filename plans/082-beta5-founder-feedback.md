@@ -431,3 +431,25 @@ Ranked:
     - module-level empty default props
     - the TabContainer keydown effect deps
     - `exhaustive-deps` and loading-flag findings
+
+### beta.5 scope update (2026-10-31)
+
+- The founder dropped the Windows Large v3 Turbo download item from beta.5:
+  the reporting user never replied. Item 5 above is deferred, not fixed.
+  The general downloader weaknesses remain a later item: `whisper/manager.rs`
+  does not reject HTTP error statuses, writes straight to the final path,
+  leaves partial files after errors, and shows 100% before verification.
+- Item 2 implementation: `7350d101` moves Claude/Codex/pi/omp user text to
+  stdin and dynamic instructions to 0600 files in a private 0700 directory
+  on Unix, owned through cleanup (including Claude's prepared spare).
+  Claude uses `--system-prompt-file`; pi/omp resolve `--system-prompt` files;
+  Codex uses `model_instructions_file`, replacing coding defaults with the
+  dictation prompt at system level rather than demoting it to user content.
+  OpenCode 2.x uses a one-shot ACP stdio client with permission denial.
+  The single OpenCode 2.2.3 no-message stdin canary failed because no model
+  was available, so stdin support remains unproven. OpenCode 1.x retains
+  its documented positional-argv exposure; upgrade or choose another CLI
+  for private input. No new private content is placed in environment values.
+  **NEEDS-SMOKE:** supported CLI versions, packaged macOS/Windows process
+  inspection, Windows file ACLs, multiline/Unicode input, prepared-spare
+  isolation, cancellation and quit cleanup; a working OpenCode ACP model.
