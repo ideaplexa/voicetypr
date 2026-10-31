@@ -154,7 +154,8 @@ req=read()
 assert req['method']=='session/new' and req['params']['mcpServers']==[]
 reply(req,{'sessionId':'test'})
 req=read()
-assert req['method']=='session/set_model' and req['params']['modelId']=='provider/test#low'
+assert req['method']=='session/set_config_option'
+assert req['params']=={'sessionId':'test','configId':'model','value':'provider/test/low'}
 reply(req,{})
 req=read()
 assert req['method']=='session/prompt'

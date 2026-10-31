@@ -126,7 +126,7 @@ pub(super) async fn run(
     for (name, value) in OPENCODE_V2_SPEC.static_env {
         command.env(name, value);
     }
-    // session/new needs a default model before session/set_model can select
+    // session/new needs a default model before session/set_config_option can select
     // its variant. Only the non-content model selector enters configuration.
     if let Some(model) = argv
         .iter()
@@ -196,9 +196,10 @@ pub(super) async fn run(
             client
                 .request(
                     3,
-                    "session/set_model",
+                    "session/set_config_option",
                     serde_json::json!({
-                        "sessionId":session_id, "modelId":model
+                        "sessionId":session_id, "configId":"model",
+                        "value":acp_model_selector(model)
                     }),
                 )
                 .await?;
@@ -223,4 +224,27 @@ pub(super) async fn run(
     .unwrap_or_else(|_| Err(MappedAiProviderError::new(AiProviderError::Timeout)));
     kill_and_reap(&mut child, None, Some(stderr_task)).await;
     result
+}
+
+fn acp_model_selector(model: &str) -> String {
+    // OpenCode's run argv spells effort as #variant; ACP model config uses
+    // /variant. See https://opencode.ai/v2/docs/cli/acp/#config-options.
+    match model.rsplit_once('#') {
+        Some((model, variant)) => format!("{model}/{variant}"),
+        None => model.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acp_model_configuration_uses_documented_variant_syntax() {
+        assert_eq!(
+            acp_model_selector("provider/model#low"),
+            "provider/model/low"
+        );
+        assert_eq!(acp_model_selector("provider/model"), "provider/model");
+    }
 }
