@@ -54,6 +54,23 @@ Source line numbers below are review anchors, not claims about the changing work
      files behind. Retention runs only after a successful save (around 4337–4341); no independent sweep.
    - Add startup and periodic sweeps regardless of the setting. Separate capture/recovery storage from
      opted-in recordings. Sweep unfinished files, but skip files still being written. Reset clears both.
+   - Slice 3 implementation: per-take `captures/<uuid>/` ownership, with recovery in
+     `recovery/`; saved timestamp/UUID filenames stay in `recordings/`. Recovery keeps
+     beta.4's three-clip cap and 30-second no-speech / 10-minute failure lifetimes;
+     failed storage handoffs now expire too. Accepted retry leases remain owned through
+     the retry. The recovery index is still in memory, not a new crash-import feature.
+   - Cleanup runs off-thread at startup, every five minutes and after saves, regardless
+     of `save_recordings`: ten-minute-old orphan captures (including legacy names),
+     abandoned recovery files, and the configured saved-recording retention. Active
+     takes, detached writers and retry leases are protected. Unreferenced saved filenames
+     are not orphans: clearing History alone is not consent to delete saved recordings.
+     Reset clears both stores of audio; detached writers are deleted after finalization
+     (or by a later startup sweep after their process exits).
+   - File uploads use a distinct `upload-normalized-<uuid>.wav` name and retain their
+     existing caller-owned cleanup, so the capture sweep cannot remove an active upload.
+     CLI `record --until-silence` still preserves its own `cli-recording-*` file on error;
+     a bounded CLI/file-job crash-recovery policy remains a follow-up, not part of the
+     desktop orphan sweep.
    - **NEEDS-SMOKE:** crash/restart, cancel-stop errors, no-speech recovery, saving off/on, retention,
      active capture during a sweep and reset on both OSes.
 4. **Four word-changing formatting bugs from the Codex review of the committed branch.**

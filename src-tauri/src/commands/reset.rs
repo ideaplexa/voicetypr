@@ -33,6 +33,10 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
 
     let mut errors = Vec::new();
     let mut cleared_items = Vec::new();
+    match crate::recording::storage::clear_audio(&app).await {
+        Ok(()) => cleared_items.push("Saved and temporary audio".to_string()),
+        Err(error) => errors.push(error),
+    }
 
     // Use the current bundle identifier so dev vs prod apps
     // clear their own OS-level data independently.

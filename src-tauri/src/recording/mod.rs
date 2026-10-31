@@ -3,3 +3,4 @@ pub(crate) mod hotkeys;
 pub(crate) mod island;
 pub(crate) mod kept;
 pub(crate) mod start_source;
+pub(crate) mod storage;

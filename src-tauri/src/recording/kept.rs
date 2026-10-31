@@ -49,6 +49,7 @@ fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
     );
 }
 struct Clip {
+    _capture_files: Option<super::storage::CaptureFiles>,
     trace: Option<crate::observability::Trace>,
     _trace_lease: Option<crate::observability::TraceLease>,
     _retry_trace_lease: Option<crate::observability::TraceLease>,
@@ -66,7 +67,7 @@ struct Store {
     closed: bool,
     leases: Vec<PathBuf>,
     active_retry: Option<(String, u64, tokio::sync::watch::Sender<bool>)>,
-    fallback: Vec<PathBuf>,
+    fallback: Vec<(PathBuf, Option<super::storage::CaptureFiles>)>,
 }
 static STORE: Lazy<Mutex<Store>> = Lazy::new(|| Mutex::new(Store::default()));
 impl Store {
@@ -84,6 +85,7 @@ impl Store {
         let expires_in_ms = kind.ttl_ms();
         std::fs::create_dir_all(dir).map_err(|_| "Recovery storage unavailable")?;
         let target = dir.join(format!("{id}.wav"));
+        let capture_files = super::storage::CaptureFiles::for_path(path);
         // Finalized clips move to opaque names; pending writers retain their source
         // until the header is finalized, then the expiry task promotes them.
         let finalized = finalized_wav(path);
@@ -106,6 +108,7 @@ impl Store {
             expires_in_ms,
         };
         self.insert(Clip {
+            _capture_files: capture_files,
             trace: crate::observability::snapshot(generation),
             _trace_lease: crate::observability::pin(generation),
             _retry_trace_lease: None,
@@ -134,7 +137,7 @@ impl Store {
         }
         if let Some(index) = self.clips.iter().position(|c| c.recovery.id == id) {
             if let Some(clip) = self.clips.remove(index) {
-                let _ = std::fs::remove_file(clip.path);
+                super::storage::remove_finished_audio(&clip.path);
             }
         }
     }
@@ -212,14 +215,14 @@ impl Store {
     }
     fn clear(&mut self) {
         self.cancel_retry();
-        for path in self.fallback.drain(..) {
-            let _ = std::fs::remove_file(path);
+        for (path, _files) in self.fallback.drain(..) {
+            super::storage::remove_finished_audio(&path);
         }
         for path in self.leases.drain(..) {
             let _ = std::fs::remove_file(path);
         }
         while let Some(clip) = self.clips.pop_front() {
-            let _ = std::fs::remove_file(clip.path);
+            super::storage::remove_finished_audio(&clip.path);
         }
     }
 }
@@ -321,22 +324,47 @@ pub fn alternative_id(id: &str) -> Option<String> {
         .and_then(|c| c.recovery.alt_engine_id.clone())
 }
 /// A fallback owner is installed before any fallible storage operation or await.
-/// Failed handoffs remain owned until shutdown, including detached writers.
+/// Failed handoffs expire with the same bounded lifetime as ordinary recovery.
 pub async fn handoff(app: &AppHandle, generation: u64, path: &Path, kind: RecoveryKind) {
     STORE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .fallback
-        .push(path.to_owned());
+        .push((
+            path.to_owned(),
+            super::storage::CaptureFiles::for_path(path),
+        ));
     match keep(app, generation, path, kind).await {
         Ok(()) => STORE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .fallback
-            .retain(|p| p != path),
+            .retain(|(p, _)| p != path),
         Err(_) => {
             // Normal finalization must not delete the fallback owner's file.
             audio::clear_in_flight_transcription_audio_for_generation(generation);
+            if audio::delivery_aborted(
+                app.state::<crate::AppState>().is_cancellation_requested(),
+                generation,
+            ) {
+                let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+                super::storage::remove_finished_audio(path);
+                store.fallback.retain(|(p, _)| p != path);
+                return;
+            }
+            let path = path.to_owned();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(kind.ttl_ms())).await;
+                let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+                store.fallback.retain(|(p, _)| {
+                    if p == &path {
+                        super::storage::remove_finished_audio(p);
+                        false
+                    } else {
+                        true
+                    }
+                });
+            });
             if !audio::delivery_aborted(
                 app.state::<crate::AppState>().is_cancellation_requested(),
                 generation,
@@ -357,6 +385,20 @@ pub fn cleanup() {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     store.closed = true;
     store.clear();
+}
+pub fn clear() {
+    STORE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+pub fn with_protected_paths<T>(work: impl FnOnce(&std::collections::HashSet<PathBuf>) -> T) -> T {
+    let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    let paths = store
+        .clips
+        .iter()
+        .map(|c| c.path.clone())
+        .chain(store.leases.iter().cloned())
+        .chain(store.fallback.iter().map(|(p, _)| p.clone()))
+        .collect();
+    work(&paths)
 }
 async fn local_candidates(app: &AppHandle) -> Vec<(String, String)> {
     let mut models: Vec<_> = app
@@ -397,9 +439,9 @@ pub async fn keep(
     }
     let dir = app
         .path()
-        .temp_dir()
+        .app_data_dir()
         .map_err(|_| "Recovery storage unavailable")?
-        .join("kept-dictation");
+        .join("recovery");
     let (recovery, removed) = {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
         let previous: Vec<_> = store.clips.iter().map(|c| c.recovery.id.clone()).collect();
@@ -500,7 +542,7 @@ fn move_finalized(source: &Path, target: &Path) -> bool {
     let _ = std::fs::remove_file(target);
     false
 }
-fn finalized_wav(path: &Path) -> bool {
+pub(super) fn finalized_wav(path: &Path) -> bool {
     // hound writes the RIFF length at finalize, after samples. A live writer's
     // placeholder header must never be treated as a completed recording.
     use std::io::Read;
@@ -917,11 +959,64 @@ fn resolve_clip(clip: &Clip, resolution: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn capture_handoff_preserves_no_speech_and_failed_retry_audio_until_bounded_expiry() {
+        for kind in [RecoveryKind::NoSpeech, RecoveryKind::CloudFailed] {
+            let data = tempfile::tempdir().unwrap();
+            let files = super::super::storage::CaptureFiles::create(data.path()).unwrap();
+            let source = files.audio_path();
+            let mut writer = hound::WavWriter::create(
+                &source,
+                hound::WavSpec {
+                    channels: 1,
+                    sample_rate: 16000,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            writer.write_sample(1_i16).unwrap();
+            writer.finalize().unwrap();
+            files.writer_stopped(false);
+            let mut store = Store::default();
+            let recovery = store
+                .retain(&data.path().join("recovery"), &source, u64::MAX, kind)
+                .unwrap();
+            let kept = store.clips[0].path.clone();
+            let expires = store.clips[0].expires;
+            drop(files);
+            assert!(
+                !source.exists(),
+                "handoff moves, rather than duplicates, capture audio"
+            );
+            assert!(kept.exists());
+            store.expire(expires - Duration::from_millis(1));
+            assert!(kept.exists());
+            assert_eq!(
+                recovery.expires_in_ms,
+                if kind == RecoveryKind::NoSpeech {
+                    30_000
+                } else {
+                    600_000
+                }
+            );
+            store.expire(expires);
+            assert!(!kept.exists());
+            tokio::time::timeout(Duration::from_secs(15), async {
+                while source.parent().unwrap().exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+    }
     fn clip(dir: &Path, kind: RecoveryKind) -> Clip {
         let id = uuid::Uuid::new_v4().to_string();
         let path = dir.join(&id);
         std::fs::write(&path, b"clip").unwrap();
         Clip {
+            _capture_files: None,
             trace: None,
             _trace_lease: None,
             _retry_trace_lease: None,
@@ -1062,7 +1157,7 @@ mod tests {
         let unavailable = dir.path().join("not-a-directory");
         std::fs::write(&unavailable, b"blocked").unwrap();
         let mut store = Store::default();
-        store.fallback.push(source.clone());
+        store.fallback.push((source.clone(), None));
         assert!(store
             .retain(&unavailable, &source, 1, RecoveryKind::Integrity)
             .is_err());

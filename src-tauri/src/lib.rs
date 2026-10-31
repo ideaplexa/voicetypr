@@ -956,6 +956,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             app.manage(crate::pill::hit_test::PointerState::default());
             app.manage(crate::pill::icons::IconCache::default());
             app.manage(crate::commands::history_index::HistoryIndex::default());
+            recording::storage::start_maintenance(app.handle().clone());
             log::info!("🧠 App state managed and ready");
 
             // Initialize window manager after app state is managed

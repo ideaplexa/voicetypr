@@ -39,6 +39,7 @@ pub struct QueuedPillEvent {
 pub struct AppState {
     pub recording_state: UnifiedRecordingState,
     pub current_recording_path: Arc<Mutex<Option<PathBuf>>>,
+    pub(crate) capture_files: Mutex<Option<crate::recording::storage::CaptureFiles>>,
     pub transcription_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub recording_mode: Arc<Mutex<RecordingMode>>,
     pub pointer_recording: AtomicBool,
@@ -76,6 +77,7 @@ impl AppState {
         Self {
             recording_state: UnifiedRecordingState::new(),
             current_recording_path: Arc::new(Mutex::new(None)),
+            capture_files: Mutex::new(None),
             transcription_task: Arc::new(Mutex::new(None)),
             recording_mode: Arc::new(Mutex::new(RecordingMode::Toggle)),
             pointer_recording: AtomicBool::new(false),

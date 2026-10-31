@@ -19,8 +19,8 @@ use crate::commands::dictation_telemetry::{
 };
 use crate::commands::settings::{
     get_settings, normalize_final_text_language, normalize_speech_language_for_model,
-    normalize_transcription_task, recording_retention_days_from_store, resolve_pill_indicator_mode,
-    task_uses_translate_to_english, Settings, TRANSCRIPTION_TASK_TRANSCRIBE,
+    normalize_transcription_task, resolve_pill_indicator_mode, task_uses_translate_to_english,
+    Settings, TRANSCRIPTION_TASK_TRANSCRIBE,
 };
 use crate::license::LicenseState;
 use crate::media::MediaPauseController;
@@ -4335,12 +4335,8 @@ async fn save_recording_internal(
         Some(Ok(_)) => {
             log::info!("Saved recording");
 
-            // Cleanup old recordings by retention period.
-            let retention_days = recording_retention_days_from_store(&store);
-
-            if let Some(days) = retention_days {
-                cleanup_old_recordings(&recordings_dir, days);
-            }
+            // Do not yield between the copy and the caller's late-cancel check.
+            crate::recording::storage::schedule_maintenance(app.clone());
 
             Some(filename)
         }
@@ -4400,51 +4396,6 @@ async fn save_recording_without_cleanup(
         Some(Err(e)) => {
             log::error!("Failed to save recording: {}", e);
             None
-        }
-    }
-}
-
-/// Clean up recordings older than the retention period.
-fn cleanup_old_recordings(recordings_dir: &Path, retention_days: u32) {
-    let cutoff = match std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(
-        u64::from(retention_days) * 24 * 60 * 60,
-    )) {
-        Some(cutoff) => cutoff,
-        None => return,
-    };
-
-    let recordings = match std::fs::read_dir(recordings_dir) {
-        Ok(entries) => entries,
-        Err(e) => {
-            log::warn!("Failed to read recordings directory for cleanup: {}", e);
-            return;
-        }
-    };
-
-    for entry in recordings.filter_map(|entry| entry.ok()) {
-        let path = entry.path();
-        let is_wav = path.extension().map(|ext| ext == "wav").unwrap_or(false);
-
-        if !is_wav {
-            continue;
-        }
-
-        let modified = entry
-            .metadata()
-            .and_then(|metadata| metadata.modified().or_else(|_| metadata.created()));
-
-        let Ok(modified) = modified else {
-            continue;
-        };
-
-        if modified >= cutoff {
-            continue;
-        }
-
-        if let Err(e) = std::fs::remove_file(&path) {
-            log::warn!("Failed to remove old recording: {}", e);
-        } else {
-            log::info!("Cleaned up old recording");
         }
     }
 }
@@ -5379,29 +5330,20 @@ pub async fn start_recording(
             crate::commands::ai::prefetch_ai_provider(app, provider_id, generation).await;
         });
     }
-    // Get app data directory for recordings
-    let recordings_dir = match app.path().app_data_dir() {
-        Ok(dir) => dir.join("recordings"),
+    // Every take owns a disposable directory, separate from opted-in saves.
+    let capture_files = match app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Capture storage unavailable".to_string())
+        .and_then(|dir| crate::recording::storage::CaptureFiles::create(&dir))
+    {
+        Ok(files) => files,
         Err(e) => {
             resume_media_if_needed();
-            return Err(e.to_string());
+            return Err(e);
         }
     };
-
-    // Ensure recordings directory exists
-    if let Err(e) = std::fs::create_dir_all(&recordings_dir) {
-        resume_media_if_needed();
-        return Err(format!("Failed to create recordings directory: {}", e));
-    }
-
-    let timestamp = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs(),
-        Err(e) => {
-            resume_media_if_needed();
-            return Err(format!("Time error: {}", e));
-        }
-    };
-    let audio_path = recordings_dir.join(format!("recording_{}.wav", timestamp));
+    let audio_path = capture_files.audio_path();
 
     // Store path for later use. The stale `pending_stop_after_start` flag is
     // cleared before `Starting` is published (above), so a stop arriving
@@ -5695,6 +5637,12 @@ pub async fn start_recording(
                 .lock()
                 .map_err(|e| format!("Failed to acquire recorder lock: {e}"))
                 .and_then(|mut recorder| recorder.stop_recording());
+            capture_files.writer_stopped(
+                stop_result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|e| crate::recording::storage::writer_may_be_running(e)),
+            );
             if let Err(stop_error) = stop_result {
                 log::warn!("Recorder cleanup after start failure: {stop_error}");
             }
@@ -5702,9 +5650,7 @@ pub async fn start_recording(
             clear_pending_stop_after_start(&app_state);
             if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
                 if let Some(path) = path_guard.take() {
-                    if let Err(remove_error) = std::fs::remove_file(&path) {
-                        log::warn!("Failed to remove failed recording file: {remove_error}");
-                    }
+                    crate::recording::storage::remove_finished_audio(&path);
                 }
             }
             island::mic_blocked(&app, recording_generation, &error);
@@ -5735,12 +5681,16 @@ pub async fn start_recording(
 
         clear_pending_stop_after_start(&app_state);
         MEDIA_CONTROLLER.resume_if_we_paused();
+        capture_files.writer_stopped(
+            stop_result
+                .as_ref()
+                .err()
+                .is_some_and(|e| crate::recording::storage::writer_may_be_running(e)),
+        );
 
         if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
             if let Some(path) = path_guard.take() {
-                if let Err(error) = std::fs::remove_file(&path) {
-                    log::warn!("Failed to remove cancelled recording file: {}", error);
-                }
+                crate::recording::storage::remove_finished_audio(&path);
             }
         }
 
@@ -5778,13 +5728,17 @@ pub async fn start_recording(
         let cleanup_recording_path = || {
             if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
                 if let Some(path) = path_guard.take() {
-                    if let Err(error) = std::fs::remove_file(&path) {
-                        log::warn!("Failed to remove aborted recording file: {}", error);
-                    }
+                    crate::recording::storage::remove_finished_audio(&path);
                 }
             }
         };
 
+        capture_files.writer_stopped(
+            stop_result
+                .as_ref()
+                .err()
+                .is_some_and(|e| crate::recording::storage::writer_may_be_running(e)),
+        );
         if let Err(error) = stop_result {
             cleanup_recording_path();
             return Err(error);
@@ -5799,6 +5753,10 @@ pub async fn start_recording(
 
     spawn_island_context(&app, source, recording_generation);
 
+    *app_state
+        .capture_files
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(capture_files);
     // Update state to recording
     update_recording_state(&app, RecordingState::Recording, None);
     crate::product_analytics::capture_at(
@@ -5970,6 +5928,7 @@ async fn stop_recording_with_mode_at(
     let capture_metrics;
     let mut mic_dropped = false;
     let mut stop_unfinalized = false;
+    let mut writer_pending = false;
     let mut stop_integrity_failure = false;
     // Stop recording (lock only within this scope to stay Send)
     log::info!("🛑 Stopping recording...");
@@ -6014,6 +5973,7 @@ async fn stop_recording_with_mode_at(
         let stop_message = match recorder.stop_recording_with_post_roll(post_roll) {
             Ok(msg) => msg,
             Err(e) => {
+                writer_pending = crate::recording::storage::writer_may_be_running(&e);
                 mic_dropped = e.starts_with("Audio device error:");
                 log::error!("Recorder stop returned error");
                 if crate::audio::recorder::stop_error_is_integrity_failure(&e) {
@@ -6049,6 +6009,14 @@ async fn stop_recording_with_mode_at(
         );
     } // MutexGuard dropped here BEFORE any await
 
+    let capture_files = app_state
+        .capture_files
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some(files) = &capture_files {
+        files.writer_stopped(writer_pending);
+    }
     let mut dictation_telemetry =
         DictationCompletionGuard::new(&app, stop_requested, capture_metrics, task_generation).await;
 
@@ -6768,6 +6736,7 @@ async fn stop_recording_with_mode_at(
         crate::whisper::transcriber::ATTEMPT_BACKEND.scope(
             std::cell::Cell::new(None),
             async move {
+        let _capture_files = capture_files;
         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
         let mut speech_evidence_attempt = speech_evidence_attempt_for_task;
         log::debug!("Transcription task started");
@@ -8182,8 +8151,8 @@ async fn normalize_upload_audio_for_cloud(
     wav_path: &Path,
 ) -> Result<NormalizedTempFile, String> {
     log::debug!("[UPLOAD] Normalizing to WAV for cloud transcription...");
-    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
+    // File jobs own this through NormalizedTempFile, not the capture sweep.
+    let out_path = recordings_dir.join(format!("upload-normalized-{}.wav", Uuid::new_v4()));
     crate::audio::decode::normalize_to_wav_async(wav_path.to_path_buf(), out_path.to_path_buf())
         .await
         .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
@@ -8689,6 +8658,19 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
         };
     }
     let stop_error = stop_result.err();
+    let capture_files = app_state
+        .capture_files
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some(files) = &capture_files {
+        files.writer_stopped(
+            stop_error
+                .as_deref()
+                .is_some_and(crate::recording::storage::writer_may_be_running),
+        );
+    }
+    drop(capture_files); // Background cleanup also covers failed cancellation stops.
 
     // Resume system media if we paused it
     MEDIA_CONTROLLER.resume_if_we_paused();
