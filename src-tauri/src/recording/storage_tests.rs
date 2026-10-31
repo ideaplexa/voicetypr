@@ -214,31 +214,260 @@ fn long_running_file_uploads_are_not_mistaken_for_orphan_captures() {
         .join("recordings")
         .join(format!("upload-normalized-{}.wav", uuid::Uuid::new_v4()));
     write_aged(&upload, now, Duration::from_secs(86400 * 40));
-    let counts = sweep(
-        data.path(),
-        None,
-        Some(&HashSet::new()),
-        &HashSet::new(),
-        &HashSet::new(),
-        Some(7),
-        now,
-    );
+    let lease = super::super::kept::protect_path(&upload);
+    let run = || {
+        super::super::kept::with_protected_paths(|protected| {
+            sweep(
+                data.path(),
+                None,
+                Some(&HashSet::new()),
+                protected,
+                &HashSet::new(),
+                Some(7),
+                now,
+            )
+        })
+    };
+    let counts = run();
     assert_eq!(counts.orphans, 0);
     assert_eq!(counts.expired, 0);
     assert!(
         upload.exists(),
         "file-job ownership can outlive the capture orphan grace"
     );
-    let audio = include_str!("../commands/audio.rs");
-    let normalize = audio
-        .split_once("async fn normalize_upload_audio_for_cloud(")
+    drop(lease);
+    assert_eq!(run().orphans, 1);
+    assert!(!upload.exists());
+}
+
+#[test]
+fn upload_orphans_require_at_least_twenty_four_hours_and_a_valid_name() {
+    let data = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let upload = || {
+        data.path()
+            .join("recordings")
+            .join(format!("upload-normalized-{}.wav", uuid::Uuid::new_v4()))
+    };
+    let recent = upload();
+    let boundary = upload();
+    let abandoned = upload();
+    let unrelated = data
+        .path()
+        .join("recordings/upload-normalized-personal.wav");
+    write_aged(&recent, now, FILE_JOB_ORPHAN_AGE - Duration::from_secs(1));
+    write_aged(&boundary, now, FILE_JOB_ORPHAN_AGE);
+    write_aged(
+        &abandoned,
+        now,
+        FILE_JOB_ORPHAN_AGE + Duration::from_secs(1),
+    );
+    write_aged(&unrelated, now, Duration::from_secs(86400 * 40));
+    let counts = sweep(
+        data.path(),
+        None,
+        None,
+        &HashSet::new(),
+        &HashSet::new(),
+        None,
+        now,
+    );
+    assert_eq!(counts.orphans, 2);
+    assert_eq!(counts.expired, 0);
+    assert!(recent.exists());
+    assert!(unrelated.exists());
+    assert!(!boundary.exists());
+    assert!(!abandoned.exists());
+}
+
+#[test]
+fn real_decoder_scratch_names_use_capture_or_file_job_age_as_appropriate() {
+    let data = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let capture = capture_path(data.path(), "normalized_20260101_120000.wav");
+    let recording = data.path().join("recordings/output.wav");
+    // Mirror the decoder: create each file before requesting another timestamp.
+    // Back-to-back names can coincide on microsecond-resolution host clocks.
+    let capture_old = crate::audio::decode::temp_path_for(&capture);
+    write_aged(&capture_old, now, ORPHAN_AGE);
+    let capture_recent = crate::audio::decode::temp_path_for(&capture);
+    write_aged(&capture_recent, now, ORPHAN_AGE - Duration::from_secs(1));
+    let recording_old = crate::audio::decode::temp_path_for(&recording);
+    write_aged(&recording_old, now, FILE_JOB_ORPHAN_AGE);
+    let recording_recent = crate::audio::decode::temp_path_for(&recording);
+    write_aged(
+        &recording_recent,
+        now,
+        FILE_JOB_ORPHAN_AGE - Duration::from_secs(1),
+    );
+    let recording_active = crate::audio::decode::temp_path_for(&recording);
+    write_aged(&recording_active, now, Duration::from_secs(86400 * 40));
+    assert_ne!(capture_old, capture_recent);
+    assert_ne!(recording_old, recording_recent);
+    assert_ne!(recording_old, recording_active);
+    assert_ne!(recording_recent, recording_active);
+    let unrelated = capture_old.with_file_name(format!(
+        "{}x.wav",
+        capture_old.file_stem().unwrap().to_str().unwrap()
+    ));
+    write_aged(&unrelated, now, Duration::from_secs(86400 * 40));
+    let _lease = super::super::kept::protect_path(&recording_active);
+    let counts = super::super::kept::with_protected_paths(|protected| {
+        sweep(
+            data.path(),
+            None,
+            Some(&HashSet::new()),
+            protected,
+            &HashSet::new(),
+            None,
+            now,
+        )
+    });
+    assert_eq!(counts.orphans, 2);
+    assert!(!capture_old.exists());
+    assert!(!recording_old.exists());
+    for kept in [
+        &capture_recent,
+        &recording_recent,
+        &recording_active,
+        &unrelated,
+    ] {
+        assert!(kept.exists());
+    }
+}
+
+#[test]
+fn overlapping_history_retries_protect_original_wav_until_last_completion() {
+    let data = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let source = data
+        .path()
+        .join("recordings/2026-01-01_12-00-00_12345678.wav");
+    write_aged(&source, now, Duration::from_secs(86400 * 8));
+    let refs = HashSet::from([source.file_name().unwrap().to_str().unwrap().to_owned()]);
+    let run = || {
+        super::super::kept::with_protected_paths(|protected| {
+            sweep(
+                data.path(),
+                None,
+                Some(&refs),
+                protected,
+                &HashSet::new(),
+                Some(7),
+                now,
+            )
+        })
+    };
+    let first = super::super::kept::protect_path(&source);
+    let second = super::super::kept::protect_path(&source);
+    assert_eq!(run().expired, 0);
+    drop(first);
+    assert_eq!(run().expired, 0);
+    assert!(source.exists());
+    drop(second);
+    assert_eq!(run().expired, 1);
+    assert!(!source.exists());
+}
+
+#[test]
+fn history_retry_error_releases_source_and_registration_precedes_first_await() {
+    let data = tempfile::tempdir().unwrap();
+    let source = data
+        .path()
+        .join("recordings/2026-01-01_12-00-00_12345678.wav");
+    let now = SystemTime::now();
+    write_aged(&source, now, Duration::from_secs(86400 * 8));
+    let result = (|| -> Result<(), ()> {
+        let _lease = super::super::kept::protect_path(&source);
+        Err(())?;
+        Ok(())
+    })();
+    assert!(result.is_err());
+    let counts = super::super::kept::with_protected_paths(|protected| {
+        assert!(!protected.contains(&source));
+        sweep(
+            data.path(),
+            None,
+            Some(&HashSet::new()),
+            protected,
+            &HashSet::new(),
+            Some(7),
+            now,
+        )
+    });
+    assert_eq!(counts.expired, 1);
+    assert!(!source.exists());
+    let entry = include_str!("../commands/audio.rs")
+        .split_once("pub(crate) async fn transcribe_audio_file_impl(")
         .unwrap()
-        .1
-        .split_once("fn cloud_provider_supports_diarized_words")
-        .unwrap()
-        .0;
-    assert!(normalize.contains("upload-normalized-"));
-    assert!(!normalize.contains("format!(\"normalized_"));
+        .1;
+    assert!(entry.split_once(".await").unwrap().0.contains(
+        "let _source_lease = crate::recording::kept::protect_path(Path::new(&file_path));"
+    ));
+}
+
+#[tokio::test]
+async fn cancelled_history_retry_releases_its_original_saved_source() {
+    let data = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let source = data
+        .path()
+        .join("recordings/2026-01-01_12-00-00_12345678.wav");
+    write_aged(&source, now, Duration::from_secs(86400 * 8));
+    let path = source.clone();
+    let (ready, started) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let _source_lease = super::super::kept::protect_path(&path);
+        ready.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    started.await.unwrap();
+    let run = || {
+        super::super::kept::with_protected_paths(|protected| {
+            sweep(
+                data.path(),
+                None,
+                Some(&HashSet::new()),
+                protected,
+                &HashSet::new(),
+                Some(7),
+                now,
+            )
+        })
+    };
+    assert_eq!(run().expired, 0);
+    assert!(source.exists());
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert_eq!(run().expired, 1);
+    assert!(!source.exists());
+}
+
+#[tokio::test]
+async fn cancelled_take_defers_cleanup_until_detached_decoder_releases_its_scratch() {
+    let data = tempfile::tempdir().unwrap();
+    let files = CaptureFiles::create(data.path()).unwrap();
+    files.writer_stopped(false);
+    let scratch = crate::audio::decode::temp_path_for(&files.audio_path());
+    std::fs::write(&scratch, b"partial").unwrap();
+    let worker_lease = super::super::kept::protect_path(&scratch);
+    drop(files);
+    assert!(scratch.exists());
+    super::super::kept::with_protected_paths(|protected| {
+        let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
+        sweep(
+            data.path(),
+            None,
+            Some(&HashSet::new()),
+            protected,
+            &active.keys().cloned().collect(),
+            None,
+            SystemTime::now() + Duration::from_secs(86400),
+        );
+    });
+    assert!(scratch.exists());
+    drop(worker_lease);
+    wait_removed(scratch.parent().unwrap()).await;
 }
 
 #[test]
@@ -361,12 +590,35 @@ async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer()
     let saved = data.path().join("recordings/saved.wav");
     let recovery = data.path().join("recovery/kept.wav");
     let old_recovery = legacy.path().join("kept.wav");
-    for p in [&active, &abandoned, &saved, &recovery, &old_recovery] {
+    let upload = data
+        .path()
+        .join("recordings")
+        .join(format!("upload-normalized-{}.wav", uuid::Uuid::new_v4()));
+    let scratch = crate::audio::decode::temp_path_for(&saved);
+    let capture_scratch = crate::audio::decode::temp_path_for(&abandoned);
+    for p in [
+        &active,
+        &abandoned,
+        &saved,
+        &recovery,
+        &old_recovery,
+        &upload,
+        &scratch,
+        &capture_scratch,
+    ] {
         write_aged(p, SystemTime::now(), Duration::ZERO);
     }
     clear_storage(data.path(), Some(legacy.path().to_owned())).unwrap();
     assert!(active.exists());
-    for p in [&abandoned, &saved, &recovery, &old_recovery] {
+    for p in [
+        &abandoned,
+        &saved,
+        &recovery,
+        &old_recovery,
+        &upload,
+        &scratch,
+        &capture_scratch,
+    ] {
         assert!(!p.exists());
     }
     files.writer_stopped(false);

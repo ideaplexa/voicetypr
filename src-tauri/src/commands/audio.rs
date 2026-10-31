@@ -1,3 +1,4 @@
+use super::normalized_audio::{normalize_upload_audio, NormalizedTempFile};
 use crate::recording::island::{
     self, emit_visible_main, plan_translation_failure, polish_was_guarded, recovery_for_failure,
     validate_recording_license, BlockedKind, DesktopWritingSuccessPlan, IslandAction, Note,
@@ -1381,30 +1382,6 @@ pub async fn should_hide_pill(app: &AppHandle) -> bool {
     );
 
     result
-}
-
-struct NormalizedTempFile {
-    path: PathBuf,
-}
-
-impl NormalizedTempFile {
-    fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for NormalizedTempFile {
-    fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_file(&self.path) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("Failed to remove normalized temporary audio");
-            }
-        }
-    }
 }
 
 const RETRANSCRIPTION_SESSION_MARKER_FIELD: &str = "retranscription_session_marker";
@@ -8146,19 +8123,6 @@ pub async fn transcribe_audio_file_for_cli(
     .await
 }
 
-async fn normalize_upload_audio_for_cloud(
-    recordings_dir: &Path,
-    wav_path: &Path,
-) -> Result<NormalizedTempFile, String> {
-    log::debug!("[UPLOAD] Normalizing to WAV for cloud transcription...");
-    // File jobs own this through NormalizedTempFile, not the capture sweep.
-    let out_path = recordings_dir.join(format!("upload-normalized-{}.wav", Uuid::new_v4()));
-    crate::audio::decode::normalize_to_wav_async(wav_path.to_path_buf(), out_path.to_path_buf())
-        .await
-        .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
-    Ok(NormalizedTempFile::new(out_path))
-}
-
 fn cloud_provider_supports_diarized_words(provider: crate::cloud_stt::CloudProvider) -> bool {
     matches!(
         provider,
@@ -8224,6 +8188,9 @@ pub(crate) async fn transcribe_audio_file_impl(
     speed_mode_override: Option<bool>,
     retry_generation: Option<u64>,
 ) -> Result<UploadTranscription, String> {
+    // History retries may use the original saved WAV without an executor copy.
+    // Register before the first await; RAII releases on completion/error/cancel.
+    let _source_lease = crate::recording::kept::protect_path(Path::new(&file_path));
     let upload_generation = retry_generation.unwrap_or_else(current_recording_generation);
     log::info!("[UPLOAD] transcribe_audio_file started");
     if validate_requirements {
@@ -8322,17 +8289,7 @@ pub(crate) async fn transcribe_audio_file_impl(
     {
         // Normalize to Whisper contract (16k mono s16 WAV) for remote transcription
         log::debug!("[UPLOAD] Normalizing to Whisper WAV for remote transcription...");
-        let normalized_file = NormalizedTempFile::new({
-            let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
-            let out_path = recordings_dir.join(format!("normalized_{}.wav", ts));
-            crate::audio::decode::normalize_to_wav_async(
-                wav_path.to_path_buf(),
-                out_path.to_path_buf(),
-            )
-            .await
-            .map_err(|e| format!("Audio normalization (decode) failed: {}", e))?;
-            out_path
-        });
+        let normalized_file = normalize_upload_audio(&recordings_dir, &wav_path).await?;
         log::info!("[UPLOAD] Normalized WAV ready");
 
         log::info!(
@@ -8396,8 +8353,7 @@ pub(crate) async fn transcribe_audio_file_impl(
                     TranscriptionSource::AudioFile,
                 )
                 .map_err(upload_error_to_string)?;
-                let normalized_file =
-                    normalize_upload_audio_for_cloud(&recordings_dir, &wav_path).await?;
+                let normalized_file = normalize_upload_audio(&recordings_dir, &wav_path).await?;
                 if retry_generation.is_none() {
                     if let Some(diarized) = maybe_return_diarized_cloud_upload(
                         &app,

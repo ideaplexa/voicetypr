@@ -4,7 +4,7 @@ use crate::commands::audio;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
@@ -66,10 +66,34 @@ struct Store {
     clips: VecDeque<Clip>,
     closed: bool,
     leases: Vec<PathBuf>,
+    borrowed_paths: HashMap<PathBuf, usize>,
     active_retry: Option<(String, u64, tokio::sync::watch::Sender<bool>)>,
     fallback: Vec<(PathBuf, Option<super::storage::CaptureFiles>)>,
 }
 static STORE: Lazy<Mutex<Store>> = Lazy::new(|| Mutex::new(Store::default()));
+
+/// Borrow an existing file without taking ownership of its deletion. Registration
+/// and maintenance deletion use the same store lock; overlapping jobs are counted.
+pub(crate) struct ProtectedPath(PathBuf);
+
+pub(crate) fn protect_path(path: &Path) -> ProtectedPath {
+    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    *store.borrowed_paths.entry(path.to_owned()).or_default() += 1;
+    ProtectedPath(path.to_owned())
+}
+
+impl Drop for ProtectedPath {
+    fn drop(&mut self) {
+        let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = store.borrowed_paths.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                store.borrowed_paths.remove(&self.0);
+            }
+        }
+    }
+}
+
 impl Store {
     fn retain(
         &mut self,
@@ -396,6 +420,7 @@ pub fn with_protected_paths<T>(work: impl FnOnce(&std::collections::HashSet<Path
         .iter()
         .map(|c| c.path.clone())
         .chain(store.leases.iter().cloned())
+        .chain(store.borrowed_paths.keys().cloned())
         .chain(store.fallback.iter().map(|(p, _)| p.clone()))
         .collect();
     work(&paths)

@@ -62,15 +62,22 @@ Source line numbers below are review anchors, not claims about the changing work
    - Cleanup runs off-thread at startup, every five minutes and after saves, regardless
      of `save_recordings`: ten-minute-old orphan captures (including legacy names),
      abandoned recovery files, and the configured saved-recording retention. Active
-     takes, detached writers and retry leases are protected. Unreferenced saved filenames
-     are not orphans: clearing History alone is not consent to delete saved recordings.
+     takes, detached writers, retry leases and History re-transcription source WAVs
+     are protected under the deletion lock until their job releases ownership.
+     Unreferenced saved filenames are not orphans: clearing History alone is not
+     consent to delete saved recordings.
      Reset clears both stores of audio; detached writers are deleted after finalization
      (or by a later startup sweep after their process exits).
-   - File uploads use a distinct `upload-normalized-<uuid>.wav` name and retain their
-     existing caller-owned cleanup, so the capture sweep cannot remove an active upload.
+   - Cloud and remote file uploads use distinct `upload-normalized-<uuid>.wav`
+     names. Output ownership travels into the blocking decoder and back with its
+     result, so cancellation cleans up even when the worker outlives its caller.
+     Active outputs and decoder scratch files are leased; abandoned upload outputs
+     and exact `.voicetypr_decode_tmp_<digits>.wav` scratch names in `recordings/`
+     have a minimum 24-hour orphan age (ten minutes inside capture take directories).
+     Reset also clears these disposable files. Rename failures retain scratch cleanup.
      CLI `record --until-silence` still preserves its own `cli-recording-*` file on error;
-     a bounded CLI/file-job crash-recovery policy remains a follow-up, not part of the
-     desktop orphan sweep.
+     bounded CLI preservation and file-job artifacts in OS temporary directories
+     remain follow-ups outside this managed desktop-directory sweep.
    - **NEEDS-SMOKE:** crash/restart, cancel-stop errors, no-speech recovery, saving off/on, retention,
      active capture during a sweep and reset on both OSes.
 4. **Four word-changing formatting bugs from the Codex review of the committed branch.**

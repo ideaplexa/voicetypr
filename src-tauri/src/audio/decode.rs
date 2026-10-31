@@ -24,6 +24,7 @@ use crate::audio::resampler::StreamingResampler;
 const TARGET_RATE: u32 = 16_000;
 const TARGET_CHANNELS: u16 = 1;
 const TARGET_BITS: u16 = 16;
+const TEMP_PREFIX: &str = ".voicetypr_decode_tmp_";
 
 /// Decode any supported audio/video-container file to the canonical Whisper /
 /// Parakeet / cloud WAV: 16 kHz, mono, signed-16-bit PCM.
@@ -41,6 +42,9 @@ const TARGET_BITS: u16 = 16;
 /// hold an open handle to `output` on Windows, where a rename cannot replace an
 /// open file (pass a path, or a closed `TempPath`, not a live `NamedTempFile`).
 pub fn normalize_to_wav(input: &Path, output: &Path) -> Result<(), String> {
+    // A blocking decoder can outlive the future awaiting it.
+    let _input_lease = crate::recording::kept::protect_path(input);
+    let _output_lease = crate::recording::kept::protect_path(output);
     let input = input.to_path_buf();
     let output = output.to_path_buf();
     match catch_unwind(AssertUnwindSafe(move || normalize_inner(&input, &output))) {
@@ -73,9 +77,9 @@ fn normalize_inner(input: &Path, output: &Path) -> Result<(), String> {
     }
 
     // 4. Atomically install the finished WAV.
-    let finalized_temp = guard.disarm();
-    std::fs::rename(&finalized_temp, output)
+    std::fs::rename(&temp_path, output)
         .map_err(|e| format!("Failed to rename temp WAV to output: {e}"))?;
+    guard.disarm();
     Ok(())
 }
 
@@ -144,13 +148,22 @@ fn open_format(input: &Path) -> Result<(Box<dyn FormatReader>, u32, CodecParamet
 }
 
 /// Sibling temp path for the streaming WAV; renamed to `output` on success.
-fn temp_path_for(output: &Path) -> PathBuf {
+pub(crate) fn temp_path_for(output: &Path) -> PathBuf {
     let dir = output.parent().unwrap_or_else(|| Path::new("."));
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or_default();
-    dir.join(format!(".voicetypr_decode_tmp_{stamp}.wav"))
+    dir.join(format!("{TEMP_PREFIX}{stamp}.wav"))
+}
+
+pub(crate) fn is_temp_path(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "wav")
+        && path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix(TEMP_PREFIX))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Open a 16 kHz / mono / s16 WAV writer at `path`.
@@ -595,17 +608,21 @@ impl TailTrimmer {
 struct TempWavGuard {
     path: PathBuf,
     armed: bool,
+    _lease: crate::recording::kept::ProtectedPath,
 }
 
 impl TempWavGuard {
     fn new(path: PathBuf) -> Self {
-        Self { path, armed: true }
+        Self {
+            _lease: crate::recording::kept::protect_path(&path),
+            path,
+            armed: true,
+        }
     }
 
-    /// Mark the file as successfully finalized and return its path for rename.
-    fn disarm(mut self) -> PathBuf {
+    /// Disarm only after the finished WAV has been successfully installed.
+    fn disarm(mut self) {
         self.armed = false;
-        self.path.clone()
     }
 }
 

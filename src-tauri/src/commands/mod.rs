@@ -14,6 +14,7 @@ pub mod keyring;
 pub mod license;
 pub mod logs;
 pub mod model;
+mod normalized_audio;
 pub mod permissions;
 pub(crate) mod pill_feedback;
 pub mod remote;

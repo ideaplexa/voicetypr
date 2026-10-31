@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::audio::decode::normalize_to_wav;
+    use crate::audio::decode::{is_temp_path, normalize_to_wav, temp_path_for};
     use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -123,6 +123,47 @@ mod tests {
         assert_eq!(spec.channels, 1, "must be mono");
         assert_eq!(spec.sample_rate, 16_000, "must be 16 kHz");
         assert_eq!(spec.bits_per_sample, 16, "must be 16-bit");
+    }
+
+    #[test]
+    fn scratch_classifier_accepts_generated_name_but_rejects_near_misses() {
+        let dir = TempDir::new().unwrap();
+        let scratch = temp_path_for(&dir.path().join("out.wav"));
+        assert_eq!(scratch.parent(), Some(dir.path()));
+        assert!(is_temp_path(&scratch));
+        let stem = scratch.file_stem().unwrap().to_str().unwrap();
+        for invalid in [
+            scratch.with_extension("txt"),
+            scratch.with_file_name(format!("{stem}x.wav")),
+            scratch.with_file_name(format!(
+                "{}.wav",
+                stem.trim_end_matches(|c: char| c.is_ascii_digit())
+            )),
+        ] {
+            assert!(!is_temp_path(&invalid));
+        }
+    }
+
+    #[test]
+    fn failed_final_rename_removes_the_finalized_decoder_scratch() {
+        let dir = TempDir::new().unwrap();
+        let input = dir.path().join("in.wav");
+        let output = dir.path().join("output.wav");
+        write_synthetic_stereo_48k(&input, 0.05);
+        std::fs::create_dir(&output).unwrap(); // A file cannot replace a directory.
+        let error = normalize_to_wav(&input, &output).unwrap_err();
+        assert!(error.starts_with("Failed to rename temp WAV to output:"));
+        assert!(input.exists());
+        assert!(output.is_dir());
+        assert_eq!(
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|e| is_temp_path(&e.path()))
+                .count(),
+            0,
+            "rename failure must not disarm scratch cleanup"
+        );
     }
 
     // --- Machine-local integration tests against staged real-world fixtures ---

@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 const ORPHAN_AGE: Duration = Duration::from_secs(10 * 60);
+const FILE_JOB_ORPHAN_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 static ACTIVE: Lazy<Mutex<HashMap<PathBuf, Weak<CaptureDirectory>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -72,14 +73,20 @@ impl Drop for CaptureDirectory {
             loop {
                 let dir = path.clone();
                 let done = tauri::async_runtime::spawn_blocking(move || {
-                    let mut active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
-                    let raw = dir.join("recording.wav");
-                    if pending && raw.exists() && !super::kept::finalized_wav(&raw) {
-                        return false;
-                    }
-                    remove_capture_files(&dir);
-                    active.remove(&dir);
-                    true
+                    // Same lock order as maintenance. A detached decoder can still
+                    // be using this take after its awaiting task was cancelled.
+                    super::kept::with_protected_paths(|protected| {
+                        let mut active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
+                        let raw = dir.join("recording.wav");
+                        if (pending && raw.exists() && !super::kept::finalized_wav(&raw))
+                            || protected.iter().any(|p| p.parent() == Some(dir.as_path()))
+                        {
+                            return false;
+                        }
+                        remove_capture_files(&dir);
+                        active.remove(&dir);
+                        true
+                    })
                 })
                 .await
                 .unwrap_or(true);
@@ -102,15 +109,24 @@ pub fn remove_finished_audio(path: &Path) {
 }
 
 fn capture_name(path: &Path) -> bool {
+    crate::audio::decode::is_temp_path(path)
+        || path.extension().is_some_and(|e| e == "wav")
+            && path.file_stem().and_then(|n| n.to_str()).is_some_and(|n| {
+                n == "recording"
+                    || n.strip_prefix("recording_")
+                        .is_some_and(|t| t.parse::<u64>().is_ok())
+                    || n.strip_prefix("normalized_").is_some_and(|t| {
+                        chrono::NaiveDateTime::parse_from_str(t, "%Y%m%d_%H%M%S").is_ok()
+                    })
+            })
+}
+fn upload_name(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "wav")
-        && path.file_stem().and_then(|n| n.to_str()).is_some_and(|n| {
-            n == "recording"
-                || n.strip_prefix("recording_")
-                    .is_some_and(|t| t.parse::<u64>().is_ok())
-                || n.strip_prefix("normalized_").is_some_and(|t| {
-                    chrono::NaiveDateTime::parse_from_str(t, "%Y%m%d_%H%M%S").is_ok()
-                })
-        })
+        && path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix("upload-normalized-"))
+            .is_some_and(|n| uuid::Uuid::parse_str(n).is_ok())
 }
 fn recovery_name(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "wav")
@@ -210,7 +226,12 @@ fn sweep(
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| h.contains(n))
         });
-        if capture_name(&path) && !referenced {
+        if (upload_name(&path) || crate::audio::decode::is_temp_path(&path)) && !referenced {
+            // File jobs can run much longer than a desktop take.
+            if old_enough(&path, now, FILE_JOB_ORPHAN_AGE) {
+                counts.orphans += usize::from(std::fs::remove_file(&path).is_ok());
+            }
+        } else if capture_name(&path) && !referenced {
             // Fail closed if History could not be read.
             if history.is_some() && old_enough(&path, now, ORPHAN_AGE) {
                 counts.orphans += usize::from(std::fs::remove_file(&path).is_ok());
