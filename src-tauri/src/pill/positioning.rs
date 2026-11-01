@@ -37,6 +37,11 @@ fn live_monitor(app: &AppHandle) -> Option<Monitor> {
     crate::utils::monitor::catch_monitor_panic(|| live_monitor_inner(app)).flatten()
 }
 fn live_monitor_inner(app: &AppHandle) -> Option<Monitor> {
+    #[cfg(target_os = "macos")]
+    let geometry = crate::utils::monitor::macos_geometry(app)?;
+    #[cfg(target_os = "macos")]
+    let monitors = &geometry.monitors;
+    #[cfg(not(target_os = "macos"))]
     let monitors = app.available_monitors().ok().unwrap_or_default();
     // Win32 gives the foreground window's actual monitor, even when it spans displays.
     #[cfg(target_os = "windows")]
@@ -85,10 +90,19 @@ fn live_monitor_inner(app: &AppHandle) -> Option<Monitor> {
                 .cloned()
         })
         .or_else(|| {
-            app.cursor_position().ok().and_then(|p| {
+            #[cfg(target_os = "macos")]
+            let cursor = {
+                // cursor_position also reads the primary NSScreen scale in
+                // tao. Never invoke it on the snapshot's blocking worker.
+                let cursor_app = app.clone();
+                crate::utils::monitor::on_main(app, move || cursor_app.cursor_position().ok())
+            };
+            #[cfg(not(target_os = "macos"))]
+            let cursor = app.cursor_position().ok();
+            cursor.and_then(|p| {
                 #[cfg(target_os = "macos")]
                 let (point, logical) = {
-                    let primary_scale = app.primary_monitor().ok().flatten()?.scale_factor();
+                    let primary_scale = geometry.primary.scale_factor();
                     ((p.x / primary_scale, p.y / primary_scale), true)
                 };
                 #[cfg(not(target_os = "macos"))]
@@ -99,7 +113,16 @@ fn live_monitor_inner(app: &AppHandle) -> Option<Monitor> {
                     .cloned()
             })
         })
-        .or_else(|| app.primary_monitor().ok().flatten())
+        .or_else(|| {
+            #[cfg(target_os = "macos")]
+            {
+                Some(geometry.primary)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                app.primary_monitor().ok().flatten()
+            }
+        })
 }
 
 /// Prefer a valid work area; auto-hidden taskbars legitimately equal full bounds.
