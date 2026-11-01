@@ -100,6 +100,10 @@ pub struct TranscriptionWord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptionResult {
     pub raw_text: String,
+    /// Local-only provenance: the Whisper request actually carried the style hint.
+    /// Never accept this flag from remote/serialized text.
+    #[serde(skip)]
+    pub(crate) whisper_style_hint_sent: bool,
     pub engine: String,
     pub model: String,
     pub spoken_language: Option<String>,
@@ -116,6 +120,7 @@ impl TranscriptionResult {
     pub fn new(job: &TranscriptionJob, raw_text: impl Into<String>) -> Self {
         Self {
             raw_text: raw_text.into(),
+            whisper_style_hint_sent: false,
             engine: job.engine.clone(),
             model: job.model.clone(),
             spoken_language: job.spoken_language.clone(),

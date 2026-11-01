@@ -368,9 +368,14 @@ pub(crate) struct LibraryRulesResult {
     pub(crate) provenance: Vec<LibraryRuleApplication>,
 }
 
-pub(crate) fn sanitize_transcript(text: &str) -> Cow<'_, str> {
-    // Only strip the exact standalone leading prompt sentence, not hint-like prose.
-    let trimmed = super::vocabulary::strip_whisper_style_hint(text.trim());
+pub(crate) fn sanitize_transcript(text: &str, whisper_style_hint_sent: bool) -> Cow<'_, str> {
+    let trimmed = text.trim();
+    // A matching sentence is speech unless this request actually sent the hint.
+    let trimmed = if whisper_style_hint_sent {
+        super::vocabulary::strip_whisper_style_hint(trimmed)
+    } else {
+        trimmed
+    };
     let needs_cleanup = trimmed.len() != text.len()
         || trimmed
             .chars()
@@ -999,11 +1004,11 @@ mod tests {
 
     #[test]
     fn test_sanitize_transcript_is_mechanical_only() {
-        let cleaned = sanitize_transcript(" \r\nhello\rworld\tthere\0\u{0008} ");
+        let cleaned = sanitize_transcript(" \r\nhello\rworld\tthere\0\u{0008} ", false);
         assert_eq!(cleaned.as_ref(), "hello\nworld\tthere");
 
         let semantic_text = "um I mean send it to Bob no Alice period";
-        let untouched = sanitize_transcript(semantic_text);
+        let untouched = sanitize_transcript(semantic_text, false);
         assert!(matches!(untouched, Cow::Borrowed(_)));
         assert_eq!(untouched.as_ref(), semantic_text);
     }
@@ -1019,7 +1024,7 @@ mod tests {
             "Keep this sentence. Hello, this is a well-punctuated transcript.",
         ] {
             assert_eq!(
-                sanitize_transcript(sample).as_ref(),
+                sanitize_transcript(sample, true).as_ref(),
                 sample,
                 "sample: {sample}"
             );
@@ -1029,13 +1034,13 @@ mod tests {
     #[test]
     fn test_sanitize_transcript_strips_an_echoed_style_hint() {
         use super::super::vocabulary::WHISPER_STYLE_HINT;
-        assert_eq!(sanitize_transcript(WHISPER_STYLE_HINT).as_ref(), "");
+        assert_eq!(sanitize_transcript(WHISPER_STYLE_HINT, true).as_ref(), "");
         assert_eq!(
-            sanitize_transcript(&format!("{WHISPER_STYLE_HINT} Send it now.")).as_ref(),
+            sanitize_transcript(&format!("{WHISPER_STYLE_HINT} Send it now."), true).as_ref(),
             "Send it now."
         );
         assert!(matches!(
-            sanitize_transcript("Hello, this is a normal take."),
+            sanitize_transcript("Hello, this is a normal take.", true),
             Cow::Borrowed(_)
         ));
     }
@@ -1052,7 +1057,7 @@ mod tests {
             }],
             ..WritingSettings::default()
         };
-        let cleaned = sanitize_transcript("\r\ninsert note\n");
+        let cleaned = sanitize_transcript("\r\ninsert note\n", false);
         let mut ops = Vec::new();
         let result = apply_library_rules(cleaned.as_ref(), &settings, Some("en"), &mut ops);
 

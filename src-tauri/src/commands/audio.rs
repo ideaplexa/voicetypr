@@ -3319,6 +3319,7 @@ mod tests {
         use crate::transcription::{TranscriptionSource, TranscriptionTask, TranscriptionTimings};
         crate::transcription::TranscriptionResult {
             raw_text: "hello world".into(),
+            whisper_style_hint_sent: false,
             engine: "whisper".into(),
             model: "base.en".into(),
             spoken_language: Some("en".into()),

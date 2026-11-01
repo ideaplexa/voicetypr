@@ -26,11 +26,9 @@ pub const PARAGRAPH_MIN_WORDS_BETWEEN_BREAKS: usize = 40;
 pub const PARAGRAPH_MIN_TAIL_WORDS: usize = 6;
 
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm"];
-// A repeated "is" can be a double copula ("what it is is ..."), not a stutter.
+// "is is" can be a double copula; "in in" can follow a phrasal verb ("come in in June").
 // Without reliable grammatical context, keep both rather than delete speech.
-const STUTTER_REPEATS: &[&str] = &[
-    "the", "a", "an", "to", "and", "i", "we", "you", "it", "of", "in",
-];
+const STUTTER_REPEATS: &[&str] = &["the", "a", "an", "to", "and", "i", "we", "you", "it", "of"];
 /// Words whose trailing period does not end a sentence.
 const ABBREVIATIONS: &[&str] = &[
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "mt", "vs", "etc", "inc", "ltd", "co",
@@ -255,16 +253,31 @@ pub fn format_transcript<'a>(
 
     // Paragraph breaks from pauses only apply to engine text without its own breaks.
     let single_line = !text.contains('\n');
-    let normalized = transcript_text::normalize_transcript_spacing_per_line(text);
-
-    let mut out = String::with_capacity(normalized.len() + 8);
+    let mut out = String::with_capacity(text.len() + 8);
     let mut at_sentence_start = true;
-    for (index, line) in normalized.split('\n').enumerate() {
+    let mut fence_length = None;
+    for (index, line) in text.split('\n').enumerate() {
         if index > 0 {
             out.push('\n');
         }
+        let fence = line.trim_start();
+        let backticks = fence.bytes().take_while(|&byte| byte == b'`').count();
+        if fence_length.is_some() || backticks >= 3 {
+            // Do this before spacing normalization: even prose-looking code is literal.
+            out.push_str(line);
+            match fence_length {
+                Some(length) if backticks >= length && fence[backticks..].trim().is_empty() => {
+                    fence_length = None;
+                }
+                None => fence_length = Some(backticks),
+                _ => {}
+            }
+            at_sentence_start = false;
+            continue;
+        }
+        let normalized = transcript_text::normalize_transcript_spacing(line);
         let hints = if single_line { pauses } else { &[] };
-        let (formatted, next_at_start) = format_line(line, at_sentence_start, hints, opts);
+        let (formatted, next_at_start) = format_line(&normalized, at_sentence_start, hints, opts);
         out.push_str(&formatted);
         at_sentence_start = next_at_start;
     }
@@ -530,8 +543,8 @@ fn is_filler(core: &str, trail: &str, sentence_start: bool) -> bool {
         && matches!(core, "Um" | "Umm" | "Uh" | "Uhh" | "Erm" | "Hmm" | "Mm")
 }
 
-fn contains_digit(text: &str) -> bool {
-    text.chars().any(|c| c.is_ascii_digit())
+fn contains_quantity(text: &str) -> bool {
+    text.chars().any(char::is_numeric)
 }
 
 /// "th-" before "the", "I-" before "I": a word cut off and restarted.
@@ -548,8 +561,10 @@ fn is_cut_off_fragment(token: &str, next: Option<&Token>) -> bool {
     let Some(next) = next else {
         return false;
     };
-    let (_, next_core, _) = split_token(&next.text);
-    is_wordlike(next_core) && next_core.to_lowercase().starts_with(&core.to_lowercase())
+    let (next_lead, next_core, next_trail) = split_token(&next.text);
+    has_prose_boundaries(next_lead, next_trail)
+        && is_wordlike(next_core)
+        && next_core.to_lowercase().starts_with(&core.to_lowercase())
 }
 
 struct FillerState {
@@ -575,9 +590,9 @@ fn strip_fillers(
         let removable_filler = has_prose_boundaries(lead, trail)
             && is_filler(core, trail, at_sentence_start(&out, starts_sentence))
             && !is_protected_word(core, protected_terms)
-            && !(core.eq_ignore_ascii_case("mm")
-                && (out.last().is_some_and(|prev| contains_digit(&prev.text))
-                    || next.is_some_and(|n| n.text.starts_with(|c: char| c.is_ascii_digit()))));
+            && !((core.eq_ignore_ascii_case("mm") || core.eq_ignore_ascii_case("um"))
+                && (out.last().is_some_and(|prev| contains_quantity(&prev.text))
+                    || next.is_some_and(|n| n.text.starts_with(char::is_numeric))));
 
         if removable_filler {
             let was_start = at_sentence_start(&out, starts_sentence);

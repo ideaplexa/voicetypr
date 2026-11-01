@@ -536,7 +536,10 @@ pub async fn process_transcription_at(
     let mut applied_operations = Vec::new();
     let mut warnings = Vec::new();
     let deterministic_start = Instant::now();
-    let cleaned_text = sanitize_transcript(&transcription.raw_text);
+    let cleaned_text = sanitize_transcript(
+        &transcription.raw_text,
+        transcription.whisper_style_hint_sent,
+    );
     if cleaned_text.as_ref() != transcription.raw_text {
         applied_operations.push(AppliedWritingOperation {
             kind: WritingOperationKind::TranscriptCleanup,
@@ -788,6 +791,109 @@ mod tests {
             provider_id: "openai".to_string(),
             model_id: "gpt-6-luna".to_string(),
         }
+    }
+
+    // AppHandle here uses the native Wry runtime, so a MockRuntime handle cannot
+    // call process_transcription. Exercise its real deterministic stages in order.
+    fn deterministic_output(transcription: &TranscriptionResult) -> String {
+        let settings = WritingSettings::default();
+        let cleaned = sanitize_transcript(
+            &transcription.raw_text,
+            transcription.whisper_style_hint_sent,
+        );
+        let library = apply_library_rules(
+            &cleaned,
+            &settings,
+            transcription.transcript_language.as_deref(),
+            &mut Vec::new(),
+        );
+        let formatted = format_for_transcription(
+            &library.text,
+            transcription,
+            transcription.transcript_language.as_deref(),
+            FormatStageSettings {
+                paragraphs: true,
+                remove_fillers: true,
+            },
+            &protected_terms(&settings),
+        );
+        let text = formatted.unwrap_or(library.text);
+        apply_final_restoration_guard(&text, &library.provenance, library.literal_locked, false).0
+    }
+
+    fn english_result(text: &str) -> TranscriptionResult {
+        make_result(text, Some("en"), Some("en"), TranscriptionTask::Transcribe)
+    }
+
+    #[test]
+    fn beta5_residual_grammatical_in_doubles_survive_pipeline_stages() {
+        for input in [
+            "Come in in the morning.",
+            "Log in in settings.",
+            "Plug it in in the kitchen.",
+        ] {
+            assert_eq!(deterministic_output(&english_result(input)), input);
+        }
+    }
+
+    #[test]
+    fn beta5_residual_cutoffs_require_prose_restart_boundaries() {
+        for (input, expected) in [
+            ("Compare A- A+ grades.", "Compare A- A+ grades."),
+            (
+                "Keep a- /abc and b- b_ tokens.",
+                "Keep a- /abc and b- b_ tokens.",
+            ),
+            ("I- I think th- the plan works.", "I think the plan works."),
+        ] {
+            assert_eq!(deterministic_output(&english_result(input)), expected);
+        }
+    }
+
+    #[test]
+    fn beta5_residual_filler_units_keep_unicode_quantities() {
+        for input in [
+            "Use a 10 um filter.",
+            "Use a ½ mm shim.",
+            "Use a ٢ um filter.",
+            "Use mm ½ and um ٢ units.",
+            "Use a 10 mm bolt.",
+        ] {
+            assert_eq!(deterministic_output(&english_result(input)), input);
+        }
+        assert_eq!(
+            deterministic_output(&english_result("Um, I um need a filter.")),
+            "I need a filter."
+        );
+    }
+
+    #[test]
+    fn beta5_residual_fenced_code_is_verbatim_between_formatted_prose() {
+        let input = "before  code .\n  ```sh  \necho i\n  um  the the .  \n```\nthen  i go .";
+        let expected = "Before code.\n  ```sh  \necho i\n  um  the the .  \n```\nthen I go.";
+        assert_eq!(deterministic_output(&english_result(input)), expected);
+        let unclosed = "before .\n````sh\necho  i\n```\necho  i";
+        let expected = "Before.\n````sh\necho  i\n```\necho  i";
+        assert_eq!(deterministic_output(&english_result(unclosed)), expected);
+    }
+
+    #[test]
+    fn beta5_residual_hint_sentence_without_prompt_provenance_is_speech() {
+        let text = format!("{} Send it now.", super::super::WHISPER_STYLE_HINT);
+        for engine in [
+            "parakeet", "soniox", "deepgram", "openai", "groq", "cohere", "remote", "whisper",
+        ] {
+            let mut transcription = english_result(&text);
+            transcription.engine = engine.to_string();
+            assert_eq!(
+                deterministic_output(&transcription),
+                text,
+                "engine: {engine}"
+            );
+        }
+        let mut echoed = english_result(&text);
+        echoed.whisper_style_hint_sent = true;
+        assert_eq!(deterministic_output(&echoed), "Send it now.");
     }
 
     #[test]

@@ -200,11 +200,15 @@ async fn route_once(
             .await
             .map_err(|e| from_local_engine_string(&e, source))?;
 
-            let result = TranscriptionResult::new(job, output.raw_text)
+            let mut result = TranscriptionResult::new(job, output.raw_text)
                 .with_transcript_language(output.transcript_language)
                 .with_segments(output.segments)
                 .with_audio_duration_ms(Some(output.audio_duration_ms))
                 .with_processing_duration_ms(Some(output.processing_duration_ms));
+            result.whisper_style_hint_sent = request
+                .initial_prompt
+                .as_deref()
+                .is_some_and(|prompt| prompt.starts_with(crate::writing::WHISPER_STYLE_HINT));
             let result = if matches!(source, TranscriptionSource::AudioFile) {
                 result.with_span_timings_ms(serde_json::json!({
                     "preprocessing": output.timings.preprocessing_ms,
