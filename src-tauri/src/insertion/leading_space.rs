@@ -32,6 +32,16 @@ pub(crate) fn prepare(text: String) -> String {
 }
 
 fn starts_word(text: &str) -> bool {
+    // Apostrophes can open a quotation or continue the preceding word.
+    if text.starts_with(['\'', '’']) {
+        static SUFFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"^['’](?:s|t|d|ll|re|ve|m)(?:$|\s|\p{P})")
+                .expect("valid apostrophe suffix regex")
+        });
+        if SUFFIX.is_match(text) {
+            return false;
+        }
+    }
     text.chars().next().is_some_and(|first| {
         !is_cjk(first)
             && (first.is_alphanumeric()
@@ -45,7 +55,7 @@ fn needs_leading_space(previous: Option<char>, text: &str) -> bool {
             && !is_cjk(previous)
             && !matches!(
                 previous,
-                '(' | '[' | '{' | '"' | '\'' | '“' | '‘' | '«' | '/' | '-'
+                '(' | '[' | '{' | '"' | '\'' | '“' | '‘' | '«' | '/' | '-' | '@' | '#' | '_'
             )
     }) && starts_word(text)
 }
@@ -107,8 +117,42 @@ mod tests {
 
     #[test]
     fn opening_delimiters_and_joiners_never_add_a_space() {
-        for previous in ['(', '[', '{', '"', '\'', '“', '‘', '«', '/', '-'] {
+        for previous in [
+            '(', '[', '{', '"', '\'', '“', '‘', '«', '/', '-', '@', '#', '_',
+        ] {
             assert!(!needs_leading_space(Some(previous), "Hello"));
+        }
+    }
+
+    #[test]
+    fn handles_hashtags_and_identifier_continuations_stay_tight() {
+        for (prefix, text) in [("@", "alice"), ("#", "topic"), ("user_", "name")] {
+            assert!(!needs_leading_space(prefix.chars().last(), text));
+        }
+    }
+
+    #[test]
+    fn apostrophe_suffixes_stay_tight_at_token_boundaries() {
+        for apostrophe in ['\'', '’'] {
+            for suffix in ["s", "t", "d", "ll", "re", "ve", "m"] {
+                for boundary in ["", " here", "\tthere", "\nNext", ",", ".", "!", "—", "…"] {
+                    let text = format!("{apostrophe}{suffix}{boundary}");
+                    assert!(!starts_word(&text), "{text:?}");
+                    for previous in ['n', 'é', '9'] {
+                        assert!(!needs_leading_space(Some(previous), &text), "{text:?}");
+                    }
+                }
+            }
+        }
+        assert!(!needs_leading_space(Some('n'), "'s")); // John + 's
+        assert!(!needs_leading_space(Some('n'), "'t")); // can + 't
+    }
+
+    #[test]
+    fn opening_quotes_and_longer_quoted_words_still_need_a_space() {
+        for text in ["'Hello'", "‘Hello’", "'something'", "'they'", "'llama'"] {
+            assert!(starts_word(text), "{text:?}");
+            assert!(needs_leading_space(Some('n'), text), "{text:?}");
         }
     }
 
