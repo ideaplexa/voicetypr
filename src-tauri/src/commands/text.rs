@@ -531,6 +531,14 @@ fn insert_via_clipboard(
         }
         Ok(())
     };
+    current()?;
+    // All cursor delivery (native paste and keyboard fallback) shares this
+    // boundary, already on spawn_blocking. Clipboard-only commands bypass it.
+    let text = if has_accessibility_permission {
+        crate::insertion::leading_space::prepare(text)
+    } else {
+        text
+    };
     // This function handles both copying text to clipboard AND pasting it at cursor
     // Initialize clipboard
     let mut clipboard =

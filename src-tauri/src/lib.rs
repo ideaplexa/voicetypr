@@ -17,6 +17,7 @@ mod audio;
 pub mod cli;
 mod cloud_stt;
 mod commands;
+mod insertion;
 mod license;
 mod media;
 mod menu;
