@@ -8528,7 +8528,7 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     let app_state = app.state::<AppState>();
     app_state.request_cancellation();
     super::ai_lifecycle::cancel_recording();
-    crate::recording::kept::discard_generation(&app, current_recording_generation());
+    crate::recording::kept::discard_generation(&app, cancel_generation);
     log::info!("Cancellation requested in app state");
 
     // Get current state
@@ -8617,6 +8617,11 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
         };
     }
     let stop_error = stop_result.err();
+    app_state
+        .current_recording_path
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
     let capture_files = app_state
         .capture_files
         .lock()

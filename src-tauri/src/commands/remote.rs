@@ -540,6 +540,7 @@ pub async fn remove_remote_server(
         save_remote_settings(&app, &settings)?;
         was_active
     };
+    crate::commands::audio::invalidate_recording_config_cache(&app).await;
     // Settings persisted — safe to forget the secret now. A failure here only
     // leaves an orphaned keychain entry (no connection references it), so warn
     // rather than fail the already-completed removal.
@@ -1227,6 +1228,10 @@ pub async fn set_active_remote_server(
         );
     }
 
+    crate::commands::audio::invalidate_recording_config_cache(&app).await;
+    // Source selection is already effective, even if sharing restoration below
+    // returns early. Refresh consumers before doing that optional work.
+    let _ = app.emit("sharing-status-changed", serde_json::json!({ "refresh": true }));
     let availability = crate::recognition::emit_recognition_availability(&app).await;
     if let Err(error) = crate::recognition::auto_select_model_if_needed(&app, &availability).await {
         log::warn!(

@@ -1395,6 +1395,7 @@ pub async fn set_model_from_tray(app: AppHandle, model_name: String) -> Result<(
             settings.set_active_connection(Some(connection_id.to_string()))?;
             save_remote_settings(&app, &settings)?;
         }
+        crate::commands::audio::invalidate_recording_config_cache(&app).await;
 
         // Update the tray menu to reflect the new selection
         update_tray_menu(app.clone()).await?;
@@ -1436,6 +1437,7 @@ pub async fn set_model_from_tray(app: AppHandle, model_name: String) -> Result<(
 
         save_remote_settings(&app, &settings)?;
     }
+    crate::commands::audio::invalidate_recording_config_cache(&app).await;
 
     if let Err(e) = app.emit("sharing-status-changed", json!({ "refresh": true })) {
         log::warn!("Failed to emit sharing-status-changed event: {}", e);
@@ -1662,40 +1664,23 @@ pub async fn update_tray_menu_with_generation(
 /// Set the selected microphone device
 #[tauri::command]
 pub async fn set_audio_device(app: AppHandle, device_name: Option<String>) -> Result<(), String> {
-    log::info!("Setting audio device to: {:?}", device_name);
+    log::info!("Changing audio device");
 
     // Get current settings
     let mut settings = get_settings(app.clone()).await?;
 
-    // Check if recording is in progress and stop it
+    // Use cancellation, not a bare recorder stop: it owns capture-file release,
+    // writer finalization, media restoration and the recording generation.
     let recorder_state = app.state::<crate::commands::audio::RecorderState>();
-    {
-        let mut recorder = recorder_state
-            .inner()
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?;
-
-        if recorder.is_recording() {
-            log::info!("Recording in progress, stopping it before changing microphone");
-
-            // Update state to notify UI
-            crate::update_recording_state(&app, crate::RecordingState::Stopping, None);
-
-            match recorder.stop_recording() {
-                Ok(msg) => {
-                    log::info!("Recording stopped: {}", msg);
-                    // Update state to idle after successful stop
-                    crate::update_recording_state(&app, crate::RecordingState::Idle, None);
-                }
-                Err(e) => {
-                    log::warn!("Failed to stop recording: {}", e);
-                    // Update state to error if stop failed
-                    crate::update_recording_state(&app, crate::RecordingState::Error, Some(e));
-                }
-            }
-        }
-    } // Lock released here
+    let recording = recorder_state
+        .inner()
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?
+        .is_recording();
+    if recording {
+        crate::commands::audio::cancel_recording(app.clone()).await?;
+    }
 
     // Update the selected microphone
     settings.selected_microphone = device_name.clone();
@@ -1711,7 +1696,7 @@ pub async fn set_audio_device(app: AppHandle, device_name: Option<String>) -> Re
         log::warn!("Failed to emit audio-device-changed event: {}", e);
     }
 
-    log::info!("Audio device successfully set to: {:?}", device_name);
+    log::info!("Audio device changed");
     Ok(())
 }
 
