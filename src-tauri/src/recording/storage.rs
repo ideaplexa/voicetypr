@@ -161,6 +161,14 @@ fn entries(dir: &Path) -> impl Iterator<Item = PathBuf> {
         .map(|e| e.path())
 }
 fn remove_capture_files(dir: &Path) -> Result<(), &'static str> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(metadata) if !metadata.is_dir() || metadata.is_symlink() => {
+            return Err("Could not clear audio storage");
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("Could not clear audio storage"),
+    }
     let files = match std::fs::read_dir(dir) {
         Ok(files) => files,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -358,43 +366,51 @@ pub async fn clear_audio(app: &AppHandle) -> Result<(), String> {
         .app_data_dir()
         .map_err(|_| "Audio storage unavailable")?;
     let legacy = app.path().temp_dir().ok().map(|p| p.join("kept-dictation"));
-    tauri::async_runtime::spawn_blocking(move || clear_storage(&data, legacy))
-        .await
-        .map_err(|_| "Could not clear audio storage")?
+    let identifier = app.config().identifier.clone();
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|_| "Home directory unavailable")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        clear_storage(&data, legacy, &identifier, &home, &std::env::temp_dir())
+    })
+    .await
+    .map_err(|_| "Could not clear audio storage")?
 }
 
-fn clear_storage(data: &Path, legacy: Option<PathBuf>) -> Result<(), String> {
+fn clear_storage(
+    data: &Path,
+    legacy: Option<PathBuf>,
+    identifier: &str,
+    home: &Path,
+    temp: &Path,
+) -> Result<(), String> {
+    use crate::utils::reset_directory;
+    // Validate even the nonrecursive sweep's roots before it can follow an
+    // app-data alias into unrelated storage.
+    for name in ["recordings", "recovery", "captures", "cli-recordings"] {
+        reset_directory::validate(&data.join(name), identifier, home)?;
+    }
     let mut failed = super::kept::with_protected_paths(|protected| {
-        super::file_jobs::sweep(
-            data,
-            &std::env::temp_dir(),
-            protected,
-            SystemTime::now(),
-            true,
-        )
-        .is_err()
+        super::file_jobs::sweep(data, temp, protected, SystemTime::now(), true).is_err()
     });
     let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
-    for dir in [
-        Some(data.join("recordings")),
-        Some(data.join("recovery")),
-        legacy,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => failed = true,
-        }
+    for dir in [data.join("recordings"), data.join("recovery")] {
+        failed |= reset_directory::remove(&dir, identifier, home).is_err();
+    }
+    // Legacy OS temp is not identifier-scoped (and dev/prod share it).
+    // Never recursively delete it; remove only recognized recovery files.
+    if let Some(legacy) = legacy {
+        failed |= clear_legacy_recovery(&legacy).is_err();
     }
     match std::fs::read_dir(data.join("captures")) {
         Ok(dirs) => {
             for entry in dirs {
                 match entry {
                     Ok(entry) if !active.contains_key(&entry.path()) => {
-                        failed |= remove_capture_files(&entry.path()).is_err();
+                        failed |= reset_directory::validate(&entry.path(), identifier, home)
+                            .is_err()
+                            || remove_capture_files(&entry.path()).is_err();
                     }
                     Ok(_) => {}
                     Err(_) => failed = true,
@@ -405,6 +421,35 @@ fn clear_storage(data: &Path, legacy: Option<PathBuf>) -> Result<(), String> {
     }
     if failed {
         Err("Could not clear audio storage".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn clear_legacy_recovery(dir: &Path) -> Result<(), &'static str> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(metadata) if !metadata.is_dir() || metadata.is_symlink() => {
+            return Err("Could not clear audio storage");
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("Could not clear audio storage"),
+    }
+    let mut failed = false;
+    for entry in std::fs::read_dir(dir).map_err(|_| "Could not clear audio storage")? {
+        match entry {
+            Ok(entry) if recovery_name(&entry.path()) => {
+                // remove_file unlinks symlinks rather than following them.
+                if let Err(error) = std::fs::remove_file(entry.path()) {
+                    failed |= error.kind() != std::io::ErrorKind::NotFound;
+                }
+            }
+            Ok(_) => {}
+            Err(_) => failed = true,
+        }
+    }
+    if failed {
+        Err("Could not clear audio storage")
     } else {
         Ok(())
     }

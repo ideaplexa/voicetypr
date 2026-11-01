@@ -597,16 +597,21 @@ async fn detached_writer_is_protected_until_header_is_finalized() {
 
 #[tokio::test]
 async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer() {
-    let data = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("com.ideaplexa.voicetypr.dev");
     let legacy = tempfile::tempdir().unwrap();
-    let files = CaptureFiles::create(data.path()).unwrap();
+    let files = CaptureFiles::create(&data).unwrap();
     let active = files.audio_path();
-    let abandoned = capture_path(data.path(), "recording.wav");
-    let saved = data.path().join("recordings/saved.wav");
-    let recovery = data.path().join("recovery/kept.wav");
-    let old_recovery = legacy.path().join("kept.wav");
-    let upload = data
+    let abandoned = capture_path(&data, "recording.wav");
+    let saved = data.join("recordings/saved.wav");
+    let recovery = data.join("recovery/kept.wav");
+    let old_recovery = legacy.path().join(format!("{}.wav", uuid::Uuid::new_v4()));
+    let temp_audio = temp
         .path()
+        .join(format!("voicetypr-audio-{}.wav", uuid::Uuid::new_v4()));
+    let unrelated = legacy.path().join("other-app.wav");
+    std::fs::write(&unrelated, b"unrelated").unwrap();
+    let upload = data
         .join("recordings")
         .join(format!("upload-normalized-{}.wav", uuid::Uuid::new_v4()));
     let scratch = crate::audio::decode::temp_path_for(&saved);
@@ -617,19 +622,29 @@ async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer()
         &saved,
         &recovery,
         &old_recovery,
+        &temp_audio,
         &upload,
         &scratch,
         &capture_scratch,
     ] {
         write_aged(p, SystemTime::now(), Duration::ZERO);
     }
-    clear_storage(data.path(), Some(legacy.path().to_owned())).unwrap();
+    clear_storage(
+        &data,
+        Some(legacy.path().to_owned()),
+        "com.ideaplexa.voicetypr.dev",
+        temp.path(),
+        temp.path(),
+    )
+    .unwrap();
     assert!(active.exists());
+    assert!(unrelated.exists());
     for p in [
         &abandoned,
         &saved,
         &recovery,
         &old_recovery,
+        &temp_audio,
         &upload,
         &scratch,
         &capture_scratch,
@@ -675,13 +690,20 @@ fn reset_reports_cli_and_capture_deletion_failures_and_keeps_clearing_other_stor
         "cli-recordings/cli-recording-20261031123000123_abcdef12.wav",
         "captures/abandoned/recording.wav",
     ] {
-        let data = tempfile::tempdir().unwrap();
-        let blocked = data.path().join(blocked_name);
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("com.ideaplexa.voicetypr.dev");
+        let blocked = data.join(blocked_name);
         std::fs::create_dir_all(&blocked).unwrap();
-        let saved = data.path().join("recordings/saved.wav");
+        let saved = data.join("recordings/saved.wav");
         write_aged(&saved, SystemTime::now(), Duration::ZERO);
         assert_eq!(
-            clear_storage(data.path(), None),
+            clear_storage(
+                &data,
+                None,
+                "com.ideaplexa.voicetypr.dev",
+                temp.path(),
+                temp.path()
+            ),
             Err("Could not clear audio storage".into())
         );
         assert!(blocked.exists());
@@ -690,20 +712,89 @@ fn reset_reports_cli_and_capture_deletion_failures_and_keeps_clearing_other_stor
             "one failure must not prevent other cleanup"
         );
         std::fs::remove_dir(blocked).unwrap();
-        clear_storage(data.path(), None).unwrap();
+        clear_storage(
+            &data,
+            None,
+            "com.ideaplexa.voicetypr.dev",
+            temp.path(),
+            temp.path(),
+        )
+        .unwrap();
     }
 }
 
 #[test]
 fn reset_reports_unreadable_storage_roots() {
     for name in ["cli-recordings", "captures", "recordings", "recovery"] {
-        let data = tempfile::tempdir().unwrap();
-        std::fs::write(data.path().join(name), b"not a directory").unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("com.ideaplexa.voicetypr.dev");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join(name), b"not a directory").unwrap();
         assert_eq!(
-            clear_storage(data.path(), None),
+            clear_storage(
+                &data,
+                None,
+                "com.ideaplexa.voicetypr.dev",
+                temp.path(),
+                temp.path()
+            ),
             Err("Could not clear audio storage".into())
         );
     }
+}
+
+#[test]
+fn reset_refuses_user_wide_audio_root_before_touching_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("recordings/saved.wav");
+    write_aged(&path, SystemTime::now(), Duration::ZERO);
+    assert!(clear_storage(
+        temp.path(),
+        None,
+        "com.ideaplexa.voicetypr.dev",
+        temp.path(),
+        temp.path()
+    )
+    .is_err());
+    assert!(path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn reset_does_not_follow_audio_storage_aliases() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("com.ideaplexa.voicetypr.dev");
+    let external = temp.path().join("other-app");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&external).unwrap();
+    let path = external.join("recording.wav");
+    std::fs::write(&path, b"unrelated").unwrap();
+    for name in ["recordings", "recovery", "captures", "cli-recordings"] {
+        let link = data.join(name);
+        std::os::unix::fs::symlink(&external, &link).unwrap();
+        assert!(clear_storage(
+            &data,
+            None,
+            "com.ideaplexa.voicetypr.dev",
+            temp.path(),
+            temp.path()
+        )
+        .is_err());
+        assert!(path.exists());
+        std::fs::remove_file(link).unwrap();
+    }
+    let link = data.join("captures").join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&external, &link).unwrap();
+    assert!(clear_storage(
+        &data,
+        None,
+        "com.ideaplexa.voicetypr.dev",
+        temp.path(),
+        temp.path()
+    )
+    .is_err());
+    assert!(path.exists());
 }
 
 #[cfg(unix)]

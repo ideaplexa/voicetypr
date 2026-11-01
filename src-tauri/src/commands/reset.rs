@@ -1,10 +1,12 @@
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
+use crate::utils::reset_directory;
+
 // secure.dat is a sibling of these directories and must survive reset.
-fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str); 5] {
+fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str); 4] {
     [
         (app_data_dir.join("stores"), "Stores directory"),
         (app_data_dir.join("models"), "Downloaded models"),
@@ -16,8 +18,62 @@ fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str
             app_data_dir.join("parakeet-tdt-0.6b-v2"),
             "Parakeet model data",
         ),
-        (app_data_dir.join("recordings"), "Audio recordings"),
+        // Audio is cleared by storage::clear_audio, which protects live writers.
     ]
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_directories_to_clear(home: &Path, identifier: &str) -> [(PathBuf, &'static str); 3] {
+    [
+        (
+            home.join("Library/Logs").join(identifier),
+            "Application logs",
+        ),
+        (home.join("Library/WebKit").join(identifier), "WebKit data"),
+        (
+            home.join("Library/Caches/com.apple.nsurlsessiond/Downloads")
+                .join(identifier),
+            "Download cache",
+        ),
+    ]
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_directories_to_clear(local_data: &Path) -> [(PathBuf, &'static str); 1] {
+    [(local_data.join("logs"), "Application logs")]
+}
+
+fn clear_directory(
+    path: &Path,
+    item: &str,
+    identifier: &str,
+    home: &Path,
+    errors: &mut Vec<String>,
+    cleared_items: &mut Vec<String>,
+) {
+    match reset_directory::remove(path, identifier, home) {
+        Ok(true) => cleared_items.push(item.to_string()),
+        Ok(false) => {}
+        Err(error) => errors.push(format!("Failed to clear {item}: {error}")),
+    }
+}
+
+// No interactive elevation prompt: resetting this user's app permissions does
+// not need administrator privileges. Bound OS commands and kill on timeout.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+async fn reset_system_command(program: &str, args: &[&str]) -> Result<bool, String> {
+    let mut command = tokio::process::Command::new(program);
+    command
+        .args(args)
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    tokio::time::timeout(Duration::from_secs(10), command.status())
+        .await
+        .map_err(|_| "System reset command timed out".to_string())?
+        .map(|status| status.success())
+        .map_err(|_| "Could not run system reset command".to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -30,6 +86,17 @@ pub struct ResetResult {
 #[tauri::command]
 pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     log::info!("Starting app data reset");
+    let identifier = app.config().identifier.clone();
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|_| "Home directory unavailable")?;
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "App storage unavailable")?;
+    // Validate before clearing ANY stores or audio, not just before rm -r.
+    reset_directory::validate(&data, &identifier, &home)?;
 
     let mut errors = Vec::new();
     let mut cleared_items = Vec::new();
@@ -38,299 +105,115 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         Err(error) => errors.push(error),
     }
 
-    // Use the current bundle identifier so dev vs prod apps
-    // clear their own OS-level data independently.
-    let app_identifier = app.config().identifier.clone();
-
-    // 1. Clear all stores and delete the store files
-    // Clear settings store
-    if let Ok(store) = app.store("settings") {
-        store.clear();
-        if let Err(e) = store.save() {
-            errors.push(format!("Failed to save cleared settings store: {}", e));
-        } else {
-            cleared_items.push("Settings store".to_string());
-        }
-    }
-
-    // Clear transcriptions store
-    if let Ok(store) = app.store("transcriptions") {
-        store.clear();
-        crate::commands::history_index::note_reset(&app);
-        if let Err(e) = store.save() {
-            errors.push(format!(
-                "Failed to save cleared transcriptions store: {}",
-                e
-            ));
-        } else {
-            cleared_items.push("Transcriptions store".to_string());
-        }
-    }
-
-    // Delete user-data directories only; secure.dat is a sibling file.
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
-        for (path, item) in app_data_directories_to_clear(&app_data_dir) {
-            if path.exists() {
-                if let Err(e) = fs::remove_dir_all(&path) {
-                    errors.push(format!("Failed to delete {}: {}", item, e));
-                } else {
+    for (name, item) in [
+        ("settings", "Settings store"),
+        ("transcriptions", "Transcriptions store"),
+    ] {
+        match app.store(name) {
+            Ok(store) => {
+                store.clear();
+                if name == "transcriptions" {
+                    crate::commands::history_index::note_reset(&app);
+                }
+                if store.save().is_ok() {
                     cleared_items.push(item.to_string());
+                } else {
+                    errors.push(format!("Failed to save cleared {item}"));
                 }
             }
+            Err(_) => errors.push(format!("Failed to open {item}")),
         }
     }
 
-    // 2. Clear cache data (license validation cache)
-    if let Ok(cache_dir) = app.path().cache_dir() {
-        if cache_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&cache_dir) {
-                errors.push(format!("Failed to clear cache: {}", e));
-            } else {
-                cleared_items.push("Cache directory".to_string());
-            }
-        }
+    let mut directories = app_data_directories_to_clear(&data).to_vec();
+    // cache_dir() is the USER-WIDE cache root (AppData/Local on Windows).
+    // Only the identifier-namespaced app_cache_dir is ours to remove.
+    match app.path().app_cache_dir() {
+        Ok(cache) => directories.push((cache, "Cache directory")),
+        Err(_) => errors.push("App cache unavailable".to_string()),
+    }
+    #[cfg(target_os = "macos")]
+    directories.extend(macos_directories_to_clear(&home, &identifier));
+    #[cfg(target_os = "windows")]
+    match app.path().app_local_data_dir() {
+        Ok(local) => directories.extend(windows_directories_to_clear(&local)),
+        Err(_) => errors.push("App local storage unavailable".to_string()),
     }
 
-    // 3. Clear app preferences
+    // FluidAudio's shared model caches are NOT Voicetypr-owned: the sidecar
+    // uses Library/Application Support/FluidAudio/Models and Caches/FluidAudio
+    // without an app-specific subfolder. Preserve them (and other apps' models).
+    // Likewise preserve legacy <identifier>.savedState / <identifier>.WebView2
+    // sibling directories: no recursive deletion outside the exact namespace.
+    // Filesystem work is off the async executor.
+    let delete_identifier = identifier.clone();
+    let delete_home = home.clone();
+    let (delete_errors, deleted) = tauri::async_runtime::spawn_blocking(move || {
+        let mut errors = Vec::new();
+        let mut deleted = Vec::new();
+        for (path, item) in directories {
+            clear_directory(
+                &path,
+                item,
+                &delete_identifier,
+                &delete_home,
+                &mut errors,
+                &mut deleted,
+            );
+        }
+        (errors, deleted)
+    })
+    .await
+    .map_err(|_| "Could not finish app storage reset")?;
+    errors.extend(delete_errors);
+    cleared_items.extend(deleted);
+
     #[cfg(target_os = "macos")]
     {
-        // Clear FluidAudio cached models (for Swift Parakeet sidecar)
-        if let Ok(home_dir) = app.path().home_dir() {
-            let fluid_audio_paths = vec![
-                home_dir.join("Library/Application Support/FluidAudio"),
-                home_dir.join("Library/Caches/FluidAudio"),
-            ];
-
-            for fluid_path in fluid_audio_paths {
-                if fluid_path.exists() {
-                    if let Err(e) = fs::remove_dir_all(&fluid_path) {
-                        errors.push(format!("Failed to delete FluidAudio cache: {}", e));
-                    } else {
-                        cleared_items.push("FluidAudio model cache".to_string());
-                    }
-                }
-            }
+        // `defaults delete` updates cfprefsd itself; do not kill the user's
+        // preferences daemon for every app.
+        match reset_system_command("/usr/bin/defaults", &["delete", &identifier]).await {
+            Ok(true) => cleared_items.push("System preferences".to_string()),
+            Ok(false) => {} // No defaults domain is normal.
+            Err(error) => errors.push(error),
         }
-
-        // macOS defaults system
-        match std::process::Command::new("defaults")
-            .arg("delete")
-            .arg(&app_identifier)
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    cleared_items.push("System preferences".to_string());
-                }
-            }
-            Err(_) => {
-                // No defaults to clear is not an error
-            }
-        }
-
-        // Also remove the preferences plist file
-        if let Ok(home_dir) = app.path().home_dir() {
-            let prefs_path = home_dir
-                .join("Library")
-                .join("Preferences")
-                .join(format!("{}.plist", app_identifier));
-            if prefs_path.exists() {
-                if let Err(e) = fs::remove_file(&prefs_path) {
-                    errors.push(format!("Failed to remove preferences file: {}", e));
-                } else {
-                    cleared_items.push("Preferences plist".to_string());
-                }
-            }
+        match reset_system_command("/usr/bin/tccutil", &["reset", "All", &identifier]).await {
+            Ok(true) => cleared_items.push("System permissions".to_string()),
+            Ok(false) => errors.push("Could not reset system permissions".to_string()),
+            Err(error) => errors.push(error),
         }
     }
-
     #[cfg(target_os = "windows")]
     {
-        // Windows Registry cleanup
-        match std::process::Command::new("reg")
-            .args([
-                "delete",
-                &format!("HKCU\\\\Software\\\\{}", app_identifier),
-                "/f",
-            ])
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    cleared_items.push("Registry settings".to_string());
-                }
-            }
-            Err(_) => {
-                // Registry key might not exist
-            }
+        let key = format!("HKCU\\Software\\{identifier}");
+        match reset_system_command("reg", &["delete", &key, "/f"]).await {
+            Ok(true) => cleared_items.push("Registry settings".to_string()),
+            Ok(false) => {} // A missing key is normal.
+            Err(error) => errors.push(error),
         }
     }
 
-    // 4. Clear additional system data
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(home_dir) = app.path().home_dir() {
-            // Clear saved application state (window positions, etc)
-            let saved_state_path = home_dir
-                .join("Library")
-                .join("Saved Application State")
-                .join(format!("{}.savedState", app_identifier));
-            if saved_state_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&saved_state_path) {
-                    errors.push(format!("Failed to clear saved state: {}", e));
-                } else {
-                    cleared_items.push("Window state".to_string());
-                }
-            }
-
-            // Clear any logs
-            let logs_path = home_dir.join("Library").join("Logs").join(&app_identifier);
-            if logs_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&logs_path) {
-                    errors.push(format!("Failed to clear logs: {}", e));
-                } else {
-                    cleared_items.push("Application logs".to_string());
-                }
-            }
-
-            // Clear WebKit data if any
-            let webkit_path = home_dir
-                .join("Library")
-                .join("WebKit")
-                .join(&app_identifier);
-            if webkit_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&webkit_path) {
-                    errors.push(format!("Failed to clear WebKit data: {}", e));
-                } else {
-                    cleared_items.push("WebKit data".to_string());
-                }
-            }
-
-            // Clear NSURLSession downloads cache
-            let nsurlsession_path = home_dir
-                .join("Library")
-                .join("Caches")
-                .join("com.apple.nsurlsessiond")
-                .join("Downloads")
-                .join(&app_identifier);
-            if nsurlsession_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&nsurlsession_path) {
-                    errors.push(format!("Failed to clear download cache: {}", e));
-                } else {
-                    cleared_items.push("Download cache".to_string());
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // Clear Windows app data
-        if let Ok(local_data_dir) = app.path().app_local_data_dir() {
-            // Clear logs from AppData\Local
-            let logs_path = local_data_dir.join("logs");
-            if logs_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&logs_path) {
-                    errors.push(format!("Failed to clear logs: {}", e));
-                } else {
-                    cleared_items.push("Application logs".to_string());
-                }
-            }
-        }
-
-        // Clear Windows WebView2 cache
-        if let Ok(temp_dir) = app.path().temp_dir() {
-            let webview_cache = temp_dir.join(format!("{}.WebView2", app_identifier));
-            if webview_cache.exists() {
-                if let Err(e) = fs::remove_dir_all(&webview_cache) {
-                    errors.push(format!("Failed to clear WebView2 cache: {}", e));
-                } else {
-                    cleared_items.push("WebView2 cache".to_string());
-                }
-            }
-        }
-    }
-
-    // 5. Reset system permissions
-    #[cfg(target_os = "macos")]
-    {
-        let reset_script = format!(
-            "do shell script \"tccutil reset All {}\" with administrator privileges",
-            app_identifier
-        );
-
-        match tokio::process::Command::new("osascript")
-            .arg("-e")
-            .arg(reset_script)
-            .output()
-            .await
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    cleared_items.push("System permissions".to_string());
-                } else {
-                    // User might have cancelled - not a critical error
-                    log::info!("User cancelled permission reset");
-                }
-            }
-            Err(e) => {
-                errors.push(format!("Could not reset permissions: {}", e));
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // Windows doesn't have centralized permissions like macOS
-        cleared_items.push("System permissions (N/A on Windows)".to_string());
-    }
-
-    // 6. Clear any runtime state
     use tauri::async_runtime::RwLock as AsyncRwLock;
     let whisper_state = app.state::<AsyncRwLock<crate::whisper::manager::WhisperManager>>();
-    let mut whisper_manager = whisper_state.write().await;
-    whisper_manager.clear_all();
-    drop(whisper_manager);
-    cleared_items.push("Runtime state".to_string());
+    match tokio::time::timeout(Duration::from_secs(10), whisper_state.write()).await {
+        Ok(mut manager) => {
+            manager.clear_all();
+            cleared_items.push("Runtime state".to_string());
+        }
+        Err(_) => errors.push("Runtime state reset timed out".to_string()),
+    }
 
-    // 6.5. Clear in-memory API key cache; persisted keys stay in secure storage.
-    if let Err(e) = crate::commands::ai::clear_all_api_key_cache() {
-        errors.push(format!("Failed to clear API key cache: {}", e));
+    if crate::commands::ai::clear_all_api_key_cache().is_err() {
+        errors.push("Failed to clear API key cache".to_string());
     } else {
         cleared_items.push("AI API key cache".to_string());
     }
-
-    // 7. Refresh preferences daemon
-    #[cfg(target_os = "macos")]
-    {
-        match std::process::Command::new("killall")
-            .arg("cfprefsd")
-            .output()
-        {
-            Ok(_) => {
-                log::info!("Refreshed cfprefsd");
-            }
-            Err(_) => {
-                // Not critical
-            }
-        }
+    if app.emit("app-reset", ()).is_err() {
+        errors.push("Failed to emit reset event".to_string());
     }
-
-    // 8. Emit reset event to frontend
-    if let Err(e) = app.emit("app-reset", ()) {
-        errors.push(format!("Failed to emit reset event: {}", e));
-    }
-
-    let success = errors.is_empty();
-
-    if success {
-        log::info!("App data reset completed successfully");
-    } else {
-        log::warn!("App data reset completed with {} errors", errors.len());
-    }
-
+    log::info!("App data reset completed with {} errors", errors.len());
     Ok(ResetResult {
-        success,
+        success: errors.is_empty(),
         errors,
         cleared_items,
     })
@@ -338,22 +221,47 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::app_data_directories_to_clear;
-    use std::path::Path;
+    use super::*;
 
     #[test]
-    fn reset_deletion_plan_preserves_secure_storage_and_license() {
-        let app_data_dir = Path::new("/tmp/voicetypr-reset-test");
-        let deletions = app_data_directories_to_clear(app_data_dir);
-
-        assert_eq!(deletions.len(), 5);
-        for (path, item) in deletions {
-            assert!(path.starts_with(app_data_dir));
-            assert_ne!(path, app_data_dir);
-            assert!(!app_data_dir.join("secure.dat").starts_with(&path));
-            assert!(!item.to_ascii_lowercase().contains("license"));
-            assert!(!item.to_ascii_lowercase().contains("secure"));
-            assert!(!item.to_ascii_lowercase().contains("api key"));
+    fn reset_deletion_plan_preserves_secure_storage_and_shared_caches() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        for identifier in ["com.ideaplexa.voicetypr", "com.ideaplexa.voicetypr.dev"] {
+            let data = home.join("Library/Application Support").join(identifier);
+            let mut deletions = app_data_directories_to_clear(&data).to_vec();
+            assert_eq!(deletions.len(), 4);
+            deletions.push((
+                home.join("Library/Caches").join(identifier),
+                "Cache directory",
+            ));
+            deletions.extend(macos_directories_to_clear(home, identifier));
+            let local = home.join("AppData/Local").join(identifier);
+            deletions.extend(windows_directories_to_clear(&local));
+            for (path, _) in deletions {
+                assert!(reset_directory::validate(&path, identifier, home).is_ok());
+                for preserved in [
+                    data.join("secure.dat"),
+                    data.join("recordings"),
+                    home.join("Library/Application Support/FluidAudio"),
+                    home.join("Library/Caches/FluidAudio"),
+                    home.join("Library/Caches/other-app"),
+                    home.join("AppData/Local/other-app"),
+                ] {
+                    assert!(!preserved.starts_with(&path));
+                }
+            }
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn system_reset_commands_have_no_interactive_stdin() {
+        assert!(reset_system_command("/usr/bin/true", &[]).await.unwrap());
+        assert!(!reset_system_command("/usr/bin/false", &[]).await.unwrap());
+        assert_eq!(
+            reset_system_command("/bin/sleep", &["30"]).await,
+            Err("System reset command timed out".into())
+        );
     }
 }
