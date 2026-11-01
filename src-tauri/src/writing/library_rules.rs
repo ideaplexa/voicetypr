@@ -369,7 +369,7 @@ pub(crate) struct LibraryRulesResult {
 }
 
 pub(crate) fn sanitize_transcript(text: &str) -> Cow<'_, str> {
-    // A recognizer can echo the style hint it was prompted with; it is never text.
+    // Only strip the exact standalone leading prompt sentence, not hint-like prose.
     let trimmed = super::vocabulary::strip_whisper_style_hint(text.trim());
     let needs_cleanup = trimmed.len() != text.len()
         || trimmed
@@ -1006,6 +1006,24 @@ mod tests {
         let untouched = sanitize_transcript(semantic_text);
         assert!(matches!(untouched, Cow::Borrowed(_)));
         assert_eq!(untouched.as_ref(), semantic_text);
+    }
+
+    #[test]
+    fn beta5_sanitize_preserves_hint_like_prose_and_attached_prefixes() {
+        for sample in [
+            "Hello, this is a well-punctuated transcript.txt file.",
+            "Hello, this is a well-punctuated transcript... or so I thought.",
+            "She said Hello, this is a well-punctuated transcript. Then she left.",
+            "Please write this in a formal tone for the client.",
+            "The phrase well-punctuated transcript belongs in the notes.",
+            "Keep this sentence. Hello, this is a well-punctuated transcript.",
+        ] {
+            assert_eq!(
+                sanitize_transcript(sample).as_ref(),
+                sample,
+                "sample: {sample}"
+            );
+        }
     }
 
     #[test]

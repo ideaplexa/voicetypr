@@ -185,11 +185,18 @@ pub fn with_whisper_style_hint(
 }
 
 /// Removes a leading [`WHISPER_STYLE_HINT`] (any case) that a recognizer echoed
-/// back. Returns `text` untouched when it does not start with the hint.
+/// back as a standalone sentence. An attached suffix (e.g. "transcript.txt")
+/// or a mention elsewhere in prose is not an echo.
 pub fn strip_whisper_style_hint(text: &str) -> &str {
     let trimmed = text.trim_start();
     match trimmed.get(..WHISPER_STYLE_HINT.len()) {
-        Some(head) if head.eq_ignore_ascii_case(WHISPER_STYLE_HINT) => {
+        Some(head)
+            if head.eq_ignore_ascii_case(WHISPER_STYLE_HINT)
+                && trimmed[WHISPER_STYLE_HINT.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(char::is_whitespace) =>
+        {
             trimmed[WHISPER_STYLE_HINT.len()..].trim_start()
         }
         _ => text,

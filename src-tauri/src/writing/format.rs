@@ -26,8 +26,10 @@ pub const PARAGRAPH_MIN_WORDS_BETWEEN_BREAKS: usize = 40;
 pub const PARAGRAPH_MIN_TAIL_WORDS: usize = 6;
 
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm"];
+// A repeated "is" can be a double copula ("what it is is ..."), not a stutter.
+// Without reliable grammatical context, keep both rather than delete speech.
 const STUTTER_REPEATS: &[&str] = &[
-    "the", "a", "an", "to", "and", "i", "we", "you", "it", "is", "of", "in",
+    "the", "a", "an", "to", "and", "i", "we", "you", "it", "of", "in",
 ];
 /// Words whose trailing period does not end a sentence.
 const ABBREVIATIONS: &[&str] = &[
@@ -395,6 +397,16 @@ fn split_token(token: &str) -> (&str, &str, &str) {
     (&token[..first.0], &token[first.0..last], &token[last..])
 }
 
+/// Sentence punctuation/quotes may surround speech; flag/path/identifier
+/// attachments must not make their inner core look like a standalone word.
+fn has_prose_boundaries(lead: &str, trail: &str) -> bool {
+    lead.chars().all(|c| OPENING_PUNCTUATION.contains(&c))
+        && trail.chars().all(|c| {
+            CLOSING_PUNCTUATION.contains(&c)
+                || matches!(c, '.' | ',' | '!' | '?' | ';' | ':' | '…' | '—' | '–')
+        })
+}
+
 fn is_wordlike(core: &str) -> bool {
     !core.is_empty()
         && core
@@ -450,7 +462,7 @@ fn at_sentence_start(out: &[Token], line_starts_sentence: bool) -> bool {
 /// Upper-cases the first letter of `token` when that is safe. Returns whether it changed.
 fn capitalize_token(token: &mut String, protected_terms: &[String]) -> bool {
     let (lead, core, trail) = split_token(token);
-    if !lead.chars().all(|c| OPENING_PUNCTUATION.contains(&c)) || !is_wordlike(core) {
+    if !has_prose_boundaries(lead, trail) || !is_wordlike(core) {
         return false;
     }
     let mut chars = core.chars();
@@ -475,7 +487,7 @@ fn capitalize_token(token: &mut String, protected_terms: &[String]) -> bool {
 /// "i", "i'm", "i've", "i'll", "i'd" → "I...". Returns whether it changed.
 fn capitalize_standalone_i(token: &mut String) -> bool {
     let (lead, core, trail) = split_token(token);
-    if lead.contains(['(', '[']) {
+    if !has_prose_boundaries(lead, trail) || lead.contains(['(', '[']) {
         return false;
     }
     let lowered = core.replace('’', "'");
@@ -507,8 +519,15 @@ fn capitalize_tokens(
 
 // --- fillers and stutters ---------------------------------------------------
 
-fn is_filler(core: &str) -> bool {
-    FILLERS.contains(&core.to_lowercase().as_str())
+fn is_filler(core: &str, trail: &str, sentence_start: bool) -> bool {
+    if FILLERS.contains(&core) {
+        return true;
+    }
+    // ASR often sentence-cases a punctuated hesitation ("Um,", "Uh.").
+    // Never fold all caps (ER/UM), and keep even "Er," because it may be a name.
+    sentence_start
+        && trail.starts_with([',', '.', '!', '?'])
+        && matches!(core, "Um" | "Umm" | "Uh" | "Uhh" | "Erm" | "Hmm" | "Mm")
 }
 
 fn contains_digit(text: &str) -> bool {
@@ -553,7 +572,8 @@ fn strip_fillers(
         let next = tokens.get(index + 1);
         let (lead, core, trail) = split_token(&token.text);
 
-        let removable_filler = is_filler(core)
+        let removable_filler = has_prose_boundaries(lead, trail)
+            && is_filler(core, trail, at_sentence_start(&out, starts_sentence))
             && !is_protected_word(core, protected_terms)
             && !(core.eq_ignore_ascii_case("mm")
                 && (out.last().is_some_and(|prev| contains_digit(&prev.text))
@@ -905,6 +925,25 @@ mod tests {
     // --- standalone i ---
 
     #[test]
+    fn beta5_pronoun_casing_preserves_flags_and_token_attachments() {
+        for sample in [
+            "Use grep -i and /i and \\i.",
+            "Keep _i and/i and\\i and.i and_i.",
+            ".i is a filename.",
+            "Keep i/ i\\ i_ i- and i.txt.",
+            "-i is a flag.",
+            "Done. /i is a path.",
+            "i/ is a path.",
+        ] {
+            assert_eq!(fmt(sample, &en()), sample, "sample: {sample}");
+        }
+        assert_eq!(
+            fmt("so i, \"i\" and i'm sure i’ll go.", &en()),
+            "So I, \"I\" and I'm sure I’ll go."
+        );
+    }
+
+    #[test]
     fn standalone_i_is_capitalized_in_english() {
         assert_eq!(
             fmt("so i think i'm right and i've seen i'll go i'd say.", &en()),
@@ -947,6 +986,40 @@ mod tests {
     // --- fillers ---
 
     #[test]
+    fn beta5_fillers_preserve_acronyms_names_and_attached_tokens() {
+        for sample in [
+            "They took him to the ER.",
+            "ER staff called Er today.",
+            "Er, the engineer, called.",
+            "Keep UM and UH as written.",
+            "Use /er -er _er er/ er_ er- and er.txt.",
+        ] {
+            assert_eq!(fmt(sample, &fillers()), sample, "sample: {sample}");
+        }
+        assert_eq!(fmt("we er, went home.", &fillers()), "we went home.");
+        assert_eq!(fmt("er, we went home.", &fillers()), "We went home.");
+    }
+
+    #[test]
+    fn beta5_pipeline_formatter_preserves_real_words() {
+        let stage = FormatStageSettings {
+            paragraphs: false,
+            remove_fillers: true,
+        };
+        for (input, expected) in [
+            ("They took him to the ER.", "They took him to the ER."),
+            ("What it is is a problem.", "What it is is a problem."),
+            ("Use grep -i and /i.", "Use grep -i and /i."),
+            ("um, i saw the the ER.", "I saw the ER."),
+        ] {
+            let result = transcription(input);
+            let output = format_for_transcription(input, &result, Some("en"), stage, &[])
+                .unwrap_or_else(|| input.to_string());
+            assert_eq!(output, expected, "sample: {input}");
+        }
+    }
+
+    #[test]
     fn removes_each_filler_word() {
         for filler in ["um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm"] {
             let input = format!("we {filler} went home.");
@@ -955,8 +1028,8 @@ mod tests {
     }
 
     #[test]
-    fn filler_removal_is_case_insensitive_and_whole_word() {
-        assert_eq!(fmt("we UM went. Uh, ok.", &fillers()), "we went. Ok.");
+    fn filler_removal_preserves_all_caps_and_matches_whole_words() {
+        assert_eq!(fmt("we UM went. Uh, ok.", &fillers()), "we UM went. Ok.");
         assert_eq!(
             fmt("the umbrella and the error.", &fillers()),
             "the umbrella and the error."
@@ -1035,6 +1108,24 @@ mod tests {
     }
 
     // --- stutters ---
+
+    #[test]
+    fn beta5_stutter_cleanup_preserves_double_copulas() {
+        for sample in [
+            "What it is is a problem.",
+            "The thing is is that we need help.",
+            "What the issue is is unclear.",
+            "My point is is that it works.",
+            "What it is is the the problem.",
+        ] {
+            let expected = sample.replace("the the", "the");
+            assert_eq!(fmt(sample, &fillers()), expected, "sample: {sample}");
+        }
+        assert_eq!(
+            fmt("so the the plan works.", &fillers()),
+            "so the plan works."
+        );
+    }
 
     #[test]
     fn removes_cut_off_fragments() {
