@@ -1,11 +1,12 @@
 //! Opaque app identity keys. Paths remain exclusively in this in-memory registry.
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, sync::Mutex, time::SystemTime};
 use tauri::{Manager, WebviewWindow};
 #[derive(Default)]
 pub struct IconCache(Mutex<HashMap<String, IconEntry>>);
 struct IconEntry {
     path: String,
+    modified: Option<SystemTime>,
     image: Option<String>,
 }
 
@@ -34,6 +35,7 @@ pub fn register(app: &tauri::AppHandle, path: &std::path::Path) -> Option<String
     }
     let entry = entries.entry(key.clone()).or_insert_with(|| IconEntry {
         path: path.clone(),
+        modified: None,
         image: None,
     });
     entry.update_path(path);
@@ -43,11 +45,18 @@ impl IconEntry {
     fn update_path(&mut self, path: String) {
         if self.path != path {
             self.path = path;
+            self.modified = None;
             self.image = None;
         }
     }
-    fn cache_image(&mut self, path: &str, image: Option<String>) {
-        if self.path == path {
+    fn update_modified(&mut self, modified: Option<SystemTime>) {
+        if self.modified != modified {
+            self.modified = modified;
+            self.image = None;
+        }
+    }
+    fn cache_image(&mut self, path: &str, modified: Option<SystemTime>, image: Option<String>) {
+        if self.path == path && self.modified == modified {
             self.image = image;
         }
     }
@@ -63,11 +72,29 @@ pub async fn pill_app_icon(window: WebviewWindow, icon_key: String) -> Option<St
         let cache = app.state::<IconCache>();
         let entries = cache.0.lock().unwrap();
         let entry = entries.get(&icon_key)?;
+        entry.path.clone()
+    };
+    let lookup_path = path.clone();
+    let modified = tauri::async_runtime::spawn_blocking(move || {
+        std::fs::metadata(lookup_path)
+            .and_then(|m| m.modified())
+            .ok()
+    })
+    .await
+    .ok()
+    .flatten();
+    {
+        let cache = app.state::<IconCache>();
+        let mut entries = cache.0.lock().unwrap();
+        let entry = entries.get_mut(&icon_key)?;
+        if entry.path != path {
+            return None;
+        }
+        entry.update_modified(modified);
         if let Some(image) = &entry.image {
             return Some(image.clone());
         }
-        entry.path.clone()
-    };
+    }
     #[cfg(target_os = "macos")]
     let image = crate::commands::utils::get_application_icon(app.clone(), path.clone())
         .await
@@ -92,7 +119,7 @@ pub async fn pill_app_icon(window: WebviewWindow, icon_key: String) -> Option<St
         .unwrap()
         .get_mut(&icon_key)
     {
-        entry.cache_image(&path, image.clone());
+        entry.cache_image(&path, modified, image.clone());
     }
     image
 }
@@ -192,16 +219,34 @@ mod tests {
     fn failed_lookup_can_retry_and_reregistered_path_invalidates_image() {
         let mut entry = IconEntry {
             path: "/old".into(),
+            modified: None,
             image: None,
         };
-        entry.cache_image("/old", None);
+        entry.cache_image("/old", None, None);
         assert!(entry.image.is_none());
-        entry.cache_image("/old", Some("image".into()));
+        entry.cache_image("/old", None, Some("image".into()));
         assert_eq!(entry.image.as_deref(), Some("image"));
         entry.update_path("/new".into());
         assert_eq!(entry.path, "/new");
         assert!(entry.image.is_none());
-        entry.cache_image("/old", Some("stale".into()));
+        entry.cache_image("/old", None, Some("stale".into()));
         assert!(entry.image.is_none());
+    }
+
+    #[test]
+    fn modified_application_invalidates_image_and_rejects_stale_encoding() {
+        let mut entry = IconEntry {
+            path: "/app".into(),
+            modified: None,
+            image: Some("old".into()),
+        };
+        let updated = Some(SystemTime::now());
+        entry.update_modified(updated);
+        assert!(entry.image.is_none());
+        entry.cache_image("/app", None, Some("stale".into()));
+        assert!(entry.image.is_none());
+        entry.cache_image("/app", updated, Some("current".into()));
+        entry.update_modified(updated);
+        assert_eq!(entry.image.as_deref(), Some("current"));
     }
 }

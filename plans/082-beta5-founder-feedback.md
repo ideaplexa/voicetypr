@@ -17,7 +17,8 @@ Done on the branch (Codex-reviewed unless noted):
 Left:
 - Founder: pick the Transcribing and Polishing waiting looks; OK to quit Voicetypr for the real-app A/B (hide vs alpha) and perf/screenshot pass.
 - Design: Dictionary redesign and the border/density pass (Pencil, founder approval).
-- Perf: F8 icon encoding off the main thread; the +2.4 MB/take memory investigation.
+- Perf: F8 implemented (PNG/base64 workers, bounded path/mtime cache; awaiting review,
+  real-app frame timing **NEEDS-SMOKE**); the +2.4 MB/take memory investigation remains.
 - Voice-processing input experiment on real speech.
 - Windows installer: done in CI (app-local CRT + vcomp140, no `vc_redist`/VulkanRT, install check); fresh-VM test stays NEEDS-SMOKE (see B.2 status).
 - Leading space from the cursor context (needs real-app tests).
@@ -458,6 +459,15 @@ Ranked:
    - This goes with section G (after the A fix round).
 7. **History reads all keys and sorts them on every call.** Keep a key index and count in managed state, and load in `spawn_blocking`.
 8. **Icon PNG encoding** runs on the main thread. Add a disk cache, or encode off the main thread.
+   - Slice 6: macOS now does only AppKit lookup/rasterization and a bounded
+     16 KiB RGBA copy on the main thread. `spawn_blocking` handles filesystem
+     validation, PNG/base64 encoding and a 128-entry in-memory path/mtime cache,
+     shared by History and the island/Insights icon route. The existing bounded
+     island identity cache now invalidates on app/exe mtime changes too.
+     Windows extraction/encoding already used `spawn_blocking`.
+   - Content-free debug timings separate raster and encode microseconds on misses.
+     No before/after UI measurement was run: **NEEDS-SMOKE** for real-app icon
+     correctness (alpha/orientation) and frame timing on both OSes.
 9. **History rows:**
    - memoised rows with stable callbacks
    - format time once
