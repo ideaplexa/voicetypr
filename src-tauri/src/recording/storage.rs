@@ -367,12 +367,12 @@ pub async fn clear_audio(app: &AppHandle) -> Result<(), String> {
         .map_err(|_| "Audio storage unavailable")?;
     let legacy = app.path().temp_dir().ok().map(|p| p.join("kept-dictation"));
     let identifier = app.config().identifier.clone();
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|_| "Home directory unavailable")?;
+    let base = data
+        .parent()
+        .ok_or("Audio storage unavailable")?
+        .to_path_buf();
     tauri::async_runtime::spawn_blocking(move || {
-        clear_storage(&data, legacy, &identifier, &home, &std::env::temp_dir())
+        clear_storage(&data, legacy, &identifier, &base, &std::env::temp_dir())
     })
     .await
     .map_err(|_| "Could not clear audio storage")?
@@ -382,21 +382,22 @@ fn clear_storage(
     data: &Path,
     legacy: Option<PathBuf>,
     identifier: &str,
-    home: &Path,
+    base: &Path,
     temp: &Path,
 ) -> Result<(), String> {
     use crate::utils::reset_directory;
     // Validate even the nonrecursive sweep's roots before it can follow an
     // app-data alias into unrelated storage.
     for name in ["recordings", "recovery", "captures", "cli-recordings"] {
-        reset_directory::validate(&data.join(name), identifier, home)?;
+        reset_directory::validate(&data.join(name), identifier, base)
+            .map_err(|_| "Could not clear audio storage")?;
     }
     let mut failed = super::kept::with_protected_paths(|protected| {
         super::file_jobs::sweep(data, temp, protected, SystemTime::now(), true).is_err()
     });
     let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
     for dir in [data.join("recordings"), data.join("recovery")] {
-        failed |= reset_directory::remove(&dir, identifier, home).is_err();
+        failed |= reset_directory::remove(&dir, identifier, base).is_err();
     }
     // Legacy OS temp is not identifier-scoped (and dev/prod share it).
     // Never recursively delete it; remove only recognized recovery files.
@@ -408,7 +409,7 @@ fn clear_storage(
             for entry in dirs {
                 match entry {
                     Ok(entry) if !active.contains_key(&entry.path()) => {
-                        failed |= reset_directory::validate(&entry.path(), identifier, home)
+                        failed |= reset_directory::validate(&entry.path(), identifier, base)
                             .is_err()
                             || remove_capture_files(&entry.path()).is_err();
                     }

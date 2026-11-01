@@ -47,11 +47,11 @@ fn clear_directory(
     path: &Path,
     item: &str,
     identifier: &str,
-    home: &Path,
+    base: &Path,
     errors: &mut Vec<String>,
     cleared_items: &mut Vec<String>,
 ) {
-    match reset_directory::remove(path, identifier, home) {
+    match reset_directory::remove(path, identifier, base) {
         Ok(true) => cleared_items.push(item.to_string()),
         Ok(false) => {}
         Err(error) => errors.push(format!("Failed to clear {item}: {error}")),
@@ -87,6 +87,7 @@ pub struct ResetResult {
 pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     log::info!("Starting app data reset");
     let identifier = app.config().identifier.clone();
+    #[cfg(target_os = "macos")]
     let home = app
         .path()
         .home_dir()
@@ -95,8 +96,56 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         .path()
         .app_data_dir()
         .map_err(|_| "App storage unavailable")?;
-    // Validate before clearing ANY stores or audio, not just before rm -r.
-    reset_directory::validate(&data, &identifier, &home)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| "App cache unavailable")?;
+    let data_base = data
+        .parent()
+        .ok_or("App storage unavailable")?
+        .to_path_buf();
+    let cache_base = cache.parent().ok_or("App cache unavailable")?.to_path_buf();
+    let mut roots = vec![data.clone(), cache.clone()];
+    let mut directories: Vec<_> = app_data_directories_to_clear(&data)
+        .into_iter()
+        .map(|(path, item)| (path, item, data_base.clone()))
+        .collect();
+    directories.push((cache, "Cache directory", cache_base));
+    #[cfg(target_os = "macos")]
+    for (path, item) in macos_directories_to_clear(&home, &identifier) {
+        let base = path
+            .parent()
+            .ok_or("App storage unavailable")?
+            .to_path_buf();
+        roots.push(path.clone());
+        directories.push((path, item, base));
+    }
+    #[cfg(target_os = "windows")]
+    let shared_roles = {
+        let local = app
+            .path()
+            .app_local_data_dir()
+            .map_err(|_| "App local storage unavailable")?;
+        let base = local.parent().ok_or("App local storage unavailable")?;
+        for (path, item) in windows_directories_to_clear(&local) {
+            directories.push((path, item, base.to_path_buf()));
+        }
+        roots.push(local);
+        // Tauri/dirs: cache_dir and data_local_dir both use LocalAppData;
+        // app_data_dir uses RoamingAppData. Only cache/local may be identical.
+        vec![(1, roots.len() - 1)]
+    };
+    #[cfg(not(target_os = "windows"))]
+    let shared_roles = Vec::new();
+    // Validate the data owner AND every role's canonical footprint before
+    // clearing ANY stores/audio. Trusted base aliases are allowed, but a cache
+    // base aliased into data must not cause secure.dat to be deleted.
+    let check_identifier = identifier.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        reset_directory::validate_roles(&roots, &check_identifier, &shared_roles)
+    })
+    .await
+    .map_err(|_| "Could not validate app storage")??;
 
     let mut errors = Vec::new();
     let mut cleared_items = Vec::new();
@@ -125,21 +174,6 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
     }
 
-    let mut directories = app_data_directories_to_clear(&data).to_vec();
-    // cache_dir() is the USER-WIDE cache root (AppData/Local on Windows).
-    // Only the identifier-namespaced app_cache_dir is ours to remove.
-    match app.path().app_cache_dir() {
-        Ok(cache) => directories.push((cache, "Cache directory")),
-        Err(_) => errors.push("App cache unavailable".to_string()),
-    }
-    #[cfg(target_os = "macos")]
-    directories.extend(macos_directories_to_clear(&home, &identifier));
-    #[cfg(target_os = "windows")]
-    match app.path().app_local_data_dir() {
-        Ok(local) => directories.extend(windows_directories_to_clear(&local)),
-        Err(_) => errors.push("App local storage unavailable".to_string()),
-    }
-
     // FluidAudio's shared model caches are NOT Voicetypr-owned: the sidecar
     // uses Library/Application Support/FluidAudio/Models and Caches/FluidAudio
     // without an app-specific subfolder. Preserve them (and other apps' models).
@@ -147,16 +181,15 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     // sibling directories: no recursive deletion outside the exact namespace.
     // Filesystem work is off the async executor.
     let delete_identifier = identifier.clone();
-    let delete_home = home.clone();
     let (delete_errors, deleted) = tauri::async_runtime::spawn_blocking(move || {
         let mut errors = Vec::new();
         let mut deleted = Vec::new();
-        for (path, item) in directories {
+        for (path, item, base) in directories {
             clear_directory(
                 &path,
                 item,
                 &delete_identifier,
-                &delete_home,
+                &base,
                 &mut errors,
                 &mut deleted,
             );
@@ -239,7 +272,13 @@ mod tests {
             let local = home.join("AppData/Local").join(identifier);
             deletions.extend(windows_directories_to_clear(&local));
             for (path, _) in deletions {
-                assert!(reset_directory::validate(&path, identifier, home).is_ok());
+                let root = path
+                    .ancestors()
+                    .find(|p| p.file_name().is_some_and(|name| name == identifier))
+                    .unwrap();
+                assert!(
+                    reset_directory::validate(&path, identifier, root.parent().unwrap()).is_ok()
+                );
                 for preserved in [
                     data.join("secure.dat"),
                     data.join("recordings"),
