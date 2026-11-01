@@ -14,10 +14,10 @@
     DetailPrint "Installing Visual C++ runtime files..."
     Push $R0
     Push $R1
-    FindFirst $R0 $R1 "$INSTDIR\resources\windows\resources\vcredist\*.dll"
+    FindFirst $R0 $R1 "$INSTDIR\windows\resources\vcredist\*.dll"
     vcrt_copy_loop:
         StrCmp $R1 "" vcrt_copy_done
-        CopyFiles /SILENT "$INSTDIR\resources\windows\resources\vcredist\$R1" "$INSTDIR\$R1"
+        CopyFiles /SILENT "$INSTDIR\windows\resources\vcredist\$R1" "$INSTDIR\$R1"
         FindNext $R0 $R1
         Goto vcrt_copy_loop
     vcrt_copy_done:
@@ -40,12 +40,12 @@
 !macro InstallPdbSymbols
     ; Place debug symbols (voicetypr.pdb) beside voicetypr.exe so the PostHog
     ; backtrace integration (dbghelp) resolves function names + line numbers at
-    ; crash time. The bundler installs it under resources/; copy it next to the
+    ; crash time. The bundler installs it under windows/resources/; copy it next to the
     ; exe where dbghelp's default per-module search looks. Best-effort: symbols
     ; are a diagnostics aid and never required for the app to run.
-    ${If} ${FileExists} "$INSTDIR\resources\windows\resources\voicetypr.pdb"
+    ${If} ${FileExists} "$INSTDIR\windows\resources\voicetypr.pdb"
         DetailPrint "Installing debug symbols (voicetypr.pdb)..."
-        CopyFiles /SILENT "$INSTDIR\resources\windows\resources\voicetypr.pdb" "$INSTDIR\voicetypr.pdb"
+        CopyFiles /SILENT "$INSTDIR\windows\resources\voicetypr.pdb" "$INSTDIR\voicetypr.pdb"
     ${Else}
         DetailPrint "voicetypr.pdb not bundled, skipping debug symbol install"
     ${EndIf}
@@ -66,7 +66,7 @@
     ; bundled folder (still present at this point) so the list never drifts.
     Push $R0
     Push $R1
-    FindFirst $R0 $R1 "$INSTDIR\resources\windows\resources\vcredist\*.dll"
+    FindFirst $R0 $R1 "$INSTDIR\windows\resources\vcredist\*.dll"
     vcrt_remove_loop:
         StrCmp $R1 "" vcrt_remove_done
         Delete "$INSTDIR\$R1"

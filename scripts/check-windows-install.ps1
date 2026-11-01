@@ -156,7 +156,7 @@ try {
     $sidecars = @(Get-ChildItem -LiteralPath $InstallDir -File -Filter 'whisper-vulkan-sidecar*.exe')
     if ($sidecars.Count -eq 0) { throw 'The Vulkan sidecar exe was not installed.' }
 
-    $bundledDir = Join-Path $InstallDir 'resources\windows\resources\vcredist'
+    $bundledDir = Join-Path $InstallDir 'windows\resources\vcredist'
     $staged = @(Get-ChildItem -LiteralPath $bundledDir -File -Filter '*.dll' -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
     if ($staged.Count -eq 0) { throw "No bundled runtime DLLs found in $bundledDir." }
     foreach ($name in $staged) {

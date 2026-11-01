@@ -125,6 +125,29 @@ mod tests {
         );
     }
 
+    /// NSIS installs each resource target relative to $INSTDIR, not resources/.
+    #[test]
+    fn windows_installer_hooks_follow_tauri_resource_targets() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.windows.conf.json")).unwrap();
+        let resources = config["bundle"]["resources"].as_array().unwrap();
+        let hooks = include_str!("../../windows/installer-hooks.nsh");
+        let check = include_str!("../../../scripts/check-windows-install.ps1");
+        for target in [
+            "windows/resources/vcredist/*.dll",
+            "windows/resources/voicetypr.pdb",
+        ] {
+            assert!(resources.iter().any(|value| value.as_str() == Some(target)));
+            let installed = format!(r"$INSTDIR\{}", target.replace('/', r"\"));
+            assert!(hooks.contains(&installed), "missing resource target");
+        }
+        assert!(hooks.contains(r"$INSTDIR\windows\resources\vcredist\$R1"));
+        assert!(check.contains(r"'windows\resources\vcredist'"));
+        let wrong_prefix = ["resources", "windows", "resources"].join(r"\");
+        assert!(!hooks.contains(&wrong_prefix));
+        assert!(!check.contains(&wrong_prefix));
+    }
+
     /// Regression guard for beta.4: the island's device and window lookups ran
     /// before the mic opened and delayed first audio by 50–200 ms. They must stay
     /// after the readiness decision in `start_recording`.
