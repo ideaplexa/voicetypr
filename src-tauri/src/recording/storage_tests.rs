@@ -443,6 +443,21 @@ async fn cancelled_history_retry_releases_its_original_saved_source() {
     assert!(!source.exists());
 }
 
+#[test]
+fn remote_history_retry_registers_source_before_waiting_for_settings() {
+    let entry = include_str!("../commands/remote.rs")
+        .split_once("pub async fn transcribe_remote(")
+        .unwrap()
+        .1;
+    let before_await = entry.split_once(".await").unwrap().0;
+    assert!(
+        before_await.contains(
+            "let _source_lease = crate::recording::kept::protect_path(std::path::Path::new(&audio_path));"
+        ),
+        "remote History retries must protect the original (non-canonical) maintenance path before awaiting settings"
+    );
+}
+
 #[tokio::test]
 async fn cancelled_take_defers_cleanup_until_detached_decoder_releases_its_scratch() {
     let data = tempfile::tempdir().unwrap();

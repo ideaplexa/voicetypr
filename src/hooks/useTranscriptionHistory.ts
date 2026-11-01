@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventCoordinator } from "@/hooks/useEventCoordinator";
 import type { TranscriptionHistory } from "@/types";
 import { createLogger } from "@/lib/logger";
+import { parseHistoryDate } from "@/lib/history-date";
 
 const log = createLogger("history");
 
@@ -45,7 +46,7 @@ function toHistoryItem(item: RawTranscriptionHistoryItem): TranscriptionHistory 
   return {
     id: timestamp,
     text: item.text,
-    timestamp: new Date(timestamp),
+    timestamp: parseHistoryDate(item.timestamp) ?? new Date(NaN),
     model: item.model,
     recording_file: item.recording_file,
     source_recording_id: item.source_recording_id,
@@ -58,7 +59,7 @@ function fromAddedEvent(item: TranscriptionAddedEvent): TranscriptionHistory {
   return {
     id: item.timestamp,
     text: item.text,
-    timestamp: new Date(item.timestamp),
+    timestamp: parseHistoryDate(item.timestamp) ?? new Date(NaN),
     model: item.model,
     recording_file: item.recording_file,
     source_recording_id: item.source_recording_id,

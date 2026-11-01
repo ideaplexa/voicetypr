@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { getModelDisplayName } from "@/lib/model-display";
 import { createLogger } from "@/lib/logger";
 import { applyHistoryFilters, sourceLabel } from "./recentRecordingsHelpers";
+import { parseHistoryDate } from "@/lib/history-date";
 import { useRecentRecordingsActions } from "./useRecentRecordingsActions";
 
 const log = createLogger("recordings");
@@ -92,7 +93,10 @@ export function useRecentRecordings({
   }, [history]);
 
   const filteredHistory = useMemo(() => {
-    const structural = applyHistoryFilters(history, sourceFilter, appFilter, dateFilter);
+    const structural = applyHistoryFilters(history, sourceFilter, appFilter, dateFilter)
+      .map((item) => ({ item, time: parseHistoryDate(item.timestamp)?.getTime() ?? -Infinity }))
+      .sort((a, b) => (a.time === b.time ? 0 : b.time - a.time))
+      .map(({ item }) => item);
     if (!searchQuery.trim()) return structural;
     const q = searchQuery.trim().toLowerCase();
     return structural.filter(
@@ -113,11 +117,13 @@ export function useRecentRecordings({
     yesterday.setDate(yesterday.getDate() - 1);
 
     filteredHistory.slice(0, visibleCount).forEach((item) => {
-      const itemDate = new Date(item.timestamp);
-      itemDate.setHours(0, 0, 0, 0);
+      const itemDate = parseHistoryDate(item.timestamp);
+      itemDate?.setHours(0, 0, 0, 0);
 
       let groupKey: string;
-      if (itemDate.getTime() === today.getTime()) {
+      if (!itemDate) {
+        groupKey = "Unknown date";
+      } else if (itemDate.getTime() === today.getTime()) {
         groupKey = "Today";
       } else if (itemDate.getTime() === yesterday.getTime()) {
         groupKey = "Yesterday";

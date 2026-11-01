@@ -2,6 +2,7 @@ import { memo } from "react";
 import type { KeyboardEvent } from "react";
 import type { TranscriptionHistory } from "@/types";
 import { sourceLabel } from "./recentRecordingsHelpers";
+import { parseHistoryDate } from "@/lib/history-date";
 import { RecentRecordingApplicationIcon } from "./RecentRecordingApplicationIcon";
 
 // Hoisted: building an Intl formatter per row per render is the expensive part.
@@ -12,9 +13,9 @@ const TIME_FORMAT = new Intl.DateTimeFormat([], {
 });
 
 function formatTime(timestamp: Date | string): string {
-  const date = new Date(timestamp);
+  const date = parseHistoryDate(timestamp);
   // Intl.format throws on an invalid date where toLocaleTimeString did not.
-  return Number.isNaN(date.getTime()) ? "Invalid Date" : TIME_FORMAT.format(date);
+  return date ? TIME_FORMAT.format(date) : "Unknown date";
 }
 
 interface RecentRecordingsListItemProps {

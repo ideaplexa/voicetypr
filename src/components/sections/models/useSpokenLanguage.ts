@@ -6,7 +6,10 @@ import { toast } from "sonner";
 
 const log = createLogger("models");
 
-export function useSpokenLanguage(supportedLanguages?: readonly string[]) {
+export function useSpokenLanguage(
+  supportedLanguages?: readonly string[],
+  enforceEnglishOnly = true,
+) {
   const { settings, updateSettings } = useSettings();
   const currentEngine = (settings?.current_model_engine ?? "whisper") as SpeechModelEngine;
   const currentModelName = settings?.current_model ?? "";
@@ -39,13 +42,15 @@ export function useSpokenLanguage(supportedLanguages?: readonly string[]) {
   );
 
   useEffect(() => {
-    if (!settings) return;
+    // A remote source uses the requested language, not the inactive local
+    // model's restriction. Wait for remote selection to load before enforcing.
+    if (!settings || !enforceEnglishOnly) return;
     if (isEnglishOnlyModel && settings.speech_language !== "en") {
       updateSettings({ speech_language: "en" }).catch((error) => {
         log.error("Failed to enforce English fallback:", error);
       });
     }
-  }, [isEnglishOnlyModel, settings, updateSettings]);
+  }, [enforceEnglishOnly, isEnglishOnlyModel, settings, updateSettings]);
 
   return {
     settings,

@@ -2,6 +2,7 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import { ChoiceCard, SettingsCard, SettingsPage } from "@/components/settings/settings-ui";
 import { SonioxStorageCard } from "@/components/SonioxStorageCard";
+import { LanguageSelection } from "@/components/LanguageSelection";
 import { useSettings } from "@/contexts/SettingsContext";
 import { isMacOS } from "@/lib/platform";
 import { isCloudModel, isLocalModel } from "@/types";
@@ -41,8 +42,11 @@ export function ModelsSection({
 }: ModelsSectionProps) {
   const { refreshSettings } = useSettings();
   const selectedModel = models.find(([name]) => name === currentModel)?.[1];
-  const language = useSpokenLanguage(selectedModel?.supported_languages ?? undefined);
   const remotes = useRemoteServers();
+  const language = useSpokenLanguage(
+    selectedModel?.supported_languages ?? undefined,
+    remotes.activeRemoteServerLoaded && !remotes.activeRemoteServer,
+  );
   const cloud = useCloudProviders({
     onSelect,
     refreshModels,
@@ -221,6 +225,17 @@ export function ModelsSection({
           </SettingsCard>
         ) : null}
         <RemoteServersBlock remotes={remotes} visible={sourceFilter === "remote"} />
+        {sourceFilter === "remote" && remotes.activeRemoteServer ? (
+          <SettingsCard
+            title="Language"
+            description="Sent to the remote model. Supported languages depend on that model."
+          >
+            <LanguageSelection
+              value={language.languageValue}
+              onValueChange={(value) => void language.handleLanguageChange(value)}
+            />
+          </SettingsCard>
+        ) : null}
         {language.currentEngine === "whisper" ? <WhisperSpeedCard /> : null}
         {sourceFilter === "cloud" &&
         providers.some(

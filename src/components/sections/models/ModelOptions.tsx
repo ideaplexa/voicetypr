@@ -73,6 +73,9 @@ export function ModelOptions({
   const polishOn = usePolishOn();
   const baseId = useId();
   const showParagraphs = supportsParagraphs(engine, modelName);
+  // Deepgram's WebSocket API has no paragraphs parameter/paragraph transcript.
+  // Keep the saved batch preference, but don't offer an ineffective stream switch.
+  const paragraphsUnavailable = engine === "deepgram" && settings?.transcription_mode === "live_preview";
   const showFillers = supportsFillerRemoval(languageValue, isEnglishOnlyModel);
 
   const save = (patch: { transcript_paragraphs?: boolean; transcript_remove_fillers?: boolean }) => {
@@ -130,12 +133,17 @@ export function ModelOptions({
       {showParagraphs ? (
         <OptionRow
           title="Paragraphs at long pauses"
-          description="Starts a new paragraph when you pause on long dictations"
+          description={
+            paragraphsUnavailable
+              ? "Deepgram paragraphs need Real-time words off."
+              : "Starts a new paragraph when you pause on long dictations"
+          }
           control={
             <Switch
               id={`${baseId}-paragraphs`}
               aria-label="Paragraphs at long pauses"
               checked={settings?.transcript_paragraphs ?? true}
+              disabled={paragraphsUnavailable}
               onCheckedChange={(checked) => save({ transcript_paragraphs: checked })}
             />
           }

@@ -29,6 +29,20 @@ describe("useTranscriptionHistory", () => {
     eventHarness.callbacks.clear();
   });
 
+  it.each(["", "garbage", "123", undefined])("does not reinterpret malformed persisted timestamps (%s) as dates", async (timestamp) => {
+    vi.mocked(invoke).mockResolvedValue([{ timestamp, text: "preserved", model: "base" }]);
+    const { result } = renderHook(() => useTranscriptionHistory({ limit: 50 }));
+    await waitFor(() => expect(result.current.history).toHaveLength(1));
+    expect(result.current.history[0].text).toBe("preserved");
+    expect(Number.isNaN(result.current.history[0].timestamp.getTime())).toBe(true);
+    act(() => eventHarness.callbacks.get("transcription-added")?.({
+      timestamp: "456",
+      text: "event preserved",
+      model: "base",
+    }));
+    expect(Number.isNaN(result.current.history[0].timestamp.getTime())).toBe(true);
+  });
+
   it("loads history and total count when requested", async () => {
     (invoke as ReturnType<typeof vi.fn>).mockImplementation((command: string) => {
       if (command === "get_transcription_history") {

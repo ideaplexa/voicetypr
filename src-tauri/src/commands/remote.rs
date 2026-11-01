@@ -1493,6 +1493,9 @@ pub async fn transcribe_remote(
     audio_path: String,
     remote_settings: State<'_, AsyncMutex<RemoteSettings>>,
 ) -> Result<String, String> {
+    // History passes the recordings-dir path used by maintenance, not its
+    // canonical alias. Lease before settings can suspend; RAII also covers errors.
+    let _source_lease = crate::recording::kept::protect_path(std::path::Path::new(&audio_path));
     // Get the connection info
     let connection = {
         let settings = remote_settings.lock().await;
@@ -1545,6 +1548,7 @@ pub async fn transcribe_remote(
     );
 
     let timeout_ms = timeout_ms_for_wav_file(&audio_path, TranscriptionSource::Upload);
+    drop(_source_lease); // Audio and WAV metadata are now owned by this request.
 
     let store = app.store("settings").map_err(|e| e.to_string())?;
     let legacy_speech_language = store

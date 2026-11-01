@@ -742,11 +742,13 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         .as_str()
         .to_string(),
     };
-    let normalized_speech_language = normalize_speech_language_for_model(
+    let normalized_speech_language = super::speech_language::normalize_for_active_source(
+        &app,
         &settings.current_model_engine,
         &settings.current_model,
         &settings.speech_language,
-    );
+    )
+    .await;
     let mut settings = settings;
     settings.speech_language = normalized_speech_language;
 
@@ -887,11 +889,13 @@ pub async fn save_settings(
     store.set("current_model", json!(settings.current_model));
     store.set("current_model_engine", json!(settings.current_model_engine));
 
-    let validated_speech_language = normalize_speech_language_for_model(
+    let validated_speech_language = super::speech_language::normalize_for_active_source(
+        &app,
         &settings.current_model_engine,
         &settings.current_model,
         &settings.speech_language,
-    );
+    )
+    .await;
     let normalized_transcription_task =
         normalize_transcription_task(Some(&settings.transcription_task), false);
     let normalized_final_text_language = normalize_final_text_language(

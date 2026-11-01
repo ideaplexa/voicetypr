@@ -1,5 +1,6 @@
 import { FileAudio, Globe, Mic, Terminal } from "lucide-react";
 import { getModelDisplayName } from "@/lib/model-display";
+import { parseHistoryDate } from "@/lib/history-date";
 import type { TranscriptionHistory } from "@/types";
 
 // Pure helpers split from RecentRecordings.tsx so the component file only
@@ -24,7 +25,7 @@ export function sourceIcon(source: string | undefined) {
 export function buildPlainHistory(items: TranscriptionHistory[]): string {
   return items
     .map((item) => {
-      const when = new Date(item.timestamp).toLocaleString();
+      const when = parseHistoryDate(item.timestamp)?.toLocaleString() ?? "Unknown date";
       const model = getModelDisplayName(item.model) ?? item.model ?? "";
       return `[${when}]${model ? ` ${model}` : ""}\n${item.text}\n`;
     })
@@ -35,7 +36,7 @@ export function buildPlainHistory(items: TranscriptionHistory[]): string {
 export function buildMarkdownHistory(items: TranscriptionHistory[]): string {
   const lines: string[] = ["# Voicetypr transcript history", ""];
   for (const item of items) {
-    const when = new Date(item.timestamp).toLocaleString();
+    const when = parseHistoryDate(item.timestamp)?.toLocaleString() ?? "Unknown date";
     const model = getModelDisplayName(item.model) ?? item.model ?? "";
     lines.push(`## ${when}${model ? ` · ${model}` : ""}`, "", item.text, "");
   }
@@ -99,7 +100,8 @@ export function applyHistoryFilters(
 
     // Date filter
     if (dateFilter !== "all") {
-      const itemDate = new Date(item.timestamp);
+      const itemDate = parseHistoryDate(item.timestamp);
+      if (!itemDate) return false;
       itemDate.setHours(0, 0, 0, 0);
       if (dateFilter === "today" && itemDate.getTime() !== todayBase.getTime()) return false;
       if (dateFilter === "last7" && itemDate < sevenDaysAgo) return false;

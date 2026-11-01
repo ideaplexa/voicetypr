@@ -12,6 +12,7 @@ const log = createLogger("models");
 export interface RemoteServersManager {
   remoteServers: SavedConnection[];
   activeRemoteServer: string | null;
+  activeRemoteServerLoaded: boolean;
   addServerModalOpen: boolean;
   setAddServerModalOpen: (open: boolean) => void;
   editingServer: SavedConnection | null;
@@ -37,6 +38,7 @@ export interface RemoteServersManager {
 export function useRemoteServers(): RemoteServersManager {
   const [remoteServers, setRemoteServers] = useState<SavedConnection[]>([]);
   const [activeRemoteServer, setActiveRemoteServer] = useState<string | null>(null);
+  const [activeRemoteServerLoaded, setActiveRemoteServerLoaded] = useState(false);
   const [addServerModalOpen, setAddServerModalOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<SavedConnection | null>(null);
   const [isRefreshingServers, setIsRefreshingServers] = useState(false);
@@ -123,6 +125,7 @@ export function useRemoteServers(): RemoteServersManager {
     try {
       const activeId = await invoke<string | null>("get_active_remote_server");
       setActiveRemoteServer(activeId);
+      setActiveRemoteServerLoaded(true);
     } catch (error) {
       log.error("Failed to fetch active remote server:", error);
     }
@@ -283,6 +286,7 @@ export function useRemoteServers(): RemoteServersManager {
   return {
     remoteServers,
     activeRemoteServer,
+    activeRemoteServerLoaded,
     addServerModalOpen,
     setAddServerModalOpen,
     editingServer,

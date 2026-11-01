@@ -4183,11 +4183,13 @@ impl RecordingConfig {
             loaded_at: Instant::now(),
         };
         let mut config = config;
-        config.speech_language = normalize_speech_language_for_model(
+        config.speech_language = super::speech_language::normalize_for_active_source(
+            app,
             &config.current_engine,
             &config.current_model,
             &config.speech_language,
-        );
+        )
+        .await;
         Ok(config)
     }
 

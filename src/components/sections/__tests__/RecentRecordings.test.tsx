@@ -597,6 +597,15 @@ describe("application context badge", () => {
 });
 
 describe("History split view", () => {
+  it.each(["", "garbage", "123", undefined])("renders a malformed timestamp (%s) in both the row and detail", async (timestamp) => {
+    const malformed = { ...historyItem, recording_file: undefined, timestamp } as unknown as TranscriptionHistory;
+    render(<RecentRecordings history={[malformed]} />);
+    expect(screen.getByText("UNKNOWN DATE")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Original transcript/ })).toHaveTextContent("Unknown date");
+    expect(screen.getByText(/This device · Unknown date/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Original transcript")).toHaveLength(2));
+  });
+
   const first: TranscriptionHistory = {
     id: "first",
     text: "First final dictation",

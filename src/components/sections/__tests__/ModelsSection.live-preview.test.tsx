@@ -18,6 +18,7 @@ let mockSettings: AppSettings;
 let mockCapabilities: ActiveStreamCapabilities;
 let activateLivePreviewError: Error | null;
 let polishOn = false;
+let activeRemoteServer: string | null = null;
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: Record<string, unknown>) => mocks.invoke(cmd, args),
@@ -48,8 +49,13 @@ vi.mock("@/components/ApiKeyModal", () => ({
 }));
 
 vi.mock("@/components/LanguageSelection", () => ({
-  LanguageSelection: ({ supportedLanguages }: { supportedLanguages?: readonly string[] }) => (
-    <div data-testid="language-selection">{supportedLanguages?.join(",")}</div>
+  LanguageSelection: ({ supportedLanguages, onValueChange }: {
+    supportedLanguages?: readonly string[];
+    onValueChange: (value: string) => void;
+  }) => (
+    <button data-testid="language-selection" onClick={() => onValueChange("ja")}>
+      {supportedLanguages?.join(",")}
+    </button>
   ),
 }));
 
@@ -128,6 +134,7 @@ describe("ModelsSection per-model options", () => {
     mockCapabilities = makeCapabilities(false);
     activateLivePreviewError = null;
     polishOn = false;
+    activeRemoteServer = null;
     mocks.invoke.mockImplementation(async (cmd) => {
       switch (cmd) {
         case "get_active_stream_capabilities":
@@ -142,13 +149,42 @@ describe("ModelsSection per-model options", () => {
         case "list_remote_servers":
           return [];
         case "get_active_remote_server":
-          return null;
+          return activeRemoteServer;
         case "discover_remote_servers":
           return [];
         default:
           return null;
       }
     });
+  });
+
+  it("lets remote users choose a language without the inactive local model's English restriction", async () => {
+    activeRemoteServer = "remote-1";
+    mockSettings = { ...mockSettings, current_model: "small.en", current_model_engine: "whisper", speech_language: "ja" };
+    renderSection();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Another computer"));
+    await userEvent.click(await screen.findByTestId("language-selection"));
+    expect(mocks.updateSettings).toHaveBeenCalledWith({ speech_language: "ja" });
+    expect(mocks.updateSettings).not.toHaveBeenCalledWith({ speech_language: "en" });
+    expect(screen.queryByText("English only")).not.toBeInTheDocument();
+  });
+
+  it.each(["live_preview", "regular"] as const)("only enables Deepgram paragraphs with streaming off (%s)", async (mode) => {
+    const deepgram: ModelInfo = { ...parakeetModel, name: "deepgram", engine: "deepgram", kind: "cloud" };
+    mockSettings = { ...mockSettings, current_model: "deepgram", current_model_engine: "deepgram", transcription_mode: mode };
+    mockCapabilities = makeCapabilities(true);
+    render(<ModelsSection {...baseProps} models={[["deepgram", deepgram]]} currentModel="deepgram" />);
+    const paragraphs = await screen.findByRole("switch", { name: "Paragraphs at long pauses" });
+    if (mode === "live_preview") {
+      expect(paragraphs).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByText("Deepgram paragraphs need Real-time words off.")).toBeInTheDocument();
+      await userEvent.click(paragraphs);
+      expect(mocks.updateSettings).not.toHaveBeenCalled();
+    } else {
+      expect(paragraphs).not.toHaveAttribute("aria-disabled", "true");
+      await userEvent.click(paragraphs);
+      expect(mocks.updateSettings).toHaveBeenCalledWith({ transcript_paragraphs: false });
+    }
   });
 
   it.each(["downloading", "verifying"] as const)("keeps %s status in the model list, outside the model options", async (phase) => {

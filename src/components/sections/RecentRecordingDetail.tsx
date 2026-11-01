@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { getModelDisplayName } from "@/lib/model-display";
 import type { TranscriptionHistory } from "@/types";
 import { formatDurationMs, sourceLabel } from "./recentRecordingsHelpers";
+import { parseHistoryDate } from "@/lib/history-date";
 
 interface Props {
   item: TranscriptionHistory;
@@ -18,7 +19,8 @@ interface Props {
 }
 
 function formatHistoryDateTime(timestamp: Date): string {
-  const date = new Date(timestamp);
+  const date = parseHistoryDate(timestamp);
+  if (!date) return "Unknown date";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
