@@ -35,7 +35,9 @@ fn starts_word(text: &str) -> bool {
     // Apostrophes can open a quotation or continue the preceding word.
     if text.starts_with(['\'', '’']) {
         static SUFFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"^['’](?:s|t|d|ll|re|ve|m)(?:$|\s|\p{P})")
+            // A closing quote or word joiner is not a suffix boundary:
+            // "'m'" and "'re-entry'" are quoted words, not continuations.
+            regex::Regex::new(r"^['’](?:s|t|d|ll|re|ve|m)(?:$|\s|[\p{P}--['’\-‐‑_/@#\\]])")
                 .expect("valid apostrophe suffix regex")
         });
         if SUFFIX.is_match(text) {
@@ -45,7 +47,7 @@ fn starts_word(text: &str) -> bool {
     text.chars().next().is_some_and(|first| {
         !is_cjk(first)
             && (first.is_alphanumeric()
-                || matches!(first, '(' | '[' | '{' | '"' | '\'' | '“' | '‘' | '«'))
+                || matches!(first, '(' | '[' | '{' | '"' | '\'' | '’' | '“' | '‘' | '«'))
     })
 }
 
@@ -153,6 +155,32 @@ mod tests {
         for text in ["'Hello'", "‘Hello’", "'something'", "'they'", "'llama'"] {
             assert!(starts_word(text), "{text:?}");
             assert!(needs_leading_space(Some('n'), text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn quoted_suffix_like_words_and_elisions_need_a_space() {
+        for text in [
+            "'m'",
+            "'m' is the slope",
+            "'re-entry'",
+            "'re-entry' matters",
+            "’m’",
+            "’re-entry’ matters",
+            "'sup",
+            "'til",
+        ] {
+            assert!(starts_word(text), "{text:?}");
+            assert!(needs_leading_space(Some('n'), text), "{text:?}");
+        }
+        for suffix in ["s", "t", "d", "ll", "re", "ve", "m"] {
+            for joiner in ["'", "’", "-", "‐", "‑", "_", "/", "@", "#", "\\"] {
+                let text = format!("'{suffix}{joiner}word");
+                assert!(needs_leading_space(Some('n'), &text), "{text:?}");
+            }
+        }
+        for text in ["'s", "'t,"] {
+            assert!(!needs_leading_space(Some('n'), text), "{text:?}");
         }
     }
 
