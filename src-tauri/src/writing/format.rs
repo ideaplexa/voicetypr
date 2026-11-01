@@ -584,11 +584,16 @@ fn is_cut_off_fragment(token: &str, next: Option<&Token>, protected_terms: &[Str
         return false;
     };
     let (next_lead, next_core, next_trail) = split_token(&next.text);
-    // Grades, blood types and short acronyms are not interrupted speech.
-    // Only the English "I- I"/"I- I'm" restart gets an uppercase exception.
+    // Preserve grades/blood types before lowercase words, but allow "B- But".
+    // Pronoun restarts also accept lowercase "i" before casing runs.
     if core.chars().count() <= 2
         && core.chars().all(char::is_uppercase)
-        && !(core == "I" && next_core.starts_with('I'))
+        && !next_core.chars().next().is_some_and(char::is_uppercase)
+        && !(core == "I"
+            && matches!(
+                next_core.to_lowercase().replace('’', "'").as_str(),
+                "i" | "i'm" | "i've" | "i'll" | "i'd"
+            ))
     {
         return false;
     }
@@ -1073,6 +1078,44 @@ mod tests {
                 ..fillers()
             };
             assert_eq!(fmt("th- the plan", &opts), "th- the plan");
+        }
+    }
+
+    #[test]
+    fn uppercase_restarts_preserve_grades_and_are_idempotent() {
+        for (input, expected) in [
+            ("B- But I said no.", "But I said no."),
+            ("A- And then.", "And then."),
+            ("O- OK sure.", "OK sure."),
+            ("AB- About that.", "About that."),
+            ("The patient has B- blood.", "The patient has B- blood."),
+            ("She earned an A- average.", "She earned an A- average."),
+            ("O- of course.", "O- of course."),
+            ("I- i think so.", "I think so."),
+            ("I- I think so.", "I think so."),
+            ("I- i'm sure.", "I'm sure."),
+            ("I- I'm sure.", "I'm sure."),
+            ("I- i’ve seen it.", "I’ve seen it."),
+            ("I- i'll go.", "I'll go."),
+            ("I- i'd go.", "I'd go."),
+            ("Compare A- A+ grades.", "Compare A- A+ grades."),
+        ] {
+            let output = fmt(input, &fillers());
+            assert_eq!(output, expected, "sample: {input}");
+            assert_eq!(fmt(&output, &fillers()), output, "idempotence: {input}");
+        }
+        for term in ["B", "B-", "I", "I-"] {
+            let terms = [term.to_string()];
+            let opts = FormatOptions {
+                protected_terms: &terms,
+                ..fillers()
+            };
+            let input = if term.starts_with('B') {
+                "B- But I said no."
+            } else {
+                "I- I'm sure."
+            };
+            assert_eq!(fmt(input, &opts), input, "protected: {term}");
         }
     }
 
