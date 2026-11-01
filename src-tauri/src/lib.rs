@@ -117,7 +117,9 @@ fn align_main_window_controls(window: &tauri::WebviewWindow) {
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
-        let _ = window.show();
+        if window.show().is_ok() {
+            crate::pill::level::main_window_visibility_changed(&window, true);
+        }
         #[cfg(target_os = "macos")]
         align_main_window_controls(&window);
         let _ = window.set_focus();
@@ -149,6 +151,7 @@ fn hide_main_window(app: &tauri::AppHandle) -> bool {
         log::error!("Failed to hide main window: {}", e);
         return false;
     }
+    crate::pill::level::main_window_visibility_changed(&window, false);
     #[cfg(target_os = "macos")]
     hide_dock_icon(app);
     true

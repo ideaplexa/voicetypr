@@ -13,6 +13,7 @@ import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
 import { formatPrimaryHotkeyLabel } from "@/lib/shortcut-display";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Check, X } from "lucide-react";
 import { toast } from "sonner";
@@ -31,13 +32,15 @@ export function MicLevelMeter() {
   const meterRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+    let visible = false;
+    let visibilityRevision = 0;
     let level = 0;
     let frame = 0;
     const paint = () => {
       frame = 0;
       const meter = meterRef.current;
-      if (!meter) return;
+      if (!meter || !visible || disposed) return;
       const lit = Math.round(level * METER_SEGMENTS);
       meter.setAttribute("aria-valuenow", String(Math.round(level * 100)));
       Array.from(meter.children).forEach((segment, index) => {
@@ -45,21 +48,43 @@ export function MicLevelMeter() {
         segment.classList.toggle("bg-muted", index >= lit);
       });
     };
-    void invoke("set_audio_meter_active", { active: true }).catch(() => undefined);
+    const setVisible = (next: boolean) => {
+      if (disposed) return;
+      visible = next;
+      if (!visible && frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      void invoke("set_audio_meter_active", { active: visible }).catch(() => undefined);
+    };
+    const retainListener = (fn: () => void) => {
+      if (disposed) fn();
+      else unlisteners.push(fn);
+    };
+    // Subscribe before querying native visibility; late snapshots cannot undo hide/show.
+    void listen<boolean>("main-window-visibility-changed", (event) => {
+      visibilityRevision++;
+      setVisible(event.payload);
+    }).then((fn) => {
+      retainListener(fn);
+      const revision = visibilityRevision;
+      if (!disposed) {
+        void getCurrentWindow().isVisible().then((next) => {
+          if (revision === visibilityRevision) setVisible(next);
+        }).catch(() => undefined);
+      }
+    }).catch(() => undefined);
     void listen<number | { level: number }>("audio-level", (event) => {
       const raw = typeof event.payload === "number" ? event.payload : event.payload.level;
       level = Math.max(0, Math.min(1, raw));
-      if (!frame) frame = requestAnimationFrame(paint);
+      if (visible && !disposed && !frame) frame = requestAnimationFrame(paint);
     })
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
-      })
+      .then(retainListener)
       .catch(() => undefined);
     return () => {
       disposed = true;
       if (frame) cancelAnimationFrame(frame);
-      unlisten?.();
+      unlisteners.forEach((unlisten) => unlisten());
       void invoke("set_audio_meter_active", { active: false }).catch(() => undefined);
     };
   }, []);

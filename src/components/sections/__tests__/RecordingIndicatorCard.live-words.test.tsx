@@ -15,7 +15,10 @@ let mockSettings: AppSettings;
 let streams = false;
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string) => mocks.invoke(cmd) }));
-vi.mock("@tauri-apps/api/event", () => ({ emit: mocks.emit }));
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: mocks.emit,
+  listen: vi.fn().mockResolvedValue(() => undefined),
+}));
 vi.mock("@/contexts/SettingsContext", () => ({
   useSettings: () => ({
     settings: mockSettings,

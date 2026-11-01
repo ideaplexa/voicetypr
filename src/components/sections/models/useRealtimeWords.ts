@@ -1,9 +1,10 @@
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
+import { useTauriEvent } from "@/hooks/useTauriEvent";
 import type { ActiveStreamCapabilities, SpeechModelEngine } from "@/types";
 import { getErrorMessage } from "@/utils/error";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 const log = createLogger("models");
@@ -14,30 +15,33 @@ export function useRealtimeWords(engine: SpeechModelEngine, modelName: string) {
   const [capabilities, setCapabilities] = useState<ActiveStreamCapabilities | null>(null);
   const [isActivating, setIsActivating] = useState(false);
   const transcriptionMode = settings?.transcription_mode ?? "regular";
+  const requestRevision = useRef(0);
 
-  const refreshCapabilities = useCallback(async () => {
-    try {
-      setCapabilities(await invoke<ActiveStreamCapabilities>("get_active_stream_capabilities"));
-    } catch (error) {
-      log.warn("Failed to load stream capabilities:", error);
-      setCapabilities(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void invoke<ActiveStreamCapabilities>("get_active_stream_capabilities")
+  const refreshCapabilities = useCallback(() => {
+    const revision = ++requestRevision.current;
+    return invoke<ActiveStreamCapabilities>("get_active_stream_capabilities")
       .then((next) => {
-        if (active) setCapabilities(next);
+        if (revision === requestRevision.current) setCapabilities(next);
       })
       .catch((error) => {
         log.warn("Failed to load stream capabilities:", error);
-        if (active) setCapabilities(null);
+        if (revision === requestRevision.current) setCapabilities(null);
       });
+  }, []);
+
+  useEffect(() => {
+    void refreshCapabilities();
     return () => {
-      active = false;
+      requestRevision.current++;
     };
-  }, [engine, modelName]);
+  }, [engine, modelName, refreshCapabilities]);
+
+  // Both the tray and remote-selection commands emit this, even if the local
+  // model/engine settings themselves did not change.
+  useTauriEvent("sharing-status-changed", () => {
+    setCapabilities(null);
+    return refreshCapabilities();
+  });
 
   const setRealtime = async (on: boolean) => {
     if (!on) {

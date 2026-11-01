@@ -14,6 +14,17 @@ use std::{
 use tauri::Emitter;
 /// True while the main window's Recording screen mic meter is mounted.
 static MAIN_METER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static MAIN_WINDOW_VISIBLE: AtomicBool = AtomicBool::new(true);
+
+/// Native hide/show is authoritative: WKWebView need not update document.visibilityState.
+pub fn main_window_visibility_changed(window: &tauri::WebviewWindow, visible: bool) {
+    MAIN_WINDOW_VISIBLE.store(visible, Ordering::Relaxed);
+    let _ = window.emit("main-window-visibility-changed", visible);
+}
+
+fn should_emit_main_meter(active: bool, visible: bool) -> bool {
+    active && visible
+}
 
 /// Clear the flag when the main page (re)loads, since React cleanup is skipped then.
 pub fn reset_main_meter() {
@@ -128,7 +139,10 @@ pub fn spawn(app: tauri::AppHandle, receiver: Receiver<f64>, generation: u64) {
                     };
                     // The pill draws the wave; the main window's Recording screen shows a mic meter.
                     let _ = app.emit_to("pill", "audio-level", level.clone());
-                    if MAIN_METER_ACTIVE.load(Ordering::Relaxed) {
+                    if should_emit_main_meter(
+                        MAIN_METER_ACTIVE.load(Ordering::Relaxed),
+                        MAIN_WINDOW_VISIBLE.load(Ordering::Relaxed),
+                    ) {
                         let _ = app.emit_to("main", "audio-level", level);
                     }
                     peak = 0.0;
@@ -142,6 +156,13 @@ pub fn spawn(app: tauri::AppHandle, receiver: Receiver<f64>, generation: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_main_window_never_receives_meter_events() {
+        assert!(!should_emit_main_meter(true, false));
+        assert!(!should_emit_main_meter(false, true));
+        assert!(should_emit_main_meter(true, true));
+    }
 
     #[test]
     fn page_reload_clears_meter_flag() {

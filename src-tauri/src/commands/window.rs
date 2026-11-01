@@ -189,6 +189,7 @@ pub async fn focus_main_window(app: AppHandle) -> Result<(), String> {
 
         if !is_visible {
             main_window.show().map_err(|e| e.to_string())?;
+            crate::pill::level::main_window_visibility_changed(&main_window, true);
             // Show dock icon when main window is shown
             #[cfg(target_os = "macos")]
             crate::show_dock_icon(&app);

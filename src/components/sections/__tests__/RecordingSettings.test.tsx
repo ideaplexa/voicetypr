@@ -42,6 +42,10 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ isVisible: () => Promise.resolve(true) }),
+}));
+
 vi.mock("@tauri-apps/plugin-autostart", () => ({
   enable: vi.fn().mockResolvedValue(undefined),
   disable: vi.fn().mockResolvedValue(undefined),
@@ -213,6 +217,7 @@ describe("Recording screen", () => {
       emitMockEvent("recording-state-changed", { state: "recording" });
     });
     const meter = await screen.findByRole("meter", { name: "Microphone level" });
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_audio_meter_active", { active: true }));
     await act(async () => {
       emitMockEvent("audio-level", 0.42);
     });
