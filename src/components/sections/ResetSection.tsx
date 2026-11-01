@@ -48,16 +48,27 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
         setIsResetting(false);
         return;
       }
-      if (result.warnings.length > 0) {
+      if (result.warnings?.length) {
+        let restartRequested = false;
+        const restartOnce = () => {
+          if (restartRequested) return;
+          restartRequested = true;
+          void relaunch();
+        };
         toast.warning(
           "Reset finished. macOS permissions couldn't be reset; you can remove Voicetypr under System Settings → Privacy & Security.",
+          {
+            duration: Infinity,
+            action: { label: "Restart now", onClick: restartOnce },
+            onDismiss: restartOnce,
+          },
         );
       } else {
         toast.success("App data reset successfully. Restarting...");
+        setTimeout(() => {
+          void relaunch();
+        }, 1000);
       }
-      setTimeout(() => {
-        void relaunch();
-      }, 1000);
     } catch (error) {
       log.error("Failed to reset app data:", error);
       toast.error("Failed to reset app data");

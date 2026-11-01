@@ -56,62 +56,98 @@ describe("ResetSection", () => {
       expect(relaunch).not.toHaveBeenCalled();
     });
 
-    it("reports success and restarts after a reset without warnings", async () => {
-      vi.useFakeTimers();
-      vi.mocked(ask).mockResolvedValue(true);
-      const result: ResetResult = {
-        success: true,
-        errors: [],
-        warnings: [],
-        cleared_items: ["Settings store", "Saved and temporary audio"],
-      };
-      vi.mocked(invoke).mockResolvedValue(result);
-      render(<ResetSection pane={pane} />);
+    it.each([{ warnings: [] }, { warnings: undefined }])(
+      "reports success and restarts after 1 s with warnings=$warnings",
+      async ({ warnings }) => {
+        vi.useFakeTimers();
+        vi.mocked(ask).mockResolvedValue(true);
+        const result = {
+          success: true,
+          errors: [],
+          warnings,
+          cleared_items: ["Settings store", "Saved and temporary audio"],
+        };
+        vi.mocked(invoke).mockResolvedValue(result);
+        render(<ResetSection pane={pane} />);
 
-      await act(async () => {
-        fireEvent.click(resetButton());
-      });
+        await act(async () => {
+          fireEvent.click(resetButton());
+        });
 
-      expect(invoke).toHaveBeenCalledWith("reset_app_data");
-      expect(toast.success).toHaveBeenCalledWith("App data reset successfully. Restarting...");
-      expect(toast.error).not.toHaveBeenCalled();
-      expect(toast.warning).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: pane ? "Resetting…" : "Resetting..." })).toBeDisabled();
-      expect(relaunch).not.toHaveBeenCalled();
-      await act(() => vi.advanceTimersByTime(999));
-      expect(relaunch).not.toHaveBeenCalled();
-      await act(() => vi.advanceTimersByTime(1));
-      expect(relaunch).toHaveBeenCalledOnce();
-    });
+        expect(invoke).toHaveBeenCalledWith("reset_app_data");
+        expect(toast.success).toHaveBeenCalledWith("App data reset successfully. Restarting...");
+        expect(toast.error).not.toHaveBeenCalled();
+        expect(toast.warning).not.toHaveBeenCalled();
+        expect(
+          screen.getByRole("button", { name: pane ? "Resetting…" : "Resetting..." }),
+        ).toBeDisabled();
+        expect(relaunch).not.toHaveBeenCalled();
+        await act(() => vi.advanceTimersByTime(999));
+        expect(relaunch).not.toHaveBeenCalled();
+        await act(() => vi.advanceTimersByTime(1));
+        expect(relaunch).toHaveBeenCalledOnce();
+      },
+    );
 
-    it("shows permission cleanup guidance and still restarts after a reset with warnings", async () => {
-      vi.useFakeTimers();
-      vi.mocked(ask).mockResolvedValue(true);
-      const result: ResetResult = {
-        success: true,
-        errors: [],
-        warnings: ["Could not reset system permissions"],
-        cleared_items: ["Settings store", "Saved and temporary audio"],
-      };
-      vi.mocked(invoke).mockResolvedValue(result);
-      render(<ResetSection pane={pane} />);
+    it.each(["action", "dismiss"] as const)(
+      "keeps permission guidance visible until %s and restarts only once",
+      async (trigger) => {
+        vi.useFakeTimers();
+        vi.mocked(ask).mockResolvedValue(true);
+        const result: ResetResult = {
+          success: true,
+          errors: [],
+          warnings: ["Could not reset system permissions"],
+          cleared_items: ["Settings store", "Saved and temporary audio"],
+        };
+        vi.mocked(invoke).mockResolvedValue(result);
+        render(<ResetSection pane={pane} />);
 
-      await act(async () => {
-        fireEvent.click(resetButton());
-      });
+        await act(async () => {
+          fireEvent.click(resetButton());
+        });
 
-      expect(toast.warning).toHaveBeenCalledWith(
-        "Reset finished. macOS permissions couldn't be reset; you can remove Voicetypr under System Settings → Privacy & Security.",
-      );
-      expect(toast.error).not.toHaveBeenCalled();
-      expect(toast.success).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: pane ? "Resetting…" : "Resetting..." })).toBeDisabled();
-      expect(relaunch).not.toHaveBeenCalled();
-      await act(() => vi.advanceTimersByTime(999));
-      expect(relaunch).not.toHaveBeenCalled();
-      await act(() => vi.advanceTimersByTime(1));
-      expect(relaunch).toHaveBeenCalledOnce();
-    });
+        expect(toast.warning).toHaveBeenCalledWith(
+          "Reset finished. macOS permissions couldn't be reset; you can remove Voicetypr under System Settings → Privacy & Security.",
+          {
+            duration: Infinity,
+            action: { label: "Restart now", onClick: expect.any(Function) },
+            onDismiss: expect.any(Function),
+          },
+        );
+        expect(toast.error).not.toHaveBeenCalled();
+        expect(toast.success).not.toHaveBeenCalled();
+        expect(
+          screen.getByRole("button", { name: pane ? "Resetting…" : "Resetting..." }),
+        ).toBeDisabled();
+        expect(relaunch).not.toHaveBeenCalled();
+        await act(() => vi.advanceTimersByTime(60_000));
+        expect(relaunch).not.toHaveBeenCalled();
+
+        const options = vi.mocked(toast.warning).mock.calls[0][1];
+        const action = options?.action;
+        const onDismiss = options?.onDismiss;
+        if (!action || typeof action !== "object" || !("onClick" in action) || !onDismiss) {
+          throw new Error("Expected a restart action and dismiss handler");
+        }
+        render(<button onClick={action.onClick}>{action.label}</button>);
+        const dismiss = () => onDismiss({ id: "reset-warning" });
+
+        if (trigger === "action") {
+          fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+        } else {
+          act(dismiss);
+        }
+        expect(relaunch).toHaveBeenCalledOnce();
+
+        // Action and dismiss callbacks may both fire; neither can request a second restart.
+        fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+        act(dismiss);
+        act(dismiss);
+        await act(() => vi.advanceTimersByTime(1000));
+        expect(relaunch).toHaveBeenCalledOnce();
+      },
+    );
   });
 
   it("explains that the license and API keys survive the reset", async () => {
