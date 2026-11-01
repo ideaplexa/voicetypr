@@ -27,6 +27,8 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
+Stable hotfix 2.0.10 — IN PROGRESS — claimed Droid 2026-11-01: port the app-owned Reset fix, validate storage before mutation, handle incomplete resets, cover removed-provider migrations, and prepare the local-only release.
+
 Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
 
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.
