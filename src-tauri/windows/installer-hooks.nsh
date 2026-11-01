@@ -60,6 +60,8 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+    ; This hook runs before Tauri's own running-app check; stop the app before deleting loaded DLLs.
+    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
     Delete "$INSTDIR\voicetypr.pdb"
 
     ; Remove the app-local runtime DLLs copied at install time. Iterate the
