@@ -96,30 +96,35 @@ pub fn start(window: &WebviewWindow) {
                 reset_pointer(&task_app);
                 break;
             }
-            let point = match (
-                task_app.cursor_position(),
-                window.inner_position(),
-                window.scale_factor(),
-            ) {
-                (Ok(cursor), Ok(origin), Ok(scale)) => {
-                    // Tao reports the global macOS cursor using the primary
-                    // display scale; window origins use their own display scale.
-                    #[cfg(target_os = "macos")]
-                    let cursor_scale = task_app
-                        .primary_monitor()
-                        .ok()
-                        .flatten()
-                        .map(|m| m.scale_factor())
-                        .unwrap_or(scale);
-                    #[cfg(not(target_os = "macos"))]
-                    let cursor_scale = scale;
-                    Some((
-                        cursor.x / cursor_scale - origin.x as f64 / scale,
-                        cursor.y / cursor_scale - origin.y as f64 / scale,
-                    ))
+            // Drain each synchronous tick on its Tokio worker, never across
+            // an await (a future can resume on a different thread).
+            let point = crate::utils::monitor::catch_monitor_panic(|| {
+                match (
+                    task_app.cursor_position(),
+                    window.inner_position(),
+                    window.scale_factor(),
+                ) {
+                    (Ok(cursor), Ok(origin), Ok(scale)) => {
+                        // Tao reports the global macOS cursor using the primary
+                        // display scale; window origins use their own display scale.
+                        #[cfg(target_os = "macos")]
+                        let cursor_scale = task_app
+                            .primary_monitor()
+                            .ok()
+                            .flatten()
+                            .map(|m| m.scale_factor())
+                            .unwrap_or(scale);
+                        #[cfg(not(target_os = "macos"))]
+                        let cursor_scale = scale;
+                        Some((
+                            cursor.x / cursor_scale - origin.x as f64 / scale,
+                            cursor.y / cursor_scale - origin.y as f64 / scale,
+                        ))
+                    }
+                    _ => None,
                 }
-                _ => None,
-            };
+            })
+            .flatten();
             let next = point.is_some_and(|(x, y)| {
                 hit_test(
                     &task_app.state::<PointerState>().rects.lock().unwrap(),

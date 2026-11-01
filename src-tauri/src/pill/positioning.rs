@@ -34,8 +34,10 @@ pub fn monitor(app: &AppHandle) -> Option<Monitor> {
     live_monitor(app)
 }
 fn live_monitor(app: &AppHandle) -> Option<Monitor> {
-    let monitors = crate::utils::monitor::catch_monitor_panic(|| app.available_monitors().ok())?
-        .unwrap_or_default();
+    crate::utils::monitor::catch_monitor_panic(|| live_monitor_inner(app)).flatten()
+}
+fn live_monitor_inner(app: &AppHandle) -> Option<Monitor> {
+    let monitors = app.available_monitors().ok().unwrap_or_default();
     // Win32 gives the foreground window's actual monitor, even when it spans displays.
     #[cfg(target_os = "windows")]
     let foreground = unsafe {
