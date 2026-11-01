@@ -356,26 +356,64 @@ pub fn schedule_maintenance(app: AppHandle) {
 /// Reset removes both opted-in saves and ephemeral audio. Clearing History
 /// alone is not consent to delete intentionally saved recordings.
 /// Detached writers remain protected until their finalizer releases ownership.
-pub async fn clear_audio(app: &AppHandle) -> Result<(), String> {
+pub(crate) struct AudioResetPlan {
+    data: PathBuf,
+    legacy: PathBuf,
+    temp: PathBuf,
+}
+
+impl AudioResetPlan {
+    pub(crate) fn new(data: PathBuf, legacy: PathBuf, temp: PathBuf) -> Self {
+        Self { data, legacy, temp }
+    }
+
+    pub(crate) fn preflight(&self, identifier: &str) -> Result<(), &'static str> {
+        let base = self.data.parent().ok_or("Audio storage unavailable")?;
+        validate_audio_roots(&self.data, identifier, base)?;
+        crate::utils::reset_directory::validate_file_sweep_root(&self.temp, &self.temp)?;
+        crate::utils::reset_directory::validate_file_sweep_root(
+            &self.legacy,
+            self.legacy.parent().ok_or("Audio storage unavailable")?,
+        )
+    }
+}
+
+pub(crate) async fn clear_audio(app: &AppHandle, plan: AudioResetPlan) -> Result<(), String> {
     // Continue clearing even if stop timed out; its detached writer remains
     // owned by the capture finalizer and is removed once it is safe.
     let _ = crate::commands::audio::cancel_recording(app.clone()).await;
     super::kept::clear();
-    let data = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Audio storage unavailable")?;
-    let legacy = app.path().temp_dir().ok().map(|p| p.join("kept-dictation"));
+    let AudioResetPlan { data, legacy, temp } = plan;
     let identifier = app.config().identifier.clone();
     let base = data
         .parent()
         .ok_or("Audio storage unavailable")?
         .to_path_buf();
     tauri::async_runtime::spawn_blocking(move || {
-        clear_storage(&data, legacy, &identifier, &base, &std::env::temp_dir())
+        clear_storage(&data, Some(legacy), &identifier, &base, &temp)
     })
     .await
     .map_err(|_| "Could not clear audio storage")?
+}
+
+fn validate_audio_roots(data: &Path, identifier: &str, base: &Path) -> Result<(), &'static str> {
+    use crate::utils::reset_directory;
+    for name in ["recordings", "recovery", "captures", "cli-recordings"] {
+        reset_directory::validate(&data.join(name), identifier, base)?;
+    }
+    // Capture take directories are separate deletion targets. Fail before
+    // clearing any audio if even a later take has an invalid ownership boundary.
+    match std::fs::read_dir(data.join("captures")) {
+        Ok(dirs) => {
+            for entry in dirs {
+                let entry = entry.map_err(|_| "Could not validate audio storage")?;
+                reset_directory::validate(&entry.path(), identifier, base)?;
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("Could not validate audio storage"),
+    }
+    Ok(())
 }
 
 fn clear_storage(
@@ -388,10 +426,7 @@ fn clear_storage(
     use crate::utils::reset_directory;
     // Validate even the nonrecursive sweep's roots before it can follow an
     // app-data alias into unrelated storage.
-    for name in ["recordings", "recovery", "captures", "cli-recordings"] {
-        reset_directory::validate(&data.join(name), identifier, base)
-            .map_err(|_| "Could not clear audio storage")?;
-    }
+    validate_audio_roots(data, identifier, base).map_err(|_| "Could not clear audio storage")?;
     let mut failed = super::kept::with_protected_paths(|protected| {
         super::file_jobs::sweep(data, temp, protected, SystemTime::now(), true).is_err()
     });

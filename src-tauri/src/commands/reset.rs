@@ -3,7 +3,22 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
+use crate::recording::storage::AudioResetPlan;
 use crate::utils::reset_directory;
+
+fn preflight_reset(
+    roots: &[PathBuf],
+    identifier: &str,
+    shared_roles: &[(usize, usize)],
+    directories: &[(PathBuf, &'static str, PathBuf)],
+    audio: &AudioResetPlan,
+) -> Result<(), &'static str> {
+    reset_directory::validate_roles(roots, identifier, shared_roles)?;
+    for (path, _, base) in directories {
+        reset_directory::validate(path, identifier, base)?;
+    }
+    audio.preflight(identifier)
+}
 
 // secure.dat is a sibling of these directories and must survive reset.
 fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str); 4] {
@@ -137,19 +152,34 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     };
     #[cfg(not(target_os = "windows"))]
     let shared_roles = Vec::new();
-    // Validate the data owner AND every role's canonical footprint before
-    // clearing ANY stores/audio. Trusted base aliases are allowed, but a cache
-    // base aliased into data must not cause secure.dat to be deleted.
+    let audio = AudioResetPlan::new(
+        data,
+        app.path()
+            .temp_dir()
+            .map_err(|_| "Audio temporary storage unavailable")?
+            .join("kept-dictation"),
+        std::env::temp_dir(),
+    );
+    // Validate every deletion target, audio root and role footprint before ANY
+    // mutation (including cancellation of active audio). Keep the checked plan
+    // rather than resolving storage paths again after clearing has begun.
     let check_identifier = identifier.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        reset_directory::validate_roles(&roots, &check_identifier, &shared_roles)
+    let (directories, audio) = tauri::async_runtime::spawn_blocking(move || {
+        preflight_reset(
+            &roots,
+            &check_identifier,
+            &shared_roles,
+            &directories,
+            &audio,
+        )?;
+        Ok::<_, &'static str>((directories, audio))
     })
     .await
     .map_err(|_| "Could not validate app storage")??;
 
     let mut errors = Vec::new();
     let mut cleared_items = Vec::new();
-    match crate::recording::storage::clear_audio(&app).await {
+    match crate::recording::storage::clear_audio(&app, audio).await {
         Ok(()) => cleared_items.push("Saved and temporary audio".to_string()),
         Err(error) => errors.push(error),
     }
@@ -255,6 +285,141 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn assert_preflight_preserves_stores_and_audio(invalid: &str, alias: bool) {
+        let temp = tempfile::tempdir().unwrap();
+        let identifier = "com.ideaplexa.voicetypr.dev";
+        let base = temp.path().join("data");
+        let data = base.join(identifier);
+        let cache = temp.path().join("cache").join(identifier);
+        let os_temp = temp.path().join("temp");
+        let external = temp.path().join("other-app");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&os_temp).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let stores: Vec<_> = ["settings", "transcriptions"]
+            .into_iter()
+            .map(|name| {
+                let path = data.join("stores").join(name);
+                let store = tauri_plugin_store::StoreBuilder::new(app.handle(), &path)
+                    .build()
+                    .unwrap();
+                store.set("keep", serde_json::json!(name));
+                store.save().unwrap();
+                let original = std::fs::read(&path).unwrap();
+                (store, path, original, name)
+            })
+            .collect();
+        let audio_files = [
+            data.join(if invalid == "recordings" {
+                "recovery/saved.wav"
+            } else {
+                "recordings/saved.wav"
+            }),
+            data.join(if invalid == "captures" {
+                "recovery/recording.wav"
+            } else {
+                "captures/live/recording.wav"
+            }),
+            external.join("recording.wav"),
+            os_temp.join("kept-dictation/.tmp-recovery.wav"),
+            os_temp.join(format!("voicetypr-audio-{}.wav", uuid::Uuid::new_v4())),
+        ];
+        for path in &audio_files {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"keep audio").unwrap();
+        }
+        let invalid = if invalid == "legacy" {
+            let path = os_temp.join("kept-dictation");
+            std::fs::remove_file(&audio_files[3]).unwrap();
+            std::fs::remove_dir(&path).unwrap();
+            path
+        } else {
+            data.join(invalid)
+        };
+        std::fs::create_dir_all(invalid.parent().unwrap()).unwrap();
+        if alias {
+            std::os::unix::fs::symlink(&external, &invalid).unwrap();
+        } else {
+            std::fs::write(&invalid, b"not a directory").unwrap();
+        }
+        let mut directories: Vec<_> = app_data_directories_to_clear(&data)
+            .into_iter()
+            .map(|(path, item)| (path, item, base.clone()))
+            .collect();
+        directories.push((
+            cache.clone(),
+            "Cache directory",
+            cache.parent().unwrap().into(),
+        ));
+        let audio = AudioResetPlan::new(
+            data.clone(),
+            os_temp.join("kept-dictation"),
+            os_temp.clone(),
+        );
+        let result = preflight_reset(&[data, cache], identifier, &[], &directories, &audio);
+        assert!(result.is_err());
+        for (store, path, original, name) in stores {
+            assert_eq!(store.get("keep"), Some(serde_json::json!(name)));
+            assert_eq!(std::fs::read(path).unwrap(), original);
+        }
+        for path in audio_files {
+            // Legacy fixture was replaced by the invalid root itself.
+            if path == os_temp.join("kept-dictation/.tmp-recovery.wav")
+                && invalid == os_temp.join("kept-dictation")
+            {
+                continue;
+            }
+            assert_eq!(std::fs::read(path).unwrap(), b"keep audio");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_preflight_rejects_symlinked_models_without_mutating_stores_or_audio() {
+        assert_preflight_preserves_stores_and_audio("models", true);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_preflight_rejects_symlinked_audio_without_mutating_stores_or_audio() {
+        for path in [
+            "recordings",
+            "recovery",
+            "captures",
+            "cli-recordings",
+            "captures/abandoned",
+            "legacy",
+        ] {
+            assert_preflight_preserves_stores_and_audio(path, true);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_preflight_rejects_unresolvable_targets_without_mutating_stores_or_audio() {
+        assert_preflight_preserves_stores_and_audio("models", false);
+        assert_preflight_preserves_stores_and_audio("recovery", false);
+    }
+
+    #[test]
+    fn reset_preflight_skips_missing_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let identifier = "com.ideaplexa.voicetypr.dev";
+        let data = temp.path().join("data").join(identifier);
+        let directories: Vec<_> = app_data_directories_to_clear(&data)
+            .into_iter()
+            .map(|(path, item)| (path, item, data.parent().unwrap().into()))
+            .collect();
+        let os_temp = temp.path().join("temp");
+        let audio = AudioResetPlan::new(data.clone(), os_temp.join("kept-dictation"), os_temp);
+        assert!(preflight_reset(&[data], identifier, &[], &directories, &audio).is_ok());
+    }
 
     #[test]
     fn reset_deletion_plan_preserves_secure_storage_and_shared_caches() {

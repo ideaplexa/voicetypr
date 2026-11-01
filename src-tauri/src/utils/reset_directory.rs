@@ -134,6 +134,45 @@ pub(crate) fn validate_roles(
     Ok(())
 }
 
+/// Validate a nonrecursive file sweep in an OS-provided temp base or its
+/// immediate child. This does NOT authorize recursively removing either root.
+/// OS aliases at/above the trusted base are allowed, but a child alias is not.
+pub(crate) fn validate_file_sweep_root(path: &Path, base: &Path) -> Result<(), &'static str> {
+    if !path.is_absolute()
+        || !base.is_absolute()
+        || path
+            .components()
+            .chain(base.components())
+            .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+        || !(path == base || path.parent() == Some(base))
+    {
+        return Err(OUTSIDE);
+    }
+    let Some(canonical) = canonical_base(base)? else {
+        return Ok(());
+    };
+    if path != base {
+        let child = canonical.join(path.file_name().ok_or(OUTSIDE)?);
+        match fs::symlink_metadata(child) {
+            Ok(metadata) => {
+                #[cfg(windows)]
+                let alias = {
+                    use std::os::windows::fs::MetadataExt;
+                    metadata.file_attributes() & 0x400 != 0
+                };
+                #[cfg(not(windows))]
+                let alias = metadata.is_symlink();
+                if alias || !metadata.is_dir() {
+                    return Err(UNRESOLVED);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(UNRESOLVED),
+        }
+    }
+    Ok(())
+}
+
 /// Returns whether anything was deleted. Never includes user paths in errors.
 pub(crate) fn remove(path: &Path, identifier: &str, base: &Path) -> Result<bool, String> {
     let Some(path) = validate(path, identifier, base)? else {
@@ -252,6 +291,42 @@ mod tests {
         let nested = [roots[0].clone(), roots[0].join("nested").join(ID)];
         fs::create_dir_all(&nested[1]).unwrap();
         assert!(validate_roles(&nested, ID, &[(0, 1)]).is_err());
+    }
+
+    #[test]
+    fn file_sweep_preflight_accepts_only_base_and_immediate_directory_children() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        assert!(validate_file_sweep_root(base, base).is_ok());
+        let child = base.join("kept-dictation");
+        assert!(validate_file_sweep_root(&child, base).is_ok());
+        fs::create_dir(&child).unwrap();
+        assert!(validate_file_sweep_root(&child, base).is_ok());
+        assert!(validate_file_sweep_root(&child.join("nested"), base).is_err());
+        assert!(validate_file_sweep_root(&base.join("../outside"), base).is_err());
+        fs::write(base.join("blocked"), b"not a directory").unwrap();
+        assert!(validate_file_sweep_root(&base.join("blocked"), base).is_err());
+        assert!(
+            validate_file_sweep_root(&base.join("blocked/child"), &base.join("blocked"),).is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_sweep_preflight_allows_os_base_aliases_but_rejects_child_and_broken_aliases() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("real");
+        fs::create_dir_all(base.join("kept-dictation")).unwrap();
+        let os_alias = temp.path().join("os-alias");
+        symlink(&base, &os_alias).unwrap();
+        assert!(validate_file_sweep_root(&os_alias, &os_alias).is_ok());
+        assert!(validate_file_sweep_root(&os_alias.join("kept-dictation"), &os_alias).is_ok());
+        symlink(&base, base.join("child-alias")).unwrap();
+        assert!(validate_file_sweep_root(&base.join("child-alias"), &base).is_err());
+        let broken = temp.path().join("broken");
+        symlink(temp.path().join("missing"), &broken).unwrap();
+        assert!(validate_file_sweep_root(&broken, &broken).is_err());
     }
 
     #[cfg(unix)]
