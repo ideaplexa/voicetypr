@@ -20,13 +20,10 @@ fn guard_reset_directory(
     protected_roots: &[PathBuf],
 ) -> io::Result<()> {
     let refused = || io::Error::new(io::ErrorKind::PermissionDenied, "Unsafe reset directory");
-    if identifier.is_empty()
-        || Path::new(identifier).components().count() != 1
-        || !matches!(
-            Path::new(identifier).components().next(),
-            Some(Component::Normal(_))
-        )
-        || !path.is_absolute()
+    if !matches!(
+        identifier,
+        "com.ideaplexa.voicetypr" | "com.ideaplexa.voicetypr.dev"
+    ) || !path.is_absolute()
         || path.components().any(|c| matches!(c, Component::ParentDir))
         || path.parent().is_none()
     {
@@ -36,10 +33,32 @@ fn guard_reset_directory(
         .ancestors()
         .find(|p| p.file_name() == Some(std::ffi::OsStr::new(identifier)))
         .ok_or_else(refused)?;
+    // Canonical containment alone accepts aliases to another directory with
+    // the same identifier. Reject every alias in the supplied path, including
+    // Windows junctions/reparse points and aliased parents of the app root.
+    for ancestor in path.ancestors() {
+        let metadata = fs::symlink_metadata(ancestor)?;
+        #[cfg(windows)]
+        let alias = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
+        };
+        #[cfg(not(windows))]
+        let alias = metadata.is_symlink();
+        if alias || !metadata.is_dir() {
+            return Err(refused());
+        }
+    }
     let resolved = path.canonicalize()?;
     let resolved_scope = scope.canonicalize()?;
-    if resolved_scope.file_name() != Some(std::ffi::OsStr::new(identifier))
-        || !resolved.starts_with(&resolved_scope)
+    let expected_scope = scope
+        .parent()
+        .ok_or_else(refused)?
+        .canonicalize()?
+        .join(identifier);
+    let relative = path.strip_prefix(scope).map_err(|_| refused())?;
+    if resolved_scope != expected_scope
+        || resolved != resolved_scope.join(relative)
         || resolved.parent().is_none()
     {
         return Err(refused());
@@ -56,6 +75,22 @@ fn guard_reset_directory(
         }
     }
     Ok(())
+}
+
+fn guard_reset_app_data(
+    path: &Path,
+    identifier: &str,
+    protected_roots: &[PathBuf],
+) -> io::Result<()> {
+    // Store APIs and secure_delete mutate files before recursive cleanup runs.
+    // Their base must be the exact app root, not merely a child in its scope.
+    if path.file_name() != Some(std::ffi::OsStr::new(identifier)) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Unsafe app data directory",
+        ));
+    }
+    guard_reset_directory(path, identifier, protected_roots)
 }
 
 fn remove_reset_directory(
@@ -95,6 +130,12 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     .into_iter()
     .collect::<Result<Vec<_>, _>>()
     .map_err(|_| "Could not resolve reset safety boundaries".to_string())?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Could not resolve app storage".to_string())?;
+    guard_reset_app_data(&app_data_dir, &app_identifier, &protected_roots)
+        .map_err(|_| "Refusing reset outside app-owned storage".to_string())?;
 
     // 1. Clear all stores and delete the store files
     // Clear settings store
@@ -121,7 +162,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     }
 
     // Delete the actual store files from disk
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
+    {
         let stores_dir = app_data_dir.join("stores");
         if stores_dir.exists() {
             if let Err(e) = remove_reset_directory(&stores_dir, &app_identifier, &protected_roots) {
@@ -133,7 +174,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     }
 
     // 2. Delete app data directories
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
+    {
         // Delete models directory
         let models_dir = app_data_dir.join("models");
         if models_dir.exists() {
@@ -186,7 +227,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     }
 
     // 3.5. Clear the secure.dat file itself
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
+    {
         let secure_store_path = app_data_dir.join("secure.dat");
         if secure_store_path.exists() {
             if let Err(e) = fs::remove_file(&secure_store_path) {
@@ -429,7 +470,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{guard_reset_directory, remove_reset_directory};
+    use super::{guard_reset_app_data, guard_reset_directory, remove_reset_directory};
     use std::{fs, path::Path};
 
     const IDENTIFIER: &str = "com.ideaplexa.voicetypr";
@@ -437,6 +478,7 @@ mod tests {
     #[test]
     fn reset_guard_rejects_user_wide_roots_and_filesystem_root() {
         let temp = tempfile::tempdir().unwrap();
+        let temp_path = temp.path().canonicalize().unwrap();
         let roots: Vec<_> = [
             "home",
             "home/Library/Caches",
@@ -446,7 +488,7 @@ mod tests {
             "home/AppData/Roaming",
         ]
         .iter()
-        .map(|p| temp.path().join(p))
+        .map(|p| temp_path.join(p))
         .collect();
         for root in &roots {
             fs::create_dir_all(root).unwrap();
@@ -462,15 +504,16 @@ mod tests {
             .is_err());
         }
         assert!(guard_reset_directory(Path::new("/"), IDENTIFIER, &roots).is_err());
-        assert!(guard_reset_directory(temp.path(), IDENTIFIER, &roots).is_err());
+        assert!(guard_reset_directory(&temp_path, IDENTIFIER, &roots).is_err());
     }
 
     #[test]
     fn reset_guard_accepts_identifier_directory_and_children() {
         let temp = tempfile::tempdir().unwrap();
-        let roots = vec![temp.path().to_path_buf()];
+        let temp_path = temp.path().canonicalize().unwrap();
+        let roots = vec![temp_path.clone()];
         for root in ["Library/Caches", "AppData/Local", "AppData/Roaming"] {
-            let app_dir = temp.path().join(root).join(IDENTIFIER);
+            let app_dir = temp_path.join(root).join(IDENTIFIER);
             let child = app_dir.join("models/nested");
             fs::create_dir_all(&child).unwrap();
             assert!(guard_reset_directory(&app_dir, IDENTIFIER, &roots).is_ok());
@@ -481,7 +524,8 @@ mod tests {
     #[test]
     fn reset_guard_rejects_shared_suffixed_relative_and_traversing_paths() {
         let temp = tempfile::tempdir().unwrap();
-        let roots = vec![temp.path().to_path_buf()];
+        let temp_path = temp.path().canonicalize().unwrap();
+        let roots = vec![temp_path.clone()];
         for name in [
             "FluidAudio".to_string(),
             format!("{IDENTIFIER}.savedState"),
@@ -489,7 +533,7 @@ mod tests {
             format!("{IDENTIFIER}-other"),
             IDENTIFIER.to_string(),
         ] {
-            fs::create_dir_all(temp.path().join(name)).unwrap();
+            fs::create_dir_all(temp_path.join(name)).unwrap();
         }
         for name in [
             "FluidAudio".to_string(),
@@ -497,22 +541,20 @@ mod tests {
             format!("{IDENTIFIER}.WebView2"),
             format!("{IDENTIFIER}-other"),
         ] {
-            assert!(guard_reset_directory(&temp.path().join(name), IDENTIFIER, &roots).is_err());
+            assert!(guard_reset_directory(&temp_path.join(name), IDENTIFIER, &roots).is_err());
         }
         assert!(guard_reset_directory(Path::new(IDENTIFIER), IDENTIFIER, &roots).is_err());
-        assert!(guard_reset_directory(
-            &temp.path().join(IDENTIFIER).join(".."),
-            IDENTIFIER,
-            &roots
-        )
-        .is_err());
-        assert!(guard_reset_directory(&temp.path().join(IDENTIFIER), "..", &roots).is_err());
+        assert!(
+            guard_reset_directory(&temp_path.join(IDENTIFIER).join(".."), IDENTIFIER, &roots)
+                .is_err()
+        );
+        assert!(guard_reset_directory(&temp_path.join(IDENTIFIER), "..", &roots).is_err());
     }
 
     #[test]
     fn reset_guard_protects_roots_even_below_an_identifier_directory() {
         let temp = tempfile::tempdir().unwrap();
-        let app_dir = temp.path().join(IDENTIFIER);
+        let app_dir = temp.path().canonicalize().unwrap().join(IDENTIFIER);
         let home = app_dir.join("home");
         fs::create_dir_all(&home).unwrap();
         assert!(guard_reset_directory(&home, IDENTIFIER, std::slice::from_ref(&home)).is_err());
@@ -522,14 +564,15 @@ mod tests {
     #[test]
     fn guarded_removal_preserves_other_apps_data() {
         let temp = tempfile::tempdir().unwrap();
-        let cache_root = temp.path().join("AppData/Local");
+        let temp_path = temp.path().canonicalize().unwrap();
+        let cache_root = temp_path.join("AppData/Local");
         let app_dir = cache_root.join(IDENTIFIER);
         let other_app = cache_root.join("Browser/profile");
         fs::create_dir_all(&app_dir).unwrap();
         fs::create_dir_all(&other_app).unwrap();
         let marker = other_app.join("keep");
         fs::write(&marker, b"other app data").unwrap();
-        let roots = vec![temp.path().to_path_buf(), cache_root.clone()];
+        let roots = vec![temp_path, cache_root.clone()];
 
         assert!(remove_reset_directory(&cache_root, IDENTIFIER, &roots).is_err());
         remove_reset_directory(&app_dir, IDENTIFIER, &roots).unwrap();
@@ -543,19 +586,117 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let temp = tempfile::tempdir().unwrap();
-        let app_dir = temp.path().join(IDENTIFIER);
-        let other_app = temp.path().join("other-app");
+        let temp_path = temp.path().canonicalize().unwrap();
+        let app_dir = temp_path.join(IDENTIFIER);
+        let other_app = temp_path.join("other-app");
         fs::create_dir_all(&app_dir).unwrap();
         fs::create_dir_all(&other_app).unwrap();
         symlink(&other_app, app_dir.join("escape")).unwrap();
-        let roots = vec![temp.path().to_path_buf()];
+        let roots = vec![temp_path.clone()];
         assert!(guard_reset_directory(&app_dir.join("escape"), IDENTIFIER, &roots).is_err());
         assert!(remove_reset_directory(&app_dir.join("escape"), IDENTIFIER, &roots).is_err());
         assert!(other_app.exists());
 
-        let alias = temp.path().join("alias");
+        let alias = temp_path.join("alias");
         fs::create_dir_all(&alias).unwrap();
         symlink(&other_app, alias.join(IDENTIFIER)).unwrap();
         assert!(guard_reset_directory(&alias.join(IDENTIFIER), IDENTIFIER, &roots).is_err());
+    }
+
+    #[test]
+    fn rejected_app_storage_preserves_stores_and_secrets() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        for relative in [
+            "other-app".to_string(),
+            format!("{IDENTIFIER}/stores"),
+            "com.ideaplexa.voicetypr.dev".to_string(),
+        ] {
+            let data = home.join(relative);
+            fs::create_dir_all(&data).unwrap();
+            for name in ["settings", "transcriptions", "secure.dat"] {
+                fs::write(data.join(name), b"must stay untouched").unwrap();
+            }
+            // Model the command's validate-before-mutation boundary using only
+            // temporary storage. None of these mutations may be reached.
+            let reset = || -> std::io::Result<()> {
+                guard_reset_app_data(&data, IDENTIFIER, std::slice::from_ref(&home))?;
+                fs::write(data.join("settings"), b"cleared")?;
+                fs::write(data.join("transcriptions"), b"cleared")?;
+                fs::remove_file(data.join("secure.dat"))
+            };
+            assert!(reset().is_err());
+            for name in ["settings", "transcriptions", "secure.dat"] {
+                assert_eq!(fs::read(data.join(name)).unwrap(), b"must stay untouched");
+            }
+        }
+        let app_data = home.join(IDENTIFIER);
+        assert!(guard_reset_app_data(&app_data, IDENTIFIER, std::slice::from_ref(&home)).is_ok());
+    }
+
+    #[test]
+    fn reset_guard_fails_closed_when_storage_cannot_be_resolved() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        let data = home.join(IDENTIFIER);
+        assert!(guard_reset_app_data(&data, IDENTIFIER, std::slice::from_ref(&home)).is_err());
+        assert!(!data.exists());
+        fs::write(&data, b"not a directory").unwrap();
+        assert!(guard_reset_app_data(&data, IDENTIFIER, std::slice::from_ref(&home)).is_err());
+        assert_eq!(fs::read(data).unwrap(), b"not a directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_same_named_app_root_aliases_and_aliased_parents() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        let real_parent = home.join("real");
+        let data = real_parent.join(IDENTIFIER);
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("secure.dat"), b"keep secrets").unwrap();
+        let alias = home.join(IDENTIFIER);
+        symlink(&data, &alias).unwrap();
+        let parent_alias = home.join("linked-parent");
+        symlink(&real_parent, &parent_alias).unwrap();
+        for path in [alias, parent_alias.join(IDENTIFIER)] {
+            assert!(guard_reset_app_data(&path, IDENTIFIER, std::slice::from_ref(&home)).is_err());
+            assert!(
+                remove_reset_directory(&path, IDENTIFIER, std::slice::from_ref(&home)).is_err()
+            );
+        }
+        assert_eq!(fs::read(data.join("secure.dat")).unwrap(), b"keep secrets");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_junction_app_roots_and_junction_parents() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        let real_parent = home.join("real");
+        let data = real_parent.join(IDENTIFIER);
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("secure.dat"), b"keep secrets").unwrap();
+        for (link, target, path) in [
+            (home.join(IDENTIFIER), data.clone(), home.join(IDENTIFIER)),
+            (
+                home.join("linked-parent"),
+                real_parent,
+                home.join("linked-parent").join(IDENTIFIER),
+            ),
+        ] {
+            assert!(std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap()
+                .status
+                .success());
+            assert!(guard_reset_app_data(&path, IDENTIFIER, std::slice::from_ref(&home)).is_err());
+        }
+        assert_eq!(fs::read(data.join("secure.dat")).unwrap(), b"keep secrets");
     }
 }
