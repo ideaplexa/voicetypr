@@ -55,11 +55,10 @@ impl DisplayWatcher {
             }
 
             log::info!("Display configuration changed, repositioning windows");
-            crate::utils::monitor::invalidate_macos_geometry();
-
             let app_ptr = user_info as *const AppHandle;
             if !app_ptr.is_null() {
                 let app = &*app_ptr;
+                crate::utils::monitor::invalidate_macos_geometry(app);
                 let app_state = app.state::<AppState>();
                 if let Some(window_manager) = app_state.get_window_manager() {
                     window_manager.reposition_floating_windows();

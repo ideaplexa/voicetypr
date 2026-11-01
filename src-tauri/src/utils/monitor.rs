@@ -93,6 +93,15 @@ mod macos {
         last_attempt: Option<Instant>,
         pending: bool,
     }
+    impl Cache {
+        fn invalidate(&mut self, is_main: bool, now: Instant) -> bool {
+            // Main can refresh directly even if an earlier worker refresh is
+            // queued. Keep pending set until that queued closure actually runs,
+            // so workers cannot add another refresh behind it.
+            self.last_attempt = is_main.then_some(now);
+            is_main
+        }
+    }
     static CACHE: Mutex<Cache> = Mutex::new(Cache {
         value: None,
         last_attempt: None,
@@ -104,10 +113,31 @@ mod macos {
         !pending && last.is_none_or(|last| now.duration_since(last) >= TTL)
     }
 
-    pub(crate) fn invalidate() {
-        // Keep last-known geometry as the failure fallback. Do not enqueue a
-        // second refresh if one is already waiting for the main thread.
-        CACHE.lock().unwrap_or_else(|e| e.into_inner()).last_attempt = None;
+    fn query_geometry(app: &tauri::AppHandle) -> Option<Geometry> {
+        // Surround the actual AppKit queries with a pool, including direct
+        // display-change refreshes that do not go through on_main_result.
+        catch_monitor_panic(|| {
+            Some(Geometry {
+                monitors: app.available_monitors().ok()?,
+                primary: app.primary_monitor().ok().flatten()?,
+            })
+        })
+        .flatten()
+    }
+
+    pub(crate) fn invalidate(app: &tauri::AppHandle) {
+        let refresh_now = CACHE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .invalidate(objc2::MainThreadMarker::new().is_some(), Instant::now());
+        if refresh_now {
+            // The display callback repositions immediately after this returns.
+            // Refresh synchronously rather than returning stale geometry while
+            // an older worker request waits in the main-thread queue.
+            if let Some(value) = query_geometry(app) {
+                CACHE.lock().unwrap_or_else(|e| e.into_inner()).value = Some(value);
+            }
+        }
     }
 
     pub(crate) fn geometry(app: &tauri::AppHandle) -> Option<Geometry> {
@@ -122,13 +152,7 @@ mod macos {
         }
         let query_app = app.clone();
         let result = on_main_result(app, move || {
-            let result = catch_monitor_panic(|| {
-                Some(Geometry {
-                    monitors: query_app.available_monitors().ok()?,
-                    primary: query_app.primary_monitor().ok().flatten()?,
-                })
-            })
-            .flatten();
+            let result = query_geometry(&query_app);
             let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
             cache.pending = false;
             if let Some(value) = &result {
@@ -156,6 +180,43 @@ mod macos {
             assert!(!should_refresh(false, Some(now), now + TTL / 2));
             assert!(should_refresh(false, Some(now), now + TTL));
             assert!(!should_refresh(true, Some(now), now + TTL * 10));
+        }
+
+        #[test]
+        fn display_invalidation_refreshes_on_main_even_with_a_pending_worker() {
+            let now = Instant::now();
+            let mut cache = Cache {
+                value: None,
+                last_attempt: Some(now - TTL),
+                pending: true,
+            };
+            assert!(cache.invalidate(true, now));
+            assert_eq!(cache.last_attempt, Some(now));
+            assert!(cache.pending);
+            assert!(!should_refresh(
+                cache.pending,
+                cache.last_attempt,
+                now + TTL
+            ));
+            // The already-queued refresh completes later, then normal TTL
+            // throttling applies to the synchronously refreshed geometry.
+            cache.pending = false;
+            assert!(!should_refresh(cache.pending, cache.last_attempt, now));
+        }
+
+        #[test]
+        fn worker_invalidation_does_not_enqueue_behind_a_pending_refresh() {
+            let now = Instant::now();
+            let mut cache = Cache {
+                value: None,
+                last_attempt: Some(now),
+                pending: true,
+            };
+            assert!(!cache.invalidate(false, now));
+            assert_eq!(cache.last_attempt, None);
+            assert!(!should_refresh(cache.pending, cache.last_attempt, now));
+            cache.pending = false;
+            assert!(should_refresh(cache.pending, cache.last_attempt, now));
         }
     }
 }
