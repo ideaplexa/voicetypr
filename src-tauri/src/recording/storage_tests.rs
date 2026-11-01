@@ -657,6 +657,55 @@ async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer()
 }
 
 #[test]
+fn reset_allows_and_removes_ds_store_and_other_regular_capture_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let identifier = "com.ideaplexa.voicetypr.dev";
+    let data = temp.path().join(identifier);
+    let files = [
+        data.join("captures/.DS_Store"),
+        data.join("captures/stray.txt"),
+        capture_path(&data, "recording.wav"),
+        data.join("recordings/saved.wav"),
+        data.join("recovery/kept.wav"),
+    ];
+    for path in &files {
+        write_aged(path, SystemTime::now(), Duration::ZERO);
+    }
+    let plan = AudioResetPlan::new(
+        data.clone(),
+        temp.path().join("kept-dictation"),
+        temp.path().to_owned(),
+    );
+    assert_eq!(plan.preflight(identifier), Ok(()));
+    clear_storage(&data, None, identifier, temp.path(), temp.path()).unwrap();
+    for path in files {
+        assert!(!path.exists(), "reset must clear regular files and audio");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn reset_rejects_capture_file_symlinks_without_touching_the_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let identifier = "com.ideaplexa.voicetypr.dev";
+    let data = temp.path().join(identifier);
+    let external = temp.path().join("other-app-file");
+    std::fs::write(&external, b"unrelated").unwrap();
+    std::fs::create_dir_all(data.join("captures")).unwrap();
+    let link = data.join("captures/.DS_Store");
+    std::os::unix::fs::symlink(&external, &link).unwrap();
+    let plan = AudioResetPlan::new(
+        data.clone(),
+        temp.path().join("kept-dictation"),
+        temp.path().to_owned(),
+    );
+    assert!(plan.preflight(identifier).is_err());
+    assert!(clear_storage(&data, None, identifier, temp.path(), temp.path()).is_err());
+    assert!(std::fs::symlink_metadata(link).unwrap().is_symlink());
+    assert_eq!(std::fs::read(external).unwrap(), b"unrelated");
+}
+
+#[test]
 fn cli_capture_has_no_short_orphan_age_gate_in_either_desktop_sweep() {
     let data = tempfile::tempdir().unwrap();
     let temp = tempfile::tempdir().unwrap();

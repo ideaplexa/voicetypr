@@ -396,6 +396,17 @@ pub(crate) async fn clear_audio(app: &AppHandle, plan: AudioResetPlan) -> Result
     .map_err(|_| "Could not clear audio storage")?
 }
 
+fn capture_directory_candidate(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    let alias = {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
+    };
+    #[cfg(not(windows))]
+    let alias = metadata.is_symlink();
+    metadata.is_dir() || alias
+}
+
 fn validate_audio_roots(data: &Path, identifier: &str, base: &Path) -> Result<(), &'static str> {
     use crate::utils::reset_directory;
     for name in ["recordings", "recovery", "captures", "cli-recordings"] {
@@ -407,7 +418,11 @@ fn validate_audio_roots(data: &Path, identifier: &str, base: &Path) -> Result<()
         Ok(dirs) => {
             for entry in dirs {
                 let entry = entry.map_err(|_| "Could not validate audio storage")?;
-                reset_directory::validate(&entry.path(), identifier, base)?;
+                let metadata = std::fs::symlink_metadata(entry.path())
+                    .map_err(|_| "Could not validate audio storage")?;
+                if capture_directory_candidate(&metadata) {
+                    reset_directory::validate(&entry.path(), identifier, base)?;
+                }
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -444,9 +459,25 @@ fn clear_storage(
             for entry in dirs {
                 match entry {
                     Ok(entry) if !active.contains_key(&entry.path()) => {
-                        failed |= reset_directory::validate(&entry.path(), identifier, base)
-                            .is_err()
-                            || remove_capture_files(&entry.path()).is_err();
+                        let path = entry.path();
+                        match std::fs::symlink_metadata(&path) {
+                            Ok(metadata) if capture_directory_candidate(&metadata) => {
+                                failed |= reset_directory::validate(&path, identifier, base)
+                                    .is_err()
+                                    || remove_capture_files(&path).is_err();
+                            }
+                            Ok(metadata) if metadata.is_file() => {
+                                // Stray files (e.g. Finder's .DS_Store) are ours
+                                // to clear. remove_file never follows a symlink.
+                                if let Err(error) = std::fs::remove_file(path) {
+                                    failed |= error.kind() != std::io::ErrorKind::NotFound;
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                failed |= error.kind() != std::io::ErrorKind::NotFound;
+                            }
+                        }
                     }
                     Ok(_) => {}
                     Err(_) => failed = true,
