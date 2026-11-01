@@ -323,7 +323,7 @@ async fn route_once(
             };
             let model = provider.selected_model(app).id;
             match provider.transcribe_typed(app, &key, model, input_path, language).await {
-                Ok(text) => Ok(TranscriptionResult::new(job, text)),
+                Ok(transcript) => Ok(cloud_transcription_result(job, transcript)),
                 Err(e) => Err(from_stt_error(&e, source)),
             }
         }
@@ -334,6 +334,15 @@ async fn route_once(
             "Remote (send-to-peer) transcription via the executor is wired by the remote-client port (Stage 5).",
         )),
     }
+}
+
+fn cloud_transcription_result(
+    job: &TranscriptionJob,
+    transcript: crate::cloud_stt::CloudTranscript,
+) -> TranscriptionResult {
+    let mut result = TranscriptionResult::new(job, transcript.text);
+    result.whisper_style_hint_sent = transcript.whisper_style_hint_sent;
+    result
 }
 
 /// Run one engine attempt under the request's [`TimeoutPolicy`], carrying the
@@ -761,6 +770,44 @@ mod tests {
             model: "base".to_string(),
             spoken_language: None,
             task: TranscriptionTask::Transcribe,
+        }
+    }
+
+    #[test]
+    fn beta5_4c_cloud_hint_provenance_reaches_sanitizer_for_every_source() {
+        use crate::cloud_stt::CloudTranscript;
+        use crate::writing::{sanitize_transcript, WHISPER_STYLE_HINT};
+        let text = format!("{WHISPER_STYLE_HINT} Send it now.");
+        for source in [
+            TranscriptionSource::DesktopRecording,
+            TranscriptionSource::AudioFile,
+            TranscriptionSource::AudioBytes,
+            TranscriptionSource::RemoteServer,
+        ] {
+            for (engine, hint_sent) in [
+                ("openai", true),
+                ("groq", true),
+                ("openai", false),
+                ("groq", false),
+                ("deepgram", false),
+                ("soniox", false),
+                ("cohere", false),
+            ] {
+                let job = TranscriptionJob {
+                    source,
+                    engine: engine.to_string(),
+                    ..sample_job()
+                };
+                let mut transcript = CloudTranscript::from(text.clone());
+                transcript.whisper_style_hint_sent = hint_sent;
+                let result = super::cloud_transcription_result(&job, transcript);
+                assert_eq!(result.whisper_style_hint_sent, hint_sent);
+                assert_eq!(
+                    sanitize_transcript(&result.raw_text, result.whisper_style_hint_sent),
+                    if hint_sent { "Send it now." } else { &text },
+                    "engine: {engine}, source: {source:?}"
+                );
+            }
         }
     }
 

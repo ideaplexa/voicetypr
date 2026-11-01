@@ -1810,7 +1810,10 @@ async fn run_diarized_transcription(
             .map(|tokens| tokens.iter().filter_map(parse_soniox_token).collect())
             .unwrap_or_default();
 
-        Ok(super::CloudTranscript { text, words })
+        Ok(super::CloudTranscript {
+            words,
+            ..text.into()
+        })
     }
     .await;
 

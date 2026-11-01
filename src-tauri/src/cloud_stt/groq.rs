@@ -23,7 +23,7 @@ pub(super) async fn transcribe_typed(
     model: &str,
     audio_path: &Path,
     language: Option<&str>,
-) -> Result<String, common::SttError> {
+) -> Result<super::CloudTranscript, common::SttError> {
     // The personal dictionary is reused as the recognizer's initial prompt so
     // jargon/brand names are reconciled against the audio at recognition time.
     let prompt = crate::writing::with_whisper_style_hint(

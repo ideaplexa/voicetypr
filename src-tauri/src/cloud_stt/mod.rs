@@ -42,6 +42,18 @@ pub enum CloudProvider {
 pub struct CloudTranscript {
     pub text: String,
     pub words: Vec<TranscriptionWord>,
+    /// True only when the adapter actually sent the style hint in its prompt.
+    pub(crate) whisper_style_hint_sent: bool,
+}
+
+impl From<String> for CloudTranscript {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            words: vec![],
+            whisper_style_hint_sent: false,
+        }
+    }
 }
 
 /// Settings-store key for the per-provider selected API model map.
@@ -257,21 +269,21 @@ impl CloudProvider {
         model: &str,
         audio_path: &Path,
         language: Option<&str>,
-    ) -> Result<String, common::SttError> {
+    ) -> Result<CloudTranscript, common::SttError> {
         match self {
-            Self::Soniox => {
-                soniox::transcribe_typed(app, api_key, model, audio_path, language).await
-            }
+            Self::Soniox => soniox::transcribe_typed(app, api_key, model, audio_path, language)
+                .await
+                .map(CloudTranscript::from),
             Self::Openai => {
                 openai::transcribe_typed(app, api_key, model, audio_path, language).await
             }
             Self::Groq => groq::transcribe_typed(app, api_key, model, audio_path, language).await,
-            Self::Deepgram => {
-                deepgram::transcribe_typed(app, api_key, model, audio_path, language).await
-            }
-            Self::Cohere => {
-                cohere::transcribe_typed(app, api_key, model, audio_path, language).await
-            }
+            Self::Deepgram => deepgram::transcribe_typed(app, api_key, model, audio_path, language)
+                .await
+                .map(CloudTranscript::from),
+            Self::Cohere => cohere::transcribe_typed(app, api_key, model, audio_path, language)
+                .await
+                .map(CloudTranscript::from),
         }
     }
 
@@ -308,13 +320,8 @@ impl CloudProvider {
                 soniox::transcribe_typed_diarized(app, api_key, model, audio_path, language).await
             }
             _ => {
-                let text = self
-                    .transcribe_typed(app, api_key, model, audio_path, language)
-                    .await?;
-                Ok(CloudTranscript {
-                    text,
-                    words: vec![],
-                })
+                self.transcribe_typed(app, api_key, model, audio_path, language)
+                    .await
             }
         }
     }

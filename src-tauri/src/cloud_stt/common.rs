@@ -357,7 +357,7 @@ pub(super) async fn openai_compatible_transcribe(
     language: Option<&str>,
     prompt: Option<&str>,
     label: &str,
-) -> Result<String, SttError> {
+) -> Result<super::CloudTranscript, SttError> {
     use futures_util::stream;
     use reqwest::{
         multipart::{Form, Part},
@@ -383,6 +383,10 @@ pub(super) async fn openai_compatible_transcribe(
         .map(str::trim)
         .filter(|prompt| !prompt.is_empty())
         .map(cap_transcription_prompt);
+    // Inspect the final, budget-capped prompt, not the provider or requested language.
+    let whisper_style_hint_sent = prompt
+        .as_deref()
+        .is_some_and(|prompt| prompt.starts_with(crate::writing::WHISPER_STYLE_HINT));
     let client = http_client();
     let url = format!("{}/audio/transcriptions", base_url);
 
@@ -435,7 +439,11 @@ pub(super) async fn openai_compatible_transcribe(
                 .await
                 .map_err(|e| classify_reqwest_err(&e))?;
 
-            parse_text_response(resp, label).await
+            let text = parse_text_response(resp, label).await?;
+            Ok(super::CloudTranscript {
+                whisper_style_hint_sent,
+                ..text.into()
+            })
         }
     })
     .await
@@ -485,6 +493,64 @@ mod tests {
         file
     }
 
+    #[tokio::test]
+    async fn beta5_4c_openai_groq_hint_provenance_matches_sent_prompt() {
+        use crate::writing::{with_whisper_style_hint, WHISPER_STYLE_HINT};
+        let budget = super::TRANSCRIPTION_PROMPT_MAX_BYTES;
+        let cases = [
+            (Some("en"), None, true),
+            (Some("en-US"), Some("Terms: Tauri.".to_string()), true),
+            (Some("es"), Some("Terms: Tauri.".to_string()), false),
+            (None, None, false),
+            (
+                Some("en"),
+                Some("x".repeat(budget - WHISPER_STYLE_HINT.len() - 1)),
+                true,
+            ),
+            (
+                Some("en"),
+                Some("x".repeat(budget - WHISPER_STYLE_HINT.len())),
+                false,
+            ),
+            (Some("en"), Some("x".repeat(budget + 1)), false),
+        ];
+        for (model, label) in [
+            ("gpt-transcribe", "OpenAI transcription"),
+            ("whisper-large-v3-turbo", "Groq transcription"),
+        ] {
+            for (language, vocabulary, expected_hint) in &cases {
+                let server = MockServer::start().await;
+                Mock::given(method("POST"))
+                    .and(path("/audio/transcriptions"))
+                    .respond_with(
+                        ResponseTemplate::new(200)
+                            .set_body_json(serde_json::json!({ "text": "hello" })),
+                    )
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+                let audio = audio_file();
+                let prompt = with_whisper_style_hint(vocabulary.clone(), *language, budget);
+                let transcript = openai_compatible_transcribe(
+                    &server.uri(),
+                    "k",
+                    model,
+                    audio.path(),
+                    *language,
+                    prompt.as_deref(),
+                    label,
+                )
+                .await
+                .unwrap();
+                assert_eq!(transcript.text, "hello");
+                assert_eq!(transcript.whisper_style_hint_sent, *expected_hint);
+                let requests = server.received_requests().await.unwrap();
+                let body = String::from_utf8_lossy(&requests[0].body);
+                assert_eq!(body.contains(WHISPER_STYLE_HINT), *expected_hint);
+            }
+        }
+    }
+
     async fn mount_sequence(server: &MockServer, responses: Vec<ResponseTemplate>) {
         let counter = Arc::new(AtomicUsize::new(0));
         let responses = Arc::new(responses);
@@ -528,7 +594,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(text, "hello");
+        assert_eq!(text.text, "hello");
+        assert!(!text.whisper_style_hint_sent);
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
         let request = &requests[0];
@@ -647,7 +714,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(text, "ok");
+        assert_eq!(text.text, "ok");
+        assert!(!text.whisper_style_hint_sent);
         let request = &server.received_requests().await.unwrap()[0];
         let body = String::from_utf8_lossy(&request.body);
         assert!(body.contains("name=\"prompt\""));
@@ -726,7 +794,7 @@ mod tests {
         .unwrap();
 
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(text, "hello");
+        assert_eq!(text.text, "hello");
         assert_eq!(requests.len(), 2);
         for request in requests {
             assert!(request.headers.get("content-length").is_some());
@@ -769,7 +837,7 @@ mod tests {
 
         let requests = server.received_requests().await.unwrap();
         let second_body = String::from_utf8_lossy(&requests[1].body);
-        assert_eq!(text, "hello");
+        assert_eq!(text.text, "hello");
         assert!(second_body.contains("two"));
     }
 

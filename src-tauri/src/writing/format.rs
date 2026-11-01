@@ -27,8 +27,9 @@ pub const PARAGRAPH_MIN_TAIL_WORDS: usize = 6;
 
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm"];
 // "is is" can be a double copula; "in in" can follow a phrasal verb ("come in in June").
-// Without reliable grammatical context, keep both rather than delete speech.
-const STUTTER_REPEATS: &[&str] = &["the", "a", "an", "to", "and", "i", "we", "you", "it", "of"];
+// Also keep "you you"/"it it" (object then subject), "to to" (stranded/infinitive
+// then purpose), and "of of" ("unheard of of course"). Prefer speech to deletion.
+const STUTTER_REPEATS: &[&str] = &["the", "a", "an", "and", "i", "we"];
 /// Words whose trailing period does not end a sentence.
 const ABBREVIATIONS: &[&str] = &[
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "mt", "vs", "etc", "inc", "ltd", "co",
@@ -255,21 +256,33 @@ pub fn format_transcript<'a>(
     let single_line = !text.contains('\n');
     let mut out = String::with_capacity(text.len() + 8);
     let mut at_sentence_start = true;
-    let mut fence_length = None;
+    let mut code_fence = None;
     for (index, line) in text.split('\n').enumerate() {
         if index > 0 {
             out.push('\n');
         }
         let fence = line.trim_start();
-        let backticks = fence.bytes().take_while(|&byte| byte == b'`').count();
-        if fence_length.is_some() || backticks >= 3 {
+        let delimiter = fence.as_bytes().first().copied().unwrap_or_default();
+        let length = if matches!(delimiter, b'`' | b'~') {
+            fence.bytes().take_while(|&byte| byte == delimiter).count()
+        } else {
+            0
+        };
+        // CommonMark forbids backticks in a backtick fence's info string:
+        // a leading inline span such as ```echo``` is prose, not a fence.
+        let opens_fence = length >= 3 && (delimiter != b'`' || !fence[length..].contains('`'));
+        if code_fence.is_some() || opens_fence {
             // Do this before spacing normalization: even prose-looking code is literal.
             out.push_str(line);
-            match fence_length {
-                Some(length) if backticks >= length && fence[backticks..].trim().is_empty() => {
-                    fence_length = None;
+            match code_fence {
+                Some((opening_delimiter, opening_length))
+                    if delimiter == opening_delimiter
+                        && length >= opening_length
+                        && fence[length..].trim().is_empty() =>
+                {
+                    code_fence = None;
                 }
-                None => fence_length = Some(backticks),
+                None => code_fence = Some((delimiter, length)),
                 _ => {}
             }
             at_sentence_start = false;
@@ -1125,6 +1138,57 @@ mod tests {
     // --- stutters ---
 
     #[test]
+    fn beta5_4c_grammatical_doubles_are_not_stutters() {
+        for sample in [
+            "I told you you were right.",
+            "Whatever you call it it works.",
+            "I do what I have to to finish on time.",
+            "That's unheard of of course.",
+            "Did you get it? It works.",
+            "Did we? We did.",
+            "Should I? I should.",
+            "She earned an A. A new record.",
+            "Was that an? An article is missing.",
+            "Use and. And then continue.",
+            "Use the. The definite article fits.",
+        ] {
+            assert_eq!(fmt(sample, &fillers()), sample, "sample: {sample}");
+        }
+    }
+
+    #[test]
+    fn beta5_4c_fences_match_delimiter_and_minimum_length() {
+        for delimiter in ['`', '~'] {
+            let opening = delimiter.to_string().repeat(4);
+            let wrong = if delimiter == '`' { "~~~~" } else { "````" };
+            let short = delimiter.to_string().repeat(3);
+            let closing = delimiter.to_string().repeat(5);
+            let input = format!(
+                "before  code .\n{opening}sh\n  echo um  .\n{wrong}\n{short}\necho uh\n{closing}\nafter  code ."
+            );
+            let expected = format!(
+                "before code.\n{opening}sh\n  echo um  .\n{wrong}\n{short}\necho uh\n{closing}\nafter code."
+            );
+            assert_eq!(fmt(&input, &fillers()), expected, "delimiter: {delimiter}");
+        }
+        let tilde = "~~~sh\necho um\n~~~";
+        assert_eq!(fmt(tilde, &fillers()), tilde);
+    }
+
+    #[test]
+    fn beta5_4c_leading_inline_code_is_not_a_fence_opener() {
+        for input in ["```echo```\nhello  world .", "```sh `echo`\nhello  world ."] {
+            let expected = input.replace("hello  world .", "hello world.");
+            assert_eq!(fmt(input, &fillers()), expected);
+        }
+        let tilde = "~~~sh `echo`\n  echo um  .\n~~~\nhello  world .";
+        assert_eq!(
+            fmt(tilde, &fillers()),
+            "~~~sh `echo`\n  echo um  .\n~~~\nhello world."
+        );
+    }
+
+    #[test]
     fn beta5_stutter_cleanup_preserves_double_copulas() {
         for sample in [
             "What it is is a problem.",
@@ -1182,11 +1246,15 @@ mod tests {
         assert_eq!(fmt("the the plan works.", &fillers()), "The plan works.");
         assert_eq!(
             fmt("go to to the store and and buy.", &fillers()),
-            "go to the store and buy."
+            "go to to the store and buy."
         );
         assert_eq!(
             fmt("so we we are, you you know.", &fillers()),
-            "so we are, you know."
+            "so we are, you you know."
+        );
+        assert_eq!(
+            fmt("so a a plan and and an an idea.", &fillers()),
+            "so a plan and an idea."
         );
         assert_eq!(fmt("so the the the end.", &fillers()), "so the end.");
         assert_eq!(fmt("I I think so.", &fillers()), "I think so.");

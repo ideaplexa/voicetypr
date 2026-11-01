@@ -239,7 +239,10 @@ fn parse_diarized_response(json: serde_json::Value) -> Option<super::CloudTransc
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(parse_deepgram_word).collect())
         .unwrap_or_default();
-    Some(super::CloudTranscript { text, words })
+    Some(super::CloudTranscript {
+        words,
+        ..text.into()
+    })
 }
 
 fn parse_deepgram_word(w: &serde_json::Value) -> Option<crate::transcription::TranscriptionWord> {
