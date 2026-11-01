@@ -83,7 +83,7 @@ impl Drop for CaptureDirectory {
                         {
                             return false;
                         }
-                        remove_capture_files(&dir);
+                        let _ = remove_capture_files(&dir);
                         active.remove(&dir);
                         true
                     })
@@ -160,13 +160,47 @@ fn entries(dir: &Path) -> impl Iterator<Item = PathBuf> {
         .filter_map(Result::ok)
         .map(|e| e.path())
 }
-fn remove_capture_files(dir: &Path) -> usize {
-    let removed = entries(dir)
-        .filter(|p| capture_name(p) && p.is_file())
-        .filter(|p| std::fs::remove_file(p).is_ok())
-        .count();
-    let _ = std::fs::remove_dir(dir); // Keep unrelated files/directories.
-    removed
+fn remove_capture_files(dir: &Path) -> Result<(), &'static str> {
+    let files = match std::fs::read_dir(dir) {
+        Ok(files) => files,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("Could not clear audio storage"),
+    };
+    let mut failed = false;
+    for entry in files {
+        let Ok(entry) = entry else {
+            failed = true;
+            continue;
+        };
+        let path = entry.path();
+        if !capture_name(&path) {
+            continue;
+        }
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_symlink() => continue,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                failed = true;
+                continue;
+            }
+        }
+        if let Err(error) = std::fs::remove_file(path) {
+            failed |= error.kind() != std::io::ErrorKind::NotFound;
+        }
+    }
+    if let Err(error) = std::fs::remove_dir(dir) {
+        // Keep unrelated files/directories, but report other deletion failures.
+        failed |= !matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+        );
+    }
+    if failed {
+        Err("Could not clear audio storage")
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -286,7 +320,8 @@ fn maintenance(app: &AppHandle) {
             protected,
             SystemTime::now(),
             false,
-        );
+        )
+        .unwrap_or(0);
         log::info!(
             "Recording cleanup: orphans={}, retention={}",
             counts.orphans,
@@ -329,14 +364,15 @@ pub async fn clear_audio(app: &AppHandle) -> Result<(), String> {
 }
 
 fn clear_storage(data: &Path, legacy: Option<PathBuf>) -> Result<(), String> {
-    super::kept::with_protected_paths(|protected| {
+    let mut failed = super::kept::with_protected_paths(|protected| {
         super::file_jobs::sweep(
             data,
             &std::env::temp_dir(),
             protected,
             SystemTime::now(),
             true,
-        );
+        )
+        .is_err()
     });
     let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
     for dir in [
@@ -350,15 +386,28 @@ fn clear_storage(data: &Path, legacy: Option<PathBuf>) -> Result<(), String> {
         match std::fs::remove_dir_all(dir) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Could not clear audio storage".into()),
+            Err(_) => failed = true,
         }
     }
-    for dir in entries(&data.join("captures")) {
-        if !active.contains_key(&dir) {
-            remove_capture_files(&dir);
+    match std::fs::read_dir(data.join("captures")) {
+        Ok(dirs) => {
+            for entry in dirs {
+                match entry {
+                    Ok(entry) if !active.contains_key(&entry.path()) => {
+                        failed |= remove_capture_files(&entry.path()).is_err();
+                    }
+                    Ok(_) => {}
+                    Err(_) => failed = true,
+                }
+            }
         }
+        Err(error) => failed |= error.kind() != std::io::ErrorKind::NotFound,
     }
-    Ok(())
+    if failed {
+        Err("Could not clear audio storage".into())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -78,6 +78,7 @@ pub(crate) struct ProtectedPath(PathBuf);
 
 pub(crate) fn protect_path(path: &Path) -> ProtectedPath {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    super::file_jobs::refresh_retry(path);
     *store.borrowed_paths.entry(path.to_owned()).or_default() += 1;
     ProtectedPath(path.to_owned())
 }

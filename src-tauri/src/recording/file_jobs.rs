@@ -87,6 +87,20 @@ fn cli_name(path: &Path, prefix: &str) -> bool {
         })
 }
 
+/// Leases are process-local. Restart the shared expiry clock before loading an
+/// engine so another process's maintenance does not expire an accepted retry.
+/// A read-only or concurrently removed file must not prevent the attempt.
+pub fn refresh_retry(path: &Path) {
+    // Match the generated name, not its lexical parent: a CLI user may retry
+    // from inside cli-recordings with a bare relative filename.
+    if cli_name(path, "cli-recording-") || cli_name(path, "cli-remote-normalized-") {
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|file| file.set_modified(SystemTime::now()));
+    }
+}
+
 fn temp_name(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "wav")
         && path
@@ -104,17 +118,26 @@ pub fn sweep(
     protected: &HashSet<PathBuf>,
     now: SystemTime,
     reset: bool,
-) -> usize {
+) -> Result<usize, &'static str> {
     let mut removed = 0;
+    let mut failed = false;
     for (dir, os_temp) in [
         (data.join("cli-recordings"), false),
         (data.join("recordings"), false),
         (temp.to_owned(), true),
     ] {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                failed |= error.kind() != std::io::ErrorKind::NotFound;
+                continue;
+            }
         };
-        for entry in entries.flatten() {
+        for entry in entries {
+            let Ok(entry) = entry else {
+                failed = true;
+                continue;
+            };
             let path = entry.path();
             let known = if os_temp {
                 temp_name(&path) || crate::audio::decode::is_temp_path(&path)
@@ -127,27 +150,41 @@ pub fn sweep(
             if !known || protected.contains(&path) {
                 continue;
             }
-            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
-                continue;
+            let metadata = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    failed |= error.kind() != std::io::ErrorKind::NotFound;
+                    continue;
+                }
             };
-            if metadata.is_file()
+            // Never follow symlinks. A directory occupying an owned filename
+            // cannot be cleared as a file and must not make reset claim success.
+            if !metadata.is_symlink()
                 && (reset
-                    || metadata
-                        .modified()
-                        .ok()
-                        .and_then(|time| now.duration_since(time).ok())
-                        .is_some_and(|age| age >= MAX_AGE))
+                    || metadata.is_file()
+                        && metadata
+                            .modified()
+                            .ok()
+                            .and_then(|time| now.duration_since(time).ok())
+                            .is_some_and(|age| age >= MAX_AGE))
             {
-                removed += usize::from(std::fs::remove_file(path).is_ok());
+                match std::fs::remove_file(path) {
+                    Ok(()) => removed += 1,
+                    Err(error) => failed |= error.kind() != std::io::ErrorKind::NotFound,
+                }
             }
         }
     }
-    removed
+    if reset && failed {
+        Err("Could not clear audio storage")
+    } else {
+        Ok(removed)
+    }
 }
 
 pub async fn startup(data: PathBuf) {
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        super::kept::with_protected_paths(|protected| {
+        let _ = super::kept::with_protected_paths(|protected| {
             sweep(
                 &data,
                 &std::env::temp_dir(),

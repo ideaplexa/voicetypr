@@ -49,14 +49,20 @@ fn sweep_has_24_hour_gate_and_keeps_unrelated_files_and_live_jobs() {
     }
     aged(&young, now, MAX_AGE - Duration::from_secs(1));
     let protected = HashSet::from([active.clone()]);
-    assert_eq!(sweep(data.path(), temp.path(), &protected, now, false), 5);
+    assert_eq!(
+        sweep(data.path(), temp.path(), &protected, now, false),
+        Ok(5)
+    );
     for path in [&old, &legacy, &normalized, &scratch, &output] {
         assert!(!path.exists());
     }
     assert!(young.exists());
     assert!(active.exists());
     assert!(unrelated.iter().all(|p| p.exists()));
-    assert_eq!(sweep(data.path(), temp.path(), &protected, now, true), 1);
+    assert_eq!(
+        sweep(data.path(), temp.path(), &protected, now, true),
+        Ok(1)
+    );
     assert!(!young.exists());
     assert!(active.exists());
     assert!(unrelated.iter().all(|p| p.exists()));
@@ -79,10 +85,144 @@ fn sweep_does_not_follow_symlinks() {
             SystemTime::now(),
             true
         ),
-        0
+        Ok(0)
     );
     assert!(link.exists());
     assert!(target.exists());
+}
+
+#[test]
+fn retry_refreshes_mtime_for_a_sweeper_without_the_process_local_lease() {
+    let data = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let before_retry = SystemTime::now();
+    for directory in ["cli-recordings", "recordings"] {
+        let path = data
+            .path()
+            .join(directory)
+            .join("cli-recording-20261031123000123_abcdef12.wav");
+        aged(&path, before_retry, MAX_AGE);
+        let lease = protect_path(&path);
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(modified
+            .duration_since(before_retry - Duration::from_secs(1))
+            .is_ok());
+        // Simulate the desktop sweep while the CLI's lease is invisible to it.
+        assert_eq!(
+            sweep(
+                data.path(),
+                temp.path(),
+                &HashSet::new(),
+                SystemTime::now(),
+                false
+            ),
+            Ok(0)
+        );
+        assert!(path.exists());
+        drop(lease);
+        assert_eq!(
+            sweep(
+                data.path(),
+                temp.path(),
+                &HashSet::new(),
+                modified + MAX_AGE,
+                false
+            ),
+            Ok(1)
+        );
+    }
+}
+
+#[test]
+fn refresh_retry_is_best_effort_and_does_not_touch_unrelated_input() {
+    let data = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let unrelated = data.path().join("cli-recordings/personal.wav");
+    aged(&unrelated, now, MAX_AGE);
+    let original = std::fs::metadata(&unrelated).unwrap().modified().unwrap();
+    refresh_retry(&unrelated);
+    assert_eq!(
+        std::fs::metadata(&unrelated).unwrap().modified().unwrap(),
+        original
+    );
+    let missing = data
+        .path()
+        .join("cli-recordings/cli-recording-20261031123000123_abcdef12.wav");
+    let _lease = protect_path(&missing);
+    assert!(!missing.exists(), "a failed touch must not create a file");
+}
+
+#[test]
+fn refresh_retry_accepts_a_bare_relative_filename() {
+    let name = format!(
+        "cli-recording-20261031123000123_{}",
+        &uuid::Uuid::new_v4().to_string()[..8]
+    );
+    let file = tempfile::Builder::new()
+        .prefix(&name)
+        .rand_bytes(0)
+        .suffix(".wav")
+        .tempfile_in(std::env::current_dir().unwrap())
+        .unwrap();
+    let now = SystemTime::now();
+    file.as_file().set_modified(now - MAX_AGE).unwrap();
+    refresh_retry(Path::new(file.path().file_name().unwrap()));
+    assert!(file
+        .as_file()
+        .metadata()
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(now - Duration::from_secs(1))
+        .is_ok());
+}
+
+#[test]
+fn reset_reports_failed_deletion_while_periodic_sweep_remains_best_effort() {
+    let data = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let blocked = data
+        .path()
+        .join("cli-recordings/cli-recording-20261031123000123_abcdef12.wav");
+    std::fs::create_dir_all(&blocked).unwrap();
+    let removable = temp.path().join(".voicetypr_decode_tmp_123.wav");
+    aged(&removable, SystemTime::now(), MAX_AGE);
+    assert_eq!(
+        sweep(
+            data.path(),
+            temp.path(),
+            &HashSet::new(),
+            SystemTime::now(),
+            true
+        ),
+        Err("Could not clear audio storage")
+    );
+    assert!(
+        !removable.exists(),
+        "reset continues after a deletion failure"
+    );
+    assert_eq!(
+        sweep(
+            data.path(),
+            temp.path(),
+            &HashSet::new(),
+            SystemTime::now(),
+            false
+        ),
+        Ok(0)
+    );
+    std::fs::remove_dir(blocked).unwrap();
+    assert_eq!(
+        sweep(
+            data.path(),
+            temp.path(),
+            &HashSet::new(),
+            SystemTime::now(),
+            true
+        ),
+        Ok(0),
+        "missing storage is not a reset failure"
+    );
 }
 
 #[test]

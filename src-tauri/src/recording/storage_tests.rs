@@ -641,6 +641,71 @@ async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer()
     wait_removed(active.parent().unwrap()).await;
 }
 
+#[test]
+fn cli_capture_has_no_short_orphan_age_gate_in_either_desktop_sweep() {
+    let data = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let path = data
+        .path()
+        .join("cli-recordings/cli-recording-20261031123000123_abcdef12.wav");
+    write_aged(&path, now, ORPHAN_AGE + Duration::from_secs(1));
+    sweep(
+        data.path(),
+        None,
+        Some(&HashSet::new()),
+        &HashSet::new(),
+        &HashSet::new(),
+        Some(0),
+        now,
+    );
+    assert_eq!(
+        super::super::file_jobs::sweep(data.path(), temp.path(), &HashSet::new(), now, false),
+        Ok(0)
+    );
+    assert!(
+        path.exists(),
+        "CLI captures use the 24-hour last-write gate, not ten minutes"
+    );
+}
+
+#[test]
+fn reset_reports_cli_and_capture_deletion_failures_and_keeps_clearing_other_storage() {
+    for blocked_name in [
+        "cli-recordings/cli-recording-20261031123000123_abcdef12.wav",
+        "captures/abandoned/recording.wav",
+    ] {
+        let data = tempfile::tempdir().unwrap();
+        let blocked = data.path().join(blocked_name);
+        std::fs::create_dir_all(&blocked).unwrap();
+        let saved = data.path().join("recordings/saved.wav");
+        write_aged(&saved, SystemTime::now(), Duration::ZERO);
+        assert_eq!(
+            clear_storage(data.path(), None),
+            Err("Could not clear audio storage".into())
+        );
+        assert!(blocked.exists());
+        assert!(
+            !saved.exists(),
+            "one failure must not prevent other cleanup"
+        );
+        std::fs::remove_dir(blocked).unwrap();
+        clear_storage(data.path(), None).unwrap();
+    }
+}
+
+#[test]
+fn reset_reports_unreadable_storage_roots() {
+    for name in ["cli-recordings", "captures", "recordings", "recovery"] {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::write(data.path().join(name), b"not a directory").unwrap();
+        assert_eq!(
+            clear_storage(data.path(), None),
+            Err("Could not clear audio storage".into())
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn sweep_does_not_follow_symlinks_outside_capture_storage() {

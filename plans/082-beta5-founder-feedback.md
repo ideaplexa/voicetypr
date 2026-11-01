@@ -87,6 +87,14 @@ Source line numbers below are review anchors, not claims about the changing work
      reset clears them without the age gate. Live in-process leases are skipped.
      Anonymous legacy OS-temp `.tmp*` files cannot safely be attributed to
      Voicetypr and are deliberately not swept.
+     Slice 6b: accepted CLI-file retries refresh mtime best-effort before app
+     startup/engine loading (also on desktop borrowing), restarting the 24-hour
+     expiry clock across processes. In-progress CLI captures live in the same
+     private directory and have no ten-minute sweep gate; expiry uses last write.
+     Explicit reset may remove another process's open capture; the CLI then
+     fails without offering a missing retry. Reset now reports content-free
+     errors for failed CLI/temp/capture cleanup (except already-missing files)
+     while continuing other cleanup; periodic maintenance remains best-effort.
    - **NEEDS-SMOKE:** crash/restart, cancel-stop errors, no-speech recovery, saving off/on, retention,
      active capture during a sweep and reset on both OSes.
 4. **Four word-changing formatting bugs from the Codex review of the committed branch.**

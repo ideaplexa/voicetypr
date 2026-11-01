@@ -251,6 +251,10 @@ pub fn maybe_run_from_env_with_context(
     }
     let measurement = matches!(command, CliCommand::Polish(_) | CliCommand::PolishEval(_));
     let wants_json = command.wants_json();
+    if let CliCommand::Transcribe(args) = &command {
+        // Before app setup, license checks and our own startup expiry sweep.
+        crate::recording::file_jobs::refresh_retry(&args.file);
+    }
     let result = tauri::async_runtime::block_on(async move {
         let app = build_cli_app(context).await?;
         let app_handle = app.handle().clone();
@@ -547,7 +551,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
     eprintln!("Recording… stop by silence.");
     let stop_message = recorder.wait_for_recording_end()?;
     // Only finalized, usable captures are offered for retry.
-    recording_guard.delete_on_drop = false;
+    recording_guard.capture_finished()?;
 
     let payload = if let Some(server) = args.server.as_deref() {
         let password = resolve_password(args.password.clone(), args.password_stdin)?;
@@ -761,6 +765,17 @@ struct TempRecording {
     delete_on_drop: bool,
 }
 
+impl TempRecording {
+    fn capture_finished(&mut self) -> Result<(), &'static str> {
+        // Another process's explicit reset may unlink an open capture on Unix.
+        if !self.path.is_file() {
+            return Err("Recording was removed before transcription");
+        }
+        self.delete_on_drop = false;
+        Ok(())
+    }
+}
+
 impl Drop for TempRecording {
     fn drop(&mut self) {
         if self.delete_on_drop {
@@ -890,6 +905,34 @@ fn format_availability(snap: &crate::RecognitionAvailabilitySnapshot) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reset_removed_capture_fails_cleanly_without_advertising_a_missing_retry() {
+        let data = tempfile::tempdir().unwrap();
+        let path = data.path().join("removed.wav");
+        std::fs::write(&path, b"capture").unwrap();
+        let mut recording = TempRecording {
+            path: path.clone(),
+            delete_on_drop: true,
+        };
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            recording.capture_finished(),
+            Err("Recording was removed before transcription")
+        );
+        assert!(recording.delete_on_drop);
+        drop(recording);
+    }
+
+    #[test]
+    fn retry_refresh_precedes_cli_app_setup_and_startup_sweep() {
+        let source = include_str!("cli.rs");
+        let entry = source.split("let measurement =").nth(1).unwrap();
+        assert!(
+            entry.find("file_jobs::refresh_retry(&args.file)").unwrap()
+                < entry.find("build_cli_app(context).await").unwrap()
+        );
+    }
+
     #[test]
     fn finalized_retry_recording_survives_error_but_success_and_capture_error_delete() {
         let data = tempfile::tempdir().unwrap();
