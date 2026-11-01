@@ -168,11 +168,11 @@ pub(crate) fn migrate_ai_settings_values(
     changed
 }
 
-/// Cline, Droid and Grok Polish were removed; a saved selection falls back to Claude Code.
+/// Removed CLI selections (including legacy Cursor) fall back to Claude Code.
 fn migrate_removed_agent_cli_provider(
     values: &mut serde_json::Map<String, serde_json::Value>,
 ) -> bool {
-    const REMOVED_PROVIDERS: [&str; 3] = ["cline", "droid", "grok"];
+    const REMOVED_PROVIDERS: [&str; 4] = ["cline", "droid", "grok", "cursor"];
     let Some(old) = values
         .get("ai_provider")
         .and_then(|value| value.as_str())
@@ -218,6 +218,38 @@ fn ai_model_is_valid_for_provider(provider: &str, model: &str) -> bool {
 mod ai_settings_migration_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn removed_cli_providers_keep_enabled_and_use_claude_model_memory() {
+        for provider in ["cline", "droid", "grok", "cursor"] {
+            for enabled in [true, false] {
+                for claude_model in [None, Some("sonnet")] {
+                    let mut models = json!({
+                        "cline": "old-cline",
+                        "droid": "old-droid",
+                        "grok": "old-grok",
+                        "cursor": "old-cursor",
+                        "custom": "keep"
+                    });
+                    if let Some(model) = claude_model {
+                        models["claude-code"] = json!(model);
+                    }
+                    let mut values = values_with_enabled(enabled, provider, "old-model", models);
+                    assert!(migrate_ai_settings_values(&mut values));
+                    assert_eq!(values["ai_provider"], json!("claude-code"));
+                    assert_eq!(values["ai_enabled"], json!(enabled));
+                    assert_eq!(values["ai_model"], json!(claude_model.unwrap_or("")));
+                    assert_eq!(values["ai_models_by_provider"]["custom"], json!("keep"));
+                    for removed in ["cline", "droid", "grok", "cursor"] {
+                        assert!(values["ai_models_by_provider"].get(removed).is_none());
+                    }
+                    let migrated = values.clone();
+                    assert!(!migrate_ai_settings_values(&mut values));
+                    assert_eq!(values, migrated);
+                }
+            }
+        }
+    }
 
     fn values(
         provider: &str,
