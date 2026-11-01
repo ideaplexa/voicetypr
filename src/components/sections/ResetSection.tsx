@@ -2,6 +2,7 @@ import { SettingsCard, SettingRow } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
 import { useSettings } from "@/contexts/SettingsContext";
 import { createLogger } from "@/lib/logger";
+import type { ResetResult } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -41,7 +42,12 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
 
     setIsResetting(true);
     try {
-      await invoke("reset_app_data");
+      const result = await invoke<ResetResult>("reset_app_data");
+      if (!result.success) {
+        toast.error(result.errors.join("\n") || "Failed to reset app data");
+        setIsResetting(false);
+        return;
+      }
       toast.success("App data reset successfully. Restarting...");
       setTimeout(() => {
         void relaunch();

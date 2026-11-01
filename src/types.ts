@@ -1,3 +1,10 @@
+/** Result of clearing app data; partial failures resolve rather than reject. */
+export interface ResetResult {
+  success: boolean;
+  errors: string[];
+  cleared_items: string[];
+}
+
 export type SpeechModelEngine =
   | "whisper"
   | "parakeet"
