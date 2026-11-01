@@ -82,7 +82,7 @@ fn live_monitor_inner(app: &AppHandle) -> Option<Monitor> {
             && point.1 >= p.y as f64 / scale
             && point.1 < (p.y as f64 + s.height as f64) / scale
     };
-    foreground
+    let selected = foreground
         .and_then(|p| {
             monitors
                 .iter()
@@ -112,17 +112,15 @@ fn live_monitor_inner(app: &AppHandle) -> Option<Monitor> {
                     .find(|m| contains(m, point, logical))
                     .cloned()
             })
-        })
-        .or_else(|| {
-            #[cfg(target_os = "macos")]
-            {
-                Some(geometry.primary)
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                app.primary_monitor().ok().flatten()
-            }
-        })
+        });
+    #[cfg(target_os = "macos")]
+    {
+        selected.or(Some(geometry.primary))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        selected.or_else(|| app.primary_monitor().ok().flatten())
+    }
 }
 
 /// Prefer a valid work area; auto-hidden taskbars legitimately equal full bounds.
