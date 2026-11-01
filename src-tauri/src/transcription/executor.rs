@@ -21,8 +21,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::recording::file_jobs::TempAudio;
 use tauri::{AppHandle, Manager};
-use tempfile::{NamedTempFile, TempPath};
 
 pub(crate) const LOCAL_ENGINE_TIMEOUT_GRACE: Duration = Duration::from_secs(2);
 
@@ -72,7 +72,7 @@ pub async fn transcribe_with_app(
             (path.clone(), None, caller)
         }
         TranscriptionAudio::Bytes { bytes, .. } => {
-            let temp = NamedTempFile::new().map_err(|e| stage_error(source, "temp create", e))?;
+            let temp = TempAudio::new().map_err(|e| stage_error(source, "temp create", e))?;
             std::fs::write(temp.path(), bytes).map_err(|e| stage_error(source, "temp write", e))?;
             (temp.path().to_path_buf(), Some(temp), None)
         }
@@ -441,18 +441,18 @@ async fn run_with_policy(
 /// A 16 kHz mono WAV ready for a local engine: either a temp we normalized into
 /// (deleted on drop) or a borrow of a caller input that already conforms.
 enum PreparedInput {
-    // A `TempPath` (not a live `NamedTempFile`): the decoder atomically renames its
+    // A closed owned temp (not a live `NamedTempFile`): the decoder atomically renames its
     // result onto this path, and on Windows you cannot rename over an *open* file. We
     // keep only the path (handle closed) so the replace succeeds, while still deleting
     // the normalized WAV on drop.
-    Owned(TempPath),
+    Owned(TempAudio),
     AlreadyNormalized(PathBuf),
 }
 
 impl PreparedInput {
     fn path(&self) -> &Path {
         match self {
-            PreparedInput::Owned(temp) => temp.as_ref(),
+            PreparedInput::Owned(temp) => temp.path(),
             PreparedInput::AlreadyNormalized(path) => path.as_path(),
         }
     }
@@ -469,10 +469,7 @@ async fn prepare_normalized_input(
     }
     // Reserve a temp path but release the file handle: the decoder finalizes by
     // renaming onto this path, and Windows refuses to replace a still-open file.
-    let out = NamedTempFile::new()
-        .map_err(|e| stage_error(source, "temp create", e))?
-        .into_temp_path();
-    crate::audio::decode::normalize_to_wav_async(input_path.to_path_buf(), out.to_path_buf())
+    let out = crate::recording::file_jobs::normalize(input_path.to_path_buf())
         .await
         .map_err(|e| from_local_engine_string(&e, source))?;
     Ok(PreparedInput::Owned(out))

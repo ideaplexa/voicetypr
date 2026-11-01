@@ -2,12 +2,11 @@
 //!
 //! Implements ServerContext using actual Whisper or Parakeet transcription.
 
-use std::io::Write;
+use crate::recording::file_jobs::TempAudio;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Instant;
 use tauri::AppHandle;
-use tempfile::NamedTempFile;
 
 use super::http::ServerContext;
 use super::server::RemoteModelControlSnapshot;
@@ -312,20 +311,12 @@ impl RealTranscriptionContext {
         }
 
         // Write audio data to a temporary WAV file
-        let mut temp_file =
-            NamedTempFile::new().map_err(|e| format!("Failed to create temp file: {}", e))?;
+        let temp_file = TempAudio::new().map_err(|_| "Failed to create temporary audio")?;
 
-        temp_file
-            .write_all(audio_data)
-            .map_err(|e| format!("Failed to write audio data: {}", e))?;
-
-        temp_file
-            .flush()
-            .map_err(|e| format!("Failed to flush temp file: {}", e))?;
+        std::fs::write(temp_file.path(), audio_data)
+            .map_err(|_| "Failed to write temporary audio")?;
 
         let temp_path = temp_file.path().to_path_buf();
-
-        log::info!("Audio written to temp file: {:?}", temp_path);
 
         // Route to appropriate transcription engine
         let result = match engine.as_str() {

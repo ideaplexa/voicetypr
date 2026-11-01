@@ -75,9 +75,17 @@ Source line numbers below are review anchors, not claims about the changing work
      and exact `.voicetypr_decode_tmp_<digits>.wav` scratch names in `recordings/`
      have a minimum 24-hour orphan age (ten minutes inside capture take directories).
      Reset also clears these disposable files. Rename failures retain scratch cleanup.
-     CLI `record --until-silence` still preserves its own `cli-recording-*` file on error;
-     bounded CLI preservation and file-job artifacts in OS temporary directories
-     remain follow-ups outside this managed desktop-directory sweep.
+     Slice 6: CLI `record --until-silence` offers finalized failed transcriptions
+     under private per-user `cli-recordings/`, prints the retry path on stderr
+     (not in logs), and deletes captures on success or capture failure. Help
+     documents 24-hour expiry and reset. CLI startup and desktop maintenance
+     sweep exact timestamp/hex CLI names (including legacy `recordings/` paths).
+     File/server jobs now own recognizable `voicetypr-audio-<uuid>.wav` temps;
+     normalization ownership stays with blocking workers through cancellation.
+     Exact OS-temp output and decoder-scratch names expire after 24 hours;
+     reset clears them without the age gate. Live in-process leases are skipped.
+     Anonymous legacy OS-temp `.tmp*` files cannot safely be attributed to
+     Voicetypr and are deliberately not swept.
    - **NEEDS-SMOKE:** crash/restart, cancel-stop errors, no-speech recovery, saving off/on, retention,
      active capture during a sweep and reset on both OSes.
 4. **Four word-changing formatting bugs from the Codex review of the committed branch.**

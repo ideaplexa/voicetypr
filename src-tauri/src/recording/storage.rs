@@ -271,7 +271,7 @@ fn maintenance(app: &AppHandle) {
     // Holding these across deletion closes the snapshot-to-delete race.
     super::kept::with_protected_paths(|protected| {
         let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
-        let counts = sweep(
+        let mut counts = sweep(
             &data,
             legacy.as_deref(),
             history.as_ref(),
@@ -279,6 +279,13 @@ fn maintenance(app: &AppHandle) {
             &active.keys().cloned().collect(),
             retention,
             SystemTime::now(),
+        );
+        counts.orphans += super::file_jobs::sweep(
+            &data,
+            &std::env::temp_dir(),
+            protected,
+            SystemTime::now(),
+            false,
         );
         log::info!(
             "Recording cleanup: orphans={}, retention={}",
@@ -322,6 +329,15 @@ pub async fn clear_audio(app: &AppHandle) -> Result<(), String> {
 }
 
 fn clear_storage(data: &Path, legacy: Option<PathBuf>) -> Result<(), String> {
+    super::kept::with_protected_paths(|protected| {
+        super::file_jobs::sweep(
+            data,
+            &std::env::temp_dir(),
+            protected,
+            SystemTime::now(),
+            true,
+        );
+    });
     let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
     for dir in [
         Some(data.join("recordings")),

@@ -53,6 +53,8 @@ enum CliCommand {
     /// Transcribe an audio file locally, or via a remote Voicetypr server with --server.
     Transcribe(TranscribeArgs),
     /// Record from the microphone until silence, then transcribe the result.
+    /// On transcription failure, prints a retry WAV path on stderr. Retry files
+    /// expire after 24 hours (cleaned at CLI/desktop startup) or on app reset.
     Record(RecordArgs),
     /// Replay a WAV through the hidden Parakeet streaming prototype and print timing spans.
     #[command(hide = true, name = "stream-bench")]
@@ -252,6 +254,7 @@ pub fn maybe_run_from_env_with_context(
     let result = tauri::async_runtime::block_on(async move {
         let app = build_cli_app(context).await?;
         let app_handle = app.handle().clone();
+        crate::recording::file_jobs::startup(app_handle.path().app_data_dir()?).await;
         warm_ai_key_cache(&app_handle).await?;
         if !measurement {
             let _ = check_license_status(app_handle.clone()).await;
@@ -520,14 +523,13 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
 
     check_license_status(app.clone()).await?;
     let settings = get_settings(app.clone()).await?;
-    let recordings_dir = app.path().app_data_dir()?.join("recordings");
-    std::fs::create_dir_all(&recordings_dir)?;
+    let recordings_dir = crate::recording::file_jobs::cli_directory(&app.path().app_data_dir()?)?;
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
     let uuid_part = uuid::Uuid::new_v4().to_string()[..8].to_string();
     let output_path = recordings_dir.join(format!("cli-recording-{}_{}.wav", timestamp, uuid_part));
     let mut recording_guard = TempRecording {
         path: output_path.clone(),
-        delete_on_drop: false,
+        delete_on_drop: true,
     };
 
     let mut recorder = AudioRecorder::new();
@@ -544,6 +546,8 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
     )?;
     eprintln!("Recording… stop by silence.");
     let stop_message = recorder.wait_for_recording_end()?;
+    // Only finalized, usable captures are offered for retry.
+    recording_guard.delete_on_drop = false;
 
     let payload = if let Some(server) = args.server.as_deref() {
         let password = resolve_password(args.password.clone(), args.password_stdin)?;
@@ -750,35 +754,10 @@ async fn run_stream_bench(
     Ok(())
 }
 
-struct RemoteNormalizedAudio {
-    path: PathBuf,
-}
-
-impl RemoteNormalizedAudio {
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for RemoteNormalizedAudio {
-    fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_file(&self.path) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                log::warn!(
-                    "Failed to remove CLI normalized temp file {:?}: {}",
-                    self.path,
-                    error
-                );
-            }
-        }
-    }
-}
-
 struct TempRecording {
     path: PathBuf,
-    /// Only remove the captured WAV after a successful transcription. On the
-    /// error path the recording is preserved so a long capture is not lost to a
-    /// transient model/network failure and can be retried.
+    /// Delete unfinished captures and successful transcriptions. A finalized
+    /// recording survives transcription errors for an advertised, bounded retry.
     delete_on_drop: bool,
 }
 
@@ -787,45 +766,18 @@ impl Drop for TempRecording {
         if self.delete_on_drop {
             if let Err(error) = std::fs::remove_file(&self.path) {
                 if error.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!(
-                        "Failed to remove CLI temp recording {:?}: {}",
-                        self.path,
-                        error
-                    );
+                    log::warn!("Failed to remove CLI temporary recording");
                 }
             }
         } else if std::fs::metadata(&self.path).is_ok() {
             // Error path: keep the capture so the user can retry transcription
             // instead of losing a long recording to a transient failure.
             eprintln!(
-                "Recording preserved for retry (CLI exited with an error): {}",
+                "Recording preserved for retry for up to 24 hours (or until app reset): {}",
                 self.path.display()
             );
         }
     }
-}
-
-async fn normalize_audio_for_remote(
-    app: &tauri::AppHandle,
-    file: &Path,
-) -> Result<RemoteNormalizedAudio, Box<dyn Error>> {
-    let recordings_dir = app.path().app_data_dir()?.join("recordings");
-    std::fs::create_dir_all(&recordings_dir)?;
-
-    // Millisecond timestamps alone collide for simultaneous CLI invocations;
-    // add a uuid suffix (matches the recordings naming convention in
-    // commands/audio.rs) for guaranteed-unique temp paths.
-    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
-    let uuid_part = uuid::Uuid::new_v4().to_string()[..8].to_string();
-    let output_path = recordings_dir.join(format!(
-        "cli-remote-normalized-{}_{}.wav",
-        timestamp, uuid_part
-    ));
-    crate::audio::decode::normalize_to_wav_async(file.to_path_buf(), output_path.to_path_buf())
-        .await
-        .map_err(std::io::Error::other)?;
-
-    Ok(RemoteNormalizedAudio { path: output_path })
 }
 
 async fn transcribe_via_remote(
@@ -836,7 +788,9 @@ async fn transcribe_via_remote(
 ) -> Result<serde_json::Value, Box<dyn Error>> {
     let settings = get_settings(app.clone()).await?;
     let (host, port) = parse_server(server)?;
-    let normalized_file = normalize_audio_for_remote(app, file).await?;
+    let normalized_file = crate::recording::file_jobs::normalize(file.to_path_buf())
+        .await
+        .map_err(std::io::Error::other)?;
     let audio_data = std::fs::read(normalized_file.path())?;
     let request = TranscriptionRequest::new(audio_data, TranscriptionSource::Upload)
         .with_language_and_task(
@@ -936,6 +890,36 @@ fn format_availability(snap: &crate::RecognitionAvailabilitySnapshot) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn finalized_retry_recording_survives_error_but_success_and_capture_error_delete() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = crate::recording::file_jobs::cli_directory(data.path()).unwrap();
+        let path = dir.join("cli-recording-20261031123000123_abcdef12.wav");
+        std::fs::write(&path, b"finalized capture").unwrap();
+        drop(TempRecording {
+            path: path.clone(),
+            delete_on_drop: false,
+        });
+        assert!(
+            path.exists(),
+            "transcription errors must retain the advertised retry"
+        );
+        drop(TempRecording {
+            path: path.clone(),
+            delete_on_drop: true,
+        });
+        assert!(!path.exists());
+        std::fs::write(&path, b"unfinished capture").unwrap();
+        drop(TempRecording {
+            path: path.clone(),
+            delete_on_drop: true,
+        });
+        assert!(
+            !path.exists(),
+            "capture errors must not retain unusable files"
+        );
+    }
+
     #[test]
     fn measurement_commands_parse_without_exposing_text_in_debug() {
         let cli = Cli::try_parse_from([
