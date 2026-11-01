@@ -15,7 +15,7 @@ vi.mock("@/contexts/SettingsContext", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 
 describe("ResetSection", () => {
   beforeEach(() => {
@@ -37,6 +37,7 @@ describe("ResetSection", () => {
       const result: ResetResult = {
         success: false,
         errors: ["Could not clear audio storage", "Failed to clear cache"],
+        warnings: ["Could not reset system permissions"],
         cleared_items: ["Settings store"],
       };
       vi.mocked(invoke).mockResolvedValue(result);
@@ -49,17 +50,19 @@ describe("ResetSection", () => {
       expect(invoke).toHaveBeenCalledWith("reset_app_data");
       expect(toast.error).toHaveBeenCalledWith(result.errors.join("\n"));
       expect(toast.success).not.toHaveBeenCalled();
+      expect(toast.warning).not.toHaveBeenCalled();
       expect(resetButton()).toBeEnabled();
       await act(() => vi.advanceTimersByTime(1000));
       expect(relaunch).not.toHaveBeenCalled();
     });
 
-    it("reports success and restarts only after a complete reset", async () => {
+    it("reports success and restarts after a reset without warnings", async () => {
       vi.useFakeTimers();
       vi.mocked(ask).mockResolvedValue(true);
       const result: ResetResult = {
         success: true,
         errors: [],
+        warnings: [],
         cleared_items: ["Settings store", "Saved and temporary audio"],
       };
       vi.mocked(invoke).mockResolvedValue(result);
@@ -72,6 +75,36 @@ describe("ResetSection", () => {
       expect(invoke).toHaveBeenCalledWith("reset_app_data");
       expect(toast.success).toHaveBeenCalledWith("App data reset successfully. Restarting...");
       expect(toast.error).not.toHaveBeenCalled();
+      expect(toast.warning).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: pane ? "Resetting…" : "Resetting..." })).toBeDisabled();
+      expect(relaunch).not.toHaveBeenCalled();
+      await act(() => vi.advanceTimersByTime(999));
+      expect(relaunch).not.toHaveBeenCalled();
+      await act(() => vi.advanceTimersByTime(1));
+      expect(relaunch).toHaveBeenCalledOnce();
+    });
+
+    it("shows permission cleanup guidance and still restarts after a reset with warnings", async () => {
+      vi.useFakeTimers();
+      vi.mocked(ask).mockResolvedValue(true);
+      const result: ResetResult = {
+        success: true,
+        errors: [],
+        warnings: ["Could not reset system permissions"],
+        cleared_items: ["Settings store", "Saved and temporary audio"],
+      };
+      vi.mocked(invoke).mockResolvedValue(result);
+      render(<ResetSection pane={pane} />);
+
+      await act(async () => {
+        fireEvent.click(resetButton());
+      });
+
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Reset finished. macOS permissions couldn't be reset; you can remove Voicetypr under System Settings → Privacy & Security.",
+      );
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: pane ? "Resetting…" : "Resetting..." })).toBeDisabled();
       expect(relaunch).not.toHaveBeenCalled();
       await act(() => vi.advanceTimersByTime(999));

@@ -48,7 +48,13 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
         setIsResetting(false);
         return;
       }
-      toast.success("App data reset successfully. Restarting...");
+      if (result.warnings.length > 0) {
+        toast.warning(
+          "Reset finished. macOS permissions couldn't be reset; you can remove Voicetypr under System Settings → Privacy & Security.",
+        );
+      } else {
+        toast.success("App data reset successfully. Restarting...");
+      }
       setTimeout(() => {
         void relaunch();
       }, 1000);

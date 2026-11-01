@@ -1,7 +1,8 @@
-/** Result of clearing app data; partial failures resolve rather than reject. */
+/** Data failures prevent success; OS integration warnings do not prevent restart. */
 export interface ResetResult {
   success: boolean;
   errors: string[];
+  warnings: string[];
   cleared_items: string[];
 }
 

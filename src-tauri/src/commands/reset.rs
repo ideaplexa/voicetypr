@@ -95,7 +95,19 @@ async fn reset_system_command(program: &str, args: &[&str]) -> Result<bool, Stri
 pub struct ResetResult {
     pub success: bool,
     pub errors: Vec<String>,
+    pub warnings: Vec<String>,
     pub cleared_items: Vec<String>,
+}
+
+impl ResetResult {
+    fn new(errors: Vec<String>, warnings: Vec<String>, cleared_items: Vec<String>) -> Self {
+        Self {
+            success: errors.is_empty(),
+            errors,
+            warnings,
+            cleared_items,
+        }
+    }
 }
 
 #[tauri::command]
@@ -178,6 +190,10 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     .map_err(|_| "Could not validate app storage")??;
 
     let mut errors = Vec::new();
+    #[cfg(target_os = "macos")]
+    let mut warnings = Vec::new();
+    #[cfg(not(target_os = "macos"))]
+    let warnings = Vec::new();
     let mut cleared_items = Vec::new();
     match crate::recording::storage::clear_audio(&app, audio).await {
         Ok(()) => cleared_items.push("Saved and temporary audio".to_string()),
@@ -234,7 +250,8 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     #[cfg(target_os = "macos")]
     {
         // `defaults delete` updates cfprefsd itself; do not kill the user's
-        // preferences daemon for every app.
+        // preferences daemon for every app. These preferences are app data,
+        // so execution failures remain errors.
         match reset_system_command("/usr/bin/defaults", &["delete", &identifier]).await {
             Ok(true) => cleared_items.push("System preferences".to_string()),
             Ok(false) => {} // No defaults domain is normal.
@@ -242,12 +259,14 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         }
         match reset_system_command("/usr/bin/tccutil", &["reset", "All", &identifier]).await {
             Ok(true) => cleared_items.push("System permissions".to_string()),
-            Ok(false) => errors.push("Could not reset system permissions".to_string()),
-            Err(error) => errors.push(error),
+            // TCC grants are OS integration, not app data. An unregistered
+            // dev bundle (or any TCC failure) must not prevent the restart.
+            Ok(false) | Err(_) => warnings.push("Could not reset system permissions".to_string()),
         }
     }
     #[cfg(target_os = "windows")]
     {
+        // Registry settings are app data, not an OS permission grant.
         let key = format!("HKCU\\Software\\{identifier}");
         match reset_system_command("reg", &["delete", &key, "/f"]).await {
             Ok(true) => cleared_items.push("Registry settings".to_string()),
@@ -274,17 +293,40 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     if app.emit("app-reset", ()).is_err() {
         errors.push("Failed to emit reset event".to_string());
     }
-    log::info!("App data reset completed with {} errors", errors.len());
-    Ok(ResetResult {
-        success: errors.is_empty(),
-        errors,
-        cleared_items,
-    })
+    log::info!(
+        "App data reset completed with {} errors and {} warnings",
+        errors.len(),
+        warnings.len()
+    );
+    Ok(ResetResult::new(errors, warnings, cleared_items))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_succeeds_with_permission_cleanup_warnings() {
+        let warnings = vec!["Could not reset system permissions".to_string()];
+        let cleared_items = vec!["Settings store".to_string()];
+        let result = ResetResult::new(Vec::new(), warnings.clone(), cleared_items.clone());
+
+        assert!(result.success);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.warnings, warnings);
+        assert_eq!(result.cleared_items, cleared_items);
+    }
+
+    #[test]
+    fn reset_data_errors_still_fail_even_with_warnings() {
+        let errors = vec!["Failed to save cleared Settings store".to_string()];
+        let warnings = vec!["Could not reset system permissions".to_string()];
+        let result = ResetResult::new(errors.clone(), warnings.clone(), Vec::new());
+
+        assert!(!result.success);
+        assert_eq!(result.errors, errors);
+        assert_eq!(result.warnings, warnings);
+    }
 
     #[cfg(unix)]
     fn assert_preflight_preserves_stores_and_audio(invalid: &str, alias: bool) {
