@@ -28,8 +28,9 @@ pub const PARAGRAPH_MIN_TAIL_WORDS: usize = 6;
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm"];
 // "is is" can be a double copula; "in in" can follow a phrasal verb ("come in in June").
 // Also keep "you you"/"it it" (object then subject), "to to" (stranded/infinitive
-// then purpose), and "of of" ("unheard of of course"). Prefer speech to deletion.
-const STUTTER_REPEATS: &[&str] = &["the", "a", "an", "and", "i", "we"];
+// then purpose), "of of" ("unheard of of course"), and "and and" when naming
+// conjunctions ("between and and or"). Prefer speech to deletion.
+const STUTTER_REPEATS: &[&str] = &["the", "a", "an", "i", "we"];
 /// Words whose trailing period does not end a sentence.
 const ABBREVIATIONS: &[&str] = &[
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "mt", "vs", "etc", "inc", "ltd", "co",
@@ -261,9 +262,12 @@ pub fn format_transcript<'a>(
         if index > 0 {
             out.push('\n');
         }
-        let fence = line.trim_start();
+        // CommonMark allows at most three leading spaces, not indented code.
+        // Do not trim tabs: each counts as four spaces and cannot precede a fence.
+        let fence = line.trim_start_matches(' ');
+        let fence_indent = line.len() - fence.len();
         let delimiter = fence.as_bytes().first().copied().unwrap_or_default();
-        let length = if matches!(delimiter, b'`' | b'~') {
+        let length = if fence_indent <= 3 && matches!(delimiter, b'`' | b'~') {
             fence.bytes().take_while(|&byte| byte == delimiter).count()
         } else {
             0
@@ -669,6 +673,13 @@ fn push_with_repeat_check(
             && last_core.chars().all(char::is_alphabetic)
             && last_core.eq_ignore_ascii_case(core)
             && STUTTER_REPEATS.contains(&last_core.to_lowercase().as_str())
+            // Keep meaningful case changes ("an A a week ago"). Only a
+            // sentence-initial titlecase -> lowercase pair is a casing stutter.
+            && (last_core == core
+                || (at_sentence_start(&out[..out.len() - 1], starts_sentence)
+                    && last_core.starts_with(char::is_uppercase)
+                    && last_core.chars().skip(1).all(char::is_lowercase)
+                    && core.chars().all(char::is_lowercase)))
         {
             out.pop();
             if at_sentence_start(out, starts_sentence) {
@@ -1138,6 +1149,71 @@ mod tests {
     // --- stutters ---
 
     #[test]
+    fn beta5_4d_repeats_preserve_meaningful_words_and_case_changes() {
+        for sample in [
+            "She received an A a week ago.",
+            "Explain the difference between and and or.",
+            "Keep the The label.",
+            "Keep a A label.",
+            "THE the meeting",
+            "the The meeting",
+        ] {
+            assert_eq!(fmt(sample, &fillers()), sample, "sample: {sample}");
+        }
+        for (sample, expected) in [
+            ("the the", "The"),
+            ("The the meeting", "The meeting"),
+            ("a a", "A"),
+            ("I I think", "I think"),
+            ("I i think", "I think"),
+            ("ok. The the meeting", "ok. The meeting"),
+        ] {
+            assert_eq!(fmt(sample, &fillers()), expected, "sample: {sample}");
+        }
+    }
+
+    #[test]
+    fn beta5_4d_indented_fence_closers_stay_code() {
+        for delimiter in ["~~~", "```"] {
+            for indent in ["    ", "     ", "\t", " \t"] {
+                let input = format!("{delimiter}text\n{indent}{delimiter}\num  is a variable .\n{delimiter}\nafter  code .");
+                let expected = input.replace("after  code .", "after code.");
+                assert_eq!(fmt(&input, &fillers()), expected, "indent: {indent:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn beta5_4d_indented_fence_openers_do_not_start_code() {
+        for delimiter in ["~~~", "```"] {
+            for indent in ["    ", "     ", "\t", " \t"] {
+                let input = format!("{indent}{delimiter}text\nhello  world .");
+                assert!(
+                    fmt(&input, &fillers()).ends_with("\nhello world."),
+                    "delimiter: {delimiter}, indent: {indent:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn beta5_4d_fences_allow_up_to_three_spaces() {
+        for delimiter in ["~~~", "```"] {
+            for opening_indent in 0..=3 {
+                for closing_indent in 0..=3 {
+                    let input = format!(
+                        "{}{delimiter}text\num  is a variable .\n{}{delimiter}\nafter  code .",
+                        " ".repeat(opening_indent),
+                        " ".repeat(closing_indent)
+                    );
+                    let expected = input.replace("after  code .", "after code.");
+                    assert_eq!(fmt(&input, &fillers()), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn beta5_4c_grammatical_doubles_are_not_stutters() {
         for sample in [
             "I told you you were right.",
@@ -1246,7 +1322,7 @@ mod tests {
         assert_eq!(fmt("the the plan works.", &fillers()), "The plan works.");
         assert_eq!(
             fmt("go to to the store and and buy.", &fillers()),
-            "go to to the store and buy."
+            "go to to the store and and buy."
         );
         assert_eq!(
             fmt("so we we are, you you know.", &fillers()),
@@ -1254,7 +1330,7 @@ mod tests {
         );
         assert_eq!(
             fmt("so a a plan and and an an idea.", &fillers()),
-            "so a plan and an idea."
+            "so a plan and and an idea."
         );
         assert_eq!(fmt("so the the the end.", &fillers()), "so the end.");
         assert_eq!(fmt("I I think so.", &fillers()), "I think so.");
