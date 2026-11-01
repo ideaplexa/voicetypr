@@ -59,7 +59,7 @@ $SystemDlls = @(
     'comctl32', 'comdlg32', 'dwmapi', 'uxtheme', 'msimg32', 'imm32', 'msctf', 'usp10',
     'gdiplus', 'windowscodecs', 'dcomp', 'dwrite', 'd2d1', 'opengl32', 'glu32', 'dxgi',
     'vulkan-1', 'version', 'winmm', 'userenv', 'setupapi', 'cfgmgr32', 'dbghelp', 'dbgcore',
-    'powrprof', 'propsys', 'psapi', 'wtsapi32', 'winspool', 'cabinet', 'wevtapi', 'msi',
+    'powrprof', 'propsys', 'psapi', 'pdh', 'wtsapi32', 'winspool', 'cabinet', 'wevtapi', 'msi',
     'rstrtmgr', 'uiautomationcore', 'hid', 'bthprops', 'xinput1_4', 'xinput9_1_0',
     'avrt', 'ksuser', 'mmdevapi', 'audioses', 'devobj',
     'mf', 'mfplat', 'mfcore', 'mfreadwrite', 'mfsrcsnk', 'mfmediaengine', 'mfsensorgroup',
