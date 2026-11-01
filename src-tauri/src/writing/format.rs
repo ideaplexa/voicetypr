@@ -515,9 +515,12 @@ fn capitalize_token(token: &mut String, protected_terms: &[String]) -> bool {
 }
 
 /// "i", "i'm", "i've", "i'll", "i'd" → "I...". Returns whether it changed.
-fn capitalize_standalone_i(token: &mut String) -> bool {
+fn capitalize_standalone_i(token: &mut String, protected_terms: &[String]) -> bool {
     let (lead, core, trail) = split_token(token);
-    if !has_prose_boundaries(lead, trail) || lead.contains(['(', '[']) {
+    if !has_prose_boundaries(lead, trail)
+        || lead.contains(['(', '['])
+        || is_protected_word(core, protected_terms)
+    {
         return false;
     }
     let lowered = core.replace('’', "'");
@@ -541,7 +544,7 @@ fn capitalize_tokens(
             capitalize_token(&mut token.text, protected_terms);
         }
         if english {
-            capitalize_standalone_i(&mut token.text);
+            capitalize_standalone_i(&mut token.text, protected_terms);
         }
         at_start = ends_sentence(&token.text);
     }
@@ -565,13 +568,15 @@ fn contains_quantity(text: &str) -> bool {
 }
 
 /// "th-" before "the", "I-" before "I": a word cut off and restarted.
-fn is_cut_off_fragment(token: &str, next: Option<&Token>) -> bool {
+fn is_cut_off_fragment(token: &str, next: Option<&Token>, protected_terms: &[String]) -> bool {
     let (lead, core, trail) = split_token(token);
     if !lead.is_empty()
         || core.is_empty()
         || trail.is_empty()
         || !trail.chars().all(|c| c == '-')
         || !core.chars().all(char::is_alphabetic)
+        || is_protected_word(token, protected_terms)
+        || is_protected_word(core, protected_terms)
     {
         return false;
     }
@@ -579,6 +584,14 @@ fn is_cut_off_fragment(token: &str, next: Option<&Token>) -> bool {
         return false;
     };
     let (next_lead, next_core, next_trail) = split_token(&next.text);
+    // Grades, blood types and short acronyms are not interrupted speech.
+    // Only the English "I- I"/"I- I'm" restart gets an uppercase exception.
+    if core.chars().count() <= 2
+        && core.chars().all(char::is_uppercase)
+        && !(core == "I" && next_core.starts_with('I'))
+    {
+        return false;
+    }
     has_prose_boundaries(next_lead, next_trail)
         && is_wordlike(next_core)
         && next_core.to_lowercase().starts_with(&core.to_lowercase())
@@ -587,6 +600,20 @@ fn is_cut_off_fragment(token: &str, next: Option<&Token>) -> bool {
 struct FillerState {
     recapitalize_next: bool,
     pending_lead: String,
+}
+
+fn has_paired_wrapper(lead: &str, trail: &str) -> bool {
+    [
+        ('"', '"'),
+        ('\'', '\''),
+        ('“', '”'),
+        ('‘', '’'),
+        ('(', ')'),
+        ('[', ']'),
+        ('«', '»'),
+    ]
+    .iter()
+    .any(|(open, close)| lead.contains(*open) && trail.contains(*close))
 }
 
 fn strip_fillers(
@@ -605,6 +632,7 @@ fn strip_fillers(
         let (lead, core, trail) = split_token(&token.text);
 
         let removable_filler = has_prose_boundaries(lead, trail)
+            && !has_paired_wrapper(lead, trail)
             && is_filler(core, trail, at_sentence_start(&out, starts_sentence))
             && !is_protected_word(core, protected_terms)
             && !((core.eq_ignore_ascii_case("mm") || core.eq_ignore_ascii_case("um"))
@@ -638,7 +666,7 @@ fn strip_fillers(
             continue;
         }
 
-        if is_cut_off_fragment(&token.text, next) {
+        if is_cut_off_fragment(&token.text, next, protected_terms) {
             if at_sentence_start(&out, starts_sentence) {
                 state.recapitalize_next = true;
             }
@@ -1023,6 +1051,57 @@ mod tests {
     }
 
     // --- fillers ---
+
+    #[test]
+    fn review_preserves_short_uppercase_cutoffs_and_dictionary_terms() {
+        for sample in [
+            "The patient has B- blood.",
+            "The patient has AB- blood.",
+            "The patient has O- only.",
+            "She earned an A- average.",
+            "Keep I- intact.",
+        ] {
+            assert_eq!(fmt(sample, &fillers()), sample);
+        }
+        assert_eq!(fmt("th- the plan", &fillers()), "The plan");
+        assert_eq!(fmt("I- I think", &fillers()), "I think");
+        assert_eq!(fmt("I- I'm sure", &fillers()), "I'm sure");
+        for term in ["th", "th-"] {
+            let terms = [term.to_string()];
+            let opts = FormatOptions {
+                protected_terms: &terms,
+                ..fillers()
+            };
+            assert_eq!(fmt("th- the plan", &opts), "th- the plan");
+        }
+    }
+
+    #[test]
+    fn review_preserves_paired_quoted_and_bracketed_fillers() {
+        for sample in [
+            "Write \"um\" on the board.",
+            "Write 'uh', then go.",
+            "Write “um” on the board.",
+            "Write ‘um’ on the board.",
+            "Write (um) on the board.",
+            "Write [um] on the board.",
+            "Write «um» on the board.",
+        ] {
+            assert_eq!(fmt(sample, &fillers()), sample);
+        }
+        assert_eq!(fmt("\"um, go now.\"", &fillers()), "\"Go now.\"");
+    }
+
+    #[test]
+    fn review_standalone_i_respects_dictionary_spelling() {
+        let terms = ["i".to_string()];
+        let opts = FormatOptions {
+            protected_terms: &terms,
+            ..en()
+        };
+        assert_eq!(fmt("increment i by one", &opts), "Increment i by one");
+        assert_eq!(fmt("i is a variable", &opts), "i is a variable");
+    }
 
     #[test]
     fn beta5_fillers_preserve_acronyms_names_and_attached_tokens() {
