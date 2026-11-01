@@ -1338,9 +1338,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 log::info!("👋 First launch or no source configured - keeping main window visible");
-                // Show dock icon when main window is visible
-                #[cfg(target_os = "macos")]
-                show_dock_icon(app.app_handle());
+                show_main_window(app.app_handle());
             }
 
             // Log setup completion

@@ -174,6 +174,47 @@ mod tests {
         assert!(guard < align.find(".ns_window()").unwrap());
     }
 
+    /// Source-level guard: a cached Parakeet engine must not leave first launch
+    /// hidden, and remote-only sessions must show until startup checks finish.
+    #[test]
+    fn startup_shows_main_window_without_a_saved_model_or_with_an_active_remote() {
+        let src = include_str!("../lib.rs").replace("\r\n", "\n");
+        let startup = src.split("let should_hide_main =").nth(1).unwrap();
+        let startup = startup.split("// Log setup completion").next().unwrap();
+        assert!(startup.contains(".get(\"current_model\")"));
+        assert!(startup.contains(".map(|s| !s.is_empty())"));
+        assert!(startup.contains("has_local_or_cloud_model && active_id.is_none()"));
+        let show_branch = startup.rsplit_once("} else {").unwrap().1;
+        assert!(
+            show_branch.contains("show_main_window(app.app_handle());"),
+            "the initially hidden window must be shown, not just its Dock icon"
+        );
+        assert!(!show_branch.contains("#[cfg("));
+        assert!(!show_branch.contains("show_dock_icon("));
+    }
+
+    /// Keep the later remote-only hide conditional on readiness and onboarding.
+    #[test]
+    fn startup_hides_ready_remote_only_after_onboarding() {
+        let src = include_str!("../lib.rs").replace("\r\n", "\n");
+        let checks = src
+            .split("async fn perform_startup_checks(")
+            .nth(1)
+            .unwrap();
+        let remote = checks
+            .split("if availability.remote_available {")
+            .nth(1)
+            .unwrap()
+            .split("if !availability.any_available()")
+            .next()
+            .unwrap();
+        assert!(remote.contains("store.get(\"onboarding_completed\")"));
+        assert!(remote.contains(".unwrap_or(false)"));
+        assert!(
+            remote.contains("if onboarding_completed {\n                hide_main_window(&app);")
+        );
+    }
+
     /// Regression guard for beta.4: the island's device and window lookups ran
     /// before the mic opened and delayed first audio by 50–200 ms. They must stay
     /// after the readiness decision in `start_recording`.
