@@ -24,6 +24,16 @@ struct PointerQuery {
 }
 
 #[cfg(any(target_os = "macos", test))]
+struct PendingPointerQuery(Arc<PointerQuery>);
+
+#[cfg(any(target_os = "macos", test))]
+impl Drop for PendingPointerQuery {
+    fn drop(&mut self) {
+        self.0.pending.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
 impl PointerQuery {
     fn invalidate(&self) {
         let mut completed = self.completed.lock().unwrap();
@@ -31,6 +41,18 @@ impl PointerQuery {
         *completed = None;
         // Do not clear pending: an old task's queued closure still owns that
         // slot until it runs, even if the pointer task was stopped/restarted.
+    }
+
+    fn reset_if_current(&self, generation: u64, reset: impl FnOnce()) {
+        let mut completed = self.completed.lock().unwrap();
+        if self.generation.load(Ordering::Acquire) != generation {
+            return;
+        }
+        *completed = None;
+        // Hold the invalidation lock through the hover reset, so a stopped
+        // synchronous poll cannot reset a newly started task's pointer state.
+        // Only stop/start invalidate the generation, never the poll itself.
+        reset();
     }
 
     fn latest(&self, now: Instant) -> Option<(f64, f64)> {
@@ -55,8 +77,12 @@ impl PointerQuery {
         {
             return;
         }
-        let state = self.clone();
-        if !dispatch(Box::new(move || {
+        let pending = PendingPointerQuery(self.clone());
+        let _ = dispatch(Box::new(move || {
+            // The closure owns the slot even if dispatch accepts but drops it
+            // without running (e.g. during event-loop shutdown).
+            let _pending = pending;
+            let state = &_pending.0;
             // Main may have been blocked for seconds (e.g. alpha show mode).
             // Skip stale work before touching AppKit; never wait on a receiver.
             let point = if queued_at.elapsed() <= POINTER_QUERY_MAX_AGE
@@ -70,11 +96,7 @@ impl PointerQuery {
             if state.generation.load(Ordering::Acquire) == generation {
                 *completed = point.map(|point| (Instant::now(), point));
             }
-            drop(completed);
-            state.pending.store(false, Ordering::Release);
-        })) {
-            self.pending.store(false, Ordering::Release);
-        }
+        }));
     }
 }
 
@@ -133,6 +155,9 @@ pub fn stop(app: &AppHandle) {
 fn reset_pointer(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     app.state::<PointerState>().query.invalidate();
+    reset_hover(app);
+}
+fn reset_hover(app: &AppHandle) {
     if app
         .state::<PointerState>()
         .inside
@@ -174,7 +199,10 @@ pub fn start(window: &WebviewWindow) {
         loop {
             interval.tick().await;
             if !crate::pill::native::is_shown(&window) {
-                reset_pointer(&task_app);
+                #[cfg(target_os = "macos")]
+                query.reset_if_current(generation, || reset_hover(&task_app));
+                #[cfg(not(target_os = "macos"))]
+                reset_hover(&task_app);
                 break;
             }
             // Tao's cursor_position ALSO reads NSScreen to obtain its scale.
@@ -369,6 +397,84 @@ mod tests {
         assert_eq!(state.latest(Instant::now()), Some((3.0, 4.0)));
         state.invalidate();
         assert_eq!(state.latest(Instant::now()), None);
+    }
+
+    #[test]
+    fn old_hidden_poll_cannot_reset_a_restarted_generation() {
+        let state = Arc::new(PointerQuery::default());
+        let generation = state.generation.load(Ordering::Acquire);
+        let hidden_observed = Arc::new(std::sync::Barrier::new(2));
+        let resume_reset = Arc::new(std::sync::Barrier::new(2));
+        let old_poll = {
+            let state = state.clone();
+            let hidden_observed = hidden_observed.clone();
+            let resume_reset = resume_reset.clone();
+            std::thread::spawn(move || {
+                hidden_observed.wait();
+                resume_reset.wait();
+                state.reset_if_current(generation, || {
+                    panic!("a stopped poll must not reset the new task's hover");
+                });
+            })
+        };
+        hidden_observed.wait();
+        state.invalidate(); // stop
+        state.invalidate(); // start
+        let generation = state.generation.load(Ordering::Acquire);
+        state.enqueue(
+            generation,
+            Instant::now(),
+            |work| {
+                work();
+                true
+            },
+            || Some((3.0, 4.0)),
+        );
+        resume_reset.wait();
+        old_poll.join().unwrap();
+        assert_eq!(state.generation.load(Ordering::Acquire), generation);
+        assert_eq!(state.latest(Instant::now()), Some((3.0, 4.0)));
+        let mut reset = false;
+        state.reset_if_current(generation, || reset = true);
+        assert!(reset);
+        assert_eq!(state.generation.load(Ordering::Acquire), generation);
+        assert_eq!(state.latest(Instant::now()), None);
+        state.enqueue(
+            generation,
+            Instant::now(),
+            |work| {
+                work();
+                true
+            },
+            || Some((5.0, 6.0)),
+        );
+        assert_eq!(state.latest(Instant::now()), Some((5.0, 6.0)));
+    }
+
+    #[test]
+    fn accepted_but_dropped_pointer_query_releases_the_slot() {
+        let state = Arc::new(PointerQuery::default());
+        state.enqueue(
+            0,
+            Instant::now(),
+            |work| {
+                drop(work);
+                true
+            },
+            || panic!("dropped work must not query AppKit"),
+        );
+        assert!(!state.pending.load(Ordering::Acquire));
+        state.enqueue(
+            0,
+            Instant::now(),
+            |work| {
+                work();
+                true
+            },
+            || Some((1.0, 2.0)),
+        );
+        assert!(!state.pending.load(Ordering::Acquire));
+        assert_eq!(state.latest(Instant::now()), Some((1.0, 2.0)));
     }
 
     #[test]
