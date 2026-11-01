@@ -36,7 +36,7 @@ mod opencode_acp;
 mod private_input;
 use private_input::cold_spawn_and_collect;
 pub(crate) use private_input::initialize as initialize_private_input;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod transport_tests;
 use hot_spare::CLAUDE_SPARE;
 pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_spare_if_current};
@@ -56,7 +56,7 @@ use super::providers::{
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 use std::ffi::OsStr;
 use std::ffi::OsString;
 #[cfg(test)]
