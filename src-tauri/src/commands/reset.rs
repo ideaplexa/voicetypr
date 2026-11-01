@@ -1,4 +1,7 @@
-use std::fs;
+use std::{
+    fs, io,
+    path::{Component, Path, PathBuf},
+};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
@@ -7,6 +10,67 @@ pub struct ResetResult {
     pub success: bool,
     pub errors: Vec<String>,
     pub cleared_items: Vec<String>,
+}
+
+// Permit the identifier directory itself and its children, never a user-wide
+// root or its ancestors. Check resolved paths too, so symlinks cannot escape.
+fn guard_reset_directory(
+    path: &Path,
+    identifier: &str,
+    protected_roots: &[PathBuf],
+) -> io::Result<()> {
+    let refused = || io::Error::new(io::ErrorKind::PermissionDenied, "Unsafe reset directory");
+    if identifier.is_empty()
+        || Path::new(identifier).components().count() != 1
+        || !matches!(
+            Path::new(identifier).components().next(),
+            Some(Component::Normal(_))
+        )
+        || !path.is_absolute()
+        || path.components().any(|c| matches!(c, Component::ParentDir))
+        || path.parent().is_none()
+    {
+        return Err(refused());
+    }
+    let scope = path
+        .ancestors()
+        .find(|p| p.file_name() == Some(std::ffi::OsStr::new(identifier)))
+        .ok_or_else(refused)?;
+    let resolved = path.canonicalize()?;
+    let resolved_scope = scope.canonicalize()?;
+    if resolved_scope.file_name() != Some(std::ffi::OsStr::new(identifier))
+        || !resolved.starts_with(&resolved_scope)
+        || resolved.parent().is_none()
+    {
+        return Err(refused());
+    }
+    for root in protected_roots {
+        if root.starts_with(path) {
+            return Err(refused());
+        }
+        match root.canonicalize() {
+            Ok(root) if root.starts_with(&resolved) => return Err(refused()),
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(refused()),
+        }
+    }
+    Ok(())
+}
+
+fn remove_reset_directory(
+    path: &Path,
+    identifier: &str,
+    protected_roots: &[PathBuf],
+) -> io::Result<()> {
+    if guard_reset_directory(path, identifier, protected_roots).is_err() {
+        log::warn!("Refused unsafe reset directory deletion");
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Unsafe reset directory",
+        ));
+    }
+    fs::remove_dir_all(path)
 }
 
 #[tauri::command]
@@ -19,6 +83,18 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     // Use the current bundle identifier so dev vs prod apps
     // clear their own OS-level data independently.
     let app_identifier = app.config().identifier.clone();
+    // Resolve every safety boundary before clearing anything; fail closed if
+    // the platform cannot tell us where its user-wide directories are.
+    let protected_roots = [
+        app.path().home_dir(),
+        app.path().cache_dir(),
+        app.path().data_dir(),
+        app.path().config_dir(),
+        app.path().local_data_dir(),
+    ]
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|_| "Could not resolve reset safety boundaries".to_string())?;
 
     // 1. Clear all stores and delete the store files
     // Clear settings store
@@ -48,7 +124,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         let stores_dir = app_data_dir.join("stores");
         if stores_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&stores_dir) {
+            if let Err(e) = remove_reset_directory(&stores_dir, &app_identifier, &protected_roots) {
                 errors.push(format!("Failed to delete stores directory: {}", e));
             } else {
                 cleared_items.push("Stores directory".to_string());
@@ -61,7 +137,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         // Delete models directory
         let models_dir = app_data_dir.join("models");
         if models_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&models_dir) {
+            if let Err(e) = remove_reset_directory(&models_dir, &app_identifier, &protected_roots) {
                 errors.push(format!("Failed to delete models directory: {}", e));
             } else {
                 cleared_items.push("Downloaded models".to_string());
@@ -76,7 +152,9 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         ];
         for parakeet_dir in parakeet_dirs {
             if parakeet_dir.exists() {
-                if let Err(e) = fs::remove_dir_all(&parakeet_dir) {
+                if let Err(e) =
+                    remove_reset_directory(&parakeet_dir, &app_identifier, &protected_roots)
+                {
                     errors.push(format!("Failed to delete Parakeet directory: {}", e));
                 } else {
                     cleared_items.push("Parakeet model data".to_string());
@@ -87,7 +165,9 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         // Delete recordings directory
         let recordings_dir = app_data_dir.join("recordings");
         if recordings_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&recordings_dir) {
+            if let Err(e) =
+                remove_reset_directory(&recordings_dir, &app_identifier, &protected_roots)
+            {
                 errors.push(format!("Failed to delete recordings directory: {}", e));
             } else {
                 cleared_items.push("Audio recordings".to_string());
@@ -118,9 +198,9 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     }
 
     // 4. Clear cache data (license validation cache)
-    if let Ok(cache_dir) = app.path().cache_dir() {
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
         if cache_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&cache_dir) {
+            if let Err(e) = remove_reset_directory(&cache_dir, &app_identifier, &protected_roots) {
                 errors.push(format!("Failed to clear cache: {}", e));
             } else {
                 cleared_items.push("Cache directory".to_string());
@@ -131,23 +211,8 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     // 5. Clear app preferences
     #[cfg(target_os = "macos")]
     {
-        // Clear FluidAudio cached models (for Swift Parakeet sidecar)
-        if let Ok(home_dir) = app.path().home_dir() {
-            let fluid_audio_paths = vec![
-                home_dir.join("Library/Application Support/FluidAudio"),
-                home_dir.join("Library/Caches/FluidAudio"),
-            ];
-
-            for fluid_path in fluid_audio_paths {
-                if fluid_path.exists() {
-                    if let Err(e) = fs::remove_dir_all(&fluid_path) {
-                        errors.push(format!("Failed to delete FluidAudio cache: {}", e));
-                    } else {
-                        cleared_items.push("FluidAudio model cache".to_string());
-                    }
-                }
-            }
-        }
+        // FluidAudio's model directories are shared with other apps. Preserve
+        // them: they are outside this app's identifier-scoped directories.
 
         // macOS defaults system
         match std::process::Command::new("defaults")
@@ -207,23 +272,15 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     #[cfg(target_os = "macos")]
     {
         if let Ok(home_dir) = app.path().home_dir() {
-            // Clear saved application state (window positions, etc)
-            let saved_state_path = home_dir
-                .join("Library")
-                .join("Saved Application State")
-                .join(format!("{}.savedState", app_identifier));
-            if saved_state_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&saved_state_path) {
-                    errors.push(format!("Failed to clear saved state: {}", e));
-                } else {
-                    cleared_items.push("Window state".to_string());
-                }
-            }
+            // Preserve the suffix-named .savedState directory; recursive
+            // deletion is restricted to exact identifier directory boundaries.
 
             // Clear any logs
             let logs_path = home_dir.join("Library").join("Logs").join(&app_identifier);
             if logs_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&logs_path) {
+                if let Err(e) =
+                    remove_reset_directory(&logs_path, &app_identifier, &protected_roots)
+                {
                     errors.push(format!("Failed to clear logs: {}", e));
                 } else {
                     cleared_items.push("Application logs".to_string());
@@ -236,7 +293,9 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
                 .join("WebKit")
                 .join(&app_identifier);
             if webkit_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&webkit_path) {
+                if let Err(e) =
+                    remove_reset_directory(&webkit_path, &app_identifier, &protected_roots)
+                {
                     errors.push(format!("Failed to clear WebKit data: {}", e));
                 } else {
                     cleared_items.push("WebKit data".to_string());
@@ -251,7 +310,9 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
                 .join("Downloads")
                 .join(&app_identifier);
             if nsurlsession_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&nsurlsession_path) {
+                if let Err(e) =
+                    remove_reset_directory(&nsurlsession_path, &app_identifier, &protected_roots)
+                {
                     errors.push(format!("Failed to clear download cache: {}", e));
                 } else {
                     cleared_items.push("Download cache".to_string());
@@ -267,7 +328,9 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
             // Clear logs from AppData\Local
             let logs_path = local_data_dir.join("logs");
             if logs_path.exists() {
-                if let Err(e) = fs::remove_dir_all(&logs_path) {
+                if let Err(e) =
+                    remove_reset_directory(&logs_path, &app_identifier, &protected_roots)
+                {
                     errors.push(format!("Failed to clear logs: {}", e));
                 } else {
                     cleared_items.push("Application logs".to_string());
@@ -275,17 +338,8 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
             }
         }
 
-        // Clear Windows WebView2 cache
-        if let Ok(temp_dir) = app.path().temp_dir() {
-            let webview_cache = temp_dir.join(format!("{}.WebView2", app_identifier));
-            if webview_cache.exists() {
-                if let Err(e) = fs::remove_dir_all(&webview_cache) {
-                    errors.push(format!("Failed to clear WebView2 cache: {}", e));
-                } else {
-                    cleared_items.push("WebView2 cache".to_string());
-                }
-            }
-        }
+        // Preserve the legacy suffix-named temp WebView2 directory, which is
+        // outside the exact identifier directory boundary.
     }
 
     // 7. Reset system permissions
@@ -371,4 +425,137 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         errors,
         cleared_items,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{guard_reset_directory, remove_reset_directory};
+    use std::{fs, path::Path};
+
+    const IDENTIFIER: &str = "com.ideaplexa.voicetypr";
+
+    #[test]
+    fn reset_guard_rejects_user_wide_roots_and_filesystem_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots: Vec<_> = [
+            "home",
+            "home/Library/Caches",
+            "home/Library/Application Support",
+            "home/.config",
+            "home/AppData/Local",
+            "home/AppData/Roaming",
+        ]
+        .iter()
+        .map(|p| temp.path().join(p))
+        .collect();
+        for root in &roots {
+            fs::create_dir_all(root).unwrap();
+        }
+        for root in &roots {
+            assert!(guard_reset_directory(root, IDENTIFIER, &roots).is_err());
+            // Even a misconfigured identifier matching a root cannot allow it.
+            assert!(guard_reset_directory(
+                root,
+                root.file_name().unwrap().to_str().unwrap(),
+                &roots
+            )
+            .is_err());
+        }
+        assert!(guard_reset_directory(Path::new("/"), IDENTIFIER, &roots).is_err());
+        assert!(guard_reset_directory(temp.path(), IDENTIFIER, &roots).is_err());
+    }
+
+    #[test]
+    fn reset_guard_accepts_identifier_directory_and_children() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = vec![temp.path().to_path_buf()];
+        for root in ["Library/Caches", "AppData/Local", "AppData/Roaming"] {
+            let app_dir = temp.path().join(root).join(IDENTIFIER);
+            let child = app_dir.join("models/nested");
+            fs::create_dir_all(&child).unwrap();
+            assert!(guard_reset_directory(&app_dir, IDENTIFIER, &roots).is_ok());
+            assert!(guard_reset_directory(&child, IDENTIFIER, &roots).is_ok());
+        }
+    }
+
+    #[test]
+    fn reset_guard_rejects_shared_suffixed_relative_and_traversing_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = vec![temp.path().to_path_buf()];
+        for name in [
+            "FluidAudio".to_string(),
+            format!("{IDENTIFIER}.savedState"),
+            format!("{IDENTIFIER}.WebView2"),
+            format!("{IDENTIFIER}-other"),
+            IDENTIFIER.to_string(),
+        ] {
+            fs::create_dir_all(temp.path().join(name)).unwrap();
+        }
+        for name in [
+            "FluidAudio".to_string(),
+            format!("{IDENTIFIER}.savedState"),
+            format!("{IDENTIFIER}.WebView2"),
+            format!("{IDENTIFIER}-other"),
+        ] {
+            assert!(guard_reset_directory(&temp.path().join(name), IDENTIFIER, &roots).is_err());
+        }
+        assert!(guard_reset_directory(Path::new(IDENTIFIER), IDENTIFIER, &roots).is_err());
+        assert!(guard_reset_directory(
+            &temp.path().join(IDENTIFIER).join(".."),
+            IDENTIFIER,
+            &roots
+        )
+        .is_err());
+        assert!(guard_reset_directory(&temp.path().join(IDENTIFIER), "..", &roots).is_err());
+    }
+
+    #[test]
+    fn reset_guard_protects_roots_even_below_an_identifier_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join(IDENTIFIER);
+        let home = app_dir.join("home");
+        fs::create_dir_all(&home).unwrap();
+        assert!(guard_reset_directory(&home, IDENTIFIER, std::slice::from_ref(&home)).is_err());
+        assert!(guard_reset_directory(&app_dir, IDENTIFIER, &[home]).is_err());
+    }
+
+    #[test]
+    fn guarded_removal_preserves_other_apps_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache_root = temp.path().join("AppData/Local");
+        let app_dir = cache_root.join(IDENTIFIER);
+        let other_app = cache_root.join("Browser/profile");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&other_app).unwrap();
+        let marker = other_app.join("keep");
+        fs::write(&marker, b"other app data").unwrap();
+        let roots = vec![temp.path().to_path_buf(), cache_root.clone()];
+
+        assert!(remove_reset_directory(&cache_root, IDENTIFIER, &roots).is_err());
+        remove_reset_directory(&app_dir, IDENTIFIER, &roots).unwrap();
+        assert!(!app_dir.exists());
+        assert_eq!(fs::read(marker).unwrap(), b"other app data");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_guard_rejects_symlink_escapes() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join(IDENTIFIER);
+        let other_app = temp.path().join("other-app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&other_app).unwrap();
+        symlink(&other_app, app_dir.join("escape")).unwrap();
+        let roots = vec![temp.path().to_path_buf()];
+        assert!(guard_reset_directory(&app_dir.join("escape"), IDENTIFIER, &roots).is_err());
+        assert!(remove_reset_directory(&app_dir.join("escape"), IDENTIFIER, &roots).is_err());
+        assert!(other_app.exists());
+
+        let alias = temp.path().join("alias");
+        fs::create_dir_all(&alias).unwrap();
+        symlink(&other_app, alias.join(IDENTIFIER)).unwrap();
+        assert!(guard_reset_directory(&alias.join(IDENTIFIER), IDENTIFIER, &roots).is_err());
+    }
 }
