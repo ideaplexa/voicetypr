@@ -126,6 +126,10 @@ fn align_main_window_controls(window: &tauri::WebviewWindow) {
     }
 }
 
+fn should_start_hidden(has_model: bool, onboarding_completed: bool, remote_active: bool) -> bool {
+    has_model && onboarding_completed && !remote_active
+}
+
 /// Show the main window and keep the macOS Dock icon in sync. Single entry point so
 /// no caller forgets to reveal the Dock icon when the window becomes visible.
 /// The single-instance callback and async startup checks can run on workers.
@@ -1315,7 +1319,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Hide main window on start (menu bar only)
-            // Only a configured local/cloud model hides the main window immediately.
+            // Only completed onboarding with a configured local/cloud model hides immediately.
+            // Auto-selection can save a model while onboarding is still incomplete.
             // Remote-only sessions stay visible until startup checks verify the remote is available.
             let observability_app = app.handle().clone();
             tauri::async_runtime::spawn(async move { observability::startup(observability_app).await; });
@@ -1324,8 +1329,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .get("current_model")
                     .and_then(|v| v.as_str().map(|s| !s.is_empty()))
                     .unwrap_or(false);
+                let onboarding_completed = store
+                    .get("onboarding_completed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
-                has_local_or_cloud_model && active_id.is_none()
+                should_start_hidden(has_local_or_cloud_model, onboarding_completed, active_id.is_some())
             } else {
                 false
             };
@@ -1921,7 +1930,33 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
 
 #[cfg(test)]
 mod startup_selection_tests {
-    use super::cloud_selection_is_kept;
+    use super::{cloud_selection_is_kept, should_start_hidden};
+
+    #[test]
+    fn incomplete_onboarding_with_a_model_starts_visible() {
+        assert!(!should_start_hidden(true, false, false));
+    }
+
+    #[test]
+    fn completed_onboarding_with_a_model_and_no_remote_starts_hidden() {
+        assert!(should_start_hidden(true, true, false));
+    }
+
+    #[test]
+    fn active_remote_starts_visible_until_startup_checks_finish() {
+        for has_model in [false, true] {
+            for onboarding_completed in [false, true] {
+                assert!(!should_start_hidden(has_model, onboarding_completed, true));
+            }
+        }
+    }
+
+    #[test]
+    fn no_model_starts_visible() {
+        for onboarding_completed in [false, true] {
+            assert!(!should_start_hidden(false, onboarding_completed, false));
+        }
+    }
 
     #[test]
     fn cloud_engine_selection_is_kept_at_startup() {

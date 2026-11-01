@@ -175,7 +175,7 @@ mod tests {
     }
 
     /// Source-level guard: a cached Parakeet engine must not leave first launch
-    /// hidden, and remote-only sessions must show until startup checks finish.
+    /// hidden during onboarding, and remote-only sessions must show until startup checks finish.
     #[test]
     fn startup_shows_main_window_without_a_saved_model_or_with_an_active_remote() {
         let src = include_str!("../lib.rs").replace("\r\n", "\n");
@@ -183,7 +183,13 @@ mod tests {
         let startup = startup.split("// Log setup completion").next().unwrap();
         assert!(startup.contains(".get(\"current_model\")"));
         assert!(startup.contains(".map(|s| !s.is_empty())"));
-        assert!(startup.contains("has_local_or_cloud_model && active_id.is_none()"));
+        assert!(startup.contains(".get(\"onboarding_completed\")"));
+        assert!(
+            startup.contains(".and_then(|v| v.as_bool())\n                    .unwrap_or(false)")
+        );
+        assert!(startup.contains(
+            "should_start_hidden(has_local_or_cloud_model, onboarding_completed, active_id.is_some())"
+        ));
         let show_branch = startup.rsplit_once("} else {").unwrap().1;
         assert!(
             show_branch.contains("show_main_window(app.app_handle());"),
