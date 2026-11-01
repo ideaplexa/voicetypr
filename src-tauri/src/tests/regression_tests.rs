@@ -148,6 +148,32 @@ mod tests {
         assert!(!check.contains(&wrong_prefix));
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn main_window_controls_reject_worker_thread() {
+        thread::spawn(|| assert!(crate::main_window_controls_thread().is_none()))
+            .join()
+            .unwrap();
+    }
+
+    /// Check the guard's wiring without constructing a native window in tests.
+    #[test]
+    fn main_window_native_access_follows_main_thread_dispatch_and_guard() {
+        let src = include_str!("../lib.rs").replace("\r\n", "\n");
+        let show = src.split("fn show_main_window(").nth(1).unwrap();
+        let show = show.split("\n}\n").next().unwrap();
+        assert!(
+            show.find(".run_on_main_thread(").unwrap() < show.find(".get_webview_window(").unwrap()
+        );
+
+        let align = src.split("fn align_main_window_controls(").nth(1).unwrap();
+        let align = align.split("\n}\n").next().unwrap();
+        let guard = align
+            .find("let Some(_main_thread) = main_window_controls_thread() else {\n        return;\n    };")
+            .expect("alignment must return without a main-thread marker");
+        assert!(guard < align.find(".ns_window()").unwrap());
+    }
+
     /// Regression guard for beta.4: the island's device and window lookups ran
     /// before the mic opened and delayed first audio by 50–200 ms. They must stay
     /// after the readiness decision in `start_recording`.

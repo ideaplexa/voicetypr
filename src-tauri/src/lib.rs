@@ -60,6 +60,15 @@ pub fn hide_dock_icon(app: &tauri::AppHandle) {
     log::debug!("Dock icon hidden (ActivationPolicy::Accessory)");
 }
 #[cfg(target_os = "macos")]
+fn main_window_controls_thread() -> Option<objc2::MainThreadMarker> {
+    let main_thread = objc2::MainThreadMarker::new();
+    if main_thread.is_none() {
+        log::debug!("Skipping main window controls alignment off the main thread");
+    }
+    main_thread
+}
+
+#[cfg(target_os = "macos")]
 fn align_main_window_controls(window: &tauri::WebviewWindow) {
     use objc2::msg_send;
     use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
@@ -67,13 +76,17 @@ fn align_main_window_controls(window: &tauri::WebviewWindow) {
     const TRAFFIC_LIGHT_LEFT: f64 = 12.0;
     const TRAFFIC_LIGHT_VERTICAL_OFFSET: f64 = 2.0;
 
+    let Some(_main_thread) = main_window_controls_thread() else {
+        return;
+    };
     let Ok(ns_window) = window.ns_window() else {
         log::warn!("Could not access the main NSWindow to align window controls");
         return;
     };
 
-    // SAFETY: Tauri owns this NSWindow for the lifetime of `window`, and setup,
-    // show, and window callbacks all execute on the AppKit main thread.
+    // SAFETY: Tauri owns this NSWindow for the lifetime of `window`. The marker
+    // above proves these AppKit calls run on the main thread, even if a caller
+    // originates on a runtime worker.
     unsafe {
         let ns_window = &*(ns_window.cast::<NSWindow>());
         let Some(close) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
@@ -115,17 +128,26 @@ fn align_main_window_controls(window: &tauri::WebviewWindow) {
 
 /// Show the main window and keep the macOS Dock icon in sync. Single entry point so
 /// no caller forgets to reveal the Dock icon when the window becomes visible.
+/// The single-instance callback and async startup checks can run on workers.
 fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        if window.show().is_ok() {
-            crate::pill::level::main_window_visibility_changed(&window, true);
-        }
-        #[cfg(target_os = "macos")]
-        align_main_window_controls(&window);
-        let _ = window.set_focus();
-        #[cfg(target_os = "macos")]
-        show_dock_icon(app);
+    let main_thread_app = app.clone();
+    if app
+        .run_on_main_thread(move || {
+            if let Some(window) = main_thread_app.get_webview_window("main") {
+                let _ = window.unminimize();
+                if window.show().is_ok() {
+                    crate::pill::level::main_window_visibility_changed(&window, true);
+                }
+                #[cfg(target_os = "macos")]
+                align_main_window_controls(&window);
+                let _ = window.set_focus();
+                #[cfg(target_os = "macos")]
+                show_dock_icon(&main_thread_app);
+            }
+        })
+        .is_err()
+    {
+        log::warn!("Could not schedule main window display on the main thread");
     }
 }
 
