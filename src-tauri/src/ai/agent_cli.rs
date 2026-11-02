@@ -45,7 +45,7 @@ use super::providers::{
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 use std::ffi::OsStr;
 use std::ffi::OsString;
 #[cfg(test)]
