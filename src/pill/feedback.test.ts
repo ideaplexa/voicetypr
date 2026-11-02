@@ -105,12 +105,8 @@ describe('feedback card layout',()=>{
   });
   it('caps stack width before measuring wrapped content height',async()=>{
     const h=await mount();
-    const original=HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
-      if(!this.classList.contains('feedback-card'))return original.call(this);
-      const constrained=this.style.width==='360px';
-      return {x:0,y:0,left:0,top:0,right:constrained?360:430,bottom:constrained?108:70,width:constrained?360:430,height:constrained?108:70,toJSON:()=>({})};
-    });
+    vi.spyOn(HTMLElement.prototype,'offsetWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('feedback-card') ? 430 : 0;});
+    vi.spyOn(HTMLElement.prototype,'offsetHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('feedback-card') && this.style.width==='360px' ? 108 : 0;});
     h.emit('dictation-blocked',{generation:1,kind:'accessibility_off',action:'open_accessibility'});await h.settle(1000);
     expect(h.get('.feedback-card').style.width).toBe('360px');expect(h.get('.feedback-card').style.height).toBe('108px');
     expect(h.get('.card-title').title).toBe('Allow Accessibility to paste automatically');

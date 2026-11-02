@@ -93,14 +93,16 @@ export class StackView {
     const frontView=front && this.views.get(front.key);
     // Measure once per content change, not on every animation frame.
     if(frontView && frontView.el.dataset.measured!==this.snapshot) {
-      frontView.el.classList.remove('back');
-      frontView.el.style.width='max-content';frontView.el.style.height='auto';
-      const bounds=frontView.el.getBoundingClientRect();
-      const width=Math.min(360,Math.max(236,bounds.width || 360));
-      frontView.el.style.width=`${width}px`;
-      frontView.el.dataset.naturalWidth=String(width);
-      frontView.el.dataset.naturalHeight=String(frontView.el.getBoundingClientRect().height || (front.sub || front.actions.length ? 70 : 34));
-      frontView.el.dataset.measured=this.snapshot;
+      const el=frontView.el,hidden=el.hidden,back=el.classList.contains('back'),oldWidth=el.style.width,oldHeight=el.style.height;
+      el.hidden=false;el.classList.remove('back');
+      el.style.width='max-content';el.style.height='auto';
+      // The border box is untransformed: promoted cards can still be scaled at either back depth.
+      const width=Math.min(360,Math.max(236,el.offsetWidth || 360));
+      el.style.width=`${width}px`;
+      el.dataset.naturalWidth=String(width);
+      el.dataset.naturalHeight=String(el.offsetHeight || (front.sub || front.actions.length ? 70 : 34));
+      el.dataset.measured=this.snapshot;
+      el.style.width=oldWidth;el.style.height=oldHeight;el.hidden=hidden;el.classList.toggle('back',back);
     }
     const width=Number(frontView?.el.dataset.naturalWidth ?? 300),height=Number(frontView?.el.dataset.naturalHeight ?? 54);
     const top=this.geometry.anchor.startsWith('top-'), direction=top ? 1 : -1;
