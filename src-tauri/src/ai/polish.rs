@@ -126,7 +126,7 @@ pub(crate) async fn measure(
     let start = Instant::now();
     let mut timings = PolishTimings::default();
     let (output, outcome, fallback_reason) = if !options.preset.requires_ai_formatting()
-        || super::skip::should_skip(text, options.preset)
+        || super::skip::should_skip(text, options.preset, language)
     {
         (text.to_string(), PolishOutcome::Skipped, None)
     } else {

@@ -97,7 +97,11 @@ fn golden_skip_list_requires_no_changes() {
     let (golden, _) = corpus();
     let mut skipped = Vec::new();
     for case in &golden {
-        if super::super::skip::should_skip(&case.input, case.style.preset()) {
+        if super::super::skip::should_skip(
+            &case.input,
+            case.style.preset(),
+            case.language.as_deref(),
+        ) {
             assert!(
                 polish_score::score(case, &case.input).passed,
                 "skip requires change {}",

@@ -1535,8 +1535,10 @@ pub async fn polish_text_typed(
     let (provider, model) =
         selected_ai_provider_and_model(app).map_err(AiPolishAttemptError::unattributed)?;
     // Zero-wait: already-clean text needs no model call. The caller decides
-    // eligibility (no translation pending), since engines may omit a language.
-    if !needs_output_language_transform && crate::ai::skip::should_skip(text, options.preset) {
+    // eligibility (no translation pending); unknown/non-English transcripts always run.
+    if !needs_output_language_transform
+        && crate::ai::skip::should_skip(text, options.preset, transcript_language)
+    {
         crate::observability::update(generation, "polish_skip_used", serde_json::json!(true));
         return Ok(crate::ai::contract::AiPolishResult {
             output_text: text.to_string(),

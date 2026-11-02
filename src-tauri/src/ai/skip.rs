@@ -1,7 +1,21 @@
 //! Conservative no-op detector; uncertainty always runs Polish.
 use super::prompts::EnhancementPreset;
 
-pub fn should_skip(input: &str, preset: EnhancementPreset) -> bool {
+pub fn should_skip(
+    input: &str,
+    preset: EnhancementPreset,
+    transcript_language: Option<&str>,
+) -> bool {
+    let english = transcript_language.is_some_and(|language| {
+        language
+            .trim()
+            .split(['-', '_'])
+            .next()
+            .is_some_and(|base| base.eq_ignore_ascii_case("en"))
+    });
+    if !english {
+        return false;
+    }
     if !matches!(
         preset,
         EnhancementPreset::CleanDictation | EnhancementPreset::Message | EnhancementPreset::Notes
@@ -58,6 +72,38 @@ pub fn should_skip(input: &str, preset: EnhancementPreset) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn only_english_transcripts_can_skip_polish() {
+        for language in [
+            None,
+            Some(""),
+            Some("de"),
+            Some("de-AT"),
+            Some("fr"),
+            Some("es"),
+            Some("pl"),
+            Some("nl"),
+        ] {
+            assert!(!should_skip(
+                "Ähm, wir kommen.",
+                EnhancementPreset::CleanDictation,
+                language
+            ));
+            assert!(!should_skip(
+                "Ready.",
+                EnhancementPreset::CleanDictation,
+                language
+            ));
+        }
+        for language in ["en", "en-US", "en_GB", " EN "] {
+            assert!(should_skip(
+                "Ready.",
+                EnhancementPreset::CleanDictation,
+                Some(language)
+            ));
+        }
+    }
+
+    #[test]
     fn uncertainty_and_reshaping_run() {
         for input in [
             "um hello.",
@@ -72,17 +118,21 @@ mod tests {
             "Sort of done.",
             "Hello  there.",
         ] {
-            assert!(!should_skip(input, EnhancementPreset::CleanDictation));
+            assert!(!should_skip(
+                input,
+                EnhancementPreset::CleanDictation,
+                Some("en")
+            ));
         }
         for preset in [EnhancementPreset::Writing, EnhancementPreset::Code] {
-            assert!(!should_skip("Ready.", preset));
+            assert!(!should_skip("Ready.", preset, Some("en")));
         }
         for preset in [
             EnhancementPreset::CleanDictation,
             EnhancementPreset::Message,
             EnhancementPreset::Notes,
         ] {
-            assert!(should_skip("Ready.", preset));
+            assert!(should_skip("Ready.", preset, Some("en")));
             let thirty = format!(
                 "Ready {}.",
                 (0..29)
@@ -90,8 +140,8 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join(" ")
             );
-            assert!(should_skip(&thirty, preset));
-            assert!(!should_skip(&format!("Ready {thirty}"), preset));
+            assert!(should_skip(&thirty, preset, Some("en")));
+            assert!(!should_skip(&format!("Ready {thirty}"), preset, Some("en")));
         }
     }
 }

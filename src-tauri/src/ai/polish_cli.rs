@@ -165,7 +165,7 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
     };
     let (provider, model) = selection(app, args.provider.as_deref(), args.model.as_deref())?;
     let result = if !options.preset.requires_ai_formatting()
-        || super::skip::should_skip(&text, options.preset)
+        || super::skip::should_skip(&text, options.preset, args.language.as_deref())
     {
         PolishOutput {
             output: text,

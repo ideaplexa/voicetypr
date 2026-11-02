@@ -151,12 +151,14 @@ fn fix_round_punctuated_corrections_never_skip() {
     ] {
         assert!(!super::skip::should_skip(
             text,
-            super::prompts::EnhancementPreset::CleanDictation
+            super::prompts::EnhancementPreset::CleanDictation,
+            Some("en")
         ));
     }
     assert!(super::skip::should_skip(
         "Nobody knows.",
-        super::prompts::EnhancementPreset::CleanDictation
+        super::prompts::EnhancementPreset::CleanDictation,
+        Some("en")
     ));
 }
 
