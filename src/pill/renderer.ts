@@ -65,7 +65,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let slowSince = 0;
   let perf: PerfProbe | undefined; // debug-only measurement (VOICETYPR_PERF=1); undefined otherwise
   // A start that never went live (cancelled or failed while pending) reports no frames.
-  const endTake = () => { if (machine.pending) perf?.abort(); else if (machine.recording) perf?.end(machine.generation); };
+  const endTake = () => { if (machine.pending) perf?.abort(); else if (machine.recording) perf?.end(machine.takeGeneration); };
   let entered = 0, pointerX = 0, pointerY = 0, pointerTime = 0;
   let buttonRects: Array<{ button: HTMLButtonElement; rect: DOMRect }> | undefined, lastLayoutKey = '';
   let closeHold = 0;
@@ -368,8 +368,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   };
   /** Keypress: Starting was published, the mic is not open yet. Show the idle listening layout at 0:00. */
   const starting = (generation?: number) => {
-    if (machine.recording) return;
+    if (machine.recording && (generation === undefined || generation <= machine.takeGeneration)) return;
     if (generation !== undefined && !machine.observeGeneration(generation)) return;
+    endTake();
     stack.resolveMicStatus('new_take', generation);
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
@@ -384,7 +385,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     perf?.begin();
   };
   const start = (generation?: number) => {
-    if (machine.pending) {
+    if (machine.pending && (generation === undefined || machine.activeTakeGeneration === undefined || generation === machine.activeTakeGeneration)) {
       // Recording began. Clock and bars go live from here; a context that already arrived keeps its start card.
       if (!machine.start(performance.now(), generation)) return;
       stack.resolveMicStatus('recording', generation);
@@ -393,8 +394,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       sync();
       return;
     }
-    if (machine.recording) return;
+    if (machine.recording && (generation === undefined || generation <= machine.takeGeneration)) return;
     if (generation !== undefined && !machine.observeGeneration(generation)) return;
+    endTake();
     stack.resolveMicStatus('new_take', generation);
     stack.resolveMicStatus('recording', generation);
     stack.dropLive();
@@ -606,7 +608,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     stream(value: TranscriptionStreamEvent) { if (enabledStream && machine.stream(value)) sync(); },
     work(state: 'transcribing' | 'polishing') {
       endTake();
-      const hint=stack.stack.items.find(item=>item.key===`escape_hint:${machine.generation}`);
+      const hint=stack.stack.items.find(item=>item.key===`escape_hint:${machine.takeGeneration}`);
       stack.dropLive(); pick = undefined;
       if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined;
       machine.work(state, performance.now());
@@ -633,7 +635,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     },
     escapeHint() {
       if (!machine.recording && !machine.processing) return;
-      stack.push({key:`escape_hint:${machine.generation}`,title:`Press Esc again to ${machine.processing ? 'discard' : 'cancel'}`,sub:'',tone:'neutral',glyph:'back',duration:null,liveGeneration:machine.generation,expiresAt:performance.now()+2000,actions:[]});
+      stack.push({key:`escape_hint:${machine.takeGeneration}`,title:`Press Esc again to ${machine.processing ? 'discard' : 'cancel'}`,sub:'',tone:'neutral',glyph:'back',duration:null,liveGeneration:machine.takeGeneration,expiresAt:performance.now()+2000,actions:[]});
       sync();
     },
     destroy() { destroyed = true; perf?.destroy(); perf = undefined; window.removeEventListener('keydown', keydown); stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },

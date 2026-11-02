@@ -60,7 +60,7 @@ export class IslandMachine {
   }
   /** Show the island on keypress. The take is live only once `start` confirms it. */
   arm(now: number, generation?: number) {
-    if (this.recording) return false;
+    if (this.recording && (generation === undefined || generation <= this.takeGeneration)) return false;
     if (generation !== undefined && !this.observeGeneration(generation)) return false;
     this.activeTakeGeneration = generation;
     this.clearStream(); this.words = 0; this.sawLiveWords = false;
@@ -69,19 +69,20 @@ export class IslandMachine {
     return true;
   }
   start(now: number, generation?: number) {
-    if (this.pending) {
-      if (generation !== undefined && (this.activeTakeGeneration !== undefined && generation !== this.activeTakeGeneration || !this.observeGeneration(generation))) return false;
+    if (this.pending && (generation === undefined || this.activeTakeGeneration === undefined || generation === this.activeTakeGeneration)) {
+      if (generation !== undefined && !this.observeGeneration(generation)) return false;
       if (generation !== undefined) this.activeTakeGeneration = generation;
       // Recording began: the clock and the bars start now, not at the keypress.
       this.pending = false; this.startedAt = now; this.frozenSeconds = 0;
       return true;
     }
-    if (this.recording) return false;
+    if (this.recording && (generation === undefined || generation <= this.takeGeneration)) return false;
     if (generation !== undefined && !this.observeGeneration(generation)) return false;
     this.activeTakeGeneration = generation;
+    this.pending = false;
     this.clearStream(); this.words = 0; this.sawLiveWords = false;
     this.startedAt = now; this.frozenSeconds = 0;
-    this.state = this.context.generation > this.consumedContext && this.context.show_start_card ? 'start' : 'listening';
+    this.state = (generation === undefined || this.context.generation === generation) && this.context.generation > this.consumedContext && this.context.show_start_card ? 'start' : 'listening';
     this.consumedContext = this.context.generation;
     return true;
   }
