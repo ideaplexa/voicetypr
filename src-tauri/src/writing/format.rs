@@ -1,7 +1,7 @@
 //! Shared local formatting stage.
 //!
 //! Runs for every engine when Polish is off (and the take is not a literal
-//! snippet): per-line spacing, sentence-start capitals, standalone English "i",
+//! snippet): per-line spacing, English sentence-start capitals and standalone "i",
 //! optional filler/stutter removal and pause-based paragraph breaks.
 //!
 //! The stage is pure (no I/O, no settings, no logging of text) and idempotent:
@@ -363,7 +363,7 @@ fn format_line(
     if opts.remove_fillers && english {
         tokens = strip_fillers(tokens, starts_sentence, opts.protected_terms);
     }
-    if !opts.engine_casing_native && !has_no_dotted_case(opts.language) {
+    if !opts.engine_casing_native && english {
         capitalize_tokens(
             &mut tokens,
             starts_sentence,
@@ -416,11 +416,6 @@ fn language_base(language: &str) -> String {
 
 pub(super) fn is_english(language: &str) -> bool {
     language_base(language) == "en"
-}
-
-/// Turkic languages upper-case "i" to a dotted capital; leave their casing alone.
-fn has_no_dotted_case(language: &str) -> bool {
-    matches!(language_base(language).as_str(), "tr" | "az")
 }
 
 // --- token anatomy ----------------------------------------------------------
@@ -909,6 +904,19 @@ mod tests {
                 "z.B", "z. B", "d.h", "u.a", "u.u", "o.ä", "Dr", "Mag", "Abs", "z", "s", "f",
             ]) {
                 let input = format!("Das gilt {abbreviation}. auch morgen.");
+                // German casing is currently disabled in the pipeline. Exercise
+                // the retained boundary logic directly for future language support.
+                let mut tokens = tokenize(&input);
+                capitalize_tokens(&mut tokens, true, false, true, &[]);
+                assert_eq!(
+                    tokens
+                        .iter()
+                        .map(|token| token.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    input
+                );
+                assert!(!ends_sentence(&format!("{abbreviation}."), true));
                 assert_eq!(fmt(&input, &opts), input, "{language}: {abbreviation}");
                 assert_eq!(fmt(&fmt(&input, &opts), &opts), input);
             }
@@ -918,11 +926,11 @@ mod tests {
             );
             assert_eq!(
                 fmt("Es regnet. dann gehen wir.", &opts),
-                "Es regnet. Dann gehen wir."
+                "Es regnet. dann gehen wir."
             );
             assert_eq!(
                 fmt("Das ist eine Art. dann gehen wir.", &opts),
-                "Das ist eine Art. Dann gehen wir."
+                "Das ist eine Art. dann gehen wir."
             );
         }
     }
@@ -951,9 +959,14 @@ mod tests {
                 language,
                 ..FormatOptions::default()
             };
+            assert!(ends_sentence("ggf.", false));
             assert_eq!(
                 fmt("Use ggf. then continue.", &opts),
-                "Use ggf. Then continue."
+                if language == "en" {
+                    "Use ggf. Then continue."
+                } else {
+                    "Use ggf. then continue."
+                }
             );
         }
         assert_eq!(
@@ -1084,12 +1097,67 @@ mod tests {
     }
 
     #[test]
-    fn capitalizes_other_latin_languages() {
+    fn leaves_other_latin_languages_casing_alone() {
         let opts = FormatOptions {
             language: "es",
             ..FormatOptions::default()
         };
-        assert_eq!(fmt("hola. ¿qué tal?", &opts), "Hola. ¿Qué tal?");
+        assert_eq!(fmt("hola. ¿qué tal?", &opts), "hola. ¿qué tal?");
+    }
+
+    #[test]
+    fn sentence_capitals_require_an_english_transcript_language() {
+        for (language, input) in [
+            ("de", "„Wirklich?“ fragte er. dann ging er."),
+            ("de-AT", "das gilt ggf. auch morgen."),
+            ("fr", "Mme. de Gaulle. « Vraiment? » demanda-t-il."),
+            ("es", "Ud. puede venir. hola."),
+            ("pl", "np. takie zdanie. potem idziemy."),
+            ("nl", "'s morgens. ijzer is sterk."),
+            ("", "hello. then we go."),
+            ("tr", "iyi günler. ilk söz."),
+            ("az", "ilk söz. sonra."),
+        ] {
+            let opts = FormatOptions {
+                language,
+                ..FormatOptions::default()
+            };
+            assert_eq!(fmt(input, &opts), input, "{language}");
+        }
+        for language in ["en", "en-US", "en_GB", " EN "] {
+            let opts = FormatOptions {
+                language,
+                ..FormatOptions::default()
+            };
+            assert_eq!(
+                fmt("hello. then i go.", &opts),
+                "Hello. Then I go.",
+                "{language}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_english_spacing_and_pause_paragraphs_still_run_without_recasing() {
+        for language in ["de", "fr", "es", "pl", "nl", ""] {
+            let opts = FormatOptions {
+                language,
+                paragraphs: true,
+                ..FormatOptions::default()
+            };
+            assert_eq!(fmt("hello  world .", &opts), "hello world.");
+            let first = words(45, ".");
+            let second = words(20, ".");
+            let text = format!("{first} {second}");
+            let hints = [PauseHint {
+                words_before: 45,
+                gap_ms: 2_000,
+            }];
+            assert_eq!(
+                format_transcript(&text, &hints, &opts),
+                format!("{first}\n\n{second}")
+            );
+        }
     }
 
     // --- standalone i ---
@@ -1134,7 +1202,7 @@ mod tests {
             language: "es",
             ..FormatOptions::default()
         };
-        assert_eq!(fmt("dijo i luego.", &es), "Dijo i luego.");
+        assert_eq!(fmt("dijo i luego.", &es), "dijo i luego.");
         assert_eq!(fmt("this is it.", &en()), "This is it.");
         assert_eq!(fmt("see (i) below", &en()), "See (i) below");
     }
