@@ -589,11 +589,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
         run: |
           if ! gh release view "$RELEASE_TAG" --json body --jq '.body' > release-body.md ||
             ! LC_ALL=C grep -q '[^[:space:]]' release-body.md; then
             gh api "repos/${{ github.repository }}/releases/generate-notes" \
-              -f tag_name="$RELEASE_TAG" --jq '.body' > release-body.md
+              -f tag_name="$RELEASE_TAG" -f target_commitish="$RELEASE_BASE_SHA" --jq '.body' > release-body.md
           fi
           LC_ALL=C grep -q '[^[:space:]]' release-body.md
 

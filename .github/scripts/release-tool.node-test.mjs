@@ -12,6 +12,16 @@ import {
   releaseTagRef,
 } from './release-tool.mjs';
 
+it('generates release notes against the dispatched base commit before the tag exists', () => {
+  const workflow = fs.readFileSync(new URL('../workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /base_sha: \$\{\{ steps\.base\.outputs\.sha \}\}/);
+  assert.match(workflow, /echo "sha=\$\{GITHUB_SHA\}" >> "\$GITHUB_OUTPUT"/);
+  const prepareBody = workflow.split('      - name: Prepare release body\n')[1]?.split('\n      - name:')[0];
+  assert.ok(prepareBody);
+  assert.match(prepareBody, /RELEASE_BASE_SHA: \$\{\{ needs\.prepare\.outputs\.base_sha \}\}/);
+  assert.match(prepareBody, /-f target_commitish="\$RELEASE_BASE_SHA"/);
+});
+
 describe('release version calculation', () => {
   it('calculates stable release types from a stable version', () => {
     assert.deepEqual(
