@@ -37,6 +37,13 @@ const ABBREVIATIONS: &[&str] = &[
     "corp", "dept", "est", "fig", "no", "nr", "vol", "approx", "gen", "sen", "rep", "gov", "lt",
     "col", "capt", "sgt", "hon", "rev", "pres", "al", "ca", "bzw", "usw", "min", "max", "tel",
 ];
+/// Additional abbreviations for German transcripts only.
+const GERMAN_ABBREVIATIONS: &[&str] = &[
+    "ggf", "bzw", "usw", "z.b", "zb", "d.h", "u.a", "u.u", "o.ä", "vgl", "bspw", "evtl", "inkl",
+    "zzgl", "abzgl", "sog", "ca", "etc", "abs", "lit", "nr", "hr", "fr", "dr", "prof", "mag",
+    "dipl", "ing", "str", "tel", "jh", "jhd", "mio", "mrd", "bzgl", "lt", "vs", "max", "min",
+    "insb", "allg", "betr", "spez", "urspr", "verh", "verw", "zit", "zz", "zt", "ff",
+];
 /// Characters that may open a token before its first letter ("(hello", "“hello").
 const OPENING_PUNCTUATION: &[char] = &['"', '\'', '“', '‘', '(', '[', '«', '¿', '¡'];
 /// Characters that may close a sentence after its terminal punctuation.
@@ -351,12 +358,19 @@ fn format_line(
     let trailing_space = line.ends_with(' ');
     let mut tokens = tokenize(line);
     let english = is_english(opts.language);
+    let german = language_base(opts.language) == "de";
 
     if opts.remove_fillers && english {
         tokens = strip_fillers(tokens, starts_sentence, opts.protected_terms);
     }
     if !opts.engine_casing_native && !has_no_dotted_case(opts.language) {
-        capitalize_tokens(&mut tokens, starts_sentence, english, opts.protected_terms);
+        capitalize_tokens(
+            &mut tokens,
+            starts_sentence,
+            english,
+            german,
+            opts.protected_terms,
+        );
     }
 
     let breaks = if opts.paragraphs {
@@ -384,7 +398,7 @@ fn format_line(
     }
     let next_starts = tokens
         .last()
-        .map(|token| ends_sentence(&token.text))
+        .map(|token| ends_sentence(&token.text, german))
         .unwrap_or(starts_sentence);
     (out, next_starts)
 }
@@ -452,7 +466,7 @@ fn is_protected_word(core: &str, protected_terms: &[String]) -> bool {
 
 /// True when the token ends a sentence. Abbreviations, initials, numbers,
 /// ellipses, URLs and emails do not.
-fn ends_sentence(token: &str) -> bool {
+fn ends_sentence(token: &str, german: bool) -> bool {
     let trimmed = token.trim_end_matches(CLOSING_PUNCTUATION);
     if trimmed.ends_with("..") || trimmed.ends_with('…') {
         return false;
@@ -474,7 +488,9 @@ fn ends_sentence(token: &str) -> bool {
             if core.chars().count() == 1 && core.chars().all(char::is_alphabetic) {
                 return false;
             }
-            !ABBREVIATIONS.contains(&core.to_lowercase().as_str())
+            let lowercase = core.to_lowercase();
+            !(ABBREVIATIONS.contains(&lowercase.as_str())
+                || german && GERMAN_ABBREVIATIONS.contains(&lowercase.as_str()))
         }
         _ => false,
     }
@@ -482,7 +498,7 @@ fn ends_sentence(token: &str) -> bool {
 
 fn at_sentence_start(out: &[Token], line_starts_sentence: bool) -> bool {
     match out.last() {
-        Some(last) => ends_sentence(&last.text),
+        Some(last) => ends_sentence(&last.text, false),
         None => line_starts_sentence,
     }
 }
@@ -536,6 +552,7 @@ fn capitalize_tokens(
     tokens: &mut [Token],
     starts_sentence: bool,
     english: bool,
+    german: bool,
     protected_terms: &[String],
 ) {
     let mut at_start = starts_sentence;
@@ -546,7 +563,7 @@ fn capitalize_tokens(
         if english {
             capitalize_standalone_i(&mut token.text, protected_terms);
         }
-        at_start = ends_sentence(&token.text);
+        at_start = ends_sentence(&token.text, german);
     }
 }
 
@@ -766,7 +783,9 @@ fn paragraph_breaks(
             continue;
         }
         let j = after - 1;
-        if breaks.last() == Some(&j) || !ends_sentence(&tokens[j].text) {
+        if breaks.last() == Some(&j)
+            || !ends_sentence(&tokens[j].text, language_base(opts.language) == "de")
+        {
             continue;
         }
         if (j as isize) - last_break < PARAGRAPH_MIN_WORDS_BETWEEN_BREAKS as isize {
@@ -877,6 +896,85 @@ mod tests {
             fmt("visit https://example.com/a. then wait", &en()),
             "Visit https://example.com/a. then wait"
         );
+    }
+
+    #[test]
+    fn german_abbreviations_do_not_end_sentences() {
+        for language in ["de", "de-AT", "de-CH", "de_DE"] {
+            let opts = FormatOptions {
+                language,
+                ..FormatOptions::default()
+            };
+            for abbreviation in GERMAN_ABBREVIATIONS.iter().copied().chain([
+                "z.B", "z. B", "d.h", "u.a", "u.u", "o.ä", "Dr", "Mag", "Abs", "z", "s", "f",
+            ]) {
+                let input = format!("Das gilt {abbreviation}. auch morgen.");
+                assert_eq!(fmt(&input, &opts), input, "{language}: {abbreviation}");
+                assert_eq!(fmt(&fmt(&input, &opts), &opts), input);
+            }
+            assert_eq!(
+                fmt("Das gilt ggf.\nauch morgen.", &opts),
+                "Das gilt ggf.\nauch morgen."
+            );
+            assert_eq!(
+                fmt("Es regnet. dann gehen wir.", &opts),
+                "Es regnet. Dann gehen wir."
+            );
+            assert_eq!(
+                fmt("Das ist eine Art. dann gehen wir.", &opts),
+                "Das ist eine Art. Dann gehen wir."
+            );
+        }
+    }
+
+    #[test]
+    fn german_ordinals_dates_and_decimals_are_preserved() {
+        let opts = FormatOptions {
+            language: "de",
+            ..FormatOptions::default()
+        };
+        for input in [
+            "Wir kommen am 3. Oktober.",
+            "Am 1. Jänner geht es los.",
+            "Punkt 3. die nächste Aufgabe.",
+            "Am 1.11.2026 geht es los.",
+            "Das kostet 3,5 Euro.",
+        ] {
+            assert_eq!(fmt(input, &opts), input);
+        }
+    }
+
+    #[test]
+    fn german_abbreviations_do_not_change_other_languages() {
+        for language in ["en", "fr", ""] {
+            let opts = FormatOptions {
+                language,
+                ..FormatOptions::default()
+            };
+            assert_eq!(
+                fmt("Use ggf. then continue.", &opts),
+                "Use ggf. Then continue."
+            );
+        }
+        assert_eq!(
+            fmt("ask dr. smith. then go.", &en()),
+            "Ask dr. smith. Then go."
+        );
+    }
+
+    #[test]
+    fn german_abbreviations_do_not_create_paragraph_breaks() {
+        let text = format!("{} ggf. {}", words(44, ""), words(20, "."));
+        let hints = [PauseHint {
+            words_before: 45,
+            gap_ms: 2_000,
+        }];
+        let opts = FormatOptions {
+            language: "de",
+            paragraphs: true,
+            ..FormatOptions::default()
+        };
+        assert!(!format_transcript(&text, &hints, &opts).contains('\n'));
     }
 
     #[test]
