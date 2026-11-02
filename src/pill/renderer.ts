@@ -566,6 +566,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       contextText(); if (pick) renderPick(); sync(); },
     closeQuick() { if (pick) closePick(); else if (machine.state === 'peek') rest(); },
     get feedbackActive() { return stack.active; },
+    observeRecordingGeneration(generation: number) {
+      if (!machine.observeRecordingGeneration(generation)) return false;
+      // Hydration may learn about a newer take only after readiness flushed old status.
+      stack.resolveMicStatus('new_take',generation); return true;
+    },
     settings(value: PillSettings) { shortcut = value.recording_mode === 'push_to_talk' ? value.ptt_hotkey ?? shortcut : value.hotkey ?? shortcut; contextText(); mode = value.pill_indicator_mode ?? 'when_recording'; enabledStream = islandShowsLiveWords(value); if (!enabledStream) machine.clearStream(); sync(); },
     feedback(card: FeedbackCard, handoff = true, announce = true) {
       const origin = handoff && !machine.recording && machine.state !== 'rest' ? dom.surface.getBoundingClientRect() : undefined;

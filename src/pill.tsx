@@ -115,7 +115,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   let shownForStart = false;
   const recordingState = (payload: RecordingStatePayload) => {
     // Starting shows the island at once (mic still opening); Recording makes it live.
-    if (payload.generation !== undefined && !island.machine.observeRecordingGeneration(payload.generation)) return;
+    if (payload.generation !== undefined && !island.observeRecordingGeneration(payload.generation)) return;
     if (payload.state === 'starting') { shownForStart = true; island.starting(payload.generation); }
     else if (payload.state === 'recording') { shownForStart = false; island.start(payload.generation); }
     else if (payload.state === 'stopping' || payload.state === 'transcribing') {
