@@ -1,3 +1,9 @@
+## 2.0.11 (2026-11-02)
+
+### Bug Fixes
+
+* **macos:** fixed a crash when Voicetypr was opened a second time while already running
+
 ## 2.0.10 (2026-11-01)
 
 ### Features
