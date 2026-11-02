@@ -365,6 +365,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   /** Keypress: Starting was published, the mic is not open yet. Show the idle listening layout at 0:00. */
   const starting = () => {
     if (machine.recording) return;
+    stack.resolveMicStatus('new_take');
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
       const permission=machine.state==='no_permission';
@@ -381,12 +382,15 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (machine.pending) {
       // Recording began. Clock and bars go live from here; a context that already arrived keeps its start card.
       if (!machine.start(performance.now())) return;
+      stack.resolveMicStatus('recording');
       glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
       if (machine.state === 'start') foldStart();
       sync();
       return;
     }
     if (machine.recording) return;
+    stack.resolveMicStatus('new_take');
+    stack.resolveMicStatus('recording');
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
       const permission=machine.state==='no_permission';

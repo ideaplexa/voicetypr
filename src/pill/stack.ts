@@ -25,6 +25,10 @@ export class FeedbackStack {
   }
   remove(key: string) { this.items=this.items.filter(i=>i.key!==key); }
   dropLive(generation?: number) { this.items = this.items.filter(i => i.liveGeneration === undefined || generation !== undefined && i.liveGeneration !== generation); }
+  /** Only obsolete mic status, never retained audio/retry leases or unrelated blockers. */
+  resolveMicStatus(stage: 'new_take' | 'recording', generation?: number) {
+    this.items = this.items.filter(i => !i.micStatus || i.micStatus.resolves !== stage || generation !== undefined && (stage === 'new_take' ? i.micStatus.generation >= generation : i.micStatus.generation > generation));
+  }
   get displayed() { return this.items.filter(i => !this.tucked || i.liveGeneration !== undefined); }
   get visible() { return this.items.slice(-3).reverse(); }
   get more() { return Math.max(0,this.items.length-3); }

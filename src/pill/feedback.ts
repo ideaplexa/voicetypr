@@ -3,7 +3,7 @@ import type { IslandIcon } from '@/pill/icons';
 import { elapsed } from '@/pill/copy';
 export type CardCommand = { command: 'island_action'; action: IslandAction } | { command: 'retry_kept_dictation'; id: string; engine: string } | { command: 'transcribe_anyway' | 'discard_kept_dictation'; id: string };
 export interface CardAction { label: string; call: CardCommand }
-export interface FeedbackCard { key: string; title: string; sub: string; tone: 'neutral' | 'amber' | 'red'; duration: number | null; expiresAt?: number; liveGeneration?: number; glyph?: IslandIcon; actions: CardAction[] }
+export interface FeedbackCard { key: string; title: string; sub: string; tone: 'neutral' | 'amber' | 'red'; duration: number | null; expiresAt?: number; liveGeneration?: number; micStatus?: { generation: number; resolves: 'new_take' | 'recording' }; glyph?: IslandIcon; actions: CardAction[] }
 const action = (label: string, value: IslandAction): CardAction => ({label, call: {command:'island_action',action:value}});
 const card = (key: string, title: string, sub = '', duration: number | null = 3500, tone: FeedbackCard['tone'] = 'neutral', actions: CardAction[] = []): FeedbackCard => ({key,title,sub,duration,tone,actions});
 export function blockedCard(e: DictationBlocked, mac: boolean): FeedbackCard {
@@ -23,10 +23,10 @@ export function blockedCard(e: DictationBlocked, mac: boolean): FeedbackCard {
     starting_up: ['Getting ready…','',''],
   } satisfies Record<DictationBlocked['kind'], [string,string,string]>;
   const [title,sub,label] = table[e.kind];
-  return {...card(`blocked:${e.kind}`,title,sub,e.kind === 'starting_up' ? 3200 : null,e.kind === 'mic_busy' ? 'red' : 'amber',label ? [action(label,e.action)] : []),glyph:e.kind.startsWith('mic_') ? 'mic-off' : e.kind==='accessibility_off' ? 'clipboard' : 'bang'};
+  return {...card(`blocked:${e.kind}`,title,sub,e.kind === 'starting_up' ? 3200 : null,e.kind === 'mic_busy' ? 'red' : 'amber',label ? [action(label,e.action)] : []),micStatus:e.kind.startsWith('mic_') ? {generation:e.generation,resolves:'recording'} : undefined,glyph:e.kind.startsWith('mic_') ? 'mic-off' : e.kind==='accessibility_off' ? 'clipboard' : 'bang'};
 }
 export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
-  if (e.kind === 'mic_dropped_empty') return {...card(`recovery:${e.id}`,'Mic disconnected · no audio captured'),glyph:'mic-off',expiresAt:now+e.expires_in_ms};
+  if (e.kind === 'mic_dropped_empty') return {...card(`recovery:${e.id}`,'Mic disconnected · no audio captured'),micStatus:{generation:e.generation,resolves:'new_take'},glyph:'mic-off',expiresAt:now+e.expires_in_ms};
   const titles = {
     cloud_failed: `${e.engine_short} unreachable`, network_offline: 'Network offline',
     model_missing: `${e.engine_short} isn't downloaded`, remote_offline: `${e.engine_short} is offline`,
@@ -41,10 +41,10 @@ export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
 export function noteCard(e: DictationNote): FeedbackCard {
   const reasons = {timeout:'Polish timed out',rate_limited:'Polish rate limited',network:'Polish unavailable offline',guard:'Polish kept the original',error:'Polish failed'};
   switch(e.kind) {
-    case 'mic_dropped': return card(e.kind,`Mic disconnected · using the ${elapsed(Math.floor(e.captured_ms/1000))} we got`);
+    case 'mic_dropped': return {...card(e.kind,`Mic disconnected · using the ${elapsed(Math.floor(e.captured_ms/1000))} we got`),micStatus:{generation:e.generation,resolves:'new_take'}};
     case 'storage_failed': return card(e.kind,"Couldn't keep the recording",'',5000,'amber');
     case 'mic_silent_live': return {...card(`mic_silent_live:${e.generation}`,'Your mic sent silence — is it muted?','',null,'amber',[action('Choose mic','choose_mic')]),liveGeneration:e.generation};
-    case 'mic_silent': return card(e.kind,'Your mic sent silence — is it muted?','',5000,'amber',[action('Choose mic','choose_mic')]);
+    case 'mic_silent': return {...card(e.kind,'Your mic sent silence — is it muted?','',5000,'amber',[action('Choose mic','choose_mic')]),micStatus:{generation:e.generation,resolves:'new_take'}};
     case 'translate_failed': return card(e.kind,'Pasted untranslated · translation failed');
     case 'model_fallback': return card(e.kind,`Using ${e.alt_engine_short} · ${e.engine_short} isn't downloaded`);
     case 'gpu_fallback': return card(e.kind,'GPU unavailable · using the CPU');

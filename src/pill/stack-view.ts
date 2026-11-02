@@ -38,6 +38,7 @@ export class StackView {
   }
   remove(key:string) { this.stack.remove(key);this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
   dropLive(generation?:number) { this.stack.dropLive(generation);this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
+  resolveMicStatus(stage:'new_take'|'recording',generation?:number) { this.stack.resolveMicStatus(stage,generation);this.sync();this.schedule();this.deps.changed();this.deps.wake(); }
   tuck(tucked:boolean) { if(tucked===this.stack.tucked)return; this.stack.tuck(tucked,performance.now());this.sync();this.schedule();this.deps.wake(); }
   private schedule() {
     if(this.timer!==undefined)this.deps.clearTimeout(this.timer);
