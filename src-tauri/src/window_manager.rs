@@ -361,17 +361,11 @@ impl WindowManager {
         let current_state = app_state.get_current_state();
         let _ = pill_window.emit(
             "recording-state-changed",
-            serde_json::json!({
-                "state": match current_state {
-                    crate::RecordingState::Idle => "idle",
-                    crate::RecordingState::Starting => "starting",
-                    crate::RecordingState::Recording => "recording",
-                    crate::RecordingState::Stopping => "stopping",
-                    crate::RecordingState::Transcribing => "transcribing",
-                    crate::RecordingState::Error => "error",
-                },
-                "error": null
-            }),
+            crate::state::app_state::recording_state_payload(
+                current_state,
+                None,
+                crate::commands::audio::current_recording_generation(),
+            ),
         );
 
         self.set_pill_window(pill_window.clone());

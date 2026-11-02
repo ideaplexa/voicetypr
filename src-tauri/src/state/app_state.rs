@@ -273,7 +273,7 @@ pub fn update_recording_state(
     let _ = app.emit("recording-state-changed", payload);
 }
 
-fn recording_state_payload(
+pub(crate) fn recording_state_payload(
     state: RecordingState,
     error: Option<String>,
     generation: u64,
@@ -352,6 +352,20 @@ mod app_context_tests {
             assert_eq!(
                 recording_state_payload(state, None, 42),
                 serde_json::json!({"state": name, "error": null, "generation": 42})
+            );
+        }
+    }
+    #[test]
+    fn idle_and_processing_snapshots_include_the_take_generation() {
+        for (state, name) in [
+            (RecordingState::Idle, "idle"),
+            (RecordingState::Stopping, "stopping"),
+            (RecordingState::Transcribing, "transcribing"),
+            (RecordingState::Error, "error"),
+        ] {
+            assert_eq!(
+                recording_state_payload(state, None, 2),
+                serde_json::json!({"state": name, "error": null, "generation": 2})
             );
         }
     }

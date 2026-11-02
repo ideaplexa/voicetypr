@@ -76,6 +76,24 @@ it.each(['stopping','transcribing'] as const)('keeps cold-renderer %s state when
   expect(h.get('[data-key="recovery:kept"]').hidden).toBe(false);
 });
 
+it('keeps a cold window-creation Transcribing snapshot when older recovery flushes and hydration is suppressed', async () => {
+  h=pillHarness();
+  h.invoke.mockImplementation(async command => {
+    if(command==='pill_feedback_ready') {
+      // Window creation supplies the only accepted state; no Starting/Recording/context arrived.
+      state('transcribing',2);
+      h.emit('dictation-recovery',recovery());
+    }
+    // Receipt of the snapshot disables hydration, so it cannot repair a missing event generation.
+    return command==='get_current_recording_state'?{state:'transcribing',generation:2,error:null}:null;
+  });
+  await h.settle(1000);
+  expect(h.invoke).toHaveBeenCalledWith('get_current_recording_state');
+  expect(h.get('.pill-root').dataset.state).toBe('transcribing');
+  expect(h.get('.pill-surface').style.width).toBe('236px');
+  expect(h.get('[data-key="recovery:kept"] .act').textContent).toBe('Transcribe anyway');
+});
+
 it.each(['idle','transcribing'] as const)('retires already-flushed old mic status on %s hydration while retaining clip actions', async phase => {
   h=pillHarness();
   let hydrate: (() => void) | undefined;
