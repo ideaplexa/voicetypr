@@ -7,6 +7,8 @@ export class IslandMachine {
   state: IslandState = 'rest';
   context = emptyContext();
   generation = 0;
+  /** Includes states seen by a cold renderer that missed Starting/Recording. */
+  latestRecordingGeneration = 0;
   /** State events identify the take before its asynchronous context arrives. */
   activeTakeGeneration: number | undefined;
   get takeGeneration() { return this.activeTakeGeneration ?? this.generation; }
@@ -57,6 +59,10 @@ export class IslandMachine {
   observeGeneration(generation: number) {
     if (generation < this.generation || generation < this.observedGeneration) return false;
     this.observedGeneration = generation; return true;
+  }
+  observeRecordingGeneration(generation: number) {
+    if (!this.observeGeneration(generation)) return false;
+    this.latestRecordingGeneration = generation; return true;
   }
   /** Show the island on keypress. The take is live only once `start` confirms it. */
   arm(now: number, generation?: number) {

@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { pillHarness } from '@/pill/test-harness';
 import type { DictationRecovery } from '@/types/island-events';
+import { IslandMachine } from '@/pill/island';
 
 let h: ReturnType<typeof pillHarness>;
 afterEach(() => h?.destroy());
@@ -51,4 +52,52 @@ it('uses clip expiry and explicit id retirement rather than generation to retire
   h.emit('dictation-recovery',recovery());
   h.emit('kept-dictation-expired',{id:'kept'});
   await h.settle(250); expect(h.get('.feedback-card')).toBeNull();
+});
+
+it.each(['stopping','transcribing'] as const)('keeps cold-renderer %s state when an older recovery flushes at readiness', async phase => {
+  h=pillHarness();
+  let flush: (() => void) | undefined;
+  h.invoke.mockImplementation(async command => {
+    if(command==='pill_feedback_ready')return new Promise(resolve=>{flush=()=>{h.emit('dictation-recovery',recovery());resolve(null);};});
+    if(command==='get_settings')return {pill_indicator_mode:'always'};
+    return null;
+  });
+  await h.settle(0); expect(flush).toBeDefined();
+  state(phase); // no Starting/Recording or context has been received
+  flush!(); await h.settle(1000);
+  expect(h.get('.pill-root').dataset.state).toBe('transcribing');
+  expect(h.get('.pill-surface').style.width).toBe('236px');
+  expect(h.get('[data-key="recovery:kept"] .act').textContent).toBe('Transcribe anyway');
+  h.emit('dictation-recovery',recovery('mic_dropped_empty'));
+  await h.settle(200);
+  expect(h.get('.pill-root').dataset.state).toBe('transcribing');
+  expect(h.get('[data-key="recovery:kept"] .card-title').textContent).toBe('No speech heard');
+  state('idle'); await h.settle(1200);
+  expect(h.get('[data-key="recovery:kept"]').hidden).toBe(false);
+});
+
+it.each(['idle','transcribing'] as const)('uses hydrated %s generation to reject old status while retaining old clip actions', async phase => {
+  h=pillHarness();
+  h.invoke.mockImplementation(async command => command==='get_current_recording_state'?{state:phase,generation:2,error:null}:command==='get_settings'?{pill_indicator_mode:'always'}:null);
+  await h.settle(0);
+  h.emit('dictation-recovery',recovery('mic_dropped_empty'));
+  expect(h.get('.feedback-card')).toBeNull();
+  h.emit('dictation-recovery',recovery()); await h.settle(100);
+  expect(h.get('.pill-root').dataset.state).toBe(phase==='idle'?'idle':'transcribing');
+  expect(h.get('[data-key="recovery:kept"] .act').textContent).toBe('Transcribe anyway');
+});
+
+it('still hands off the current cold-renderer take to its recovery card', async () => {
+  h=pillHarness(); await h.settle(0); state('transcribing');
+  h.emit('dictation-recovery',{...recovery(),generation:2}); await h.settle(1200);
+  expect(h.get('.pill-root').dataset.state).toBe('idle');
+  expect(h.get('[data-key="recovery:kept"]').hidden).toBe(false);
+});
+
+it('tracks all accepted state generations independently of context and rejects regressions', () => {
+  const machine=new IslandMachine();
+  expect(machine.observeRecordingGeneration(2)).toBe(true);
+  expect(machine.takeGeneration).toBe(0); expect(machine.latestRecordingGeneration).toBe(2);
+  expect(machine.observeRecordingGeneration(1)).toBe(false);
+  expect(machine.latestRecordingGeneration).toBe(2);
 });

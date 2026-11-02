@@ -576,8 +576,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     recovery(value: DictationRecovery) {
       // Retained clips outlive their take. Their id/lease, not the active-take watermark, owns the action.
       if (!value.id || !(value.expires_in_ms > 0)) return;
-      if (value.kind === 'mic_dropped_empty' && value.generation < machine.takeGeneration) return;
-      this.feedback(recoveryCard(value,performance.now()),value.generation >= machine.takeGeneration);
+      const latest = Math.max(machine.takeGeneration,machine.latestRecordingGeneration);
+      if (value.kind === 'mic_dropped_empty' && value.generation < latest) return;
+      this.feedback(recoveryCard(value,performance.now()),value.generation >= latest);
     },
     withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },
     note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.takeGeneration)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
