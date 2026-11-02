@@ -37,3 +37,12 @@ it('keeps state generation separate so equal-generation context can hydrate once
   expect(m.contextEvent({...emptyContext(),generation:2})).toBe(false);
   expect(m.start(200,2)).toBe(true);
 });
+
+it('leaves an idle hidden island and its feedback ownership alone for an unmatched withdrawal', async () => {
+  h=pillHarness({pill_indicator_mode:'when_recording'}); await h.settle(0);
+  h.invoke.mockClear();
+  h.emit('dictation-note-withdraw',{generation:1,kind:'mic_silent_live'}); await h.settle(500);
+  expect(h.get('.pill-surface').hidden).toBe(true);
+  expect(h.get('.feedback-card')).toBeNull();
+  expect(h.invoke.mock.calls.filter(([command])=>command==='pill_feedback_visible')).toEqual([]);
+});

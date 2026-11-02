@@ -154,6 +154,35 @@ mod tests {
         assert!(!hide_is_current(Some(7), 7, 8));
         assert!(!hide_is_current(Some(8), 7, 8));
     }
+
+    #[test]
+    fn withdrawal_retires_only_the_matching_queued_live_note() {
+        let mut queued = vec![
+            (
+                "dictation-note",
+                serde_json::json!({"generation":7,"kind":"mic_silent_live"}),
+            ),
+            (
+                "dictation-note",
+                serde_json::json!({"generation":8,"kind":"mic_silent_live"}),
+            ),
+            (
+                "dictation-note",
+                serde_json::json!({"generation":7,"kind":"mic_silent"}),
+            ),
+            (
+                "dictation-recovery",
+                serde_json::json!({"generation":7,"id":"kept"}),
+            ),
+        ];
+        withdraw_queued_live_mic_silent(&mut queued, 6);
+        assert_eq!(queued.len(), 4);
+        withdraw_queued_live_mic_silent(&mut queued, 7);
+        assert_eq!(queued.len(), 3);
+        assert_eq!(queued[0].1["generation"], 8);
+        assert_eq!(queued[1].1["kind"], "mic_silent");
+        assert_eq!(queued[2].1["id"], "kept");
+    }
 }
 
 // Feedback owns the reused, non-activating panel across idle transitions.
@@ -168,6 +197,27 @@ fn owns_feedback(mode: &str, visible: bool) -> bool {
 }
 pub(crate) fn feedback_owned() -> bool {
     FEEDBACK_OWNED.load(Ordering::SeqCst)
+}
+fn withdraw_queued_live_mic_silent(
+    queued: &mut Vec<(&'static str, serde_json::Value)>,
+    generation: u64,
+) {
+    queued.retain(|(event, payload)| {
+        *event != "dictation-note"
+            || payload["generation"].as_u64() != Some(generation)
+            || payload["kind"].as_str() != Some("mic_silent_live")
+    });
+}
+/// A withdrawal cannot acquire feedback ownership or show/reposition the native panel.
+pub(crate) fn withdraw_live_mic_silent<R: tauri::Runtime>(app: &AppHandle<R>, generation: u64) {
+    use tauri::Emitter;
+    let mut queued = QUEUED.lock().unwrap();
+    withdraw_queued_live_mic_silent(&mut queued, generation);
+    let _ = app.emit_to(
+        "pill",
+        "dictation-note-withdraw",
+        serde_json::json!({"generation":generation,"kind":"mic_silent_live"}),
+    );
 }
 pub(crate) fn send<R: tauri::Runtime>(
     app: &AppHandle<R>,

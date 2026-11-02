@@ -102,11 +102,7 @@ struct BlockedEvent {
 }
 /// Enumerated withdrawal, scoped to the take. Never contains capture context.
 pub fn withdraw_live_mic_silent(app: &AppHandle, generation: u64) {
-    crate::commands::pill_feedback::send(
-        app,
-        "dictation-note-withdraw",
-        serde_json::json!({"generation": generation, "kind": "mic_silent_live"}),
-    );
+    crate::commands::pill_feedback::withdraw_live_mic_silent(app, generation);
 }
 pub fn note(app: &AppHandle, generation: u64, note: Note) {
     if matches!(&note, Note::MicDropped { .. }) {
