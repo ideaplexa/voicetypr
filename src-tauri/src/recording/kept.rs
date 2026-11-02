@@ -63,6 +63,8 @@ struct Clip {
 }
 #[derive(Default)]
 struct Store {
+    // Installed before the first clip; every permanent deletion retires its UI id.
+    app: Option<AppHandle>,
     clips: VecDeque<Clip>,
     closed: bool,
     leases: Vec<PathBuf>,
@@ -163,6 +165,11 @@ impl Store {
         if let Some(index) = self.clips.iter().position(|c| c.recovery.id == id) {
             if let Some(clip) = self.clips.remove(index) {
                 super::storage::remove_finished_audio(&clip.path);
+                if let Some(app) = &self.app {
+                    crate::commands::pill_feedback::expire_kept_id(app, id);
+                } else {
+                    crate::commands::pill_feedback::retire_kept_id(id);
+                }
             }
         }
     }
@@ -246,8 +253,9 @@ impl Store {
         for path in self.leases.drain(..) {
             let _ = std::fs::remove_file(path);
         }
-        while let Some(clip) = self.clips.pop_front() {
-            super::storage::remove_finished_audio(&clip.path);
+        while let Some(clip) = self.clips.front() {
+            let id = clip.recovery.id.clone();
+            self.discard(&id);
         }
     }
 }
@@ -410,6 +418,7 @@ pub fn cleanup() {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     store.closed = true;
     store.clear();
+    store.app = None;
 }
 pub fn clear() {
     STORE.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -468,19 +477,11 @@ pub async fn keep(
         .app_data_dir()
         .map_err(|_| "Recovery storage unavailable")?
         .join("recovery");
-    let (recovery, removed) = {
+    let recovery = {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        let previous: Vec<_> = store.clips.iter().map(|c| c.recovery.id.clone()).collect();
-        let recovery = store.retain(&dir, path, generation, kind)?;
-        let removed: Vec<_> = previous
-            .into_iter()
-            .filter(|id| !store.clips.iter().any(|c| &c.recovery.id == id))
-            .collect();
-        (recovery, removed)
+        store.app.get_or_insert_with(|| app.clone());
+        store.retain(&dir, path, generation, kind)?
     };
-    for id in removed {
-        crate::commands::pill_feedback::expire_kept_id(app, &id);
-    }
     let id = recovery.id.clone();
     let expires_in_ms = recovery.expires_in_ms;
     audio::clear_in_flight_transcription_audio_for_generation(generation);
@@ -514,7 +515,6 @@ pub async fn keep(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .discard(&expiry_id);
-        crate::commands::pill_feedback::expire_kept_id(&expiry_app, &expiry_id);
         crate::menu::runtime::refresh(&expiry_app);
     });
     let alternative = local_alternative(app).await;
@@ -1251,6 +1251,82 @@ mod tests {
         store.leases.push(lease.clone());
         store.clear();
         assert!(!lease.exists());
+    }
+    #[test]
+    fn discard_retires_only_its_queued_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let first = clip(dir.path(), RecoveryKind::NoSpeech);
+        let id = first.recovery.id.clone();
+        let other = clip(dir.path(), RecoveryKind::CloudFailed);
+        let other_id = other.recovery.id.clone();
+        store.insert(first).unwrap();
+        store.insert(other).unwrap();
+        queue_recoveries(&store);
+        store.discard(&id);
+        assert!(!recovery_is_queued(&id));
+        assert!(recovery_is_queued(&other_id));
+        store.clear();
+        assert!(!recovery_is_queued(&other_id));
+    }
+    #[test]
+    fn successful_retry_retires_queued_recovery_but_failure_preserves_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        let id = clip.recovery.id.clone();
+        store.insert(clip).unwrap();
+        queue_recoveries(&store);
+        store.complete_retry(&id, false);
+        assert!(recovery_is_queued(&id));
+        store.complete_retry(&id, true);
+        assert!(!recovery_is_queued(&id));
+    }
+    #[test]
+    fn generation_expiry_eviction_and_reset_also_retire_queued_recoveries() {
+        for deletion in ["generation", "expiry", "eviction", "reset"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = Store::default();
+            let first = clip(dir.path(), RecoveryKind::NoSpeech);
+            let id = first.recovery.id.clone();
+            store.insert(first).unwrap();
+            queue_recoveries(&store);
+            match deletion {
+                "generation" => store.discard_generation(1),
+                "expiry" => store.expire(Instant::now() + Duration::from_secs(31)),
+                "eviction" => {
+                    for _ in 0..3 {
+                        store
+                            .insert(clip(dir.path(), RecoveryKind::Integrity))
+                            .unwrap();
+                    }
+                }
+                "reset" => store.clear(),
+                _ => unreachable!(),
+            }
+            assert!(!recovery_is_queued(&id), "{deletion}");
+            store.clear();
+        }
+    }
+    fn queue_recoveries(store: &Store) {
+        let mut queued = crate::commands::pill_feedback::queued_for_test()
+            .lock()
+            .unwrap();
+        for clip in &store.clips {
+            queued.push((
+                "dictation-recovery",
+                serde_json::to_value(&clip.recovery).unwrap(),
+            ));
+        }
+    }
+    fn recovery_is_queued(id: &str) -> bool {
+        crate::commands::pill_feedback::queued_for_test()
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(event, payload)| {
+                *event == "dictation-recovery" && payload["id"].as_str() == Some(id)
+            })
     }
     #[test]
     fn every_recovery_kind_has_only_safe_metadata_and_the_correct_ttl() {

@@ -101,3 +101,13 @@ it('tracks all accepted state generations independently of context and rejects r
   expect(machine.observeRecordingGeneration(1)).toBe(false);
   expect(machine.latestRecordingGeneration).toBe(2);
 });
+
+it('retires only the deleted clip id without interrupting a newer take', async () => {
+  h=pillHarness(); await h.settle(0); state('transcribing');
+  h.emit('dictation-recovery',recovery());
+  h.emit('dictation-recovery',{...recovery(),id:'other'});
+  h.emit('kept-dictation-expired',{id:'kept'}); await h.settle(250);
+  expect(h.get('[data-key="recovery:kept"]')).toBeNull();
+  expect(h.get('[data-key="recovery:other"] .act').textContent).toBe('Transcribe anyway');
+  expect(h.get('.pill-root').dataset.state).toBe('transcribing');
+});

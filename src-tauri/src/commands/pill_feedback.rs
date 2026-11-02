@@ -206,6 +206,26 @@ mod tests {
     }
 
     #[test]
+    fn recovery_retirement_is_id_scoped_and_releases_only_empty_pre_ready_ownership() {
+        for ready in [false, true] {
+            let owned = AtomicBool::new(true);
+            let mut queued = vec![
+                ("dictation-recovery", serde_json::json!({"id":"gone"})),
+                ("dictation-recovery", serde_json::json!({"id":"live"})),
+                ("dictation-note", serde_json::json!({"id":"gone"})),
+            ];
+            retire_queued_kept_id(&mut queued, "gone", ready, &owned);
+            assert_eq!(queued.len(), 2);
+            assert_eq!(queued[0].1["id"], "live");
+            assert_eq!(queued[1].0, "dictation-note");
+            assert!(owned.load(Ordering::SeqCst));
+            queued.pop();
+            retire_queued_kept_id(&mut queued, "live", ready, &owned);
+            assert!(queued.is_empty());
+            assert_eq!(owned.load(Ordering::SeqCst), ready);
+        }
+    }
+    #[test]
     fn unmatched_withdrawal_does_not_release_other_feedback_ownership() {
         let owned = AtomicBool::new(true);
         let mut queued = Vec::new();
@@ -313,13 +333,37 @@ pub async fn pill_feedback_visible(app: AppHandle, visible: bool) -> Result<(), 
     Ok(())
 }
 
-/// Expiry/eviction invalidates any event queued before the renderer mounted.
-pub(crate) fn expire_kept_id<R: tauri::Runtime>(app: &AppHandle<R>, id: &str) {
-    use tauri::Emitter;
-    QUEUED.lock().unwrap().retain(|(event, payload)| {
+fn retire_queued_kept_id(
+    queued: &mut Vec<(&'static str, serde_json::Value)>,
+    id: &str,
+    ready: bool,
+    owned: &AtomicBool,
+) {
+    let before = queued.len();
+    queued.retain(|(event, payload)| {
         *event != "dictation-recovery"
             || payload.get("id").and_then(serde_json::Value::as_str) != Some(id)
     });
+    if !ready && queued.len() < before && queued.is_empty() {
+        owned.store(false, Ordering::SeqCst);
+    }
+}
+pub(crate) fn retire_kept_id(id: &str) {
+    retire_queued_kept_id(
+        &mut QUEUED.lock().unwrap(),
+        id,
+        READY.load(Ordering::SeqCst),
+        &FEEDBACK_OWNED,
+    );
+}
+#[cfg(test)]
+pub(crate) fn queued_for_test() -> &'static Mutex<Vec<(&'static str, serde_json::Value)>> {
+    &QUEUED
+}
+/// Every permanent deletion invalidates queued and already-rendered recovery ids.
+pub(crate) fn expire_kept_id<R: tauri::Runtime>(app: &AppHandle<R>, id: &str) {
+    use tauri::Emitter;
+    retire_kept_id(id);
     let _ = app.emit_to(
         "pill",
         "kept-dictation-expired",
