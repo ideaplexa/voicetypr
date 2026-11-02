@@ -12,6 +12,7 @@ export class IslandMachine {
   get takeGeneration() { return this.activeTakeGeneration ?? this.generation; }
   private consumedContext = 0;
   private observedGeneration = 0;
+  private sawLiveWords = false;
   committed = '';
   tentative = '';
   session = -1;
@@ -46,10 +47,10 @@ export class IslandMachine {
     if (context.generation <= this.generation || context.generation < this.observedGeneration) return false;
     this.context = context;
     this.generation = context.generation;
-    // Context resolution can finish after recording-started. Never reopen a stopped take.
+    // Late context hydrates chips/icons, but cannot interrupt words or reopen a stopped take.
     if (this.recording) {
       this.consumedContext = context.generation;
-      if (context.show_start_card) this.state = 'start';
+      if (context.show_start_card && this.state === 'listening' && !this.sawLiveWords) this.state = 'start';
     }
     return true;
   }
@@ -62,7 +63,7 @@ export class IslandMachine {
     if (this.recording) return false;
     if (generation !== undefined && !this.observeGeneration(generation)) return false;
     this.activeTakeGeneration = generation;
-    this.clearStream(); this.words = 0;
+    this.clearStream(); this.words = 0; this.sawLiveWords = false;
     this.startedAt = now; this.frozenSeconds = 0;
     this.state = 'listening'; this.pending = true;
     return true;
@@ -78,7 +79,7 @@ export class IslandMachine {
     if (this.recording) return false;
     if (generation !== undefined && !this.observeGeneration(generation)) return false;
     this.activeTakeGeneration = generation;
-    this.clearStream(); this.words = 0;
+    this.clearStream(); this.words = 0; this.sawLiveWords = false;
     this.startedAt = now; this.frozenSeconds = 0;
     this.state = this.context.generation > this.consumedContext && this.context.show_start_card ? 'start' : 'listening';
     this.consumedContext = this.context.generation;
@@ -112,6 +113,7 @@ export class IslandMachine {
       // Reject rewrites; committed ink may only grow (invariant 10).
       if (!event.committed.startsWith(this.committed)) return false;
       this.committed = event.committed; this.tentative = event.tentative;
+      if (this.committed || this.tentative) this.sawLiveWords = true;
       if (this.state !== 'start') this.state = this.committed || this.tentative ? 'live' : 'listening';
     } else {
       this.clearStream(); if (this.state === 'live') this.state = 'listening';
