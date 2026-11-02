@@ -70,6 +70,9 @@ Never fetched at app runtime.
   standard speed, without modifying preferences. Retired native selections
   migrate to the provider default instead of requiring reselection.
 
-Main-line model recommendations and specialist/deprecated exclusions are preserved.
+Stable native recommendations are restored: GPT-6 Luna / GPT-5.6 Luna, Claude
+Haiku 5.5 / Sonnet 5.5, Gemini 3.5 Flash Lite / 3.8 Flash. Key checks use each
+first recommendation at its lowest effort. Main-line OpenRouter recommendations
+and specialist/deprecated exclusions are preserved.
 CLI defaults remain Sonnet/low for Claude, CLI-owned models/thinking-off for pi/omp,
 and GPT-6 Luna/medium/Fast for Codex; stable defaults do not override them.

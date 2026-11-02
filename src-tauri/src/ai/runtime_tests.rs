@@ -419,8 +419,8 @@ mod tests {
     async fn validation_probes_use_latest_models_at_lowest_effort_without_fast() {
         for (id, model, expected_cap) in [
             (PROVIDER_OPENAI, "gpt-6-luna", 256),
-            (PROVIDER_ANTHROPIC, "claude-sonnet-5-5", 2304),
-            (PROVIDER_GEMINI, "gemini-3.8-flash", 2304),
+            (PROVIDER_ANTHROPIC, "claude-haiku-5-5", 256),
+            (PROVIDER_GEMINI, "gemini-3.5-flash-lite", 1280),
         ] {
             assert_eq!(super::super::catalog::default_model_id(id), Some(model));
             let effort = super::super::catalog::lowest_reasoning_level(id, model);
@@ -434,13 +434,13 @@ mod tests {
                     assert_eq!(body["max_output_tokens"], expected_cap);
                 }
                 PROVIDER_ANTHROPIC => {
-                    assert_eq!(body["thinking"]["type"], "adaptive");
+                    assert_eq!(body["thinking"]["type"], "disabled");
                     assert_eq!(body["max_tokens"], expected_cap);
                 }
                 _ => {
                     assert_eq!(
                         body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
-                        "LOW"
+                        "MINIMAL"
                     );
                     assert_eq!(body["generationConfig"]["maxOutputTokens"], expected_cap);
                 }

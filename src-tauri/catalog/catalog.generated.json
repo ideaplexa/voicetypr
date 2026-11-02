@@ -9,11 +9,11 @@
       "models": [
         {
           "context": 1000000,
-          "cost_input": 2,
-          "cost_output": 10,
+          "cost_input": 0.1,
+          "cost_output": 0.5,
           "fast_mode": false,
-          "label": "Claude Sonnet 5.5",
-          "model_id": "claude-sonnet-5-5",
+          "label": "Claude Haiku 5.5",
+          "model_id": "claude-haiku-5-5",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
@@ -24,20 +24,21 @@
             "max"
           ],
           "reasoning_levels": [
+            "none",
             "low",
             "medium",
             "high"
           ],
           "recommended": true,
-          "temperature": false
+          "temperature": true
         },
         {
           "context": 1000000,
-          "cost_input": 4,
-          "cost_output": 20,
-          "fast_mode": true,
-          "label": "Claude Opus 5.5",
-          "model_id": "claude-opus-5-5",
+          "cost_input": 2,
+          "cost_output": 10,
+          "fast_mode": false,
+          "label": "Claude Sonnet 5.5",
+          "model_id": "claude-sonnet-5-5",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
@@ -132,31 +133,6 @@
           "reasoning": true,
           "reasoning_efforts": [],
           "reasoning_levels": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "recommended": false,
-          "temperature": true
-        },
-        {
-          "context": 1000000,
-          "cost_input": 0.1,
-          "cost_output": 0.5,
-          "fast_mode": false,
-          "label": "Claude Haiku 5.5",
-          "model_id": "claude-haiku-5-5",
-          "output": 128000,
-          "reasoning": true,
-          "reasoning_efforts": [
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ],
-          "reasoning_levels": [
-            "none",
             "low",
             "medium",
             "high"
@@ -305,6 +281,30 @@
         },
         {
           "context": 1000000,
+          "cost_input": 4,
+          "cost_output": 20,
+          "fast_mode": true,
+          "label": "Claude Opus 5.5",
+          "model_id": "claude-opus-5-5",
+          "output": 128000,
+          "reasoning": true,
+          "reasoning_efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "recommended": false,
+          "temperature": false
+        },
+        {
+          "context": 1000000,
           "cost_input": 3,
           "cost_output": 15,
           "fast_mode": false,
@@ -403,28 +403,6 @@
       "models": [
         {
           "context": 1048576,
-          "cost_input": 0.75,
-          "cost_output": 3.75,
-          "fast_mode": false,
-          "label": "Gemini 3.8 Flash",
-          "model_id": "gemini-3.8-flash",
-          "output": 65536,
-          "reasoning": true,
-          "reasoning_efforts": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "reasoning_levels": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "recommended": true,
-          "temperature": true
-        },
-        {
-          "context": 1048576,
           "cost_input": 0.3,
           "cost_output": 2.5,
           "fast_mode": false,
@@ -440,6 +418,28 @@
           ],
           "reasoning_levels": [
             "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "recommended": true,
+          "temperature": true
+        },
+        {
+          "context": 1048576,
+          "cost_input": 0.75,
+          "cost_output": 3.75,
+          "fast_mode": false,
+          "label": "Gemini 3.8 Flash",
+          "model_id": "gemini-3.8-flash",
+          "output": 65536,
+          "reasoning": true,
+          "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -791,14 +791,15 @@
         },
         {
           "context": 1050000,
-          "cost_input": 2,
-          "cost_output": 10,
+          "cost_input": 0.2,
+          "cost_output": 1.2,
           "fast_mode": true,
-          "label": "GPT-6.1 Sol",
-          "model_id": "gpt-6.1-sol",
+          "label": "GPT-5.6 Luna",
+          "model_id": "gpt-5.6-luna",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
+            "none",
             "low",
             "medium",
             "high",
@@ -806,6 +807,7 @@
             "max"
           ],
           "reasoning_levels": [
+            "none",
             "low",
             "medium",
             "high"
@@ -1277,32 +1279,6 @@
         },
         {
           "context": 1050000,
-          "cost_input": 0.2,
-          "cost_output": 1.2,
-          "fast_mode": true,
-          "label": "GPT-5.6 Luna",
-          "model_id": "gpt-5.6-luna",
-          "output": 128000,
-          "reasoning": true,
-          "reasoning_efforts": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max"
-          ],
-          "reasoning_levels": [
-            "none",
-            "low",
-            "medium",
-            "high"
-          ],
-          "recommended": false,
-          "temperature": false
-        },
-        {
-          "context": 1050000,
           "cost_input": 4,
           "cost_output": 20,
           "fast_mode": true,
@@ -1396,6 +1372,30 @@
           ],
           "reasoning_levels": [
             "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "recommended": false,
+          "temperature": false
+        },
+        {
+          "context": 1050000,
+          "cost_input": 2,
+          "cost_output": 10,
+          "fast_mode": true,
+          "label": "GPT-6.1 Sol",
+          "model_id": "gpt-6.1-sol",
+          "output": 128000,
+          "reasoning": true,
+          "reasoning_efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"

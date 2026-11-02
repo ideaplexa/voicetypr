@@ -108,6 +108,9 @@ export interface ActiveStreamCapabilities {
   transcription_mode: TranscriptionMode;
 }
 
+// Native Polish maps (ai_native_reasoning_by_provider and
+// ai_native_fast_mode_by_provider) use AISettings in types/ai.ts and dedicated
+// commands, not this bulk settings payload. Generic saves must preserve them.
 export interface AppSettings {
   polish_keep_words?: boolean;
   hotkey: string;

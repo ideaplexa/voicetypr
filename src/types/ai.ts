@@ -78,7 +78,9 @@ export interface AISettings {
   model: string;
   hasApiKey: boolean;
   modelsByProvider: Record<string, string>;
+  /** Combined CLI preferences and ai_native_reasoning_by_provider (native default Medium). */
   reasoningByProvider: Record<string, string>;
+  /** Combined CLI preferences and ai_native_fast_mode_by_provider (native default false). */
   fastModeByProvider: Record<string, boolean>;
   aiModelNeedsReselection?: boolean;
 }

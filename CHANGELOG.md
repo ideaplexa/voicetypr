@@ -2,6 +2,7 @@
 
 ### Features
 
+* **ai:** bring stable native Polish fixes into beta: reasoning effort and optional Fast mode, OpenAI Responses, complete-output guards, and stable native model recommendations; existing beta CLI defaults are unchanged
 * **ai:** harden Claude Code, pi, and oh-my-pi subscription-based Polish with isolated, deadline-bounded processes; add curated/discovered model selection in Advanced settings
 
 ### Improvements

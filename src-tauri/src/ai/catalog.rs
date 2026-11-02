@@ -626,7 +626,41 @@ mod tests {
     #[test]
     fn default_model_is_first_recommended_entry() {
         assert_eq!(default_model_id("openai"), Some("gpt-6-luna"));
-        assert_eq!(default_model_id("anthropic"), Some("claude-sonnet-5-5"));
-        assert_eq!(default_model_id("gemini"), Some("gemini-3.8-flash"));
+        assert_eq!(default_model_id("anthropic"), Some("claude-haiku-5-5"));
+        assert_eq!(default_model_id("gemini"), Some("gemini-3.5-flash-lite"));
+    }
+
+    #[test]
+    fn stable_native_recommendations_and_cheap_key_probes_survive_beta_merge() {
+        for (provider, expected, probe_effort) in [
+            ("openai", ["gpt-6-luna", "gpt-5.6-luna"], "none"),
+            (
+                "anthropic",
+                ["claude-haiku-5-5", "claude-sonnet-5-5"],
+                "none",
+            ),
+            (
+                "gemini",
+                ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
+                "minimal",
+            ),
+        ] {
+            let recommended = recommended_models(provider);
+            let ids: Vec<_> = recommended
+                .iter()
+                .map(|model| model.model_id.as_str())
+                .collect();
+            assert_eq!(ids, expected, "{provider}");
+            let model = default_model_id(provider).unwrap();
+            assert_eq!(model, expected[0]);
+            assert_eq!(
+                lowest_reasoning_level(provider, model).as_deref(),
+                Some(probe_effort)
+            );
+        }
+        assert_eq!(
+            resolve_model("anthropic", "claude-haiku-5-5").as_deref(),
+            Some("claude-haiku-5-5")
+        );
     }
 }

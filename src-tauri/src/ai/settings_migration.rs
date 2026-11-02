@@ -501,6 +501,44 @@ mod ai_settings_migration_tests {
     }
 
     #[test]
+    fn saved_haiku_stays_selected_and_native_model_memory_is_normalized_once() {
+        for enabled in [false, true] {
+            let mut values = values_with_enabled(
+                enabled,
+                "anthropic",
+                "claude-haiku-5-5",
+                json!({
+                    "anthropic": "claude-haiku-5-5",
+                    "gemini": "removed-gemini-model",
+                    "openai": "removed-openai-model",
+                    "claude-code": "sonnet",
+                    "pi": "",
+                    "omp": "",
+                    "codex": "gpt-6-luna"
+                }),
+            );
+            assert!(migrate_ai_settings_values(&mut values));
+            assert_eq!(values["ai_model"], json!("claude-haiku-5-5"));
+            assert_eq!(values["ai_enabled"], json!(enabled));
+            assert_eq!(
+                values["ai_models_by_provider"],
+                json!({
+                    "anthropic": "claude-haiku-5-5",
+                    "gemini": "gemini-3.5-flash-lite",
+                    "openai": "gpt-6-luna",
+                    "claude-code": "sonnet",
+                    "pi": "",
+                    "omp": "",
+                    "codex": "gpt-6-luna"
+                })
+            );
+            let first = values.clone();
+            assert!(!migrate_ai_settings_values(&mut values));
+            assert_eq!(values, first);
+        }
+    }
+
+    #[test]
     fn migration_is_idempotent_after_first_pass() {
         let mut values = values(
             "google",

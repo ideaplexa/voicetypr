@@ -57,6 +57,8 @@ where
 pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
     store: &tauri_plugin_store::Store<R>,
 ) -> Result<(), String> {
+    // Native Polish maps are owned by ai::native_settings and the AISettings
+    // payload, not Settings. Bulk settings saves must leave those keys intact.
     let _guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
         .lock()
         .await;

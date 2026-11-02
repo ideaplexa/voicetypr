@@ -5,8 +5,8 @@
     "label": "Anthropic",
     "namespace": null,
     "recommended": [
-      "claude-sonnet-5-5",
-      "claude-opus-5-5"
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5"
     ],
     "runtime": "genai_adapter",
     "snapshot_id": "anthropic",
@@ -23,8 +23,8 @@
     "label": "Google Gemini",
     "namespace": null,
     "recommended": [
-      "gemini-3.8-flash",
-      "gemini-3.5-flash-lite"
+      "gemini-3.5-flash-lite",
+      "gemini-3.8-flash"
     ],
     "runtime": "genai_adapter",
     "snapshot_id": "google",
@@ -38,7 +38,7 @@
     "namespace": null,
     "recommended": [
       "gpt-6-luna",
-      "gpt-6.1-sol"
+      "gpt-5.6-luna"
     ],
     "runtime": "genai_adapter",
     "snapshot_id": "openai",
