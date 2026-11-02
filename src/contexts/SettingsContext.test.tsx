@@ -169,6 +169,10 @@ describe("SettingsContext refresh", () => {
       </SettingsProvider>,
     );
     await screen.findByText("system");
+    // The loaded commit's passive effect may still be pending when the DOM shows
+    // "system", so wait for it to report the settled state and flush before counting.
+    await waitFor(() => expect(latest.loading).toBe(false));
+    await act(async () => {});
     const settled = renders.count;
     await act(async () => latest.refresh());
     expect(renders.count).toBe(settled);
