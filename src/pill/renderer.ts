@@ -284,7 +284,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     } else if (state === 'start') {
       const styleWidth = inlineWidth('.style-name'), micWidth = inlineWidth('.mic-name'), engineWidth = inlineWidth('.engine-chip');
       if (styleWidth && micWidth && engineWidth) W.to = Math.min(340,Math.max(180,styleWidth + (machine.context.polish.style ? 39 : 12) + micWidth + 35 + engineWidth + 38));
-      H.to = layers.entries.start.el.scrollHeight ? layers.entries.start.el.scrollHeight + 2 : machine.height;
+      // Incoming details must be measured at their own target width, not the previous listening box.
+      const start = layers.entries.start.el, oldWidth = start.style.width;
+      start.style.width = `${Math.max(0,W.to - 2)}px`;
+      H.to = start.scrollHeight ? start.scrollHeight + 2 : machine.height;
+      start.style.width = oldWidth;
       GW.to = Math.max(0,W.to - 105);
     } else if (state === 'copied' || state === 'no_permission') {
       const titleWidth = inlineWidth('.notice-title'), countWidth = inlineWidth('.notice-count');

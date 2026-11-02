@@ -7,6 +7,14 @@ class Layer {
   constructor(readonly el: HTMLElement) { el.hidden = true; this.second = el.querySelector<HTMLElement>('.chips,.acts'); }
   target(on: boolean) {
     if (on === this.on) return;
+    if (this.el.dataset.layer === 'start') {
+      // The shared content box retargets immediately; keep outgoing chips laid out until they fade.
+      if (on) { this.el.style.width = ''; this.el.style.height = ''; }
+      else if (this.alpha > 0) {
+        const { offsetWidth, offsetHeight } = this.el;
+        this.el.style.width = `${offsetWidth}px`; this.el.style.height = `${offsetHeight}px`;
+      }
+    }
     this.on = on; this.from = this.alpha; this.time = this.secondTime = 0;
     this.el.hidden = false;
     this.el.inert = !on; this.el.setAttribute('aria-hidden', String(!on));
