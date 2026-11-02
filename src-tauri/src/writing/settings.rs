@@ -295,7 +295,7 @@ fn validate_dictionary_languages(settings: &WritingSettings) -> Result<(), Strin
         );
     for scope in scopes.flatten() {
         let code = scope.trim().to_ascii_lowercase();
-        if !code.is_empty() && !crate::whisper::languages::is_language_supported(&code) {
+        if !code.is_empty() && super::pipeline::supported_language_base(&code).is_none() {
             return Err("Unsupported dictionary language code. Use a supported code such as en or de, or leave it empty for all languages.".to_string());
         }
     }
@@ -343,6 +343,10 @@ mod tests {
             Some(" de "),
             Some("DE"),
             Some("yue"),
+            Some("de-AT"),
+            Some("de-CH"),
+            Some("de_DE"),
+            Some("en-GB"),
         ] {
             let settings = WritingSettings {
                 custom_words: vec![CustomWord {
@@ -367,7 +371,7 @@ mod tests {
 
     #[test]
     fn dictionary_languages_reject_invalid_scopes_in_every_entry_kind() {
-        for language in ["d", "invalid", "auto", "de-AT", "de_CH", "english"] {
+        for language in ["d", "invalid", "auto", "de-", "de_CH_extra", "english"] {
             let scope = Some(language.to_string());
             let cases = [
                 WritingSettings {
@@ -422,7 +426,7 @@ mod tests {
             snippets: vec![Snippet {
                 trigger: "insert test".into(),
                 body: "Test".into(),
-                language: Some("de-AT".into()),
+                language: Some("zz-AT".into()),
                 ..Snippet::default()
             }],
             ..WritingSettings::default()
@@ -432,7 +436,7 @@ mod tests {
             settings.replacements[0].language.as_deref(),
             Some("invalid")
         );
-        assert_eq!(settings.snippets[0].language.as_deref(), Some("de-AT"));
+        assert_eq!(settings.snippets[0].language.as_deref(), Some("zz-AT"));
         assert!(!super::super::language_scope_matches(
             settings.custom_words[0].language.as_deref(),
             Some("en")

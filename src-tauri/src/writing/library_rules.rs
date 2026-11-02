@@ -560,6 +560,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn regional_transcripts_use_base_language_dictionary_entries() {
+        let replacements = [TextReplacementRule {
+            from: "voice typer".into(),
+            to: "Voicetypr".into(),
+            language: Some("de".into()),
+            enabled: true,
+        }];
+        let words = [CustomWord {
+            phrase: "OpenAI".into(),
+            spoken_form: Some("open ai".into()),
+            language: Some("de".into()),
+            enabled: true,
+        }];
+        let snippets = [Snippet {
+            trigger: "insert note".into(),
+            body: "Saved body".into(),
+            language: Some("de".into()),
+            enabled: true,
+            preserve_literal: true,
+        }];
+        for language in ["de-AT", "de-CH", "de_DE"] {
+            let (text, operations) = apply_text_replacements(
+                "voice typer open ai",
+                &replacements,
+                &words,
+                Some(language),
+            );
+            assert_eq!(text, "Voicetypr OpenAI");
+            assert_eq!(operations.len(), 2);
+            assert!(match_snippet("insert note", &snippets, Some(language)).is_some());
+        }
+        assert!(match_snippet("insert note", &snippets, Some("en-GB")).is_none());
+    }
+
+    #[test]
     fn test_apply_text_replacements_prefers_explicit_rules() {
         let replacements = vec![TextReplacementRule {
             from: "voice typer".to_string(),

@@ -245,19 +245,33 @@ pub fn effective_personal_dictation_mode(app: &AppHandle) -> Result<bool, String
     Ok(effective_pipeline_config(app)?.preset == EnhancementPreset::PersonalDictation)
 }
 
+/// Supported base code, optionally followed by an ISO region (two letters or three digits).
+pub(super) fn supported_language_base(value: &str) -> Option<String> {
+    let lowercase = value.trim().to_ascii_lowercase();
+    let mut parts = lowercase.split(['-', '_']);
+    let base = parts.next()?;
+    if !is_language_supported(base) {
+        return None;
+    }
+    if let Some(region) = parts.next() {
+        let valid_region = (region.len() == 2
+            && region.bytes().all(|byte| byte.is_ascii_alphabetic()))
+            || (region.len() == 3 && region.bytes().all(|byte| byte.is_ascii_digit()));
+        if !valid_region || parts.next().is_some() {
+            return None;
+        }
+    }
+    Some(base.to_string())
+}
+
 pub(crate) fn normalize_language_scope(value: Option<&str>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() {
             return None;
         }
-        let lowercase = trimmed.to_ascii_lowercase();
-        Some(if is_language_supported(&lowercase) {
-            lowercase
-        } else {
-            // Preserve legacy invalid scopes instead of reinterpreting them.
-            value.to_string()
-        })
+        // Preserve legacy invalid scopes instead of reinterpreting them.
+        Some(supported_language_base(trimmed).unwrap_or_else(|| value.to_string()))
     })
 }
 
@@ -285,7 +299,12 @@ pub(crate) fn language_scope_matches(
     transcript_language: Option<&str>,
 ) -> bool {
     match scope {
-        Some(scope) => transcript_language == Some(scope),
+        Some(scope) => supported_language_base(scope).is_some_and(|base| {
+            transcript_language
+                .and_then(supported_language_base)
+                .as_deref()
+                == Some(base.as_str())
+        }),
         None => true,
     }
 }
@@ -778,6 +797,39 @@ mod tests {
     use super::*;
     use crate::ai::prompts::EnhancementPreset;
     use crate::transcription::{TranscriptionJob, TranscriptionSource, TranscriptionTask};
+
+    #[test]
+    fn dictionary_scopes_match_regional_transcripts_by_base() {
+        for language in ["de", "de-AT", "de-CH", "de_DE", " DE-at "] {
+            assert_eq!(
+                normalize_language_scope(Some(language)).as_deref(),
+                Some("de")
+            );
+            assert!(language_scope_matches(Some("de"), Some(language)));
+            assert!(language_scope_matches(Some("de-AT"), Some(language)));
+            assert!(!language_scope_matches(Some("en"), Some(language)));
+        }
+        assert!(language_scope_matches(Some("en"), Some("en-GB")));
+        assert!(language_scope_matches(Some("es"), Some("es-419")));
+        assert!(language_scope_matches(None, None));
+        assert!(!language_scope_matches(Some("de"), None));
+        assert!(!language_scope_matches(Some("invalid"), Some("invalid")));
+        for value in [
+            "d",
+            "auto",
+            "de-",
+            "de-AT-extra",
+            "de_AT_extra",
+            "de-A",
+            "de-1234",
+            "de-äö",
+            "en-1A",
+            "zz-US",
+            "zh-Hant",
+        ] {
+            assert!(supported_language_base(value).is_none(), "{value}");
+        }
+    }
 
     fn make_result(
         raw_text: &str,

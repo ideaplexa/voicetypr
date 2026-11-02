@@ -164,11 +164,11 @@ describe("Dictionary regression cases", () => {
     expect(useWritingSettings.getState().settings[key]).toEqual([]);
     expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "update_writing_settings")).toHaveLength(0);
     await user.clear(language);
-    await user.type(language, " DE ");
+    await user.type(language, " DE-at ");
     expect(language).toHaveAttribute("aria-invalid", "false");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(useWritingSettings.getState().settings[key][0]?.language).toBe(" DE ");
+    expect(useWritingSettings.getState().settings[key][0]?.language).toBe("de");
     await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "update_writing_settings")).toHaveLength(1));
   });
 

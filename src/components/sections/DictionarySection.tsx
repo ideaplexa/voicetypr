@@ -10,6 +10,7 @@ import type { CustomWord, Snippet, TextReplacementRule } from "@/types/writing";
 import {
   dictionaryEntryError,
   dictionaryLanguageError,
+  normalizeDictionaryLanguage,
   type DictionaryEntry,
   type DictionaryKind,
 } from "@/lib/dictionary-validation";
@@ -112,11 +113,12 @@ export function DictionarySection() {
       setEditing(null);
       return;
     }
+    const draft = { ...activeEditor.draft, language: normalizeDictionaryLanguage(activeEditor.draft.language) };
     updateList(
       tab,
       activeEditor.source
-        ? existing.map((item) => (item === activeEditor.source ? activeEditor.draft : item))
-        : [...existing, activeEditor.draft],
+        ? existing.map((item) => (item === activeEditor.source ? draft : item))
+        : [...existing, draft],
     );
     setEditing(null);
   };

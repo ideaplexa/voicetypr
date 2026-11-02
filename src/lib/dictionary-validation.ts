@@ -6,15 +6,24 @@ export type DictionaryEntry = CustomWord | TextReplacementRule | Snippet;
 
 // Library matching uses Rust's eq_ignore_ascii_case after the sanitizer trims.
 const normalizedText = (value: string) => value.trim().replace(/[A-Z]/g, (letter) => letter.toLowerCase());
-// Dictionary scopes use the same supported base codes as the spoken-language picker.
-// Rust also trims and folds ASCII case; regional forms are not supported scopes.
-const languageScope = (value: string | null | undefined) => value ? normalizedText(value) || null : null;
+// Keep this grammar aligned with Rust's supported_language_base: supported base,
+// optionally followed by a two-letter or three-digit ISO region.
+function supportedLanguageBase(value: string): string | null {
+  const match = /^([a-z]{2,3})(?:[-_](?:[a-z]{2}|[0-9]{3}))?$/.exec(normalizedText(value));
+  const base = match?.[1];
+  return base && languages.some((language) => language.value === base) ? base : null;
+}
+
+export function normalizeDictionaryLanguage(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  return supportedLanguageBase(value) ?? value;
+}
+const languageScope = normalizeDictionaryLanguage;
 
 export function dictionaryLanguageError(value: string | null | undefined): string | null {
-  const code = languageScope(value);
-  return code === null || languages.some((language) => language.value === code)
+  return !value?.trim() || supportedLanguageBase(value) !== null
     ? null
-    : "Use a supported language code (e.g. en or de), or leave empty for all languages.";
+    : "Use a supported language code (e.g. en, de or de-AT), or leave empty for all languages.";
 }
 const scopesOverlap = (a: string | null, b: string | null) => a === null || b === null || a === b;
 
