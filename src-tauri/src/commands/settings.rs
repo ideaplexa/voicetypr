@@ -46,6 +46,7 @@ where
     let store = app.store("settings").map_err(|e| e.to_string())?;
     mutate(&store)?;
     store.save().map_err(|e| map_save_error(e.to_string()))?;
+    crate::commands::ai_lifecycle::invalidate();
     drop(store);
 
     crate::commands::audio::invalidate_recording_config_cache(app).await;
@@ -73,6 +74,7 @@ pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
         let _ = store.reload();
         return Err(error.to_string());
     }
+    crate::commands::ai_lifecycle::invalidate();
     Ok(())
 }
 

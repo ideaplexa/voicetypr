@@ -63,6 +63,8 @@ const providerModels = vi.hoisted(
       name: string;
       recommended: boolean;
       reasoning?: boolean;
+      reasoningLevels?: string[];
+      supportsFastMode?: boolean;
       contextWindow?: number | null;
       sourceProvider?: string | null;
       cliDefault?: boolean;
@@ -70,20 +72,34 @@ const providerModels = vi.hoisted(
       costOutput?: number | null;
     }>
   > => ({
-    gemini: [{ id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", recommended: true }],
+    gemini: [
+      {
+        id: "gemini-3.8-flash",
+        name: "Gemini 3.8 Flash",
+        recommended: true,
+        reasoningLevels: ["low", "medium", "high"],
+      },
+      {
+        id: "gemini-3.5-flash-lite",
+        name: "Gemini 3.5 Flash Lite",
+        recommended: false,
+      },
+    ],
     openai: [
       {
         id: "gpt-6.1-sol",
         name: "GPT-6.1 Sol",
         recommended: true,
         reasoning: true,
+        reasoningLevels: ["minimal", "low", "medium", "high"],
+        supportsFastMode: true,
         contextWindow: 1050000,
         costInput: 2,
         costOutput: 10,
       },
       { id: "gpt-6-luna", name: "GPT-6 Luna", recommended: false },
     ],
-    anthropic: [{ id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", recommended: true }],
+    anthropic: [{ id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", recommended: true, reasoning: true, reasoningLevels: ["low", "medium", "high"] }],
     groq: [
       {
         id: "llama-3.3-70b-versatile",
@@ -137,21 +153,6 @@ const providerModels = vi.hoisted(
         name: "Default",
         recommended: true,
         cliDefault: true,
-      },
-    ],
-    droid: [
-      { id: "", name: "Default", recommended: true, cliDefault: true },
-      {
-        id: "claude-opus-5-5",
-        name: "Opus 5.5",
-        recommended: false,
-        reasoning: true,
-      },
-      {
-        id: "gpt-6.1-sol",
-        name: "GPT-6.1 Sol",
-        recommended: false,
-        reasoning: true,
       },
     ],
   }),
@@ -257,21 +258,8 @@ const providerListResponse = [
     supportsReasoning: false,
   },
   {
-    id: "droid",
-    name: "Droid",
-    status: "production",
-    supportsReasoning: false,
-  },
-  { id: "grok", name: "Grok", status: "production", supportsReasoning: false },
-  {
     id: "opencode",
     name: "OpenCode",
-    status: "production",
-    supportsReasoning: false,
-  },
-  {
-    id: "cline",
-    name: "Cline",
     status: "production",
     supportsReasoning: false,
   },
@@ -281,10 +269,7 @@ const localAgentProviderIds = new Set([
   "pi",
   "omp",
   "codex",
-  "droid",
-  "grok",
   "opencode",
-  "cline",
 ]);
 
 const isAgentCliProviderForTest = (providerId: string) => localAgentProviderIds.has(providerId);
@@ -479,7 +464,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(8);
+      expect(probeCalls).toHaveLength(5);
       expect(eventListeners.has("ai-ready")).toBe(true);
     });
 
@@ -495,7 +480,7 @@ describe("EnhancementsSection", () => {
       const probeCalls = vi
         .mocked(invoke)
         .mock.calls.filter(([command]) => command === "probe_agent_cli");
-      expect(probeCalls).toHaveLength(8);
+      expect(probeCalls).toHaveLength(5);
     });
   });
 
@@ -858,7 +843,7 @@ describe("EnhancementsSection", () => {
         name: "Claude Code",
       }),
     ).toBeInTheDocument();
-    for (const providerName of ["Codex", "Droid", "Grok", "OpenCode", "Cline"]) {
+    for (const providerName of ["Codex", "OpenCode"]) {
       expect(
         within(providersPanel).getByRole("heading", { name: providerName }),
       ).toBeInTheDocument();
@@ -1688,7 +1673,7 @@ describe("EnhancementsSection", () => {
       enabled: false,
       modelsByProvider: {
         openai: "gpt-6.1-sol",
-        gemini: "gemini-1.5-flash",
+        gemini: "gemini-3.8-flash",
       },
     };
     (hasApiKey as ReturnType<typeof vi.fn>).mockImplementation(
@@ -1706,7 +1691,7 @@ describe("EnhancementsSection", () => {
     await waitFor(() => {
       expect(saveApiKey).toHaveBeenCalledWith("gemini", "gemini-key");
       expect(screen.getByRole("combobox", { name: "Model for Google Gemini" })).toHaveValue(
-        "Gemini 1.5 Flash",
+        "Gemini 3.8 Flash",
       );
     });
   });
@@ -1939,59 +1924,59 @@ describe("EnhancementsSection", () => {
     });
   });
 
-  it("shows discovered Droid models beside its current default", async () => {
+  it("shows discovered pi models beside its current default", async () => {
     agentCliProbeResponse = {
       state: "ready",
-      reasoningLevels: ["low", "medium"],
+      reasoningLevels: ["off", "low", "medium"],
     };
     const user = userEvent.setup();
     renderWithProviders();
     const providersPanel = await getProviderSetupPanel();
     await user.click(within(providersPanel).getByRole("tab", { name: "Local Agents" }));
-    await user.click(await within(providersPanel).findByRole("button", { name: "Select Droid" }));
+    await user.click(await within(providersPanel).findByRole("button", { name: "Select pi" }));
 
-    const droidModel = await within(providersPanel).findByRole("button", {
-      name: "Model for Droid",
+    const piModel = await within(providersPanel).findByRole("button", {
+      name: "Model for pi",
     });
-    expect(droidModel).toHaveTextContent("Default");
-    await user.click(droidModel);
+    expect(piModel).toHaveTextContent("Default");
+    await user.click(piModel);
     const modelDialog = await screen.findByRole("dialog", {
-      name: "Choose a Droid model",
+      name: "Choose a pi model",
     });
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Default.*droid\/default/i,
+        name: /^Default.*pi\/default/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^Opus 5.5.*droid\/claude-opus-5-5.*Reasoning/i,
+        name: /^Claude Sonnet 5\.5.*anthropic\/claude-sonnet-5-5/i,
       }),
     ).toBeInTheDocument();
     await user.type(
-      within(modelDialog).getByRole("textbox", { name: "Search Droid models" }),
+      within(modelDialog).getByRole("textbox", { name: "Search pi models" }),
       "gpt-6.1",
     );
     expect(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-6.1 Sol.*droid\/gpt-6.1-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*openai\/gpt-6.1-sol/i,
       }),
     ).toBeInTheDocument();
     expect(
       within(modelDialog).queryByRole("button", {
-        name: /^Opus 5.5.*Reasoning/i,
+        name: /^Claude Sonnet 5\.5/i,
       }),
     ).not.toBeInTheDocument();
     await user.click(
       within(modelDialog).getByRole("button", {
-        name: /^GPT-6.1 Sol.*droid\/gpt-6.1-sol.*Reasoning/i,
+        name: /^GPT-6.1 Sol.*openai\/gpt-6.1-sol/i,
       }),
     );
 
     expect(invoke).toHaveBeenCalledWith("update_ai_settings", {
       enabled: false,
-      provider: "droid",
-      model: "gpt-6.1-sol",
+      provider: "pi",
+      model: "openai/gpt-6.1-sol",
     });
   });
 
@@ -2117,6 +2102,175 @@ describe("EnhancementsSection", () => {
       await waitFor(() => {
         expect(screen.getByText(authCopy)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("native provider effort and fast mode", () => {
+    const emitEvent = (name: string, payload: unknown) => {
+      act(() => {
+        void eventListeners.get(name)?.({ payload });
+      });
+    };
+
+    it("shows and persists an effort level for native models that support it", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        reasoningByProvider: { openai: "minimal" },
+      };
+      vi.mocked(hasApiKey).mockImplementation(
+        async (providerId: string) => providerId === "openai",
+      );
+      const user = userEvent.setup();
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+
+      const effortSelect = await within(providersPanel).findByRole("combobox", {
+        name: "Effort for OpenAI",
+      });
+      expect(effortSelect).toHaveTextContent("Minimal");
+
+      await user.click(effortSelect);
+      await user.click(await screen.findByRole("option", { name: "High" }));
+
+      expect(invoke).toHaveBeenCalledWith("update_native_ai_reasoning", {
+        provider: "openai",
+        reasoning: "high",
+      });
+      await waitFor(() => expect(effortSelect).toHaveTextContent("High"));
+    });
+
+    it("resolves the default effort to Medium when none is stored", async () => {
+      aiSettingsResponse = { ...enabledAISettings };
+      vi.mocked(hasApiKey).mockImplementation(
+        async (providerId: string) => providerId === "openai",
+      );
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+
+      expect(
+        await within(providersPanel).findByRole("combobox", { name: "Effort for OpenAI" }),
+      ).toHaveTextContent("Medium");
+    });
+
+    it("resolves an unsupported stored effort to the model's levels", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        reasoningByProvider: { openai: "xhigh" },
+      };
+      vi.mocked(hasApiKey).mockImplementation(
+        async (providerId: string) => providerId === "openai",
+      );
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+
+      // gpt-6.1-sol supports [minimal, low, medium, high]; xhigh falls back to medium.
+      expect(
+        await within(providersPanel).findByRole("combobox", { name: "Effort for OpenAI" }),
+      ).toHaveTextContent("Medium");
+    });
+
+    it("hides the effort select for native models without effort levels", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        provider: "openai",
+        model: "gpt-6-luna",
+        modelsByProvider: { openai: "gpt-6-luna" },
+      };
+      vi.mocked(hasApiKey).mockImplementation(
+        async (providerId: string) => providerId === "openai",
+      );
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+
+      await within(providersPanel).findByRole("combobox", { name: "Model for OpenAI" });
+      expect(
+        within(providersPanel).queryByRole("combobox", { name: "Effort for OpenAI" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows Fast only for models with fast support and persists the toggle", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        modelsByProvider: { openai: "gpt-6.1-sol", anthropic: "claude-sonnet-5-5" },
+      };
+      vi.mocked(hasApiKey).mockImplementation(
+        async (providerId: string) => providerId === "openai" || providerId === "anthropic",
+      );
+      const user = userEvent.setup();
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+
+      // Base UI computes the switch name from the wrapping label + aria-label,
+      // so match by regex (see the "fast mode only when the CLI adapter
+      // supports it" test above for the same caveat).
+      const fastSwitch = await within(providersPanel).findByRole("switch", {
+        name: /fast mode for openai/i,
+      });
+      expect(fastSwitch).not.toBeChecked();
+      // Claude Sonnet 5.5 has no fast tier: no switch, but effort shows.
+      expect(
+        within(providersPanel).queryByRole("switch", { name: /anthropic/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(providersPanel).getByRole("combobox", { name: "Effort for Anthropic" }),
+      ).toHaveTextContent("Medium");
+
+      await user.click(fastSwitch);
+
+      expect(invoke).toHaveBeenCalledWith("update_native_ai_fast_mode", {
+        provider: "openai",
+        enabled: true,
+      });
+      await waitFor(() => expect(fastSwitch).toBeChecked());
+    });
+
+    it("turns Fast off locally when the backend reports it unavailable", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        fastModeByProvider: { openai: true },
+      };
+      vi.mocked(hasApiKey).mockImplementation(
+        async (providerId: string) => providerId === "openai",
+      );
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+
+      const fastSwitch = await within(providersPanel).findByRole("switch", {
+        name: /fast mode for openai/i,
+      });
+      expect(fastSwitch).toBeChecked();
+
+      emitEvent("ai-fast-mode-unavailable", { provider: "openai", model: "gpt-6.1-sol" });
+
+      await waitFor(() => expect(fastSwitch).not.toBeChecked());
+    });
+
+    it("keeps selected-model effort and Fast visible when search matches another model", async () => {
+      aiSettingsResponse = {
+        ...enabledAISettings,
+        reasoningByProvider: { openai: "high" },
+        fastModeByProvider: { openai: true },
+      };
+      vi.mocked(hasApiKey).mockImplementation(async (providerId: string) => providerId === "openai");
+      const user = userEvent.setup();
+      renderWithProviders();
+      const providersPanel = await getProviderSetupPanel();
+      await within(providersPanel).findByRole("combobox", { name: "Effort for OpenAI" });
+
+      await user.type(
+        within(providersPanel).getByLabelText("Search cloud providers and models"),
+        "gpt-6-luna",
+      );
+
+      expect(
+        within(providersPanel).getByRole("combobox", { name: "Effort for OpenAI" }),
+      ).toHaveTextContent("High");
+      expect(
+        within(providersPanel).getByRole("switch", { name: /fast mode for openai/i }),
+      ).toBeChecked();
+      await user.click(within(providersPanel).getByRole("combobox", { name: "Model for OpenAI" }));
+      expect(await screen.findByRole("option", { name: /gpt-6 luna/i })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: /gpt-6.1 sol/i })).not.toBeInTheDocument();
     });
   });
 });

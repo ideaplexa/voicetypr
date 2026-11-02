@@ -11,8 +11,16 @@ import {
   ComboboxLabel,
   ComboboxList,
 } from "@/components/ui/combobox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { ExternalLink, Key, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import { Brain, ExternalLink, Key, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import {
   formatModelCost,
   fromModelSelectValue,
@@ -20,6 +28,7 @@ import {
   type ModelPickerGroup,
   type ModelPickerItem,
 } from "./agentCli";
+import { formatNativeEffort, isNativeProvider } from "./nativeProvider";
 import {
   providerRowShellClass,
   type ProviderRowProps,
@@ -41,10 +50,22 @@ export function CloudProviderRow({
     showGuidedSetup,
     setGuidedSetupProvider,
     onSelectModel,
+    onSelectReasoning,
+    onToggleFastMode,
     onSetupApiKey,
     onRemoveApiKey,
   } = props;
-  const { hasKey, isSelected, modelPickerGroups, selectedModelItem, statusCopy } = model;
+  const {
+    hasKey,
+    isSelected,
+    modelPickerGroups,
+    selectedModelItem,
+    statusCopy,
+    reasoning,
+    reasoningLevels,
+    fastModeEnabled,
+    supportsFastMode,
+  } = model;
 
   return (
     <div className={providerRowShellClass(isSelected, false)}>
@@ -127,6 +148,58 @@ export function CloudProviderRow({
                 </ComboboxList>
               </ComboboxContent>
             </Combobox>
+          )}
+          {!provider.isCustom && hasKey && isNativeProvider(provider.id) && (
+            <>
+              {reasoningLevels.length > 0 && (
+                <Select
+                  value={reasoning}
+                  onValueChange={(value) =>
+                    value != null && void onSelectReasoning(provider.id, value)
+                  }
+                >
+                  <SelectTrigger
+                    className="h-9 w-full justify-between gap-2 px-2.5 sm:w-24"
+                    aria-label={`Effort for ${provider.name}`}
+                  >
+                    <SelectValue>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Brain className="h-3.5 w-3.5 shrink-0" />
+                        {formatNativeEffort(reasoning)}
+                      </span>
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reasoningLevels.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Brain className="h-3.5 w-3.5 shrink-0" />
+                          {formatNativeEffort(level)}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {supportsFastMode && (
+                <label
+                  className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-xs font-medium"
+                  title="Use the provider's faster service tier. Provider pricing may be higher."
+                >
+                  <span className="flex flex-col leading-tight">
+                    <span>Fast</span>
+                    <span className="text-[10px] font-normal text-muted-foreground">
+                      costs more
+                    </span>
+                  </span>
+                  <Switch
+                    aria-label={`Fast mode for ${provider.name}`}
+                    checked={fastModeEnabled}
+                    onCheckedChange={(enabled) => void onToggleFastMode(provider.id, enabled)}
+                  />
+                </label>
+              )}
+            </>
           )}
           {hasKey ? (
             <>

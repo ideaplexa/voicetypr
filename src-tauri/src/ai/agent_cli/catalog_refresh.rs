@@ -139,6 +139,7 @@ mod tests {
                 ClaudeCapabilities {
                     safe_mode: true,
                     effort: true,
+                    disable_slash_commands: false,
                 },
                 level,
             );
@@ -164,6 +165,7 @@ mod tests {
         let capabilities = ClaudeCapabilities {
             safe_mode: true,
             effort: true,
+            disable_slash_commands: false,
         };
         for (selected, expected) in [("", "sonnet"), ("haiku", "haiku"), ("fable", "fable")] {
             let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", selected, capabilities);

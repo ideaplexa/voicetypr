@@ -168,6 +168,10 @@ jobs:
               --repo "$REPOSITORY" \
               --json assets --jq '.assets[] | select(.name == "latest.json.next") | .apiUrl' \
               | head -1)"
+            if [[ -z "$NEXT_URL" ]]; then
+              echo "::error::latest.json.next asset not found after upload"
+              exit 1
+            fi
             gh api -X PATCH "$NEXT_URL" -f name=latest.json
           else
             gh release create beta candidate/latest.json \

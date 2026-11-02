@@ -46,10 +46,7 @@ const AGENT_CLI_PROVIDER_IDS = [
   "pi",
   "omp",
   "codex",
-  "droid",
-  "grok",
   "opencode",
-  "cline",
 ] as const;
 
 const CLAUDE_CODE_MODELS: AIProviderModel[] = [

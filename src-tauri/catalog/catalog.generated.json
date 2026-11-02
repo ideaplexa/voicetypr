@@ -1,5 +1,5 @@
 {
-  "generated_from_sha": "3e83335a8143df2043a2f07c98d0a68f7c90089f785202b8728e1c8e5a9d2b79",
+  "generated_from_sha": "8c2960cce6857956cd9823589be557aeb8b54365a395a47c623aa0458953130f",
   "providers": [
     {
       "adapter": "Anthropic",
@@ -11,6 +11,7 @@
           "context": 1000000,
           "cost_input": 2,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "Claude Sonnet 5.5",
           "model_id": "claude-sonnet-5-5",
           "output": 128000,
@@ -22,6 +23,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": true,
           "temperature": false
         },
@@ -29,6 +35,7 @@
           "context": 1000000,
           "cost_input": 4,
           "cost_output": 20,
+          "fast_mode": true,
           "label": "Claude Opus 5.5",
           "model_id": "claude-opus-5-5",
           "output": 128000,
@@ -40,6 +47,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": true,
           "temperature": false
         },
@@ -47,6 +59,7 @@
           "context": 1000000,
           "cost_input": 10,
           "cost_output": 50,
+          "fast_mode": false,
           "label": "Claude Fable 5",
           "model_id": "claude-fable-5",
           "output": 128000,
@@ -58,6 +71,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -65,6 +83,7 @@
           "context": 1000000,
           "cost_input": 10,
           "cost_output": 50,
+          "fast_mode": false,
           "label": "Claude Fable 5.1",
           "model_id": "claude-fable-5-1",
           "output": 128000,
@@ -76,6 +95,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -83,11 +107,17 @@
           "context": 200000,
           "cost_input": 1,
           "cost_output": 5,
+          "fast_mode": false,
           "label": "Claude Haiku 4.5 (latest)",
           "model_id": "claude-haiku-4-5",
           "output": 64000,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -95,23 +125,38 @@
           "context": 200000,
           "cost_input": 1,
           "cost_output": 5,
+          "fast_mode": false,
           "label": "Claude Haiku 4.5",
           "model_id": "claude-haiku-4-5-20251001",
           "output": 64000,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
         {
-          "context": 200000,
-          "cost_input": 5,
-          "cost_output": 25,
-          "label": "Claude Opus 4.5 (latest)",
-          "model_id": "claude-opus-4-5",
-          "output": 64000,
+          "context": 1000000,
+          "cost_input": 0.1,
+          "cost_output": 0.5,
+          "fast_mode": false,
+          "label": "Claude Haiku 5.5",
+          "model_id": "claude-haiku-5-5",
+          "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "reasoning_levels": [
+            "none",
             "low",
             "medium",
             "high"
@@ -123,11 +168,39 @@
           "context": 200000,
           "cost_input": 5,
           "cost_output": 25,
+          "fast_mode": false,
+          "label": "Claude Opus 4.5 (latest)",
+          "model_id": "claude-opus-4-5",
+          "output": 64000,
+          "reasoning": true,
+          "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "recommended": false,
+          "temperature": true
+        },
+        {
+          "context": 200000,
+          "cost_input": 5,
+          "cost_output": 25,
+          "fast_mode": false,
           "label": "Claude Opus 4.5",
           "model_id": "claude-opus-4-5-20251101",
           "output": 64000,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -139,6 +212,7 @@
           "context": 1000000,
           "cost_input": 5,
           "cost_output": 25,
+          "fast_mode": false,
           "label": "Claude Opus 4.6",
           "model_id": "claude-opus-4-6",
           "output": 128000,
@@ -149,6 +223,11 @@
             "high",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -156,6 +235,7 @@
           "context": 1000000,
           "cost_input": 5,
           "cost_output": 25,
+          "fast_mode": false,
           "label": "Claude Opus 4.7",
           "model_id": "claude-opus-4-7",
           "output": 128000,
@@ -167,6 +247,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -174,6 +259,7 @@
           "context": 1000000,
           "cost_input": 5,
           "cost_output": 25,
+          "fast_mode": true,
           "label": "Claude Opus 4.8",
           "model_id": "claude-opus-4-8",
           "output": 128000,
@@ -185,6 +271,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -192,6 +283,7 @@
           "context": 1000000,
           "cost_input": 5,
           "cost_output": 25,
+          "fast_mode": true,
           "label": "Claude Opus 5",
           "model_id": "claude-opus-5",
           "output": 128000,
@@ -203,6 +295,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -210,11 +307,17 @@
           "context": 1000000,
           "cost_input": 3,
           "cost_output": 15,
+          "fast_mode": false,
           "label": "Claude Sonnet 4.5 (latest)",
           "model_id": "claude-sonnet-4-5",
           "output": 64000,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -222,11 +325,17 @@
           "context": 1000000,
           "cost_input": 3,
           "cost_output": 15,
+          "fast_mode": false,
           "label": "Claude Sonnet 4.5",
           "model_id": "claude-sonnet-4-5-20250929",
           "output": 64000,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -234,6 +343,7 @@
           "context": 1000000,
           "cost_input": 3,
           "cost_output": 15,
+          "fast_mode": false,
           "label": "Claude Sonnet 4.6",
           "model_id": "claude-sonnet-4-6",
           "output": 128000,
@@ -244,6 +354,11 @@
             "high",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -251,6 +366,7 @@
           "context": 1000000,
           "cost_input": 2,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "Claude Sonnet 5",
           "model_id": "claude-sonnet-5",
           "output": 128000,
@@ -261,6 +377,12 @@
             "high",
             "xhigh",
             "max"
+          ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
           ],
           "recommended": false,
           "temperature": false
@@ -283,11 +405,17 @@
           "context": 1048576,
           "cost_input": 0.75,
           "cost_output": 3.75,
+          "fast_mode": false,
           "label": "Gemini 3.8 Flash",
           "model_id": "gemini-3.8-flash",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -299,11 +427,18 @@
           "context": 1048576,
           "cost_input": 0.3,
           "cost_output": 2.5,
+          "fast_mode": false,
           "label": "Gemini 3.5 Flash Lite",
           "model_id": "gemini-3.5-flash-lite",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -316,11 +451,13 @@
           "context": 128000,
           "cost_input": 1.25,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "Gemini 2.5 Computer Use Preview 10-2025",
           "model_id": "gemini-2.5-computer-use-preview-10-2025",
           "output": 64000,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -328,11 +465,18 @@
           "context": 1048576,
           "cost_input": 0.3,
           "cost_output": 2.5,
+          "fast_mode": false,
           "label": "Gemini 2.5 Flash",
           "model_id": "gemini-2.5-flash",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -340,11 +484,18 @@
           "context": 1048576,
           "cost_input": 0.1,
           "cost_output": 0.4,
+          "fast_mode": false,
           "label": "Gemini 2.5 Flash-Lite",
           "model_id": "gemini-2.5-flash-lite",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -352,11 +503,17 @@
           "context": 1048576,
           "cost_input": 1.25,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "Gemini 2.5 Pro",
           "model_id": "gemini-2.5-pro",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -364,11 +521,18 @@
           "context": 1048576,
           "cost_input": 0.5,
           "cost_output": 3,
+          "fast_mode": false,
           "label": "Gemini 3 Flash Preview",
           "model_id": "gemini-3-flash-preview",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -381,11 +545,18 @@
           "context": 1048576,
           "cost_input": 0.25,
           "cost_output": 1.5,
+          "fast_mode": false,
           "label": "Gemini 3.1 Flash Lite",
           "model_id": "gemini-3.1-flash-lite",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -398,11 +569,17 @@
           "context": 1048576,
           "cost_input": 2,
           "cost_output": 12,
+          "fast_mode": false,
           "label": "Gemini 3.1 Pro Preview",
           "model_id": "gemini-3.1-pro-preview",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -414,11 +591,17 @@
           "context": 1048576,
           "cost_input": 2,
           "cost_output": 12,
+          "fast_mode": false,
           "label": "Gemini 3.1 Pro Preview Custom Tools",
           "model_id": "gemini-3.1-pro-preview-customtools",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -430,6 +613,7 @@
           "context": 1048576,
           "cost_input": 1.5,
           "cost_output": 9,
+          "fast_mode": false,
           "label": "Gemini 3.5 Flash",
           "model_id": "gemini-3.5-flash",
           "output": 65536,
@@ -440,18 +624,7 @@
             "medium",
             "high"
           ],
-          "recommended": false,
-          "temperature": true
-        },
-        {
-          "context": 1048576,
-          "cost_input": 0.75,
-          "cost_output": 3.75,
-          "label": "Gemini 3.6 Flash",
-          "model_id": "gemini-3.6-flash",
-          "output": 65536,
-          "reasoning": true,
-          "reasoning_efforts": [
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -464,11 +637,19 @@
           "context": 1048576,
           "cost_input": 0.75,
           "cost_output": 3.75,
-          "label": "Gemini 3.7 Flash",
-          "model_id": "gemini-3.7-flash",
+          "fast_mode": false,
+          "label": "Gemini 3.6 Flash",
+          "model_id": "gemini-3.6-flash",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
+            "minimal",
             "low",
             "medium",
             "high"
@@ -480,11 +661,39 @@
           "context": 1048576,
           "cost_input": 0.75,
           "cost_output": 3.75,
+          "fast_mode": false,
+          "label": "Gemini 3.7 Flash",
+          "model_id": "gemini-3.7-flash",
+          "output": 65536,
+          "reasoning": true,
+          "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "recommended": false,
+          "temperature": true
+        },
+        {
+          "context": 1048576,
+          "cost_input": 0.75,
+          "cost_output": 3.75,
+          "fast_mode": false,
           "label": "Gemini Flash Latest",
           "model_id": "gemini-flash-latest",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -496,6 +705,7 @@
           "context": 1048576,
           "cost_input": 0.3,
           "cost_output": 2.5,
+          "fast_mode": false,
           "label": "Gemini Flash-Lite Latest",
           "model_id": "gemini-flash-lite-latest",
           "output": 65536,
@@ -506,26 +716,36 @@
             "medium",
             "high"
           ],
+          "reasoning_levels": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
         {
           "context": 262144,
+          "fast_mode": false,
           "label": "Gemma 4 26B A4B IT",
           "model_id": "gemma-4-26b-a4b-it",
           "output": 32768,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
         {
           "context": 262144,
+          "fast_mode": false,
           "label": "Gemma 4 31B IT",
           "model_id": "gemma-4-31b-it",
           "output": 32768,
           "reasoning": true,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         }
@@ -538,7 +758,7 @@
       "supports_reasoning": true
     },
     {
-      "adapter": "OpenAI",
+      "adapter": "OpenAIResp",
       "docs_url": "https://platform.openai.com/docs/models",
       "id": "openai",
       "label": "OpenAI",
@@ -547,6 +767,7 @@
           "context": 1050000,
           "cost_input": 0.1,
           "cost_output": 0.5,
+          "fast_mode": true,
           "label": "GPT-6 Luna",
           "model_id": "gpt-6-luna",
           "output": 128000,
@@ -559,6 +780,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": true,
           "temperature": false
         },
@@ -566,6 +793,7 @@
           "context": 1050000,
           "cost_input": 2,
           "cost_output": 10,
+          "fast_mode": true,
           "label": "GPT-6.1 Sol",
           "model_id": "gpt-6.1-sol",
           "output": 128000,
@@ -577,6 +805,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": true,
           "temperature": false
         },
@@ -584,11 +817,13 @@
           "context": 1047576,
           "cost_input": 2,
           "cost_output": 8,
+          "fast_mode": true,
           "label": "GPT-4.1",
           "model_id": "gpt-4.1",
           "output": 32768,
           "reasoning": false,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -596,11 +831,13 @@
           "context": 1047576,
           "cost_input": 0.4,
           "cost_output": 1.6,
+          "fast_mode": true,
           "label": "GPT-4.1 mini",
           "model_id": "gpt-4.1-mini",
           "output": 32768,
           "reasoning": false,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -608,11 +845,13 @@
           "context": 128000,
           "cost_input": 2.5,
           "cost_output": 10,
+          "fast_mode": true,
           "label": "GPT-4o",
           "model_id": "gpt-4o",
           "output": 16384,
           "reasoning": false,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -620,11 +859,13 @@
           "context": 128000,
           "cost_input": 2.5,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "GPT-4o (2024-08-06)",
           "model_id": "gpt-4o-2024-08-06",
           "output": 16384,
           "reasoning": false,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -632,11 +873,13 @@
           "context": 128000,
           "cost_input": 2.5,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "GPT-4o (2024-11-20)",
           "model_id": "gpt-4o-2024-11-20",
           "output": 16384,
           "reasoning": false,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -644,11 +887,13 @@
           "context": 128000,
           "cost_input": 0.15,
           "cost_output": 0.6,
+          "fast_mode": true,
           "label": "GPT-4o mini",
           "model_id": "gpt-4o-mini",
           "output": 16384,
           "reasoning": false,
           "reasoning_efforts": [],
+          "reasoning_levels": [],
           "recommended": false,
           "temperature": true
         },
@@ -656,11 +901,18 @@
           "context": 400000,
           "cost_input": 1.25,
           "cost_output": 10,
+          "fast_mode": true,
           "label": "GPT-5",
           "model_id": "gpt-5",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -673,11 +925,18 @@
           "context": 400000,
           "cost_input": 0.25,
           "cost_output": 2,
+          "fast_mode": true,
           "label": "GPT-5 Mini",
           "model_id": "gpt-5-mini",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -690,11 +949,18 @@
           "context": 400000,
           "cost_input": 0.05,
           "cost_output": 0.4,
+          "fast_mode": false,
           "label": "GPT-5 Nano",
           "model_id": "gpt-5-nano",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
@@ -707,11 +973,15 @@
           "context": 400000,
           "cost_input": 15,
           "cost_output": 120,
+          "fast_mode": false,
           "label": "GPT-5 Pro",
           "model_id": "gpt-5-pro",
           "output": 272000,
           "reasoning": true,
           "reasoning_efforts": [
+            "high"
+          ],
+          "reasoning_levels": [
             "high"
           ],
           "recommended": false,
@@ -721,11 +991,18 @@
           "context": 400000,
           "cost_input": 1.25,
           "cost_output": 10,
+          "fast_mode": true,
           "label": "GPT-5.1",
           "model_id": "gpt-5.1",
           "output": 128000,
           "reasoning": true,
           "reasoning_efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "none",
             "low",
             "medium",
@@ -738,6 +1015,7 @@
           "context": 400000,
           "cost_input": 1.75,
           "cost_output": 14,
+          "fast_mode": true,
           "label": "GPT-5.2",
           "model_id": "gpt-5.2",
           "output": 128000,
@@ -749,6 +1027,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -756,6 +1040,7 @@
           "context": 400000,
           "cost_input": 21,
           "cost_output": 168,
+          "fast_mode": false,
           "label": "GPT-5.2 Pro",
           "model_id": "gpt-5.2-pro",
           "output": 128000,
@@ -765,6 +1050,10 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -772,6 +1061,7 @@
           "context": 400000,
           "cost_input": 1.75,
           "cost_output": 14,
+          "fast_mode": false,
           "label": "GPT-5.3 Codex",
           "model_id": "gpt-5.3-codex",
           "output": 128000,
@@ -783,6 +1073,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -790,6 +1086,7 @@
           "context": 128000,
           "cost_input": 1.75,
           "cost_output": 14,
+          "fast_mode": false,
           "label": "GPT-5.3 Codex Spark",
           "model_id": "gpt-5.3-codex-spark",
           "output": 32000,
@@ -801,6 +1098,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -808,6 +1111,7 @@
           "context": 1050000,
           "cost_input": 2.5,
           "cost_output": 15,
+          "fast_mode": true,
           "label": "GPT-5.4",
           "model_id": "gpt-5.4",
           "output": 128000,
@@ -819,6 +1123,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -826,6 +1136,7 @@
           "context": 400000,
           "cost_input": 0.75,
           "cost_output": 4.5,
+          "fast_mode": true,
           "label": "GPT-5.4 mini",
           "model_id": "gpt-5.4-mini",
           "output": 128000,
@@ -837,6 +1148,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -844,6 +1161,7 @@
           "context": 400000,
           "cost_input": 0.2,
           "cost_output": 1.25,
+          "fast_mode": false,
           "label": "GPT-5.4 nano",
           "model_id": "gpt-5.4-nano",
           "output": 128000,
@@ -855,6 +1173,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": true
         },
@@ -862,6 +1186,7 @@
           "context": 1050000,
           "cost_input": 30,
           "cost_output": 180,
+          "fast_mode": false,
           "label": "GPT-5.4 Pro",
           "model_id": "gpt-5.4-pro",
           "output": 128000,
@@ -871,6 +1196,10 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -878,6 +1207,7 @@
           "context": 1050000,
           "cost_input": 5,
           "cost_output": 30,
+          "fast_mode": true,
           "label": "GPT-5.5",
           "model_id": "gpt-5.5",
           "output": 128000,
@@ -889,6 +1219,12 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -896,6 +1232,7 @@
           "context": 1050000,
           "cost_input": 30,
           "cost_output": 180,
+          "fast_mode": false,
           "label": "GPT-5.5 Pro",
           "model_id": "gpt-5.5-pro",
           "output": 128000,
@@ -905,6 +1242,10 @@
             "high",
             "xhigh"
           ],
+          "reasoning_levels": [
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -912,6 +1253,7 @@
           "context": 1050000,
           "cost_input": 4,
           "cost_output": 20,
+          "fast_mode": false,
           "label": "GPT-5.6",
           "model_id": "gpt-5.6",
           "output": 128000,
@@ -924,6 +1266,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -931,6 +1279,7 @@
           "context": 1050000,
           "cost_input": 0.2,
           "cost_output": 1.2,
+          "fast_mode": true,
           "label": "GPT-5.6 Luna",
           "model_id": "gpt-5.6-luna",
           "output": 128000,
@@ -943,6 +1292,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -950,6 +1305,7 @@
           "context": 1050000,
           "cost_input": 4,
           "cost_output": 20,
+          "fast_mode": true,
           "label": "GPT-5.6 Sol",
           "model_id": "gpt-5.6-sol",
           "output": 128000,
@@ -962,6 +1318,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -969,6 +1331,7 @@
           "context": 1050000,
           "cost_input": 2,
           "cost_output": 12,
+          "fast_mode": true,
           "label": "GPT-5.6 Terra",
           "model_id": "gpt-5.6-terra",
           "output": 128000,
@@ -981,6 +1344,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -988,6 +1357,7 @@
           "context": 1050000,
           "cost_input": 10,
           "cost_output": 50,
+          "fast_mode": true,
           "label": "GPT-6 Astra",
           "model_id": "gpt-6-astra",
           "output": 128000,
@@ -999,6 +1369,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -1006,6 +1381,7 @@
           "context": 1050000,
           "cost_input": 2,
           "cost_output": 10,
+          "fast_mode": true,
           "label": "GPT-6 Sol",
           "model_id": "gpt-6-sol",
           "output": 128000,
@@ -1018,6 +1394,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -1025,6 +1407,7 @@
           "context": 1050000,
           "cost_input": 4,
           "cost_output": 20,
+          "fast_mode": false,
           "label": "Daybreak Blue",
           "model_id": "gpt-daybreak-blue-latest",
           "output": 128000,
@@ -1037,6 +1420,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -1044,6 +1433,7 @@
           "context": 400000,
           "cost_input": 12.5,
           "cost_output": 75,
+          "fast_mode": false,
           "label": "Daybreak Red",
           "model_id": "gpt-daybreak-red-latest",
           "output": 128000,
@@ -1056,6 +1446,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": false,
           "temperature": false
         },
@@ -1063,11 +1459,17 @@
           "context": 200000,
           "cost_input": 2,
           "cost_output": 8,
+          "fast_mode": true,
           "label": "o3",
           "model_id": "o3",
           "output": 100000,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -1079,11 +1481,17 @@
           "context": 200000,
           "cost_input": 20,
           "cost_output": 80,
+          "fast_mode": false,
           "label": "o3-pro",
           "model_id": "o3-pro",
           "output": 100000,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -1109,6 +1517,7 @@
           "context": 1050000,
           "cost_input": 0.1,
           "cost_output": 0.5,
+          "fast_mode": false,
           "label": "GPT-6 Luna",
           "model_id": "openai/gpt-6-luna",
           "output": 128000,
@@ -1121,6 +1530,12 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": true,
           "temperature": false
         },
@@ -1128,11 +1543,17 @@
           "context": 1048576,
           "cost_input": 0.75,
           "cost_output": 3.75,
+          "fast_mode": false,
           "label": "Gemini 3.8 Flash",
           "model_id": "google/gemini-3.8-flash",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "low",
             "medium",
             "high"
@@ -1144,6 +1565,7 @@
           "context": 1000000,
           "cost_input": 2,
           "cost_output": 10,
+          "fast_mode": false,
           "label": "Claude Sonnet 5.5",
           "model_id": "anthropic/claude-sonnet-5.5",
           "output": 128000,
@@ -1155,6 +1577,11 @@
             "xhigh",
             "max"
           ],
+          "reasoning_levels": [
+            "low",
+            "medium",
+            "high"
+          ],
           "recommended": true,
           "temperature": true
         },
@@ -1162,11 +1589,18 @@
           "context": 1048576,
           "cost_input": 0.3,
           "cost_output": 2.5,
+          "fast_mode": false,
           "label": "Gemini 3.5 Flash Lite",
           "model_id": "google/gemini-3.5-flash-lite",
           "output": 65536,
           "reasoning": true,
           "reasoning_efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning_levels": [
             "minimal",
             "low",
             "medium",
