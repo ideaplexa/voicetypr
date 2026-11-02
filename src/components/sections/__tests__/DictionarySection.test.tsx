@@ -145,6 +145,46 @@ describe("Dictionary", () => {
 
 describe("Dictionary regression cases", () => {
   it.each([
+    ["words", "custom_words", { phrase: "Legacy", language: "d", enabled: true }, "Add word", "Canonical", null],
+    ["corrections", "replacements", { from: "Legacy", to: "A", language: "d", enabled: true }, "Add rule", "Match", "Replace"],
+    ["snippets", "snippets", { trigger: "insert legacy", body: "A", language: "d", enabled: true, preserve_literal: true }, "Add saved text", "Insert", "Text to insert"],
+  ] as const)("preserves a legacy invalid %s row while saving another entry", async (kind, key, legacy, addLabel, field, otherField) => {
+    const initial = { ...defaultWritingSettings, [key]: [legacy] };
+    vi.mocked(invoke).mockImplementation(async (command) => command === "get_writing_settings" ? initial : undefined);
+    const user = userEvent.setup();
+    await ready();
+    if (kind !== "words") await user.click(screen.getByRole("tab", { name: new RegExp(`^${kind}`, "i") }));
+    expect(screen.getByRole("status")).toHaveTextContent("Unsupported language scope; preserved.");
+    await user.click(screen.getByRole("button", { name: addLabel }));
+    await user.type(screen.getByLabelText(field), "New");
+    if (otherField) await user.type(screen.getByLabelText(otherField), "B");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith("update_writing_settings", {
+      settings: expect.objectContaining({ [key]: [legacy, expect.objectContaining({ language: null })] }),
+    }));
+    expect(useWritingSettings.getState().settings[key][0]).toEqual(legacy);
+  });
+
+  it("allows non-language edits to a legacy row but rejects a changed invalid scope", async () => {
+    const legacy = { phrase: "Legacy", language: "d", enabled: true };
+    vi.mocked(invoke).mockImplementation(async (command) => command === "get_writing_settings"
+      ? { ...defaultWritingSettings, custom_words: [legacy] } : undefined);
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByRole("button", { name: "Edit row 1" }));
+    await user.type(screen.getByLabelText("Spoken"), "alternate");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith("update_writing_settings", {
+      settings: expect.objectContaining({ custom_words: [{ ...legacy, spoken_form: "alternate" }] }),
+    }));
+    await user.click(screen.getByRole("button", { name: "Edit row 1" }));
+    await user.type(screen.getByLabelText("Language"), "x");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it.each([
     ["words", "custom_words", "Add word", "Canonical", "Alpha", null],
     ["corrections", "replacements", "Add rule", "Match", "Alpha", "Replace"],
     ["snippets", "snippets", "Add saved text", "Insert", "note", "Text to insert"],

@@ -276,38 +276,55 @@ pub fn sanitize_writing_settings(settings: WritingSettings) -> WritingSettings {
     }
 }
 
-fn validate_dictionary_languages(settings: &WritingSettings) -> Result<(), String> {
-    let scopes = settings
-        .replacements
-        .iter()
-        .map(|entry| entry.language.as_deref())
-        .chain(
-            settings
-                .custom_words
-                .iter()
-                .map(|entry| entry.language.as_deref()),
-        )
-        .chain(
-            settings
-                .snippets
-                .iter()
-                .map(|entry| entry.language.as_deref()),
-        );
-    for scope in scopes.flatten() {
-        let code = scope.trim().to_ascii_lowercase();
-        if !code.is_empty() && super::pipeline::supported_language_base(&code).is_none() {
-            return Err("Unsupported dictionary language code. Use a supported code such as en or de, or leave it empty for all languages.".to_string());
+fn validate_entry_languages<T>(
+    entries: &[T],
+    previous: &[T],
+    identity: fn(&T) -> (&str, Option<&str>),
+) -> Result<(), String> {
+    // Consume each stored identity/scope once: copying a legacy invalid row is
+    // still a new invalid entry. Other fields may change without altering scope.
+    let mut legacy = previous.iter().map(identity).collect::<Vec<_>>();
+    for entry in entries {
+        let (key, scope) = identity(entry);
+        let Some(scope) = scope.filter(|scope| !scope.trim().is_empty()) else {
+            continue;
+        };
+        if super::pipeline::supported_language_base(scope).is_some() {
+            continue;
         }
+        let Some(index) = legacy.iter().position(|(old_key, old_scope)| {
+            old_key.trim() == key.trim() && *old_scope == Some(scope)
+        }) else {
+            return Err("Unsupported dictionary language code. Use a supported code such as en, de or de-AT, or leave it empty for all languages.".to_string());
+        };
+        legacy.remove(index);
     }
     Ok(())
 }
 
-pub fn load_writing_settings(app: &AppHandle) -> Result<WritingSettings, String> {
+fn validate_dictionary_languages(
+    settings: &WritingSettings,
+    previous: &WritingSettings,
+) -> Result<(), String> {
+    validate_entry_languages(&settings.replacements, &previous.replacements, |entry| {
+        (&entry.from, entry.language.as_deref())
+    })?;
+    validate_entry_languages(&settings.custom_words, &previous.custom_words, |entry| {
+        (&entry.phrase, entry.language.as_deref())
+    })?;
+    validate_entry_languages(&settings.snippets, &previous.snippets, |entry| {
+        (&entry.trigger, entry.language.as_deref())
+    })
+}
+
+pub fn load_writing_settings<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Result<WritingSettings, String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
     if let Some(value) = store.get(WRITING_SETTINGS_KEY) {
         let settings: WritingSettings = serde_json::from_value(value.clone())
             .map_err(|e| format!("Failed to parse writing settings: {}", e))?;
-        if validate_dictionary_languages(&settings).is_err() {
+        if validate_dictionary_languages(&settings, &WritingSettings::default()).is_err() {
             log::warn!("Stored dictionary contains an unsupported language scope; preserving it");
         }
         Ok(sanitize_writing_settings(settings))
@@ -316,9 +333,18 @@ pub fn load_writing_settings(app: &AppHandle) -> Result<WritingSettings, String>
     }
 }
 
-pub fn save_writing_settings(app: &AppHandle, settings: &WritingSettings) -> Result<(), String> {
-    validate_dictionary_languages(settings)?;
+pub fn save_writing_settings<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    settings: &WritingSettings,
+) -> Result<(), String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
+    let previous = store
+        .get(WRITING_SETTINGS_KEY)
+        .map(serde_json::from_value::<WritingSettings>)
+        .transpose()
+        .map_err(|e| format!("Failed to parse stored writing settings: {}", e))?
+        .unwrap_or_default();
+    validate_dictionary_languages(settings, &previous)?;
     let sanitized = sanitize_writing_settings(settings.clone());
     store.set(
         WRITING_SETTINGS_KEY,
@@ -357,7 +383,7 @@ mod tests {
                 ..WritingSettings::default()
             };
             assert!(
-                validate_dictionary_languages(&settings).is_ok(),
+                validate_dictionary_languages(&settings, &WritingSettings::default()).is_ok(),
                 "{language:?}"
             );
         }
@@ -402,9 +428,11 @@ mod tests {
                 },
             ];
             for settings in cases {
-                assert!(validate_dictionary_languages(&settings)
-                    .unwrap_err()
-                    .contains("Unsupported dictionary language code"));
+                assert!(
+                    validate_dictionary_languages(&settings, &WritingSettings::default())
+                        .unwrap_err()
+                        .contains("Unsupported dictionary language code")
+                );
             }
         }
     }
@@ -449,7 +477,95 @@ mod tests {
             settings.snippets[0].language.as_deref(),
             Some("en")
         ));
-        assert!(validate_dictionary_languages(&settings).is_err());
+        assert!(validate_dictionary_languages(&settings, &WritingSettings::default()).is_err());
+    }
+
+    #[test]
+    fn legacy_invalid_scopes_do_not_block_unrelated_saves() {
+        use tauri::Manager;
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.config_mut().identifier = dir.path().to_str().unwrap().to_string();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(context)
+            .unwrap();
+        let previous = WritingSettings {
+            custom_words: vec![CustomWord {
+                phrase: "Alpha".into(),
+                language: Some(" d ".into()),
+                enabled: true,
+                ..CustomWord::default()
+            }],
+            replacements: vec![TextReplacementRule {
+                from: "A".into(),
+                to: "B".into(),
+                language: Some("invalid".into()),
+                enabled: true,
+            }],
+            snippets: vec![Snippet {
+                trigger: "insert test".into(),
+                body: "Test".into(),
+                language: Some("zz-AT".into()),
+                enabled: true,
+                preserve_literal: true,
+            }],
+            ..WritingSettings::default()
+        };
+        let store = app.store("settings").unwrap();
+        store.set(
+            WRITING_SETTINGS_KEY,
+            serde_json::to_value(&previous).unwrap(),
+        );
+        store.save().unwrap();
+        let mut next = load_writing_settings(app.handle()).unwrap();
+        next.app_formatting_rules.push(AppFormattingRule {
+            app_name: "Editor".into(),
+            preset: EnhancementPreset::Notes,
+            enabled: true,
+        });
+        next.custom_words.push(CustomWord {
+            phrase: "Beta".into(),
+            language: Some("de-AT".into()),
+            enabled: true,
+            ..CustomWord::default()
+        });
+        assert!(save_writing_settings(app.handle(), &next).is_ok());
+        let saved = load_writing_settings(app.handle()).unwrap();
+        assert_eq!(saved.custom_words[0], previous.custom_words[0]);
+        assert_eq!(saved.replacements, previous.replacements);
+        assert_eq!(saved.snippets, previous.snippets);
+        assert_eq!(saved.app_formatting_rules.len(), 1);
+        assert_eq!(saved.custom_words[1].language.as_deref(), Some("de"));
+        next.custom_words[0].language = Some("new-invalid".into());
+        assert!(save_writing_settings(app.handle(), &next).is_err());
+        assert_eq!(load_writing_settings(app.handle()).unwrap(), saved);
+    }
+
+    #[test]
+    fn preserving_legacy_scopes_allows_other_fields_but_not_new_or_changed_invalid_values() {
+        let previous = WritingSettings {
+            custom_words: vec![CustomWord {
+                phrase: "Alpha".into(),
+                language: Some("d".into()),
+                enabled: true,
+                ..CustomWord::default()
+            }],
+            ..WritingSettings::default()
+        };
+        let mut next = previous.clone();
+        next.custom_words[0].enabled = false;
+        assert!(validate_dictionary_languages(&next, &previous).is_ok());
+        next.custom_words[0].spoken_form = Some("alternate".into());
+        assert!(validate_dictionary_languages(&next, &previous).is_ok());
+        next.custom_words.push(next.custom_words[0].clone());
+        assert!(validate_dictionary_languages(&next, &previous).is_err());
+        next.custom_words.pop();
+        next.custom_words[0].language = Some("D".into());
+        assert!(validate_dictionary_languages(&next, &previous).is_err());
+        next.custom_words[0].language = Some("d".into());
+        next.custom_words[0].phrase = "New identity".into();
+        assert!(validate_dictionary_languages(&next, &previous).is_err());
     }
 
     #[test]

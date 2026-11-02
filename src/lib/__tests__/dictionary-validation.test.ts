@@ -41,7 +41,11 @@ describe("dictionary language validation", () => {
     const existing = { phrase: "Alpha", language: "d", enabled: true };
     const settings = { ...defaultWritingSettings, custom_words: [existing] };
     expect(dictionaryEntryError("words", { ...existing, language: "en" }, settings, null)).toBeNull();
-    expect(dictionaryEntryError("words", existing, settings, existing))
+    expect(dictionaryEntryError("words", existing, settings, existing)).toBeNull();
+    expect(dictionaryEntryError("words", { ...existing, spoken_form: "alternate" }, settings, existing)).toBeNull();
+    expect(dictionaryEntryError("words", { ...existing, language: "D" }, settings, existing))
+      .toContain("supported language code");
+    expect(dictionaryEntryError("words", { ...existing, phrase: "New" }, settings, existing))
       .toContain("supported language code");
   });
 });

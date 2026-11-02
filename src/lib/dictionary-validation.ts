@@ -29,7 +29,12 @@ const scopesOverlap = (a: string | null, b: string | null) => a === null || b ==
 
 export function dictionaryEntryError(kind: DictionaryKind, entry: DictionaryEntry, settings: WritingSettings, original: DictionaryEntry | null): string | null {
   const languageError = dictionaryLanguageError(entry.language);
-  if (languageError) return languageError;
+  const identity = (value: DictionaryEntry) => kind === "words"
+    ? (value as CustomWord).phrase.trim()
+    : kind === "corrections" ? (value as TextReplacementRule).from.trim() : (value as Snippet).trigger.trim();
+  const preservedLegacyScope = original !== null &&
+    entry.language === original.language && identity(entry) === identity(original);
+  if (languageError && !preservedLegacyScope) return languageError;
   if (kind === "words") {
     const word = entry as CustomWord;
     if (!word.phrase.trim()) return "Enter a word or phrase.";

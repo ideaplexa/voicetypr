@@ -236,6 +236,7 @@ export function DictionarySection() {
                     key={`${tab}-${entryId(item)}`}
                     index={index}
                     values={values}
+                    languageWarning={!!dictionaryLanguageError(item.language)}
                     editing={activeEditor?.source === item}
                     onEdit={() =>
                       activeEditor?.source === item ? setEditing(null) : newEditor(tab, item)
@@ -306,12 +307,14 @@ export function DictionarySection() {
 function Row({
   index,
   values,
+  languageWarning,
   editing,
   onEdit,
   onDelete,
 }: {
   index: number;
   values: string[];
+  languageWarning: boolean;
   editing: boolean;
   onEdit: () => void;
   onDelete: () => void;
@@ -325,6 +328,11 @@ function Row({
           title={value}
         >
           {value || "—"}
+          {column === 2 && languageWarning ? (
+            <span role="status" className="block whitespace-normal text-xs text-destructive">
+              Unsupported language scope; preserved.
+            </span>
+          ) : null}
         </td>
       ))}
       <td className="px-2 py-1.5">
