@@ -1,8 +1,8 @@
 # Plan 086: Multilingual text correctness for beta.6
 
-Status: SPEC, not claimed for implementation. Proposed target: 2.1.0-beta.6,
-subject to founder approval of an addition to the approved scope in
-[plan 083](083-2.1-beta6.md) and re-estimation.
+Status: SPEC, not claimed for implementation. On 2026-11-02 the founder
+approved adding this work to 2.1.0-beta.6 and requested re-estimation.
+See the updated scope in [plan 083](083-2.1-beta6.md).
 Audit baseline: beta.5 worktree commit
 `9581cc6a1e859be5fd3f28e1ec99eefc63fbb406`; check current code and merge
 drift before implementation. Changes are independent of opt-in punctuation
@@ -85,6 +85,35 @@ parity for app context or cloud diarized early returns.
     provider supplies it, and use conservative behavior on conflict or
     code-switching. No fabricated detection, no new telemetry of text.
 
+## Re-estimate, 2026-11-02
+
+Planning estimates in working days for one implementer, not measured results.
+Each item includes its focused implementation and tests. Language-specific
+integration, review and smoke preparation are additional and do not duplicate
+plan 083's existing integration allowance.
+
+| Item | Size | Days |
+|---|---|---:|
+| 1. Sentence boundaries and capitals | L | 4–7 |
+| 2. French spacing | M | 1–2 |
+| 3. Translation intent | M | 1–2 |
+| 4. CJK joining and insertion | L | 4–7 |
+| 5. Snippets | M | 2–3 |
+| 6. Dictionary | L | 3–6 |
+| 7. Polish output guard | M | 2–4 |
+| 8. Other scripts and security | M | 2–4 |
+| 9. Protected lowercase terms | S | 1–2 |
+| 10. Language provenance | L | 3–5 |
+| Language fixtures, integration, review and smoke preparation | M | 3–5 |
+| **Incremental total** | **XL** | **26–47** |
+
+Added to plan 083's earlier 34–56 days, the planning total is **60–103
+working days**, approximately **12–21 weeks** at five working days per week
+with one implementer. This is a simple range sum, not a schedule promise;
+provider access, language coverage, security review, hardware and failed
+spikes may extend it. Re-estimate after the baseline and security review.
+Plan 085 and plan 084 remain separate from this estimate.
+
 ## Fixture contract and minimum coverage
 
 Use table-driven cases with fields `id`, `input`, `language`, `engine`,
@@ -145,8 +174,6 @@ clipboard, prompt, path or window title in logs or analytics.
 
 - Which languages must pass real-speech and hardware smoke for beta.6, and
   which may stay behind conservative gates until later?
-- Approve adding this scope to beta.6 and a revised estimate, or assign the
-  work to a later beta without delaying the approved plan 083 release?
 - Should French typography preserve user/engine whitespace indefinitely or
   normalize to U+00A0 or U+202F by locale? What is the de-CH quote policy?
 - Is provider language detection trustworthy enough for automatic formatting,

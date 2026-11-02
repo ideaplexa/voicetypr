@@ -9,65 +9,86 @@ scope in [plan 083](083-2.1-beta6.md). The local Polish model in
 [plan 084](084-local-polish-model.md) remains a separate beta after evaluation
 and is not required for this offline feature.
 
-## Why and decision gate
+## Why and founder decision
 
 An Austrian Windows customer uses local Whisper large-v3-turbo for confidential
 German legal documents, with Polish off. Spoken punctuation currently appears
 as words. This must work without a network, cloud recognition or AI, as well as
 with cloud engines selected by other users. Do not collect their documents.
 
-The master plan puts voice commands in 2.2 and says commands have their own
-trigger, never guessed from dictation. A setting alone is not that trigger.
-This proposal moves a narrow punctuation-only feature into 2.1. **Do not
-implement or ship until the founder approves both the earlier scope and the
-trigger and ambiguity policy.** It does not authorize editing commands, app
-actions, or Command Mode.
+On 2026-11-02 the founder approved a narrow punctuation-only exception for
+2.1, off by default, with the Dragon-style trigger policy below. This overrides
+the master plan's 2.2 timing and separate-trigger rule for this feature only.
+It does not authorize editing commands, app actions, or Command Mode.
 
-## Proposed contract
+## Contract
 
 - Add a persistent setting, off for new and existing users; update Rust
   settings and TypeScript types together. User selects German or English
   command table, including German Austrian aliases; regional codes resolve to
   base language. Unsupported or unknown language does not silently use English.
   More languages require separate reviewed tables.
-- Require an explicit spoken prefix, proposed `Befehl` / `command`, immediately
-  before each command. Match whole tokens, case-insensitively, longest phrase
-  first. An explicit escape, proposed `wörtlich` / `literal`, emits the next
-  command phrase as words, without the escape token. A lone, incomplete or
-  unknown prefix or escape stays literal. Exact words and localized UI need
-  approval. Explain the syntax and show examples in Settings.
-- A prefix grants only this single conversion, not a mode that persists.
-  Without it, `der springende Punkt`, `ich komme gleich`, prose `Plus`/`Minus`
-  and `drei Komma fünf` stay words. Unprefixed recognition, if ever desired,
-  is a separate per-command opt-in, off by default and out of this initial
-  slice. No position heuristic can guarantee intent. Repeated punctuation
-  requires repeated prefixed commands. Preserve unrecognized input.
-- `Anführungszeichen` and its observed mishearing `Ausführungszeichen` use
-  opening/closing role within a take; explicit `Anführungszeichen auf/zu` is
-  preferred. Start closed, toggle only on a recognized command, support
-  explicit open/close and preserve an unmatched close literally. Do not guess
-  nested roles. English `open quote`/`close quote` are explicit. Ambiguous
-  role and a quote spanning takes need founder review.
+- Match whole tokens case-insensitively, longest phrase first. Unambiguous
+  commands work without a prefix. Ambiguous words convert only at a verified
+  phrase end, defined below, or immediately after `Befehl` / `command`.
+  A prefix applies to one command only. `wörtlich` / `literal` forces the next
+  command phrase to remain words, consuming only the escape. A lone,
+  incomplete or unknown prefix or escape stays literal. Explain all of this
+  in Settings, including that boundary guesses can still mistake intent.
+- Bare `Anführungszeichen` and observed mishearing `Ausführungszeichen` are
+  ambiguous: apply the same boundary or prefix rule. Proposed role behavior
+  starts closed, toggles within a take, and preserves an unmatched explicit
+  close literally. Explicit `auf/zu` and English open/close are unambiguous.
+  Role, mishearing, nested or cross-take quotes, and de-CH shape remain open.
+
+### Phrase end and conservative matching
+
+For an ambiguous candidate, phrase end means the candidate is followed by
+end of the final take, an independently recognized next command, or an
+engine-emitted sentence-ending `.`, `?`, `!`, `。`, `？` or `！`. A next
+command must itself qualify without treating the candidate as its boundary:
+resolve chains from right to left, so a speculative ambiguous word cannot
+make another speculative word qualify. A matched, already emitted punctuation
+mark is deduplicated as below, but a comma alone is not proof of phrase end.
+
+Where reliable word timestamps survive to the parser, a measured silence of
+at least 500 ms between the candidate's end and the next word is a proposed
+initial pause threshold, to calibrate on consented real speech before release.
+Whisper segment boundaries are not automatically pauses: count one only if
+reliable timing shows the same gap. If timestamps are missing, invalid or
+not carried through a provider, do not infer pauses from segment/final chunk
+boundaries or text whitespace; use only the textual boundary rules above or
+the explicit prefix. Confirm which engines actually expose timing end-to-end
+before promising pause support.
+
+Protect decimal contexts: `drei Komma fünf` and `three point five` remain
+literal even if there is a timing gap; a prefix explicitly overrides this
+protection. Likewise `der springende Punkt ist` and `ich komme gleich wieder`
+remain words without a qualifying boundary. A noun at the end of a take,
+such as `der springende Punkt`, can still be mistaken for a command under the
+approved policy: `wörtlich Punkt` forces the literal. Do not claim perfect
+intent detection.
 
 ### Initial command tables
 
-These are phrases after the prefix; output is exact before surrounding spacing.
+Output is exact before surrounding spacing. A/U means ambiguous/unambiguous.
+Explicit descriptive names and directional phrases are U; short ordinary nouns,
+adverbs and arithmetic words are A because they often occur in prose or numbers.
 
-| German, including Austrian | English | Output |
+| Output | German, including Austrian | English |
 |---|---|---|
-| Beistrich, Komma | comma | `,` |
-| Punkt | period, full stop | `.` |
-| Strichpunkt | semicolon | `;` |
-| Doppelpunkt | colon | `:` |
-| Gedankenstrich | dash, en dash | ` – ` |
-| neuer Absatz | new paragraph | blank line (`\n\n`) |
-| neue Zeile | new line | line break (`\n`) |
-| Anführungszeichen, Ausführungszeichen; auf/zu | open quote, close quote | German `„` / `“`; English `“` / `”` |
-| Fragezeichen, Ausrufezeichen | question mark, exclamation mark | `?`, `!` |
-| Klammer auf/zu, eckige Klammer auf/zu | open/close parenthesis, open/close bracket | `(`, `)`, `[`, `]` |
-| Prozent, Paragraph, Und-Zeichen, Raute | percent, section sign, ampersand, hash | `%`, `§`, `&`, `#` |
-| Plus, Minus, gleich | plus, minus, equals | `+`, `-`, `=` |
-| Schrägstrich, Backslash, Sternchen | slash, backslash, asterisk | `/`, `\`, `*` |
+| `,` | U: Beistrich; A: Komma | A: comma |
+| `.` | A: Punkt | A: period, point, dot, full stop |
+| `;` | U: Strichpunkt | U: semicolon |
+| `:` | U: Doppelpunkt | U: colon |
+| ` – ` | U: Gedankenstrich; A: Strich | U: en dash; A: dash |
+| `\n\n`, `\n` | U: neuer Absatz, neue Zeile | U: new paragraph, new line |
+| `„` / `“` in German, `“` / `”` in English | U: Anführungszeichen auf/zu; A: Anführungszeichen, Ausführungszeichen | U: open quote, close quote |
+| `?`, `!` | U: Fragezeichen, Ausrufezeichen | U: question mark, exclamation mark, exclamation point |
+| `(`, `)`, `[`, `]` | U: Klammer auf/zu, eckige Klammer auf/zu | U: open/close parenthesis, open/close paren, open/close bracket |
+| `%`, `§`, `&`, `#` | U: Paragraphzeichen, Und-Zeichen, Raute; A: Prozent, Paragraph | U: section sign, ampersand; A: percent, hash |
+| `+`, `-`, `=` | A: Plus, Minus, gleich | A: plus, minus, equals |
+| `/`, `\`, `*` | U: Schrägstrich, Backslash, Sternchen; A: Stern | U: backslash, asterisk; A: slash, star |
 
 `Doppelpunkt` already supplies `:`. List and tests must cover all requested
 symbols, not just the examples above. Do not use German quote shapes in
@@ -93,9 +114,11 @@ English, or infer locale-specific quote shapes for de-CH without a decision.
    preserve plan 084's local-model fallback and evaluation gates.
 3. Recognizers may already emit symbols. Whisper's `suppress_nst` suppresses
    some punctuation tokens but does not guarantee none; `Befehl Komma,` and
-   `Befehl Punkt.` each become one symbol, not two. Consume only one adjacent
-   matching recognizer-emitted mark, never unrelated or repeated literal
-   punctuation. Test model variants rather than altering suppression blindly.
+   `Punkt.` at a valid boundary each become one symbol, not two. An adjacent
+   matching mark alone does not qualify an ambiguous candidate unless it is
+   also a sentence-ending mark. Consume only one adjacent matching mark,
+   never unrelated or repeated literal punctuation. Test model variants
+   rather than altering suppression blindly.
 4. Format command boundaries, not unrelated text: no space before `, . ; : ? !`;
    closing quotes and brackets attach to their contents, opening ones attach to
    the following word; normal word separation resumes outside them. Dash has
@@ -130,15 +153,21 @@ instead of typing Enter or dropping the newline.
 
 ## Phases and acceptance
 
-1. **S: decision and fixtures.** Resolve trigger conflict, language/quote and
-   spacing choices. Capture baseline for both engines and insertion paths.
+1. **S: fixtures.** Record the founder's trigger decision; resolve remaining
+   quote and spacing choices. Capture baseline for both engines and insertion
+   paths and characterize available timing metadata.
 2. **M: parser and renderer.** Table-driven German/Austrian and English tests
    cover every alias and symbol, prefixed/unprefixed and escaped ambiguity,
    case, boundaries, quotes, punctuation already emitted, formatting, sentence
-   case and unchanged disabled behavior. Reapplying output is idempotent,
-   including literal escaped text and consecutive marks; preserve all words
-   except an explicit command or its escape. Round-trip settings, unknown
-   language and per-take state.
+   case and unchanged disabled behavior. Cover every item in Peter's list and
+   each ambiguous word at mid-phrase, take end, before a command, before
+   sentence punctuation, with prefix and escape, and around the pause threshold
+   with and without timing. Test numbers and decimals, false positives,
+   Whisper segments without a real pause and command chains. Formatting typed
+   spans is idempotent; parse each recognition result only once. Plain rendered
+   text cannot safely be reparsed: escaped literal output can itself resemble
+   a command. Preserve all words except a recognized command or its escape.
+   Round-trip settings, unknown language and per-take state.
 3. **M: integration.** Local/cloud, Polish off/on, failed placeholder
    protection, snippet/Corrections order, stream chunks splitting commands,
    stale revisions, and final/preview tests. No change to default output.
@@ -158,11 +187,6 @@ smoke above; report missing provider/hardware as a blocker, not a pass.
 
 ## Founder questions
 
-1. Approve 2.1 as a narrow exception to the 2.2 voice-command roadmap and the
-   proposed explicit per-command prefix and escape words?
-2. Approve the quote role policy and mishearing alias, or require explicit
+1. Approve the quote role policy and mishearing alias, or require explicit
    open/close only? What should de-CH quotes be?
-3. Approve U+00A0 for German percentages and command capitalization remaining
-   unchanged in German until plan 086?
-4. Is a separately enabled unprefixed mode ever acceptable for legal documents,
-   given unavoidable literal-word ambiguity?
+2. Approve U+00A0 for German percentages?
