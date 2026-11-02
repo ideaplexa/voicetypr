@@ -1021,6 +1021,18 @@ mod tests {
     }
 
     #[test]
+    fn transcribe_audio_context_defaults_to_none_and_accepts_override() {
+        for (extra, expected) in [(vec![], None), (vec!["--audio-ctx", "512"], Some(512))] {
+            let mut argv = vec!["voicetypr", "transcribe", "--file", "sample.wav"];
+            argv.extend(extra);
+            let cli = Cli::try_parse_from(argv).unwrap();
+            assert!(
+                matches!(cli.command, Some(CliCommand::Transcribe(args)) if args.audio_ctx == expected)
+            );
+        }
+    }
+
+    #[test]
     fn cli_parses_transcribe_command() {
         let cli = Cli::try_parse_from([
             "voicetypr",

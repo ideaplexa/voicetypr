@@ -1,5 +1,9 @@
 # Voicetypr performance master roadmap
 
+> **Beta 5 correction:** the adaptive `audio_ctx` default proposed below was
+> reverted after ctx=512 repeated a sentence on real German speech. Full model
+> context is now the default; explicit overrides remain available.
+
 > Synthesis of 6 source-grounded perf teardowns (`01`–`05`, `07`) against VT `main` @ `af63ab1`, the Handy teardown, and `06-oracle-decision.md`. Every number below traces to a slice doc with `path:line`. **Nothing is committed; this is the plan.**
 
 ---

@@ -955,6 +955,24 @@ mod tests {
 
         assert_eq!(probe.response_timeout(), CONTROL_REQUEST_TIMEOUT);
         assert_eq!(transcribe.response_timeout(), DEFAULT_TRANSCRIPTION_TIMEOUT);
+        // No audio_ctx is sent: the sidecar's stock params retain full context.
+        assert!(serde_json::to_value(&transcribe)
+            .unwrap()
+            .get("audio_ctx")
+            .is_none());
+    }
+
+    #[test]
+    fn vulkan_decoder_leaves_audio_context_at_stock_default() {
+        let source = include_str!("../../../sidecar/whisper-vulkan/src/main.rs");
+        let body = source
+            .split("fn transcribe_with_context(")
+            .nth(1)
+            .unwrap()
+            .split("fn load_audio_16khz_mono(")
+            .next()
+            .unwrap();
+        assert!(!body.contains(".set_audio_ctx("));
     }
 
     #[test]

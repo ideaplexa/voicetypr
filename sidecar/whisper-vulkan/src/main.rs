@@ -389,6 +389,8 @@ fn transcribe_with_context(
         beam_size: 5,
         patience: -1.0,
     });
+    // Leave audio_ctx unset: whisper.cpp uses the model's full context.
+    // Explicit overrides are routed to the in-process decoder by the host.
 
     let final_language = match language {
         Some("auto") | None => Some("en"),

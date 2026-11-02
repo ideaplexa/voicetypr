@@ -1,5 +1,10 @@
 # Plan 044 — Whisper WER-gated wins (adaptive audio_ctx + speed mode)
 
+> **Superseded (beta 5):** adaptive audio context is no longer the default.
+> A real German speech clip repeated its whole sentence at ctx=512 despite the
+> synthetic gate below. All paths now use stock full context unless explicitly
+> overridden; speed mode remains opt-in. The plan and outcome below are historical.
+
 > Authored from `docs/review/grounding-whisper-wins.md` (ultracode 2026-07-03).
 > ⚠️ The file:line refs in this plan are APPROXIMATE ANCHORS captured before slice
 > 045; the actual sites drift ~15-25 lines. Codex MUST locate each site by the

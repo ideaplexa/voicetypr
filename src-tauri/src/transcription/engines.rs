@@ -75,6 +75,13 @@ pub(crate) async fn transcription_acceleration_mode(app: &AppHandle) -> String {
     DEFAULT_TRANSCRIPTION_ACCELERATION.to_string()
 }
 
+// The Vulkan protocol has no context override; explicit overrides must go to
+// the in-process decoder instead of being silently ignored.
+#[cfg(any(target_os = "windows", test))]
+fn use_whisper_vulkan(mode: &str, audio_ctx: Option<i32>) -> bool {
+    mode != "cpu" && audio_ctx.is_none()
+}
+
 // TODO(arch-review): collapse into a request struct when the whisper dispatch
 // seam is restructured (audio_ctx/speed-mode params pushed this over 8 args).
 #[allow(clippy::too_many_arguments)]
@@ -103,7 +110,7 @@ where
     let mut preserve_gpu_status = false;
 
     #[cfg(target_os = "windows")]
-    if mode != "cpu" && audio_ctx.is_none() {
+    if use_whisper_vulkan(&mode, audio_ctx) {
         if should_cancel() {
             return Err("Transcription cancelled".to_string());
         }
@@ -407,8 +414,17 @@ pub(crate) async fn resolve_engine_for_model(
 mod tests {
     use super::{
         parakeet_segments_to_transcription_segments, should_use_active_remote,
-        transcription_watchdog_budget, ActiveEngineSelection,
+        transcription_watchdog_budget, use_whisper_vulkan, ActiveEngineSelection,
     };
+
+    #[test]
+    fn vulkan_uses_default_context_and_override_uses_in_process_decoder() {
+        assert!(use_whisper_vulkan("auto", None));
+        assert!(use_whisper_vulkan("gpu", None));
+        assert!(!use_whisper_vulkan("cpu", None));
+        assert!(!use_whisper_vulkan("auto", Some(512)));
+        assert!(!use_whisper_vulkan("gpu", Some(512)));
+    }
 
     #[test]
     fn parakeet_sidecar_segments_keep_their_times() {

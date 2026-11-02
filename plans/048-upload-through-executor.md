@@ -18,7 +18,8 @@
 - `EngineSelection` (request.rs:36), `TimeoutPolicy` (:46), `CleanupPolicy` (:29).
 - `transcribe_with_app` (executor.rs:50) → `route_once` (:176) → `run_with_policy` (:307).
   route_once's Whisper arm calls `transcribe_whisper_with_acceleration(..., None, None, …)`
-  — passing `None` for audio_ctx and speed_mode_override today (adaptive default + settings).
+  — passing `None` for audio_ctx and speed_mode_override (stock full context + settings;
+  adaptive ctx was reverted after real speech repeated at 512).
 - Upload: `transcribe_audio_file_impl` (audio.rs:6485), match at :6588 with Whisper/
   Parakeet/Cloud/Remote arms using the Wave-0 timeout wrappers. It threads the CLI's
   `audio_ctx: Option<i32>` and `speed_mode_override: Option<bool>` into the whisper arm.

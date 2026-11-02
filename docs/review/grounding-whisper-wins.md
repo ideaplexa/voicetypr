@@ -26,6 +26,10 @@
 
 ## 2. Length-adaptive audio_ctx default: exact sites
 
+**Historical proposal, superseded in beta 5:** adaptive context repeated a whole
+sentence on real German speech at 512. The default is stock full context again;
+explicit overrides remain supported.
+
 **Plumbing today:** `audio_ctx: Option<i32>` exists end-to-end from plan 032 but is only ever `Some` from the CLI: cli.rs:103 (`--audio-ctx`) → cli.rs:442 → `transcribe_audio_file_for_cli` audio.rs:6591 → `transcribe_audio_file_impl` audio.rs:6728 → `transcribe_whisper_with_acceleration` audio.rs:1596-1603 → `transcribe_with_metadata_with_prompt` transcriber.rs:298 → `params.set_audio_ctx()` transcriber.rs:586-589 (binding verified: whisper-rs `whisper_params.rs:252`). The three product paths pass `None`: executor.rs:197 (desktop recording), audio.rs:7082 (audio bytes), remote/transcription.rs:398 (remote host).
 
 **Primary site — the SHARED layer** (same reasoning as plan 032: CLI, GUI executor, upload, and remote host all funnel through the transcriber): `transcriber.rs`, immediately after `resampled_audio` exists and duration is known. Concretely:

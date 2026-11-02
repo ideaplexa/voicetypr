@@ -674,28 +674,9 @@ impl Transcriber {
 
         params.set_initial_prompt(initial_prompt.unwrap_or(""));
 
-        let effective_audio_ctx = audio_ctx.or_else(|| adaptive_audio_ctx(samples_count));
-        match (audio_ctx, effective_audio_ctx) {
-            (Some(custom_ctx), _) => {
-                log::info!(
-                    "[PERFORMANCE] Using custom Whisper audio_ctx={}",
-                    custom_ctx
-                );
-            }
-            (None, Some(adaptive_ctx)) => {
-                log::info!(
-                    "[PERFORMANCE] Using adaptive Whisper audio_ctx={} for {:.2}s audio",
-                    adaptive_ctx,
-                    duration_seconds
-                );
-            }
-            (None, None) => {
-                log::info!("[PERFORMANCE] Using full Whisper audio context");
-            }
-        }
-        if let Some(effective_audio_ctx) = effective_audio_ctx {
-            params.set_audio_ctx(effective_audio_ctx);
-        }
+        // Even a 512-position context repeated a complete sentence on real speech.
+        // Keep whisper.cpp's full model context unless explicitly overridden.
+        apply_audio_ctx_override(audio_ctx, |ctx| params.set_audio_ctx(ctx));
 
         params.set_temperature(if self.cpu_profile { 0.0 } else { 0.2 });
         params.set_temperature_inc(0.2); // Increase by 0.2 on fallback (default)
@@ -902,29 +883,12 @@ fn whisper_centiseconds_to_ms(centiseconds: i64) -> Option<u64> {
         .and_then(|value| value.checked_mul(10))
 }
 
-fn adaptive_audio_ctx(samples: usize) -> Option<i32> {
-    const SAMPLE_RATE: usize = 16_000;
-    const POSITIONS_PER_SECOND: usize = 50;
-    const TAIL_PAD_POSITIONS: usize = 50;
-    const CONTEXT_MULTIPLE: usize = 64;
-    // Floor raised 256 -> 512 after the WER gate caught a repetition hallucination
-    // at ctx=256 on short clips (e.g. de-2s duplicated the whole sentence); ctx>=384
-    // is clean, 512 gives margin. Still ~2.5-4x faster than the full 1500 window.
-    const MIN_CONTEXT: usize = 512;
-    const FULL_CONTEXT_THRESHOLD: usize = 1_500;
-
-    let positions = samples
-        .saturating_mul(POSITIONS_PER_SECOND)
-        .saturating_add(SAMPLE_RATE - 1)
-        / SAMPLE_RATE;
-    let needed = positions.saturating_add(TAIL_PAD_POSITIONS);
-    let rounded = needed.saturating_add(CONTEXT_MULTIPLE - 1) / CONTEXT_MULTIPLE * CONTEXT_MULTIPLE;
-    let ctx = rounded.max(MIN_CONTEXT);
-
-    if ctx >= FULL_CONTEXT_THRESHOLD {
-        None
+fn apply_audio_ctx_override(audio_ctx: Option<i32>, mut set_audio_ctx: impl FnMut(i32)) {
+    if let Some(ctx) = audio_ctx {
+        log::info!("[PERFORMANCE] Using custom Whisper audio_ctx={ctx}");
+        set_audio_ctx(ctx);
     } else {
-        Some(ctx as i32)
+        log::info!("[PERFORMANCE] Using full Whisper audio context");
     }
 }
 
@@ -1002,34 +966,51 @@ fn convert_multichannel_to_mono(audio: &[f32], channels: usize) -> Result<Vec<f3
 }
 
 #[cfg(test)]
-mod adaptive_audio_ctx_tests {
-    use super::adaptive_audio_ctx;
-
-    const SAMPLE_RATE: usize = 16_000;
-
-    #[test]
-    fn adaptive_audio_ctx_uses_floor_for_very_short_audio() {
-        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE), Some(512));
-        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 2), Some(512));
-    }
-
-    #[test]
-    fn adaptive_audio_ctx_rounds_up_with_tail_pad() {
-        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 5), Some(512)); // floored
-        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 27), Some(1408));
-    }
-
-    #[test]
-    fn adaptive_audio_ctx_keeps_full_context_for_long_audio() {
-        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 30), None);
-        assert_eq!(adaptive_audio_ctx(SAMPLE_RATE * 60), None);
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn audio_context_setter_is_only_called_for_explicit_override() {
+        let mut calls = Vec::new();
+        apply_audio_ctx_override(None, |ctx| calls.push(ctx));
+        assert!(calls.is_empty());
+        apply_audio_ctx_override(Some(512), |ctx| calls.push(ctx));
+        assert_eq!(calls, [512]);
+    }
+
+    #[test]
+    #[ignore = "requires local large-v3-turbo model and real German audio fixture"]
+    fn real_german_speech_does_not_repeat_at_default_context() {
+        let model = std::env::var_os("VOICETYPR_TEST_WHISPER_MODEL")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                dirs::data_dir()
+                    .map(|p| p.join("com.ideaplexa.voicetypr/models/large-v3-turbo.bin"))
+            });
+        let fixture = std::env::var_os("VOICETYPR_TEST_AUDIO_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| "/Volumes/1tb-drive/developer/oss/voicetypr-test-audio/de".into())
+            .join("thorsten-00008.wav");
+        let Some(model) = model.filter(|path| path.is_file()) else {
+            eprintln!("Skipping: large-v3-turbo model not found");
+            return;
+        };
+        if !fixture.is_file() {
+            eprintln!("Skipping: real German fixture not found");
+            return;
+        }
+        let transcriber = Transcriber::new(&model, false).unwrap();
+        let output = transcriber
+            .transcribe_with_metadata_with_prompt(&fixture, Some("de"), false, None, None, || false)
+            .unwrap();
+        let text = output.raw_text.to_lowercase();
+        assert_eq!(
+            text.matches("mueslis").count() + text.matches("müslis").count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(text.matches(['.', '!', '?']).count(), 1, "{text}");
+    }
     #[test]
     fn whisper_centiseconds_convert_to_milliseconds() {
         assert_eq!(whisper_centiseconds_to_ms(0), Some(0));
