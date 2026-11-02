@@ -8764,6 +8764,7 @@ pub async fn clear_all_transcriptions(app: AppHandle) -> Result<(), String> {
 pub struct RecordingStateResponse {
     state: String,
     error: Option<String>,
+    generation: u64,
 }
 
 #[tauri::command]
@@ -8782,6 +8783,7 @@ pub fn get_current_recording_state(app: AppHandle) -> RecordingStateResponse {
         }
         .to_string(),
         error: None,
+        generation: current_recording_generation(),
     }
 }
 

@@ -21,10 +21,7 @@ export interface PillSettings {
   ptt_hotkey?: string;
   recording_mode?: string;
 }
-export interface RecordingStatePayload {
-  state: 'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'error';
-  error: string | null;
-}
+export type { RecordingStatePayload } from '@/types';
 /** Future slice actions are capabilities, never buttons that invoke missing commands. */
 export interface IslandActions {
   start(): Promise<unknown>;

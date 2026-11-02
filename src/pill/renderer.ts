@@ -363,9 +363,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, kind === 'error' ? 1500 : kind === 'too_short' ? 1400 : 30000); sync();
   };
   /** Keypress: Starting was published, the mic is not open yet. Show the idle listening layout at 0:00. */
-  const starting = () => {
+  const starting = (generation?: number) => {
     if (machine.recording) return;
-    stack.resolveMicStatus('new_take');
+    if (generation !== undefined && !machine.observeGeneration(generation)) return;
+    stack.resolveMicStatus('new_take', generation);
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
       const permission=machine.state==='no_permission';
@@ -373,24 +374,25 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     }
     pick = undefined;
     stack.tuck(true);
-    if (!machine.arm(performance.now())) return;
+    if (!machine.arm(performance.now(), generation)) return;
     timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
     sync();
     perf?.begin();
   };
-  const start = () => {
+  const start = (generation?: number) => {
     if (machine.pending) {
       // Recording began. Clock and bars go live from here; a context that already arrived keeps its start card.
-      if (!machine.start(performance.now())) return;
-      stack.resolveMicStatus('recording');
+      if (!machine.start(performance.now(), generation)) return;
+      stack.resolveMicStatus('recording', generation);
       glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
       if (machine.state === 'start') foldStart();
       sync();
       return;
     }
     if (machine.recording) return;
-    stack.resolveMicStatus('new_take');
-    stack.resolveMicStatus('recording');
+    if (generation !== undefined && !machine.observeGeneration(generation)) return;
+    stack.resolveMicStatus('new_take', generation);
+    stack.resolveMicStatus('recording', generation);
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
       const permission=machine.state==='no_permission';
@@ -398,7 +400,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     }
     pick = undefined;
     stack.tuck(true);
-    if (!machine.start(performance.now())) return;
+    if (!machine.start(performance.now(), generation)) return;
     timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; announce('');
     if (machine.state === 'start') foldStart(); sync();
     perf?.begin();
@@ -562,14 +564,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     blocked(value: DictationBlocked) { if (machine.observeGeneration(value.generation)) this.feedback(blockedCard(value,deps.mac),value.kind !== 'starting_up',!(value.kind==='accessibility_off' && machine.state==='no_permission')); },
     recovery(value: DictationRecovery) { if (machine.observeGeneration(value.generation)) this.feedback(recoveryCard(value,performance.now())); },
     withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },
-    note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.generation)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
+    note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.takeGeneration)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
     tooShort(value: RecordingTooShort) { if (machine.observeGeneration(value.generation)) this.feedback(shortCard(value)); },
     notice(value: IslandNotice) {
       if (value.kind === "long_silence" && !machine.recording) return;
       if(value.kind==='finishing' && machine.processing) {
         finishing=true;if(finishingTimer!==undefined)deps.clearTimeout(finishingTimer);
         finishingTimer=deps.setTimeout(()=>{finishingTimer=undefined;finishing=false;sync();},600);sync();
-      } else this.feedback(value.kind === "long_silence" && machine.recording ? {...noticeCard(value),liveGeneration:machine.generation} : noticeCard(value),false);
+      } else this.feedback(value.kind === "long_silence" && machine.recording ? {...noticeCard(value),liveGeneration:machine.takeGeneration} : noticeCard(value),false);
     },
     expired(id: string) { stack.remove(`recovery:${id}`); },
     clearNotice(kind: IslandNotice['kind']) { stack.remove(`notice:${kind}`); },

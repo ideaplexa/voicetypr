@@ -7,6 +7,9 @@ export class IslandMachine {
   state: IslandState = 'rest';
   context = emptyContext();
   generation = 0;
+  /** State events identify the take before its asynchronous context arrives. */
+  activeTakeGeneration: number | undefined;
+  get takeGeneration() { return this.activeTakeGeneration ?? this.generation; }
   private consumedContext = 0;
   private observedGeneration = 0;
   committed = '';
@@ -55,20 +58,26 @@ export class IslandMachine {
     this.observedGeneration = generation; return true;
   }
   /** Show the island on keypress. The take is live only once `start` confirms it. */
-  arm(now: number) {
+  arm(now: number, generation?: number) {
     if (this.recording) return false;
+    if (generation !== undefined && !this.observeGeneration(generation)) return false;
+    this.activeTakeGeneration = generation;
     this.clearStream(); this.words = 0;
     this.startedAt = now; this.frozenSeconds = 0;
     this.state = 'listening'; this.pending = true;
     return true;
   }
-  start(now: number) {
+  start(now: number, generation?: number) {
     if (this.pending) {
+      if (generation !== undefined && (this.activeTakeGeneration !== undefined && generation !== this.activeTakeGeneration || !this.observeGeneration(generation))) return false;
+      if (generation !== undefined) this.activeTakeGeneration = generation;
       // Recording began: the clock and the bars start now, not at the keypress.
       this.pending = false; this.startedAt = now; this.frozenSeconds = 0;
       return true;
     }
     if (this.recording) return false;
+    if (generation !== undefined && !this.observeGeneration(generation)) return false;
+    this.activeTakeGeneration = generation;
     this.clearStream(); this.words = 0;
     this.startedAt = now; this.frozenSeconds = 0;
     this.state = this.context.generation > this.consumedContext && this.context.show_start_card ? 'start' : 'listening';

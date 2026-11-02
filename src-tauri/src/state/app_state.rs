@@ -220,6 +220,7 @@ pub fn update_recording_state(
     error: Option<String>,
 ) {
     let app_state = app.state::<AppState>();
+    let generation = crate::commands::audio::current_recording_generation();
 
     let final_state =
         match app_state
@@ -265,8 +266,20 @@ pub fn update_recording_state(
             }
         };
 
-    let payload = serde_json::json!({
-        "state": match final_state {
+    let payload = recording_state_payload(final_state, error, generation);
+
+    crate::perf::on_state(final_state);
+    crate::menu::runtime::recording_changed(app, final_state);
+    let _ = app.emit("recording-state-changed", payload);
+}
+
+fn recording_state_payload(
+    state: RecordingState,
+    error: Option<String>,
+    generation: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "state": match state {
             RecordingState::Idle => "idle",
             RecordingState::Starting => "starting",
             RecordingState::Recording => "recording",
@@ -274,12 +287,9 @@ pub fn update_recording_state(
             RecordingState::Transcribing => "transcribing",
             RecordingState::Error => "error",
         },
-        "error": error
-    });
-
-    crate::perf::on_state(final_state);
-    crate::menu::runtime::recording_changed(app, final_state);
-    let _ = app.emit("recording-state-changed", payload);
+        "error": error,
+        "generation": generation,
+    })
 }
 
 /// Helper function to get current recording state
@@ -333,6 +343,18 @@ pub async fn flush_pill_event_queue(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod app_context_tests {
     use super::*;
+    #[test]
+    fn recording_state_events_include_the_take_before_context_is_ready() {
+        for (state, name) in [
+            (RecordingState::Starting, "starting"),
+            (RecordingState::Recording, "recording"),
+        ] {
+            assert_eq!(
+                recording_state_payload(state, None, 42),
+                serde_json::json!({"state": name, "error": null, "generation": 42})
+            );
+        }
+    }
     #[test]
     fn clear_before_failed_capture_cannot_reuse_previous_app() {
         let state = AppState::new();
