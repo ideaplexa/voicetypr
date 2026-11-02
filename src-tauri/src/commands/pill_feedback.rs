@@ -1,5 +1,5 @@
 //! Terminal window lifetime, separate from text delivery and its latency.
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -157,6 +157,7 @@ mod tests {
 
     #[test]
     fn withdrawal_retires_only_the_matching_queued_live_note() {
+        let owned = AtomicBool::new(true);
         let mut queued = vec![
             (
                 "dictation-note",
@@ -175,19 +176,47 @@ mod tests {
                 serde_json::json!({"generation":7,"id":"kept"}),
             ),
         ];
-        withdraw_queued_live_mic_silent(&mut queued, 6);
+        withdraw_queued_live_mic_silent(&mut queued, 6, false, &owned);
         assert_eq!(queued.len(), 4);
-        withdraw_queued_live_mic_silent(&mut queued, 7);
+        withdraw_queued_live_mic_silent(&mut queued, 7, false, &owned);
         assert_eq!(queued.len(), 3);
         assert_eq!(queued[0].1["generation"], 8);
         assert_eq!(queued[1].1["kind"], "mic_silent");
         assert_eq!(queued[2].1["id"], "kept");
+        assert!(owned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn last_queued_warning_releases_pre_ready_but_not_renderer_ownership() {
+        for ready in [false, true] {
+            let owned = AtomicBool::new(true);
+            let mut queued = vec![(
+                "dictation-note",
+                serde_json::json!({"generation":7,"kind":"mic_silent_live"}),
+            )];
+            withdraw_queued_live_mic_silent(&mut queued, 7, ready, &owned);
+            assert!(queued.is_empty());
+            assert_eq!(owned.load(Ordering::SeqCst), ready);
+            // The normal terminal-hide guard is no longer suppressed before readiness.
+            assert_eq!(
+                !owned.load(Ordering::SeqCst) && hide_is_current(Some(7), 7, 7),
+                !ready
+            );
+        }
+    }
+
+    #[test]
+    fn unmatched_withdrawal_does_not_release_other_feedback_ownership() {
+        let owned = AtomicBool::new(true);
+        let mut queued = Vec::new();
+        withdraw_queued_live_mic_silent(&mut queued, 7, false, &owned);
+        assert!(owned.load(Ordering::SeqCst));
     }
 }
 
 // Feedback owns the reused, non-activating panel across idle transitions.
-static FEEDBACK_OWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static FEEDBACK_OWNED: AtomicBool = AtomicBool::new(false);
+static READY: AtomicBool = AtomicBool::new(false);
 static QUEUED: Mutex<Vec<(&'static str, serde_json::Value)>> = Mutex::new(Vec::new());
 pub(crate) fn release_feedback_ownership() {
     FEEDBACK_OWNED.store(false, Ordering::SeqCst);
@@ -201,18 +230,29 @@ pub(crate) fn feedback_owned() -> bool {
 fn withdraw_queued_live_mic_silent(
     queued: &mut Vec<(&'static str, serde_json::Value)>,
     generation: u64,
+    ready: bool,
+    owned: &AtomicBool,
 ) {
+    let before = queued.len();
     queued.retain(|(event, payload)| {
         *event != "dictation-note"
             || payload["generation"].as_u64() != Some(generation)
             || payload["kind"].as_str() != Some("mic_silent_live")
     });
+    if !ready && queued.len() < before && queued.is_empty() {
+        owned.store(false, Ordering::SeqCst);
+    }
 }
 /// A withdrawal cannot acquire feedback ownership or show/reposition the native panel.
 pub(crate) fn withdraw_live_mic_silent<R: tauri::Runtime>(app: &AppHandle<R>, generation: u64) {
     use tauri::Emitter;
     let mut queued = QUEUED.lock().unwrap();
-    withdraw_queued_live_mic_silent(&mut queued, generation);
+    withdraw_queued_live_mic_silent(
+        &mut queued,
+        generation,
+        READY.load(Ordering::SeqCst),
+        &FEEDBACK_OWNED,
+    );
     let _ = app.emit_to(
         "pill",
         "dictation-note-withdraw",
@@ -228,8 +268,9 @@ pub(crate) fn send<R: tauri::Runtime>(
     if app.try_state::<crate::AppState>().is_some() && pill_mode(app) == "never" {
         return;
     }
-    FEEDBACK_OWNED.store(true, Ordering::SeqCst);
     let mut queued = QUEUED.lock().unwrap();
+    // Serialize ownership with pre-ready withdrawal so a waiting send cannot lose its claim.
+    FEEDBACK_OWNED.store(true, Ordering::SeqCst);
     if READY.load(Ordering::SeqCst) || app.try_state::<crate::AppState>().is_none() {
         let _ = app.emit_to("pill", event, payload);
     } else {
