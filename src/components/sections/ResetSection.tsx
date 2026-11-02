@@ -12,6 +12,12 @@ import { SettingsPaneCard, SettingsPaneRow } from "@/components/settings/setting
 
 const log = createLogger("reset-settings");
 
+interface ResetResult {
+  success: boolean;
+  errors: string[];
+  cleared_items: string[];
+}
+
 export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
   const { updateSettings } = useSettings();
   const [isResetting, setIsResetting] = useState(false);
@@ -41,7 +47,12 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
 
     setIsResetting(true);
     try {
-      await invoke("reset_app_data");
+      const result = await invoke<ResetResult>("reset_app_data");
+      if (!result.success) {
+        toast.error("Reset could not remove everything. Please try again.");
+        setIsResetting(false);
+        return;
+      }
       toast.success("App data reset successfully. Restarting...");
       setTimeout(() => {
         void relaunch();

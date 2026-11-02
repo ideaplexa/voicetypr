@@ -1,9 +1,9 @@
 # AI provider catalog — source & refresh
 
 - Upstream: https://models.dev/api.json (MIT)
-- Fetched: 2026-10-03
-- Projected snapshot SHA256: 3e83335a8143df2043a2f07c98d0a68f7c90089f785202b8728e1c8e5a9d2b79
-- Providers: 4 | text->text models: 70 (anthropic 16, gemini 17, openai 33, openrouter 4)
+- Fetched: 2026-10-03; merged 2026-10-10 effort metadata and Claude Haiku 5.5 from stable
+- Projected snapshot SHA256: 8c2960cce6857956cd9823589be557aeb8b54365a395a47c623aa0458953130f
+- Providers: 4 | text->text models: 71 (anthropic 17, gemini 17, openai 33, openrouter 4)
 
 ## Deterministic filter (plan 017, STOP-1 tighter rule)
 A provider is in the catalog IFF it has an entry in `overlay.json` mapping it to
@@ -46,3 +46,30 @@ Never fetched at app runtime.
 - openai: `text-embedding-3-large`
 - openai: `text-embedding-3-small`
 - openai: `text-embedding-ada-002`
+
+## Native request contracts
+
+- Effort choices are capped to `none`, `minimal`, `low`, `medium`, `high`.
+  Effort options intersect that ladder; toggles add `none`; budget-only options
+  expose low/medium/high, with `none` when toggled or their minimum is zero.
+  Saved choices resolve to the selected level, medium, the highest level below
+  medium, then the lowest supported level, in that order.
+- Native OpenAI uses Responses with `store: false`. Fast requests use
+  `service_tier: "fast"` ([OpenAI fast mode](https://openai.com/api-fast-mode)).
+- New Claude families use raw Messages with `output_config.effort` and adaptive
+  thinking. Toggle `none` disables thinking and omits effort. Sonnet 5.5's
+  below-low request uses `between_tools`, not disabled thinking, as documented
+  in the [thinking configuration table](https://platform.claude.com/docs/en/build-with-claude/thinking).
+  Fast Opus models add `speed: "fast"` and `anthropic-beta: fast-mode-2026-02-01`
+  ([Claude fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)).
+- Gemini 2.5 `none` uses an explicit zero budget: genai's `None` variant omits
+  thinking configuration and does not disable it. Legacy medium/high budgets
+  are 8000/24000 tokens; max output includes a larger thinking allowance and is
+  clamped to the catalog output limit.
+- Key validation uses the provider default at its lowest supported effort and
+  standard speed, without modifying preferences. Retired native selections
+  migrate to the provider default instead of requiring reselection.
+
+Main-line model recommendations and specialist/deprecated exclusions are preserved.
+CLI defaults remain Sonnet/low for Claude, CLI-owned models/thinking-off for pi/omp,
+and GPT-6 Luna/medium/Fast for Codex; stable defaults do not override them.

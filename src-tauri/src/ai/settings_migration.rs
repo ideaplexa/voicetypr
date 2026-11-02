@@ -45,10 +45,51 @@ pub(crate) fn migrate_ai_settings_before_key_cache<R: tauri::Runtime>(app: &taur
     }
 }
 
+const REMOVED_AGENT_CLI_PROVIDERS: [&str; 4] = ["cline", "droid", "grok", "cursor"];
+
+fn migrate_removed_agent_cli_provider(
+    values: &mut serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let Some(old) = values
+        .get("ai_provider")
+        .and_then(|value| value.as_str())
+        .filter(|provider| REMOVED_AGENT_CLI_PROVIDERS.contains(provider))
+        .map(str::to_string)
+    else {
+        return false;
+    };
+    let claude_model = match values
+        .get_mut("ai_models_by_provider")
+        .and_then(|value| value.as_object_mut())
+    {
+        Some(models) => {
+            for removed in REMOVED_AGENT_CLI_PROVIDERS {
+                models.remove(removed);
+            }
+            models
+                .get(crate::ai::providers::PROVIDER_CLAUDE_CODE)
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string()
+        }
+        None => String::new(),
+    };
+    values.insert(
+        "ai_provider".to_string(),
+        serde_json::Value::String(crate::ai::providers::PROVIDER_CLAUDE_CODE.to_string()),
+    );
+    values.insert(
+        "ai_model".to_string(),
+        serde_json::Value::String(claude_model),
+    );
+    log::info!("Polish provider {old} was removed; switched to Claude Code");
+    true
+}
+
 pub(crate) fn migrate_ai_settings_values(
     values: &mut serde_json::Map<String, serde_json::Value>,
 ) -> bool {
-    let mut changed = false;
+    let mut changed = migrate_removed_agent_cli_provider(values);
 
     let provider = values
         .get("ai_provider")
@@ -83,6 +124,25 @@ pub(crate) fn migrate_ai_settings_values(
                 models.insert("gemini".to_string(), google_model);
             }
             changed = true;
+        }
+    }
+
+    if let Some(models) = values
+        .get_mut("ai_models_by_provider")
+        .and_then(|v| v.as_object_mut())
+    {
+        for (provider, saved) in models.iter_mut() {
+            if crate::ai::catalog::is_native_provider(provider) {
+                if let Some(model) = saved
+                    .as_str()
+                    .and_then(|model| crate::ai::catalog::resolve_model(provider, model))
+                {
+                    if saved.as_str() != Some(model.as_str()) {
+                        *saved = serde_json::json!(model);
+                        changed = true;
+                    }
+                }
+            }
         }
     }
 
@@ -202,6 +262,65 @@ mod ai_settings_migration_tests {
         values.insert("ai_model".to_string(), json!(model));
         values.insert("ai_models_by_provider".to_string(), models);
         values
+    }
+
+    fn assert_removed_provider_migration(provider: &str) {
+        for enabled in [true, false] {
+            for saved_claude_model in ["", "claude-haiku-5-5"] {
+                let mut values = values_with_enabled(
+                    enabled,
+                    provider,
+                    "old-model",
+                    json!({
+                        "cline": "old-model",
+                        "droid": "old-model",
+                        "grok": "old-model",
+                        "cursor": "old-model",
+                        "claude-code": saved_claude_model,
+                        "codex": "keep-model"
+                    }),
+                );
+                assert!(migrate_ai_settings_values(&mut values), "{provider}");
+                assert_eq!(values["ai_provider"], json!("claude-code"), "{provider}");
+                assert_eq!(values["ai_model"], json!(saved_claude_model), "{provider}");
+                assert_eq!(values["ai_enabled"], json!(enabled), "{provider}");
+                assert_eq!(
+                    values["ai_models_by_provider"],
+                    json!({"claude-code": saved_claude_model, "codex": "keep-model"}),
+                    "{provider}"
+                );
+                assert_eq!(values.get("ai_model_needs_reselection"), None, "{provider}");
+                let first = values.clone();
+                assert!(!migrate_ai_settings_values(&mut values), "{provider}");
+                assert_eq!(values, first, "{provider}");
+            }
+        }
+        // No saved model map is also valid: Claude Code chooses its default.
+        let mut values = values(provider, "old-model", json!(null));
+        assert!(migrate_ai_settings_values(&mut values), "{provider}");
+        assert_eq!(values["ai_provider"], json!("claude-code"), "{provider}");
+        assert_eq!(values["ai_model"], json!(""), "{provider}");
+        assert_eq!(values["ai_enabled"], json!(true), "{provider}");
+    }
+
+    #[test]
+    fn migrates_removed_cline_provider() {
+        assert_removed_provider_migration("cline");
+    }
+
+    #[test]
+    fn migrates_removed_droid_provider() {
+        assert_removed_provider_migration("droid");
+    }
+
+    #[test]
+    fn migrates_removed_grok_provider() {
+        assert_removed_provider_migration("grok");
+    }
+
+    #[test]
+    fn migrates_removed_cursor_provider_defensively() {
+        assert_removed_provider_migration("cursor");
     }
 
     #[test]

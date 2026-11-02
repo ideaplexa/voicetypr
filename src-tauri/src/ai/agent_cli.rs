@@ -1,8 +1,7 @@
-//! Cold-spawn runtime for agent-CLI polish providers.
+//! Isolated, one-shot runtime for agent-CLI polish providers.
 //!
-//! Agent CLIs are deliberately launched as isolated, one-shot subprocesses.
-//! There is no warm-session manager: every request gets a fresh process and a
-//! fresh temporary working directory.
+//! Every request gets a fresh process and temporary working directory. Claude
+//! may consume a pre-spawned single-use spare; conversations are never reused.
 //!
 //! # Spawning model
 //!
@@ -34,16 +33,18 @@ use catalog_refresh::{
     apply_claude_effort_env, curated_claude_models, parse_omp_default_model,
     parse_pi_default_model, validate_discovered_selection,
 };
+mod hot_spare;
+use hot_spare::CLAUDE_SPARE;
+pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_spare_if_current};
 
 use super::contract::AiPolishRequest;
 use super::error::{AiProviderError, MappedAiProviderError};
 use super::providers::{
-    PROVIDER_CLAUDE_CODE, PROVIDER_CLINE, PROVIDER_CODEX, PROVIDER_DROID, PROVIDER_GROK,
-    PROVIDER_OMP, PROVIDER_OPENCODE, PROVIDER_PI,
+    PROVIDER_CLAUDE_CODE, PROVIDER_CODEX, PROVIDER_OMP, PROVIDER_OPENCODE, PROVIDER_PI,
 };
 use command_group::{AsyncCommandGroup, AsyncGroupChild};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(any(unix, test))]
 use std::ffi::OsStr;
 use std::ffi::OsString;
@@ -78,7 +79,13 @@ fn cold_spawn_timeout(provider: &str) -> Duration {
 const MAX_CAPTURE_BYTES: usize = 128 * 1024;
 const MAX_CLI_ERROR_CHARS: usize = 200;
 
-const OPENCODE_ISOLATION_CONFIG: &str = r#"{"permission":"deny"}"#;
+/// `ask` keeps OpenCode's toolset declared but auto-rejects every tool action
+/// in non-interactive runs; `deny` would also work but makes OpenCode refuse
+/// its free models ("free tier can only be used from within OpenCode").
+const OPENCODE_ISOLATION_CONFIG: &str = r#"{"permission":"ask"}"#;
+/// OpenCode 2.x has no `--pure`; the `integration.use` policy keeps every
+/// plugin, MCP server, and skill unloaded.
+const OPENCODE_V2_ISOLATION_CONFIG: &str = r#"{"permission":"ask","policies":[{"action":"integration.use","resource":"*","effect":"deny"}]}"#;
 
 struct AgentCliSpec {
     #[allow(dead_code)]
@@ -109,6 +116,11 @@ enum ReasoningPolicy {
         default: &'static str,
     },
     ClaudeEffortLowIfSupported,
+    /// Appended to the selected model as `provider/model#level`; omitted
+    /// with no explicit model or at `off`.
+    ModelVariantSuffix {
+        default: &'static str,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,12 +134,12 @@ enum SystemPromptPolicy {
 enum InputMode {
     Stdin,
     PositionalArg,
-    FlagValue(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputParser {
-    ClaudeJson,
+    /// `{type:"result", is_error, result}` from claude's `--output-format json`.
+    ResultJson,
     CodexJsonl,
     PiJsonl,
     PlainText,
@@ -137,6 +149,7 @@ enum OutputParser {
 struct ClaudeCapabilities {
     safe_mode: bool,
     effort: bool,
+    disable_slash_commands: bool,
 }
 
 const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
@@ -153,13 +166,12 @@ const CLAUDE_CODE_SPEC: AgentCliSpec = AgentCliSpec {
         "--no-session-persistence",
     ],
     required_capability_flags: &["--no-session-persistence"],
-    // Sonnet 5.5: best measured Polish quality and lowest latency (plan 081 baseline, 2026-10-03).
     default_model: Some("sonnet"),
     model_flag: Some("--model"),
     reasoning: ReasoningPolicy::ClaudeEffortLowIfSupported,
     system_prompt: SystemPromptPolicy::Flag("--system-prompt"),
     input_mode: InputMode::Stdin,
-    output: OutputParser::ClaudeJson,
+    output: OutputParser::ResultJson,
     static_env: &[],
 };
 
@@ -290,67 +302,6 @@ const CODEX_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[],
 };
 
-const DROID_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_DROID,
-    binary: "droid",
-    help_argv: &["exec", "--help"],
-    cold_argv_prefix: &["exec", "--output-format", "text"],
-    cold_argv_suffix: &[],
-    required_isolation_args: &["--restrict-tools", "TodoWrite", "--disable-builtin-skills"],
-    required_capability_flags: &[
-        "--restrict-tools",
-        "--disable-builtin-skills",
-        "--output-format",
-    ],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--reasoning-effort",
-        default: "low",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--append-system-prompt"),
-    input_mode: InputMode::PositionalArg,
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
-const GROK_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_GROK,
-    binary: "grok",
-    help_argv: &["--help"],
-    cold_argv_prefix: &[],
-    cold_argv_suffix: &[],
-    required_isolation_args: &[
-        "--no-memory",
-        "--no-subagents",
-        "--disable-web-search",
-        "--tools",
-        "",
-        "--no-plan",
-        "--verbatim",
-    ],
-    required_capability_flags: &[
-        "--single",
-        "--no-memory",
-        "--no-subagents",
-        "--disable-web-search",
-        "--tools",
-        "--system-prompt-override",
-    ],
-    default_model: None,
-    model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--reasoning-effort",
-        default: "low",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--system-prompt-override"),
-    input_mode: InputMode::FlagValue("--single"),
-    output: OutputParser::PlainText,
-    static_env: &[],
-};
-
 const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     provider_id: PROVIDER_OPENCODE,
     binary: "opencode",
@@ -372,37 +323,42 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)],
 };
 
-const CLINE_SPEC: AgentCliSpec = AgentCliSpec {
-    provider_id: PROVIDER_CLINE,
-    binary: "cline",
-    help_argv: &["--help"],
-    cold_argv_prefix: &[],
+/// OpenCode 2.x (`@opencode/cli`). `--standalone` runs a private server so
+/// Polish never uses or starts the user's shared background service.
+const OPENCODE_V2_SPEC: AgentCliSpec = AgentCliSpec {
+    provider_id: PROVIDER_OPENCODE,
+    binary: "opencode",
+    help_argv: &["run", "--help"],
+    cold_argv_prefix: &["run", "--standalone"],
     cold_argv_suffix: &[],
-    required_isolation_args: &[
-        "--auto-approve",
-        "false",
-        "--timeout",
-        "9",
-        "--retries",
-        "1",
-        "--compaction",
-        "off",
-        "--hooks-dir",
-        ".",
-    ],
-    required_capability_flags: &["--auto-approve", "--timeout", "--system", "--hooks-dir"],
+    required_isolation_args: &[],
+    required_capability_flags: &["--standalone", "--model"],
     default_model: None,
     model_flag: Some("--model"),
-    reasoning: ReasoningPolicy::Flag {
-        flag: "--thinking",
-        default: "low",
-        omit_off: false,
-    },
-    system_prompt: SystemPromptPolicy::Flag("--system"),
+    reasoning: ReasoningPolicy::ModelVariantSuffix { default: "low" },
+    system_prompt: SystemPromptPolicy::None,
     input_mode: InputMode::PositionalArg,
     output: OutputParser::PlainText,
-    static_env: &[],
+    static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_V2_ISOLATION_CONFIG)],
 };
+
+/// Pick the spec whose required flags the probed help advertises. OpenCode
+/// 1.x and 2.x ship the same `opencode` binary and `run --help` probe.
+fn compatible_spec(spec: &'static AgentCliSpec, help: &[u8]) -> Option<&'static AgentCliSpec> {
+    if required_capabilities_present(spec, help) {
+        Some(spec)
+    } else if spec.provider_id == PROVIDER_OPENCODE && is_opencode_v2(help) {
+        Some(&OPENCODE_V2_SPEC)
+    } else {
+        None
+    }
+}
+
+/// OpenCode 2.x dropped `--pure`/`--variant` and added `--standalone`.
+fn is_opencode_v2(help: &[u8]) -> bool {
+    !required_capabilities_present(&OPENCODE_SPEC, help)
+        && required_capabilities_present(&OPENCODE_V2_SPEC, help)
+}
 
 fn spec_for(provider_id: &str) -> Option<&'static AgentCliSpec> {
     match provider_id {
@@ -410,10 +366,7 @@ fn spec_for(provider_id: &str) -> Option<&'static AgentCliSpec> {
         PROVIDER_PI => Some(&PI_SPEC),
         PROVIDER_OMP => Some(&OMP_SPEC),
         PROVIDER_CODEX => Some(&CODEX_SPEC),
-        PROVIDER_DROID => Some(&DROID_SPEC),
-        PROVIDER_GROK => Some(&GROK_SPEC),
         PROVIDER_OPENCODE => Some(&OPENCODE_SPEC),
-        PROVIDER_CLINE => Some(&CLINE_SPEC),
         _ => None,
     }
 }
@@ -482,6 +435,10 @@ fn cold_argv_for_model_with_options(
         } else {
             argv.extend(["--setting-sources", ""].into_iter().map(str::to_string));
         }
+        // Disable skills without --bare, which breaks subscription login.
+        if capabilities.disable_slash_commands {
+            argv.push("--disable-slash-commands".to_string());
+        }
     }
 
     if fast_mode {
@@ -504,13 +461,29 @@ fn cold_argv_for_model_with_options(
         }
     }
 
+    let valid_level = requested_reasoning.and_then(|level| match level {
+        "off" | "low" | "medium" => Some(level),
+        "minimal" if supports_minimal_thinking(spec) => Some("minimal"),
+        "high" => Some("medium"),
+        _ => None,
+    });
+
     let model = if selected_model.trim().is_empty() {
         spec.default_model.unwrap_or_default()
     } else {
         selected_model
     };
     if let Some(model_flag) = spec.model_flag.filter(|_| !model.is_empty()) {
-        argv.extend([model_flag.to_string(), model.to_string()]);
+        let model = match spec.reasoning {
+            ReasoningPolicy::ModelVariantSuffix { default } => {
+                match valid_level.unwrap_or(default) {
+                    "off" => model.to_string(),
+                    level => format!("{model}#{level}"),
+                }
+            }
+            _ => model.to_string(),
+        };
+        argv.extend([model_flag.to_string(), model]);
     }
 
     argv.extend(
@@ -519,12 +492,6 @@ fn cold_argv_for_model_with_options(
             .map(|s| (*s).to_string()),
     );
 
-    let valid_level = requested_reasoning.and_then(|level| match level {
-        "off" | "low" | "medium" => Some(level),
-        "minimal" if supports_minimal_thinking(spec) => Some("minimal"),
-        "high" => Some("medium"),
-        _ => None,
-    });
     match spec.reasoning {
         ReasoningPolicy::Flag {
             flag,
@@ -549,7 +516,8 @@ fn cold_argv_for_model_with_options(
             let level = valid_level.filter(|level| *level != "off").unwrap_or("low");
             argv.extend(["--effort".to_string(), level.to_string()]);
         }
-        ReasoningPolicy::ClaudeEffortLowIfSupported => {}
+        ReasoningPolicy::ClaudeEffortLowIfSupported
+        | ReasoningPolicy::ModelVariantSuffix { .. } => {}
     }
 
     if spec.output == OutputParser::PiJsonl {
@@ -587,8 +555,7 @@ fn cold_argv(spec: &AgentCliSpec, prompt: &str) -> Vec<String> {
     cold_argv_for_model(spec, prompt, "", ClaudeCapabilities::default())
 }
 
-/// Cold-spawn runtime. Each `polish` call spawns a fresh child in a unique
-/// temporary cwd; no warm session is retained.
+/// Each invocation consumes a fresh child; a Claude spare is never reused.
 #[derive(Clone, Default)]
 pub struct AgentCliRuntime;
 
@@ -606,17 +573,13 @@ impl AgentCliRuntime {
         let spec = spec_for(&request.provider_id)
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
 
-        // pi/omp own their catalogs; never pass a removed saved selector or
-        // delegate to an unavailable CLI default. Discovery also lets the
-        // chooser offer valid models when the external default has gone stale.
         if matches!(request.provider_id.as_str(), PROVIDER_PI | PROVIDER_OMP) {
             validate_discovered_selection(
                 &list_models(&request.provider_id).await?,
                 &request.model_id,
             )?;
         }
-
-        let binary_path = resolve_binary(spec.binary)
+        let binary_path = resolve_spec_binary(spec)
             .await
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
         let capability_started = Instant::now();
@@ -628,11 +591,11 @@ impl AgentCliRuntime {
             capability_started.elapsed().as_millis(),
             cached_capabilities
         );
-        if !required_capabilities_present(spec, &help) {
+        let Some(spec) = compatible_spec(spec, &help) else {
             return Err(MappedAiProviderError::new(AiProviderError::AgentCli(
                 "The installed CLI does not support the required isolation flags.".to_string(),
             )));
-        }
+        };
 
         let prompt = request.prompt.clone();
         let input_text = if spec.system_prompt == SystemPromptPolicy::None {
@@ -642,7 +605,7 @@ impl AgentCliRuntime {
         };
         let input_mode = spec.input_mode;
         let output = spec.output;
-        let argv = cold_argv_for_model_with_options(
+        let mut argv = cold_argv_for_model_with_options(
             spec,
             &prompt,
             &request.model_id,
@@ -650,10 +613,43 @@ impl AgentCliRuntime {
             request.reasoning_level.as_deref(),
             request.fast_mode,
         );
+        let variant_suffix = matches!(spec.reasoning, ReasoningPolicy::ModelVariantSuffix { .. });
+        if variant_suffix && model_variant_rejected_before(&argv) {
+            strip_model_variant(&mut argv);
+        }
         let invocation_started = Instant::now();
-        let result =
-            cold_spawn_and_collect(spec, &binary_path, &argv, input_mode, &input_text, output)
+        let hot_result = if spec.provider_id == PROVIDER_CLAUDE_CODE {
+            CLAUDE_SPARE
+                .take_and_run(&binary_path, &argv, &input_text)
+                .await
+        } else {
+            invalidate_hot_spare();
+            None
+        };
+        let mut result = match hot_result {
+            Some(Ok(text)) => Ok(text),
+            Some(Err(_)) | None => {
+                cold_spawn_and_collect(spec, &binary_path, &argv, input_mode, &input_text, output)
+                    .await
+            }
+        };
+        if variant_suffix && result.as_ref().is_err_and(is_variant_unavailable) {
+            if let Some(selector) = strip_model_variant(&mut argv) {
+                log::warn!(
+                    "OpenCode has no reasoning variant {selector}; retrying once without it"
+                );
+                rejected_model_variants().insert(selector);
+                result = cold_spawn_and_collect(
+                    spec,
+                    &binary_path,
+                    &argv,
+                    input_mode,
+                    &input_text,
+                    output,
+                )
                 .await;
+            }
+        }
         log::info!(
             "agent_cli_stage_timing provider={} stage=model_invocation duration_ms={} outcome={}",
             spec.provider_id,
@@ -666,6 +662,36 @@ impl AgentCliRuntime {
         );
         result
     }
+}
+
+/// `provider/model#variant` selectors OpenCode 2.x rejected as "Variant
+/// unavailable"; for the process lifetime they are sent without the suffix.
+static OPENCODE_REJECTED_VARIANTS: LazyLock<std::sync::Mutex<HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+fn rejected_model_variants() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    OPENCODE_REJECTED_VARIANTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn model_variant_rejected_before(argv: &[String]) -> bool {
+    argv.iter()
+        .position(|arg| arg == "--model")
+        .and_then(|index| argv.get(index + 1))
+        .is_some_and(|selector| rejected_model_variants().contains(selector))
+}
+
+/// Drop the `#variant` suffix from the `--model` value, returning the
+/// selector it replaced.
+fn strip_model_variant(argv: &mut [String]) -> Option<String> {
+    let index = argv.iter().position(|arg| arg == "--model")? + 1;
+    let model = argv.get(index)?.rsplit_once('#')?.0.to_string();
+    Some(std::mem::replace(&mut argv[index], model))
+}
+
+fn is_variant_unavailable(error: &MappedAiProviderError) -> bool {
+    matches!(&error.error, AiProviderError::AgentCli(detail) if detail.contains("Variant unavailable for "))
 }
 
 /// Owns a process group/job until it has been explicitly killed and reaped.
@@ -751,9 +777,11 @@ async fn terminate_process_group(child: &mut ProcessGroupGuard) -> std::io::Resu
 struct ProcessCapture {
     status: ExitStatus,
     stdout: Vec<u8>,
-    /// True when stdout exceeded [`MAX_CAPTURE_BYTES`] and the drain dropped
-    /// the tail. The retained bytes are a partial payload.
+    /// True when stdout exceeded `capture_limit` and the drain dropped the
+    /// tail. The retained bytes are a partial payload.
     stdout_truncated: bool,
+    /// Per-stream byte ceiling this capture was drained with.
+    capture_limit: usize,
     stderr: Vec<u8>,
 }
 
@@ -766,7 +794,7 @@ impl ProcessCapture {
         if self.stdout_truncated {
             log::warn!(
                 "CLI stdout exceeded the {} KiB capture ceiling; refusing partial output",
-                MAX_CAPTURE_BYTES / 1024
+                self.capture_limit / 1024
             );
             return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
         }
@@ -783,10 +811,12 @@ enum ProcessFailure {
 
 /// Run a configured command from a unique temporary cwd. The `TempDir` stays
 /// alive until the child has been reaped and both drain tasks have completed.
+/// Each stream retains at most `max_capture` bytes.
 async fn run_isolated_command(
     mut command: Command,
     stdin_bytes: Option<&[u8]>,
     timeout: Duration,
+    max_capture: usize,
 ) -> Result<ProcessCapture, ProcessFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
     let temp_dir = TempDir::new().map_err(ProcessFailure::Io)?;
@@ -819,8 +849,8 @@ async fn run_isolated_command(
             )));
         }
     };
-    let mut stdout_task = Some(tokio::spawn(drain_bounded(stdout)));
-    let mut stderr_task = Some(tokio::spawn(drain_bounded(stderr)));
+    let mut stdout_task = Some(tokio::spawn(drain_bounded(stdout, max_capture)));
+    let mut stderr_task = Some(tokio::spawn(drain_bounded(stderr, max_capture)));
 
     if let Some(input) = stdin_bytes {
         let mut stdin = match child.inner().stdin.take() {
@@ -927,6 +957,7 @@ async fn run_isolated_command(
         status,
         stdout,
         stdout_truncated,
+        capture_limit: max_capture,
         stderr,
     })
 }
@@ -935,15 +966,15 @@ async fn run_isolated_command(
 ///
 /// Draining always runs to EOF so the child can never block on a full pipe
 /// (which would deadlock the capture). Returns the retained bytes plus
-/// whether anything beyond [`MAX_CAPTURE_BYTES`] was dropped — a set flag
+/// whether anything beyond `max_capture` bytes was dropped — a set flag
 /// means callers must not parse the prefix as a complete payload.
-async fn drain_bounded<R>(mut reader: R) -> std::io::Result<(Vec<u8>, bool)>
+async fn drain_bounded<R>(mut reader: R, max_capture: usize) -> std::io::Result<(Vec<u8>, bool)>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     use tokio::io::AsyncReadExt;
 
-    let mut retained = Vec::with_capacity(MAX_CAPTURE_BYTES.min(8192));
+    let mut retained = Vec::with_capacity(max_capture.min(8192));
     let mut chunk = [0_u8; 8192];
     let mut truncated = false;
     loop {
@@ -951,7 +982,7 @@ where
         if read == 0 {
             break;
         }
-        let take = (MAX_CAPTURE_BYTES - retained.len()).min(read);
+        let take = (max_capture - retained.len()).min(read);
         retained.extend_from_slice(&chunk[..take]);
         if read > take {
             truncated = true;
@@ -995,6 +1026,9 @@ static POLISH_CAPABILITY_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// capabilities learned from a binary that has since been updated or
 /// replaced on PATH.
 pub async fn invalidate_polish_capabilities(provider: &str) {
+    if provider == PROVIDER_CLAUDE_CODE {
+        invalidate_hot_spare();
+    }
     let Some(spec) = spec_for(provider) else {
         return;
     };
@@ -1034,7 +1068,7 @@ async fn discover_capabilities_for_polish(
     command.env("PATH", resolved_path(false).await);
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
-    match run_isolated_command(command, None, Duration::from_secs(3)).await {
+    match run_isolated_command(command, None, Duration::from_secs(3), MAX_CAPTURE_BYTES).await {
         // A help payload that hit the capture ceiling is unusable; fall back
         // to conservative defaults exactly like a failed probe.
         Ok(capture) if capture.status.success() && !capture.stdout_truncated => {
@@ -1083,6 +1117,7 @@ fn claude_capabilities_from_help(help: &[u8]) -> ClaudeCapabilities {
     ClaudeCapabilities {
         safe_mode: help_advertises_flag(help, "--safe-mode"),
         effort: help_advertises_flag(help, "--effort"),
+        disable_slash_commands: help_advertises_flag(help, "--disable-slash-commands"),
     }
 }
 
@@ -1098,31 +1133,6 @@ fn apply_no_window(command: &mut Command) {
     }
 }
 
-struct RuntimeIsolation {
-    _cline_data_dir: Option<TempDir>,
-}
-
-fn apply_runtime_isolation(
-    spec: &AgentCliSpec,
-    command: &mut Command,
-) -> Result<RuntimeIsolation, MappedAiProviderError> {
-    let cline_data_dir = if spec.provider_id == PROVIDER_CLINE {
-        let directory = TempDir::new().map_err(|error| {
-            MappedAiProviderError::new(AiProviderError::AgentCli(sanitize_cli_error(
-                &error.to_string(),
-            )))
-        })?;
-        command.arg("--data-dir").arg(directory.path());
-        Some(directory)
-    } else {
-        None
-    };
-
-    Ok(RuntimeIsolation {
-        _cline_data_dir: cline_data_dir,
-    })
-}
-
 /// Spawn the binary, deliver `input_text` per `input_mode`, wait for exit, and
 /// parse the polish result from stdout. A non-zero exit is always an error,
 /// even when stdout looks like a successful JSON response.
@@ -1136,16 +1146,12 @@ async fn cold_spawn_and_collect(
 ) -> Result<String, MappedAiProviderError> {
     let mut command = Command::new(binary_path);
     command.args(argv);
-
-    let runtime_isolation = apply_runtime_isolation(spec, &mut command)?;
+    apply_claude_effort_env(&mut command, spec, argv);
 
     match input_mode {
         InputMode::Stdin => {}
         InputMode::PositionalArg => {
             command.arg(input_text);
-        }
-        InputMode::FlagValue(flag) => {
-            command.arg(flag).arg(input_text);
         }
     }
     command.env("PATH", resolved_path(false).await);
@@ -1153,17 +1159,16 @@ async fn cold_spawn_and_collect(
     for (name, value) in spec.static_env {
         command.env(name, value);
     }
-    apply_claude_effort_env(&mut command, spec, argv);
     apply_no_window(&mut command);
 
     let capture = run_isolated_command(
         command,
         (input_mode == InputMode::Stdin).then_some(input_text.as_bytes()),
         cold_spawn_timeout(spec.provider_id),
+        MAX_CAPTURE_BYTES,
     )
     .await
     .map_err(map_process_failure)?;
-    drop(runtime_isolation);
 
     if !capture.status.success() {
         let detail = extract_process_error(output, &capture.stdout, &capture.stderr);
@@ -1278,7 +1283,7 @@ where
 /// Select the parser for a CLI's stdout shape.
 fn parse_cli_output(output: OutputParser, stdout: &[u8]) -> Result<String, MappedAiProviderError> {
     match output {
-        OutputParser::ClaudeJson => parse_claude_json(stdout),
+        OutputParser::ResultJson => parse_result_json(stdout),
         OutputParser::CodexJsonl => parse_codex_jsonl(stdout),
         OutputParser::PiJsonl => parse_pi_jsonl(stdout),
         OutputParser::PlainText => parse_plain_text(stdout),
@@ -1332,7 +1337,7 @@ fn parse_codex_jsonl(stdout: &[u8]) -> Result<String, MappedAiProviderError> {
 /// `{type:"text", text:"..."}` blocks). A noisy prefix line (update notice,
 /// shell banner) before the JSON is tolerated by slicing between the first `{`
 /// and the last `}` — mirrors parakeet's `extract_json_payload`.
-fn parse_claude_json(stdout: &[u8]) -> Result<String, MappedAiProviderError> {
+fn parse_result_json(stdout: &[u8]) -> Result<String, MappedAiProviderError> {
     let text = String::from_utf8_lossy(stdout);
     let payload = extract_json_payload(&text).unwrap_or(text.as_ref());
     let value: Value = serde_json::from_str(payload)
@@ -1454,7 +1459,7 @@ fn parse_pi_jsonl(stdout: &[u8]) -> Result<String, MappedAiProviderError> {
 /// Extract the joined text of an assistant message from a JSONL event line.
 /// Returns `Some` only when `message.role == "assistant"` and `message.content`
 /// is an array of `{type:"text", text:"..."}` blocks with at least one text
-/// block; the blocks are joined with `\n` (mirrors parse_claude_json's content
+/// block; the blocks are joined with `\n` (mirrors parse_result_json's content
 /// handling). Non-assistant events (user, session, agent_end) yield `None`.
 fn assistant_message_text(value: &Value) -> Option<String> {
     let message = value.get("message")?;
@@ -1559,8 +1564,22 @@ async fn resolve_binary_state(binary: &str, refresh_path: bool) -> BinaryResolut
     select_safe_candidate(candidates)
 }
 
+async fn resolve_spec_binary_state(spec: &AgentCliSpec, refresh_path: bool) -> BinaryResolution {
+    resolve_binary_state(spec.binary, refresh_path).await
+}
+
+/// Resolve a spec's binary to an absolute safe path against the resolved
+/// PATH. Unsafe candidates are skipped rather than stopping at the first match.
+async fn resolve_spec_binary(spec: &AgentCliSpec) -> Option<PathBuf> {
+    match resolve_spec_binary_state(spec, false).await {
+        BinaryResolution::Found(path) => Some(path),
+        BinaryResolution::Missing | BinaryResolution::UnsafeLauncher => None,
+    }
+}
+
 /// Resolve a CLI binary name to an absolute safe path against the resolved
 /// PATH. Unsafe candidates are skipped rather than stopping at the first match.
+#[cfg(test)]
 pub async fn resolve_binary(binary: &str) -> Option<PathBuf> {
     match resolve_binary_state(binary, false).await {
         BinaryResolution::Found(path) => Some(path),
@@ -1578,7 +1597,7 @@ async fn prefetch_capabilities_with_binary(spec: &'static AgentCliSpec, binary_p
 }
 
 async fn prefetch_spec(spec: &'static AgentCliSpec) {
-    if let Some(binary_path) = resolve_binary(spec.binary).await {
+    if let Some(binary_path) = resolve_spec_binary(spec).await {
         prefetch_capabilities_with_binary(spec, &binary_path).await;
     }
 }
@@ -1719,7 +1738,7 @@ async fn resolve_login_shell_path() -> Option<String> {
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
 
-    let capture = run_isolated_command(command, None, LOGIN_SHELL_PATH_TIMEOUT)
+    let capture = run_isolated_command(command, None, LOGIN_SHELL_PATH_TIMEOUT, MAX_CAPTURE_BYTES)
         .await
         .ok()?;
     if !capture.status.success() || capture.stdout_truncated {
@@ -1831,8 +1850,8 @@ fn supported_reasoning_levels(spec: &AgentCliSpec) -> Vec<String> {
     // medium; pi, omp, and opencode also document `minimal` between
     // off and low, so it is included wherever the contract has it.
     let has_off = matches!(
-        spec.reasoning,
-        ReasoningPolicy::Flag { default: "off", .. } | ReasoningPolicy::Flag { omit_off: true, .. }
+        spec.provider_id,
+        PROVIDER_PI | PROVIDER_OMP | PROVIDER_OPENCODE
     );
     let mut levels: Vec<&str> = if has_off { vec!["off"] } else { Vec::new() };
     if supports_minimal_thinking(spec) {
@@ -1872,7 +1891,7 @@ pub async fn probe(provider: &str, refresh_path: bool) -> AgentCliProbe {
     if refresh_path {
         invalidate_polish_capabilities(provider).await;
     }
-    let resolution = resolve_binary_state(spec.binary, refresh_path).await;
+    let resolution = resolve_spec_binary_state(spec, refresh_path).await;
     if resolution == BinaryResolution::Missing {
         log::debug!(
             "Agent CLI detection could not resolve binary '{}' for provider '{}'",
@@ -2055,142 +2074,56 @@ fn strip_reasoning_suffix(selector: &str) -> &str {
     }
 }
 
+/// Parse `codex debug models`: only `visibility == "list"` models, in
+/// ascending `priority` order. Entries without a slug are skipped; a payload
+/// without a `models` array is a broken contract.
 fn parse_codex_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProviderError> {
     let text = String::from_utf8_lossy(stdout);
     let payload = extract_json_payload(&text).unwrap_or(text.trim());
     let value: Value = serde_json::from_str(payload)
         .map_err(|_| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let details = value
-        .get("checks")
-        .and_then(|checks| checks.get("config.load"))
-        .and_then(|check| check.get("details"))
+    let entries = value
+        .get("models")
+        .and_then(Value::as_array)
         .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let model = details
-        .get("model")
-        .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))?;
-    let provider = details
-        .get("model_provider")
-        .and_then(Value::as_str)
-        .filter(|provider| !provider.trim().is_empty())
-        .map(str::to_string);
-    Ok(vec![
-        named_cli_default("Codex", Some(&humanize_cli_model_id(model)), provider),
-        AgentCliModel {
-            id: CODEX_SPEC.default_model.unwrap().to_string(),
-            name: "GPT-6 Luna".to_string(),
-            recommended: true,
-            reasoning: true,
-            context_window: None,
-            source_provider: None,
-            cli_default: false,
-        },
-    ])
-}
-
-fn parse_droid_models(
-    stdout: &[u8],
-) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
-    let text = String::from_utf8_lossy(stdout);
-    let mut in_models = false;
-    let mut saw_models = false;
-    let mut default_name = None;
-    let mut models = Vec::new();
-
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if matches!(line, "Available Models:" | "Custom Models:") {
-            in_models = true;
-            saw_models = true;
-            continue;
-        }
-        if line == "Model details:" {
-            break;
-        }
-        if !in_models || line.is_empty() {
-            continue;
-        }
-        let Some(split_at) = line.find(char::is_whitespace) else {
-            continue;
-        };
-        let id = &line[..split_at];
-        let raw_name = line[split_at..].trim();
-        if id.is_empty() || raw_name.is_empty() {
-            continue;
-        }
-        let is_default = raw_name.ends_with(" (default)");
-        let name = raw_name.strip_suffix(" (default)").unwrap_or(raw_name);
-        if is_default {
-            default_name = Some(name.to_string());
-        }
-        models.push(AgentCliModel {
-            id: id.to_string(),
-            name: name.to_string(),
-            recommended: false,
-            reasoning: id != "auto",
-            context_window: None,
-            source_provider: None,
-            cli_default: false,
-        });
-    }
-
-    if !saw_models || models.is_empty() {
-        return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
-    }
-    Ok((
-        named_cli_default("Droid", default_name.as_deref(), None),
-        models,
-    ))
-}
-
-fn parse_grok_models(
-    stdout: &[u8],
-) -> Result<(AgentCliModel, Vec<AgentCliModel>), MappedAiProviderError> {
-    let text = String::from_utf8_lossy(stdout);
-    let configured_default = text.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("Default model:")
-            .map(str::trim)
-            .filter(|model| !model.is_empty())
-    });
-    let mut in_models = false;
-    let mut models = Vec::new();
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line == "Available models:" {
-            in_models = true;
-            continue;
-        }
-        if !in_models || line.is_empty() {
-            continue;
-        }
-        let without_marker = line.strip_prefix('*').map(str::trim).unwrap_or(line);
-        let id = without_marker
-            .strip_suffix(" (default)")
-            .unwrap_or(without_marker)
-            .trim();
-        if id.is_empty() || id.chars().any(char::is_whitespace) {
-            continue;
-        }
-        models.push(AgentCliModel {
-            id: id.to_string(),
-            name: humanize_cli_model_id(id),
-            recommended: false,
-            reasoning: true,
-            context_window: None,
-            source_provider: Some("xAI".to_string()),
-            cli_default: false,
-        });
-    }
-    if models.is_empty() {
-        return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
-    }
-    let default_name = configured_default.map(humanize_cli_model_id);
-    Ok((
-        named_cli_default("Grok", default_name.as_deref(), Some("xAI".to_string())),
-        models,
-    ))
+    let mut listed = entries
+        .iter()
+        .filter(|entry| entry.get("visibility").and_then(Value::as_str) == Some("list"))
+        .filter_map(|entry| {
+            let slug = entry
+                .get("slug")
+                .and_then(Value::as_str)
+                .filter(|slug| !slug.trim().is_empty())?;
+            let name = entry
+                .get("display_name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| humanize_cli_model_id(slug));
+            let reasoning = entry
+                .get("supported_reasoning_levels")
+                .and_then(Value::as_array)
+                .is_some_and(|levels| !levels.is_empty());
+            let priority = entry
+                .get("priority")
+                .and_then(Value::as_i64)
+                .unwrap_or(i64::MAX);
+            Some((
+                priority,
+                AgentCliModel {
+                    id: slug.to_string(),
+                    name,
+                    recommended: Some(slug) == CODEX_SPEC.default_model,
+                    reasoning,
+                    context_window: None,
+                    source_provider: None,
+                    cli_default: false,
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    listed.sort_by_key(|(priority, _)| *priority);
+    Ok(listed.into_iter().map(|(_, model)| model).collect())
 }
 
 fn parse_selector_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiProviderError> {
@@ -2224,10 +2157,22 @@ fn parse_selector_models(stdout: &[u8]) -> Result<Vec<AgentCliModel>, MappedAiPr
     }
 }
 
+/// OpenCode 1.x prints its merged config object; 2.x lists its config
+/// sources in load order, each document under `info`, so the last source
+/// that sets `model` wins.
 fn parse_configured_model(stdout: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(stdout);
+    if let Ok(Value::Array(sources)) = serde_json::from_str::<Value>(text.trim()) {
+        return sources
+            .iter()
+            .rev()
+            .find_map(|source| configured_model(source.get("info")?));
+    }
     let payload = extract_json_payload(&text).unwrap_or(text.trim());
-    let value = serde_json::from_str::<Value>(payload).ok()?;
+    configured_model(&serde_json::from_str::<Value>(payload).ok()?)
+}
+
+fn configured_model(value: &Value) -> Option<String> {
     value
         .get("model")
         .and_then(Value::as_str)
@@ -2280,7 +2225,8 @@ fn humanize_cli_model_id(id: &str) -> String {
 }
 
 const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(5);
-const MODEL_LIST_MAX_OUTPUT: usize = 512 * 1024;
+// `codex debug models` alone prints ~560 KB (per-model instructions included).
+const MODEL_LIST_MAX_OUTPUT: usize = 4 * 1024 * 1024;
 static MODEL_DISCOVERY_PERMIT: Semaphore = Semaphore::const_new(1);
 const PI_MODEL_LIST_ARGV: &[&str] = &[
     "--mode",
@@ -2294,15 +2240,15 @@ const PI_MODEL_LIST_ARGV: &[&str] = &[
 ];
 const OMP_MODEL_LIST_ARGV: &[&str] = &["models", "--json", "--no-extensions"];
 const OMP_DEFAULT_MODEL_ARGV: &[&str] = &["config", "get", "modelRoles", "--json"];
-const CODEX_DEFAULT_MODEL_ARGV: &[&str] = &["doctor", "--json"];
-const DROID_MODEL_LIST_ARGV: &[&str] = &["exec", "--help"];
-const GROK_MODEL_LIST_ARGV: &[&str] = &["models"];
+const CODEX_MODEL_LIST_ARGV: &[&str] = &["debug", "models"];
 const OPENCODE_MODEL_LIST_ARGV: &[&str] = &["models", "--pure"];
 const OPENCODE_CONFIG_ARGV: &[&str] = &["debug", "config", "--pure"];
+const OPENCODE_V2_MODEL_LIST_ARGV: &[&str] = &["models", "--standalone"];
+const OPENCODE_V2_CONFIG_ARGV: &[&str] = &["debug", "config"];
 const PI_MODEL_LIST_REQUEST: &[u8] = b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n";
 
 async fn model_binary(spec: &AgentCliSpec) -> Result<PathBuf, MappedAiProviderError> {
-    resolve_binary(spec.binary)
+    resolve_spec_binary(spec)
         .await
         .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))
 }
@@ -2331,9 +2277,10 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
         }
         PROVIDER_OMP => {
             let binary = model_binary(&OMP_SPEC).await?;
-            let models_payload = run_model_list_command(&binary, OMP_MODEL_LIST_ARGV).await?;
+            let models_payload = run_model_list_command(&binary, OMP_MODEL_LIST_ARGV, &[]).await?;
             let models = parse_omp_models(&models_payload)?;
-            let default_payload = run_model_list_command(&binary, OMP_DEFAULT_MODEL_ARGV).await?;
+            let default_payload =
+                run_model_list_command(&binary, OMP_DEFAULT_MODEL_ARGV, &[]).await?;
             let mut result = models;
             if let Ok(default) = parse_omp_default_model(&default_payload, &result) {
                 result.insert(0, default);
@@ -2341,34 +2288,34 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             Ok(result)
         }
         PROVIDER_CODEX => {
-            let payload =
-                run_model_list_command(&model_binary(&CODEX_SPEC).await?, CODEX_DEFAULT_MODEL_ARGV)
-                    .await?;
-            parse_codex_models(&payload)
-        }
-        PROVIDER_DROID => {
-            let payload =
-                run_model_list_command(&model_binary(&DROID_SPEC).await?, DROID_MODEL_LIST_ARGV)
-                    .await?;
-            let (default, models) = parse_droid_models(&payload)?;
-            let mut result = vec![default];
-            result.extend(models);
-            Ok(result)
-        }
-        PROVIDER_GROK => {
-            let payload =
-                run_model_list_command(&model_binary(&GROK_SPEC).await?, GROK_MODEL_LIST_ARGV)
-                    .await?;
-            let (default, models) = parse_grok_models(&payload)?;
-            let mut result = vec![default];
-            result.extend(models);
+            let payload = run_model_list_command(
+                &model_binary(&CODEX_SPEC).await?,
+                CODEX_MODEL_LIST_ARGV,
+                &[],
+            )
+            .await?;
+            let mut result = vec![named_cli_default("Codex", None, None)];
+            result.extend(parse_codex_models(&payload)?);
             Ok(result)
         }
         PROVIDER_OPENCODE => {
             let binary = model_binary(&OPENCODE_SPEC).await?;
-            let payload = run_model_list_command(&binary, OPENCODE_MODEL_LIST_ARGV).await?;
+            let (_, help, _) =
+                discover_capabilities_for_polish(&binary, &OPENCODE_SPEC, false).await;
+            // 2.x listing starts a private server, so it carries the same
+            // isolation config that keeps Polish free of plugins.
+            let (list_argv, config_argv, env) = if is_opencode_v2(&help) {
+                (
+                    OPENCODE_V2_MODEL_LIST_ARGV,
+                    OPENCODE_V2_CONFIG_ARGV,
+                    OPENCODE_V2_SPEC.static_env,
+                )
+            } else {
+                (OPENCODE_MODEL_LIST_ARGV, OPENCODE_CONFIG_ARGV, &[][..])
+            };
+            let payload = run_model_list_command(&binary, list_argv, env).await?;
             let models = parse_selector_models(&payload)?;
-            let configured = run_model_list_command(&binary, OPENCODE_CONFIG_ARGV)
+            let configured = run_model_list_command(&binary, config_argv, env)
                 .await
                 .ok()
                 .and_then(|payload| parse_configured_model(&payload));
@@ -2384,7 +2331,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
             result.extend(models);
             Ok(result)
         }
-        PROVIDER_CLINE => Ok(vec![named_cli_default("Cline", None, None)]),
         _ => Err(MappedAiProviderError::new(
             AiProviderError::UnsupportedProvider,
         )),
@@ -2393,13 +2339,15 @@ pub async fn list_models(provider: &str) -> Result<Vec<AgentCliModel>, MappedAiP
 async fn run_model_list_command(
     binary_path: &Path,
     argv: &[&str],
+    env: &[(&str, &str)],
 ) -> Result<Vec<u8>, MappedAiProviderError> {
     let mut command = Command::new(binary_path);
     command.args(argv);
+    command.envs(env.iter().copied());
     command.env("PATH", resolved_path(false).await);
     command.env("ZSH_TMUX_AUTOSTART", "false");
     apply_no_window(&mut command);
-    let capture = run_isolated_command(command, None, MODEL_LIST_TIMEOUT)
+    let capture = run_isolated_command(command, None, MODEL_LIST_TIMEOUT, MODEL_LIST_MAX_OUTPUT)
         .await
         .map_err(|failure| {
             MappedAiProviderError::new(match failure {
@@ -2507,7 +2455,8 @@ async fn run_pi_model_listing(binary_path: &Path) -> Result<Vec<u8>, MappedAiPro
             ));
         }
     };
-    let stderr_task = tokio::spawn(async move { drain_bounded(&mut stderr).await });
+    let stderr_task =
+        tokio::spawn(async move { drain_bounded(&mut stderr, MAX_CAPTURE_BYTES).await });
     let mut stdout_task =
         tokio::spawn(async move { read_until_pi_model_response(&mut stdout).await });
     let mut stdin = match child.inner().stdin.take() {
@@ -2632,10 +2581,7 @@ mod tests {
             PROVIDER_PI,
             PROVIDER_OMP,
             PROVIDER_CODEX,
-            PROVIDER_DROID,
-            PROVIDER_GROK,
             PROVIDER_OPENCODE,
-            PROVIDER_CLINE,
         ] {
             assert_eq!(cold_spawn_timeout_ms(provider), 20_000, "{provider}");
         }
@@ -2711,9 +2657,10 @@ mod tests {
         // the partial payload instead of pasting it.
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "yes a | head -c 160000"]);
-        let capture = run_isolated_command(command, None, Duration::from_secs(30))
-            .await
-            .expect("overflowing child must be captured without deadlock");
+        let capture =
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES)
+                .await
+                .expect("overflowing child must be captured without deadlock");
 
         assert!(capture.status.success());
         assert!(
@@ -2733,9 +2680,10 @@ mod tests {
     async fn successful_stdout_within_cap_completes() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "printf 'polished text'"]);
-        let capture = run_isolated_command(command, None, Duration::from_secs(30))
-            .await
-            .unwrap();
+        let capture =
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES)
+                .await
+                .unwrap();
 
         assert!(capture.status.success());
         assert!(!capture.stdout_truncated);
@@ -2749,9 +2697,10 @@ mod tests {
         // the capture over dropped diagnostics, and never grow unbounded.
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "yes noise | head -c 160000 >&2; printf 'done'"]);
-        let capture = run_isolated_command(command, None, Duration::from_secs(30))
-            .await
-            .unwrap();
+        let capture =
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES)
+                .await
+                .unwrap();
 
         assert!(capture.status.success());
         assert_eq!(capture.stderr.len(), MAX_CAPTURE_BYTES);
@@ -2968,7 +2917,7 @@ mod tests {
 
     #[test]
     fn cli_default_model_is_explicit_empty_selection() {
-        let model = named_cli_default("Codex", Some("GPT-6.1 Sol"), Some("openai".to_string()));
+        let model = named_cli_default("Codex", Some("GPT-5.6 Sol"), Some("openai".to_string()));
         assert_eq!(model.id, "");
         assert_eq!(model.name, "Default");
         assert!(model.recommended);
@@ -3018,11 +2967,10 @@ mod tests {
             PI_MODEL_LIST_REQUEST,
             b"{\"id\":\"voicetypr-state\",\"type\":\"get_state\"}\n{\"id\":\"voicetypr-models\",\"type\":\"get_available_models\"}\n"
         );
-        assert_eq!(CODEX_DEFAULT_MODEL_ARGV, &["doctor", "--json"][..]);
-        assert_eq!(DROID_MODEL_LIST_ARGV, &["exec", "--help"][..]);
-        assert_eq!(GROK_MODEL_LIST_ARGV, &["models"][..]);
+        assert_eq!(CODEX_MODEL_LIST_ARGV, &["debug", "models"][..]);
         assert_eq!(OPENCODE_MODEL_LIST_ARGV, &["models", "--pure"][..]);
-        assert!(!CODEX_DEFAULT_MODEL_ARGV.contains(&"app-server"));
+        assert_eq!(OPENCODE_V2_MODEL_LIST_ARGV, &["models", "--standalone"][..]);
+        assert!(!CODEX_MODEL_LIST_ARGV.contains(&"app-server"));
         assert!(!PI_MODEL_LIST_ARGV.contains(&"-p"));
         assert!(!OMP_MODEL_LIST_ARGV.contains(&"-p"));
         assert!(!String::from_utf8_lossy(PI_MODEL_LIST_REQUEST).contains("transcript"));
@@ -3082,63 +3030,59 @@ mod tests {
 
     #[test]
     fn discovery_parsers_preserve_defaults_and_selectable_models() {
-        let pi = br#"{"id":"voicetypr-state","data":{"model":{"provider":"openai-codex","id":"gpt-6.1-sol","name":"GPT-6.1 Sol"}}}"#;
+        let pi = br#"{"id":"voicetypr-state","data":{"model":{"provider":"openai-codex","id":"gpt-5.6-sol","name":"GPT-5.6 Sol"}}}"#;
         assert_eq!(parse_pi_default_model(pi).unwrap().name, "Default");
 
         let omp_models = parse_omp_models(
-            br#"{"models":[{"provider":"openai-codex","selector":"openai-codex/gpt-6.1-sol","name":"GPT-6.1 Sol"}]}"#,
+            br#"{"models":[{"provider":"openai-codex","selector":"openai-codex/gpt-5.6-sol","name":"GPT-5.6 Sol"}]}"#,
         )
         .unwrap();
         let omp_default = parse_omp_default_model(
-            br#"{"value":{"default":"openai-codex/gpt-6.1-sol:high"}}"#,
+            br#"{"value":{"default":"openai-codex/gpt-5.6-sol:high"}}"#,
             &omp_models,
         )
         .unwrap();
         assert_eq!(omp_default.name, "Default");
 
         let codex = parse_codex_models(
-            br#"{"checks":{"config.load":{"details":{"model":"gpt-6.1-sol","model_provider":"openai"}}}}"#,
+            br#"{"models":[{"slug":"gpt-reserve","display_name":"GPT-Reserve","visibility":"hide","priority":0,"supported_reasoning_levels":[]},{"slug":"gpt-6.1-mini","visibility":"list","priority":2,"supported_reasoning_levels":[]},{"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","visibility":"list","priority":1,"supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}"#,
         )
         .unwrap();
-        assert_eq!(codex[0].name, "Default");
-
-        let (droid_default, droid_models) = parse_droid_models(
-            b"Available Models:\n  auto  Auto Model\n  claude-opus-5  Opus 5 (default)\nCustom Models:\n  custom:glm  GLM\nModel details:\n",
-        )
-        .unwrap();
-        assert_eq!(droid_default.name, "Default");
-        assert_eq!(
-            droid_models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["auto", "claude-opus-5", "custom:glm"]
-        );
-
-        let (grok_default, grok_models) = parse_grok_models(
-            b"Default model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)\n",
-        )
-        .unwrap();
-        assert_eq!(grok_default.name, "Default");
-        assert_eq!(grok_models[0].id, "grok-4.5");
+        assert_eq!(codex.len(), 2);
+        assert_eq!(codex[0].id, "gpt-6.1-sol");
+        assert_eq!(codex[0].name, "GPT-6.1-Sol");
+        assert!(codex[0].reasoning);
+        assert_eq!(codex[1].id, "gpt-6.1-mini");
+        assert_eq!(codex[1].name, "GPT 6.1 Mini");
+        assert!(!codex[1].reasoning);
 
         let selectors =
-            parse_selector_models(b"openai/gpt-6.1-sol\nanthropic/claude-sonnet-5\n").unwrap();
-        assert_eq!(selectors[0].name, "GPT 6.1 Sol");
+            parse_selector_models(b"openai/gpt-5.6-sol\nanthropic/claude-sonnet-5\n").unwrap();
+        assert_eq!(selectors[0].name, "GPT 5.6 Sol");
         assert_eq!(selectors[0].source_provider.as_deref(), Some("openai"));
+
+        assert_eq!(
+            parse_configured_model(br#"{"model":"openai/gpt-5.6-sol"}"#).as_deref(),
+            Some("openai/gpt-5.6-sol")
+        );
+        assert_eq!(
+            parse_configured_model(
+                br#"[{"type":"document","path":"a","info":{"model":"openai/gpt-6"}},{"type":"document","path":"b","info":{"model":"zai/glm-5"}},{"type":"directory","path":"c"}]"#
+            )
+            .as_deref(),
+            Some("zai/glm-5")
+        );
     }
 
     #[test]
     fn discovery_parsers_reject_missing_model_contracts() {
         assert!(parse_pi_default_model(b"{}").is_err());
         assert!(parse_codex_models(b"{}").is_err());
-        assert!(parse_droid_models(b"Available Models:\n").is_err());
-        assert!(parse_grok_models(b"Available models:\n").is_err());
         assert!(parse_selector_models(b"not-a-selector\n").is_err());
     }
 
     #[test]
-    fn claude_code_cold_argv_uses_sonnet_when_model_is_empty() {
+    fn claude_code_cold_argv_uses_spec_default_model_when_model_is_empty() {
         let argv = cold_argv(&CLAUDE_CODE_SPEC, "my system prompt");
         assert_eq!(
             argv,
@@ -3163,6 +3107,19 @@ mod tests {
             .windows(2)
             .any(|pair| pair[0] == "--model" && pair[1] == "sonnet"));
         assert!(!argv.contains(&"--bare".to_string()));
+        // --disable-slash-commands is capability-gated; absent without help.
+        assert!(!argv.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn claude_disables_skills_only_when_supported_without_bare() {
+        let capabilities =
+            claude_capabilities_from_help(b"--disable-slash-commands --effort --safe-mode");
+        let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "", capabilities);
+        assert!(argv.iter().any(|arg| arg == "--disable-slash-commands"));
+        assert!(!argv.iter().any(|arg| arg == "--bare"));
+        let fallback = cold_argv(&CLAUDE_CODE_SPEC, "prompt");
+        assert!(!fallback.iter().any(|arg| arg == "--disable-slash-commands"));
     }
 
     #[test]
@@ -3174,6 +3131,25 @@ mod tests {
         assert!(!argv.contains(&dangerous_input.to_string()));
         assert!(argv.iter().all(|arg| !arg.contains("sh -c")));
         assert_eq!(argv.len(), 14);
+    }
+
+    #[test]
+    fn claude_code_disable_slash_commands_requires_help_capability() {
+        let capabilities = claude_capabilities_from_help(
+            b"Options:\n  --safe-mode\n  --effort <level>\n  --disable-slash-commands\n",
+        );
+        assert!(capabilities.disable_slash_commands);
+        let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "", capabilities);
+        assert!(argv.contains(&"--disable-slash-commands".to_string()));
+        assert!(argv.contains(&"--safe-mode".to_string()));
+        assert!(!argv.contains(&"--bare".to_string()));
+
+        let without = claude_capabilities_from_help(b"Options:\n  --effort\n");
+        assert!(!without.disable_slash_commands);
+        assert!(
+            !cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "", without)
+                .contains(&"--disable-slash-commands".to_string())
+        );
     }
 
     #[test]
@@ -3287,10 +3263,9 @@ mod tests {
     #[test]
     fn specs_select_correct_input_and_output_modes() {
         assert_eq!(CLAUDE_CODE_SPEC.input_mode, InputMode::Stdin);
-        assert_eq!(CLAUDE_CODE_SPEC.output, OutputParser::ClaudeJson);
+        assert_eq!(CLAUDE_CODE_SPEC.output, OutputParser::ResultJson);
         assert_eq!(PI_SPEC.input_mode, InputMode::Stdin);
         assert_eq!(PI_SPEC.output, OutputParser::PlainText);
-        assert_eq!(OMP_SPEC.input_mode, InputMode::PositionalArg);
         assert_eq!(OMP_SPEC.output, OutputParser::PiJsonl);
 
         for (provider, binary) in [
@@ -3298,10 +3273,7 @@ mod tests {
             (PROVIDER_PI, "pi"),
             (PROVIDER_OMP, "omp"),
             (PROVIDER_CODEX, "codex"),
-            (PROVIDER_DROID, "droid"),
-            (PROVIDER_GROK, "grok"),
             (PROVIDER_OPENCODE, "opencode"),
-            (PROVIDER_CLINE, "cline"),
         ] {
             let spec = spec_for(provider).expect("provider must have a CLI spec");
             assert_eq!(spec.binary, binary);
@@ -3324,50 +3296,28 @@ mod tests {
         assert!(codex
             .windows(2)
             .any(|pair| pair[0] == "-c" && pair[1] == "model_reasoning_effort=\"medium\""));
+        assert!(codex
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "gpt-6-luna"));
         assert!(codex.windows(2).any(|pair| {
             pair[0] == "-c" && pair[1].starts_with("developer_instructions=\"system\"")
         }));
-
-        let droid = cold_argv(&DROID_SPEC, "system");
-        assert!(droid
-            .windows(2)
-            .any(|pair| pair[0] == "--restrict-tools" && pair[1] == "TodoWrite"));
-        assert!(droid.contains(&"--disable-builtin-skills".to_string()));
-
-        let grok = cold_argv(&GROK_SPEC, "system");
-        assert!(grok
-            .windows(2)
-            .any(|pair| pair[0] == "--tools" && pair[1].is_empty()));
-        assert_eq!(GROK_SPEC.input_mode, InputMode::FlagValue("--single"));
 
         assert_eq!(
             OPENCODE_SPEC.static_env,
             &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)]
         );
-        assert!(cold_argv(&CLINE_SPEC, "system")
-            .windows(2)
-            .any(|pair| pair[0] == "--auto-approve" && pair[1] == "false"));
-        assert!(cold_argv(&CLINE_SPEC, "system")
-            .windows(2)
-            .any(|pair| pair[0] == "--retries" && pair[1] == "1"));
-    }
-
-    #[test]
-    fn cline_runtime_uses_disposable_local_state() {
-        let mut command = Command::new("cline");
-        let isolation =
-            apply_runtime_isolation(&CLINE_SPEC, &mut command).expect("Cline isolation");
-        let args: Vec<OsString> = command
-            .as_std()
-            .get_args()
-            .map(OsStr::to_os_string)
-            .collect();
-        assert_eq!(args.first(), Some(&OsString::from("--data-dir")));
-        let data_dir = PathBuf::from(args.get(1).expect("data directory argument"));
-        assert!(data_dir.is_dir());
-
-        drop(isolation);
-        assert!(!data_dir.exists());
+        assert_eq!(
+            OPENCODE_V2_SPEC.static_env,
+            &[("OPENCODE_CONFIG_CONTENT", OPENCODE_V2_ISOLATION_CONFIG)]
+        );
+        // `deny` makes OpenCode refuse its free models; `ask` auto-rejects
+        // every tool action in non-interactive runs instead.
+        for config in [OPENCODE_ISOLATION_CONFIG, OPENCODE_V2_ISOLATION_CONFIG] {
+            assert!(config.starts_with(r#"{"permission":"ask""#));
+        }
+        assert!(OPENCODE_V2_ISOLATION_CONFIG
+            .contains(r#"{"action":"integration.use","resource":"*","effect":"deny"}"#));
     }
 
     #[test]
@@ -3387,13 +3337,15 @@ mod tests {
 
     #[test]
     fn claude_help_capabilities_choose_safe_mode_and_effort() {
-        let help = b"Options:\n  --safe-mode\n  --effort <low|medium|high>\n";
+        let help =
+            b"Options:\n  --safe-mode\n  --effort <low|medium|high>\n  --disable-slash-commands\n";
         let capabilities = claude_capabilities_from_help(help);
         assert_eq!(
             capabilities,
             ClaudeCapabilities {
                 safe_mode: true,
-                effort: true
+                effort: true,
+                disable_slash_commands: true
             }
         );
         let argv = cold_argv_for_model(&CLAUDE_CODE_SPEC, "prompt", "sonnet", capabilities);
@@ -3438,7 +3390,7 @@ mod tests {
         let argv = cold_argv_for_model_with_reasoning(
             &PI_SPEC,
             "prompt",
-            "openai/gpt-6.1-sol",
+            "openai/gpt-5.4",
             ClaudeCapabilities::default(),
             Some("minimal"),
         );
@@ -3509,14 +3461,16 @@ mod tests {
             supported_reasoning_levels(&OMP_SPEC),
             ["off", "minimal", "low", "medium"]
         );
-        assert_eq!(
-            supported_reasoning_levels(&OPENCODE_SPEC),
-            ["off", "minimal", "low", "medium"]
-        );
+        for spec in [&OPENCODE_SPEC, &OPENCODE_V2_SPEC] {
+            assert_eq!(
+                supported_reasoning_levels(spec),
+                ["off", "minimal", "low", "medium"]
+            );
+        }
     }
 
     #[test]
-    fn claude_help_fallback_uses_setting_sources_and_sonnet() {
+    fn claude_help_fallback_uses_setting_sources_and_spec_default() {
         let argv = cold_argv_for_model(
             &CLAUDE_CODE_SPEC,
             "prompt",
@@ -3531,6 +3485,7 @@ mod tests {
             .any(|pair| pair[0] == "--model" && pair[1] == "sonnet"));
         assert!(!argv.contains(&"--safe-mode".to_string()));
         assert!(!argv.contains(&"--effort".to_string()));
+        assert!(!argv.contains(&"--disable-slash-commands".to_string()));
     }
 
     #[test]
@@ -3543,10 +3498,7 @@ mod tests {
             &OMP_SPEC,
             b"--no-tools --no-session --no-extensions --no-lsp"
         ));
-        assert!(!required_capabilities_present(
-            &OPENCODE_SPEC,
-            b"--pure --format"
-        ));
+        assert!(compatible_spec(&OPENCODE_SPEC, b"--pure --format --model").is_none());
         assert!(required_capabilities_present(
             &PI_SPEC,
             b"--no-tools --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --thinking"
@@ -3559,10 +3511,16 @@ mod tests {
             &OMP_SPEC,
             b"--no-tools --no-session --no-skills --no-rules --no-extensions --no-lsp --no-title --thinking"
         ));
-        assert!(required_capabilities_present(
-            &OPENCODE_SPEC,
-            b"--pure --format --variant"
-        ));
+        let opencode_prefix =
+            |help: &[u8]| compatible_spec(&OPENCODE_SPEC, help).map(|spec| spec.cold_argv_prefix);
+        assert_eq!(
+            opencode_prefix(b"--pure --format --variant"),
+            Some(&["run", "--pure"][..])
+        );
+        assert_eq!(
+            opencode_prefix(b"--standalone --model provider/model#variant --format"),
+            Some(&["run", "--standalone"][..])
+        );
     }
 
     #[test]
@@ -3577,7 +3535,7 @@ mod tests {
     #[test]
     fn nonzero_success_looking_payload_is_not_treated_as_polish() {
         let detail = extract_process_error(
-            OutputParser::ClaudeJson,
+            OutputParser::ResultJson,
             br#"{"result":"success-looking output","is_error":false}"#,
             b"",
         );
@@ -3607,17 +3565,13 @@ mod tests {
 
     #[test]
     fn resolver_continues_after_unsafe_candidate() {
-        // Windows only accepts native `.exe` launchers; Unix accepts any
-        // non-script candidate.
-        let safe = if cfg!(target_os = "windows") {
-            PathBuf::from("C:\\Tools\\claude.exe")
-        } else {
-            PathBuf::from("/tmp/claude")
-        };
-        let candidates = vec![PathBuf::from("/tmp/claude.cmd"), safe.clone()];
+        let candidates = vec![
+            PathBuf::from("/tmp/claude.cmd"),
+            PathBuf::from("/tmp/claude"),
+        ];
         assert_eq!(
             select_safe_candidate(candidates),
-            BinaryResolution::Found(safe)
+            BinaryResolution::Found(PathBuf::from("/tmp/claude"))
         );
         assert_eq!(
             select_safe_candidate([PathBuf::from("/tmp/claude.ps1")]),
@@ -3649,41 +3603,41 @@ mod tests {
     }
 
     #[test]
-    fn parse_claude_json_reads_result_field() {
+    fn parse_result_json_reads_result_field() {
         let json = br#"{"type":"result","result":"Hello, world.","is_error":false}"#;
-        assert_eq!(parse_claude_json(json).unwrap(), "Hello, world.");
+        assert_eq!(parse_result_json(json).unwrap(), "Hello, world.");
     }
 
     #[test]
-    fn parse_claude_json_reads_content_string() {
+    fn parse_result_json_reads_content_string() {
         let json = br#"{"content":"Raw content here."}"#;
-        assert_eq!(parse_claude_json(json).unwrap(), "Raw content here.");
+        assert_eq!(parse_result_json(json).unwrap(), "Raw content here.");
     }
 
     #[test]
-    fn parse_claude_json_reads_content_text_blocks() {
+    fn parse_result_json_reads_content_text_blocks() {
         let json =
             br#"{"content":[{"type":"text","text":"line one"},{"type":"text","text":"line two"}]}"#;
-        assert_eq!(parse_claude_json(json).unwrap(), "line one\nline two");
+        assert_eq!(parse_result_json(json).unwrap(), "line one\nline two");
     }
 
     #[test]
-    fn parse_claude_json_recovers_from_noisy_prefix() {
+    fn parse_result_json_recovers_from_noisy_prefix() {
         // A real CLI may emit an update notice or shell banner before the JSON.
         // We slice between the first `{` and the last `}` (parakeet precedent).
         let noisy = b"A new version of claude is available. Run npm i -g @anthropic-ai/claude-code to update.\n{\"result\":\"Polished text.\"}\n";
-        assert_eq!(parse_claude_json(noisy).unwrap(), "Polished text.");
+        assert_eq!(parse_result_json(noisy).unwrap(), "Polished text.");
     }
 
     #[test]
-    fn parse_claude_json_rejects_garbage() {
-        assert!(parse_claude_json(b"not json at all").is_err());
-        assert!(parse_claude_json(b"{}").is_err());
-        assert!(parse_claude_json(b"{\"unrelated\":\"field\"}").is_err());
+    fn parse_result_json_rejects_garbage() {
+        assert!(parse_result_json(b"not json at all").is_err());
+        assert!(parse_result_json(b"{}").is_err());
+        assert!(parse_result_json(b"{\"unrelated\":\"field\"}").is_err());
     }
 
     #[test]
-    fn parse_claude_json_rejects_is_error_result_as_polish_text() {
+    fn parse_result_json_rejects_is_error_result_as_polish_text() {
         // Latent-bug guard: an `is_error:true` `result` is the CLI's OWN message
         // (e.g. "Not logged in · Please run /login"), NOT polished text. It must
         // surface as Err(AgentCli) carrying that message so it is never typed at
@@ -3692,7 +3646,7 @@ mod tests {
             r#"{"type":"result","result":"Not logged in · Please run /login","is_error":true}"#
                 .as_bytes();
         let err =
-            parse_claude_json(json).expect_err("an is_error result must NOT become polished text");
+            parse_result_json(json).expect_err("an is_error result must NOT become polished text");
         match err.error {
             AiProviderError::AgentCli(message) => {
                 assert_eq!(message, "Not logged in · Please run /login");
@@ -3702,12 +3656,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_claude_json_rejects_subtype_error_marker() {
+    fn parse_result_json_rejects_subtype_error_marker() {
         // CLIs that signal failure via `subtype`/`type` = "error" instead of
         // `is_error` are also rejected; the message falls back to the `error`
         // field, then `message`, then a short generic.
         let json = br#"{"subtype":"error","error":"rate limit exceeded"}"#;
-        let err = parse_claude_json(json).expect_err("subtype=error must be rejected");
+        let err = parse_result_json(json).expect_err("subtype=error must be rejected");
         match err.error {
             AiProviderError::AgentCli(message) => assert_eq!(message, "rate limit exceeded"),
             other => panic!("expected AgentCli error, got {other:?}"),
@@ -3715,11 +3669,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_claude_json_keeps_success_path_for_is_error_false() {
+    fn parse_result_json_keeps_success_path_for_is_error_false() {
         // `is_error:false` (or absent) with a `result` stays on the success
         // path — the guard must not over-trigger on normal results.
         let json = br#"{"type":"result","result":"Hello, world.","is_error":false}"#;
-        assert_eq!(parse_claude_json(json).unwrap(), "Hello, world.");
+        assert_eq!(parse_result_json(json).unwrap(), "Hello, world.");
     }
 
     #[test]
@@ -3764,7 +3718,7 @@ mod tests {
 
     #[test]
     fn parse_pi_jsonl_joins_multiple_text_blocks() {
-        // Multi-block assistant content joins with `\n` (mirrors parse_claude_json).
+        // Multi-block assistant content joins with `\n` (mirrors parse_result_json).
         let stream = b"{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"line one\"},{\"type\":\"text\",\"text\":\"line two\"}]}}\n";
         assert_eq!(parse_pi_jsonl(stream).unwrap(), "line one\nline two");
     }
@@ -3833,7 +3787,8 @@ not a json line\n";
             .arg("(sleep 0.25; printf survived > \"$MARKER\") & wait")
             .env("MARKER", &marker);
 
-        let result = run_isolated_command(command, None, Duration::from_millis(50)).await;
+        let result =
+            run_isolated_command(command, None, Duration::from_millis(50), MAX_CAPTURE_BYTES).await;
         assert!(matches!(result, Err(ProcessFailure::Timeout)));
 
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -3856,7 +3811,7 @@ not a json line\n";
 
         let cancelled = tokio::time::timeout(
             Duration::from_millis(50),
-            run_isolated_command(command, None, Duration::from_secs(30)),
+            run_isolated_command(command, None, Duration::from_secs(30), MAX_CAPTURE_BYTES),
         )
         .await;
         assert!(cancelled.is_err(), "outer deadline must cancel the command");
@@ -4192,38 +4147,6 @@ not a json line\n";
             selectors.iter().all(|selector| !selector.trim().is_empty()),
             "omp listing returned an empty exact selector: {selectors:?}"
         );
-    }
-
-    #[tokio::test]
-    #[ignore = "requires VOICETYPR_AGENT_CLI_PROVIDERS plus installed CLIs; no completion request"]
-    async fn real_configured_agent_cli_model_listing() {
-        let providers = std::env::var("VOICETYPR_AGENT_CLI_PROVIDERS")
-            .expect("set VOICETYPR_AGENT_CLI_PROVIDERS to comma-separated provider ids");
-        for provider in providers
-            .split(',')
-            .map(str::trim)
-            .filter(|provider| !provider.is_empty())
-        {
-            let models = list_models(provider)
-                .await
-                .unwrap_or_else(|error| panic!("{provider} model listing failed: {error:?}"));
-            let default = models
-                .first()
-                .unwrap_or_else(|| panic!("{provider} returned no default model"));
-            assert_eq!(default.id, "");
-            assert!(default.cli_default);
-            assert!(default.recommended);
-            assert_ne!(default.name, "CLI default");
-            if matches!(
-                provider,
-                PROVIDER_PI | PROVIDER_OMP | PROVIDER_DROID | PROVIDER_GROK | PROVIDER_OPENCODE
-            ) {
-                assert!(
-                    models.len() > 1,
-                    "{provider} should expose selectable models: {models:?}"
-                );
-            }
-        }
     }
 }
 

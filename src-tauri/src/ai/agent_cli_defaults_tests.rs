@@ -67,10 +67,9 @@ fn codex_defaults_and_explicit_overrides() {
 #[test]
 fn codex_discovery_keeps_default_and_recommends_luna() {
     let models = parse_codex_models(
-        br#"{"checks":{"config.load":{"details":{"model":"different-model","model_provider":"openai"}}}}"#,
+        br#"{"models":[{"slug":"gpt-6-luna","visibility":"list","priority":1},{"slug":"different-model","visibility":"list","priority":2}]}"#,
     ).unwrap();
-    assert!(models[0].id.is_empty());
-    assert!(models[0].cli_default);
+    assert!(named_cli_default("Codex", None, None).cli_default);
     let luna = models
         .iter()
         .find(|model| model.id == "gpt-6-luna")
@@ -84,7 +83,6 @@ fn other_provider_model_and_reasoning_defaults_are_unchanged() {
     for (spec, flag, level) in [
         (&PI_SPEC, "--thinking", "off"),
         (&OMP_SPEC, "--thinking", "off"),
-        (&DROID_SPEC, "--reasoning-effort", "low"),
     ] {
         let args = cold_argv_for_model(spec, "prompt", "", ClaudeCapabilities::default());
         assert!(has_pair(&args, flag, level));

@@ -25,6 +25,53 @@
 * **settings:** complete Polish initialization under React StrictMode and restore model-picker refresh behavior
 * **release:** pin the Tauri CLI to 2.6.2 and restore the changelog command used by the local release script
 
+## 2.0.11 (2026-11-02)
+
+### Bug Fixes
+
+* **macos:** fixed a crash when Voicetypr was opened a second time while already running
+
+## 2.0.10 (2026-11-01)
+
+### Features
+
+* **ai:** Claude Code prepares a fresh process ahead of time for faster Polish; each dictation still uses a separate conversation
+
+### Bug Fixes
+
+* **ai:** local CLI Polish keeps its enabled state and your chosen model across restarts
+* **ai:** the model pickers for oh-my-pi and Codex list every model the CLI offers again
+* **ai:** OpenCode Polish works with OpenCode 2.x (and still with 1.x), including OpenCode's free models
+* **reset:** Reset deletes only Voicetypr's own data and caches, works with relocated user storage, and refuses unsafe paths
+* **reset:** Reset shows an error instead of restarting when something could not be removed
+
+### BREAKING CHANGES
+
+* **ai:** removed Cline, Droid and Grok Polish providers; if one was selected, Polish switches to Claude Code
+
+## 2.0.9 (2026-10-10)
+
+### Features
+
+* **ai:** new recommended models: GPT-6 Luna and GPT-5.6 Luna (OpenAI), Claude Haiku 5.5 and Sonnet 5.5 (Anthropic), Gemini 3.5 Flash Lite and 3.8 Flash (Gemini); a saved model that no longer exists switches to the provider's default
+* **ai:** choose the reasoning effort (Off to High, per model) for OpenAI, Anthropic and Gemini; default Medium
+* **ai:** optional Fast mode (costs more) for OpenAI models and Claude Opus 5.5 / 5 / 4.8; if your account can't use it, Polish runs at standard speed, turns Fast off and tells you
+* **ai:** local CLIs default to Claude Haiku 5.5 (Claude Code) and GPT-6 Luna (Codex, pi, oh-my-pi) at Medium effort; saved choices are kept
+
+### Bug Fixes
+
+* **ai:** Claude Opus 4.7 / 4.8, Fable 5 and the Claude 5.x models work in Polish (they rejected the old thinking request)
+* **ai:** very long dictations on Gemini no longer exceed the model's output limit, and a cut-off response falls back to your raw text instead of pasting a partial result
+* **ai:** OpenAI Polish uses the Responses API; API key checks use the newest cheapest model at its lowest effort
+* **ai:** Claude Code runs with slash commands and skills disabled
+
+## 2.0.8 (2026-10-09)
+
+### Bug Fixes
+
+* **ai:** Polish works again with GPT-5 models (gpt-5-nano, gpt-5-mini, gpt-5.4): they reject a custom temperature, so every Polish fell back to the raw transcript
+* **ai:** Anthropic API keys save again and Claude Polish works on short dictations: the key check sent a thinking budget equal to `max_tokens` plus a temperature, which Anthropic rejected as a bad request
+
 ## [2.0.4](https://github.com/moinulmoin/voicetypr/compare/v2.0.3...v2.0.4) (2026-07-01)
 
 ### Features

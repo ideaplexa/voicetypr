@@ -976,6 +976,7 @@ pub(crate) fn begin_recording_generation() -> u64 {
     let generation =
         crate::commands::pill_feedback::advance_recording_generation(&RECORDING_GENERATION);
     crate::observability::begin(generation);
+    crate::commands::ai_lifecycle::begin_recording(generation);
     generation
 }
 
@@ -7032,11 +7033,11 @@ async fn stop_recording_with_mode_at(
 
                     // 1. Process the transcription and enhancement
                     let (final_text, mut writing_metadata, should_deliver, writing_succeeded) =
-                        match crate::writing::process_transcription_at(
+                        match crate::commands::ai_lifecycle::recording_polish(task_generation, crate::writing::process_transcription_at(
                             app_for_process.clone(),
                             transcription_for_process.clone(),
                             task_generation,
-                        )
+                        ))
                         .await
                         {
                             Ok(writing_result) => {
@@ -7367,6 +7368,12 @@ async fn stop_recording_with_mode_at(
                             insertion_ms
                         );
                         record_insertion_timing(&mut writing_metadata, insertion_ms);
+                    }
+
+                    if delivery_journey.succeeded == Some(true)
+                        && !delivery_aborted(app_state.is_cancellation_requested(), task_generation)
+                    {
+                        crate::commands::ai_lifecycle::delivered(app_for_process.clone(), task_generation);
                     }
 
                     // Recheck (Race 3) IMMEDIATELY before history save: a cancel
@@ -8448,6 +8455,7 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     // Request cancellation FIRST
     let app_state = app.state::<AppState>();
     app_state.request_cancellation();
+    crate::commands::ai_lifecycle::cancel_recording();
     crate::recording::kept::discard_generation(&app, current_recording_generation());
     log::info!("Cancellation requested in app state");
 

@@ -36,6 +36,7 @@ async fn execute(input: &str, output: &str, translation: bool) -> Result<String,
         )
         .await
         .map(|r| r.output_text)
+        .map_err(|failure| failure.error)
 }
 
 #[tokio::test]

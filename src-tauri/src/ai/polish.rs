@@ -1,6 +1,6 @@
-//! Shared, state-free prompt/executor boundary used by desktop and measurement CLI.
+//! Shared prompt/executor boundary used by desktop and measurement CLI.
 use super::{
-    contract::{AiPolishRequest, AiPolishResult},
+    contract::{AiPolishError, AiPolishRequest, AiPolishResult},
     error::AiProviderError,
     executor::AiExecutor,
     EnhancementOptions,
@@ -55,21 +55,23 @@ pub(crate) async fn execute_prompt(
     prompt: String,
     timings: &mut PolishTimings,
     needs_output_language_transform: bool,
-) -> Result<AiPolishResult, AiProviderError> {
+) -> Result<AiPolishResult, AiPolishError> {
+    let request = AiPolishRequest {
+        provider_id: runtime.provider.clone(),
+        model_id: runtime.model.clone(),
+        reasoning_level: runtime.reasoning_level.clone(),
+        fast_mode: runtime.fast_mode,
+        input_text: text.to_string(),
+        needs_output_language_transform,
+        prompt,
+        timeout_ms: runtime.timeout_ms,
+    };
+    crate::commands::ai_lifecycle::remember_request(&request);
     runtime
         .executor
         .polish_with_timings(
-            AiPolishRequest {
-                provider_id: runtime.provider.clone(),
-                model_id: runtime.model.clone(),
-                reasoning_level: runtime.reasoning_level.clone(),
-                fast_mode: runtime.fast_mode,
-                input_text: text.to_string(),
-                needs_output_language_transform,
-                prompt,
-                timeout_ms: runtime.timeout_ms,
-            },
-            tokio_util::sync::CancellationToken::new(),
+            request,
+            crate::commands::ai_lifecycle::polish_cancellation(),
             timings,
         )
         .await
@@ -131,7 +133,7 @@ pub(crate) async fn measure(
             Err(error) => (
                 raw_fallback(text),
                 PolishOutcome::FallbackRaw,
-                Some(error_category(&error).to_string()),
+                Some(error_category(&error.error).to_string()),
             ),
         }
     };
