@@ -366,6 +366,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     announce(kind === 'too_short' ? shortCopy(machine.context) : kind === 'nospeech' ? 'No speech heard' : message);
     feedbackTimer = deps.setTimeout(() => { feedbackTimer = undefined; rest(); }, kind === 'error' ? 1500 : kind === 'too_short' ? 1400 : 30000); sync();
   };
+  const resolveCapturedMic = () => {
+    // Context is published after capture readiness; kept-file retries synthesize Recording without it.
+    if (!machine.pending && machine.context.generation > 0 && machine.context.generation === machine.takeGeneration && machine.context.mic.ok) stack.resolveMicStatus('recording',machine.takeGeneration);
+  };
   /** Keypress: Starting was published, the mic is not open yet. Show the idle listening layout at 0:00. */
   const starting = (generation?: number) => {
     if (machine.recording && (generation === undefined || generation <= machine.takeGeneration)) return;
@@ -388,7 +392,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (machine.pending && (generation === undefined || machine.activeTakeGeneration === undefined || generation === machine.activeTakeGeneration)) {
       // Recording began. Clock and bars go live from here; a context that already arrived keeps its start card.
       if (!machine.start(performance.now(), generation)) return;
-      stack.resolveMicStatus('recording', generation);
+      resolveCapturedMic();
       glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
       if (machine.state === 'start') foldStart();
       sync();
@@ -398,7 +402,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     if (generation !== undefined && !machine.observeGeneration(generation)) return;
     endTake();
     stack.resolveMicStatus('new_take', generation);
-    stack.resolveMicStatus('recording', generation);
     stack.dropLive();
     if (machine.state === 'copied' || machine.state === 'no_permission') {
       const permission=machine.state==='no_permission';
@@ -407,6 +410,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     pick = undefined;
     stack.tuck(true);
     if (!machine.start(performance.now(), generation)) return;
+    resolveCapturedMic();
     timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; announce('');
     if (machine.state === 'start') foldStart(); sync();
     perf?.begin();
@@ -414,6 +418,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   const context = (value: DictationContext) => {
     if (!machine.contextEvent(value)) return;
     contextText();
+    resolveCapturedMic();
     appIcon.set(value.app.name, value.app.icon_key, deps.icon);
     if (machine.state === 'start') foldStart(); sync();
   };
