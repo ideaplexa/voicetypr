@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Button } from "@/components/settings/SettingsButton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +9,7 @@ import { useWritingSettings } from "@/state/writingSettings";
 import type { CustomWord, Snippet, TextReplacementRule } from "@/types/writing";
 import {
   dictionaryEntryError,
+  dictionaryLanguageError,
   type DictionaryEntry,
   type DictionaryKind,
 } from "@/lib/dictionary-validation";
@@ -354,22 +355,29 @@ function FieldInput({
   value,
   onChange,
   placeholder,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  error?: string | null;
 }) {
+  const id = useId();
   return (
-    <label className="min-w-0 flex-1 text-xs text-muted-foreground">
-      {label}
+    <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+      <label htmlFor={id}>{label}</label>
       <Input
+        id={id}
+        aria-invalid={!!error}
+        aria-describedby={error ? `${id}-error` : undefined}
         className="mt-1 bg-card text-sm"
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
-    </label>
+      {error ? <p id={`${id}-error`} className="mt-1 text-xs text-destructive">{error}</p> : null}
+    </div>
   );
 }
 function EnabledField({
@@ -410,6 +418,7 @@ function WordFields({
       />
       <FieldInput
         label="Language"
+        error={dictionaryLanguageError(item.language)}
         value={item.language ?? ""}
         placeholder="Language code (optional, e.g. en)"
         onChange={(language) => onChange(index, { language: language || null })}
@@ -443,6 +452,7 @@ function CorrectionFields({
       />
       <FieldInput
         label="Language"
+        error={dictionaryLanguageError(item.language)}
         value={item.language ?? ""}
         placeholder="Language code (optional, e.g. en)"
         onChange={(language) => onChange(index, { language: language || null })}
@@ -482,6 +492,7 @@ function SnippetFields({
         </label>
         <FieldInput
           label="Language"
+          error={dictionaryLanguageError(item.language)}
           value={item.language ?? ""}
           placeholder="Language code (optional, e.g. en)"
           onChange={(language) => onChange(index, { language: language || null })}

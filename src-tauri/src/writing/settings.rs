@@ -276,11 +276,40 @@ pub fn sanitize_writing_settings(settings: WritingSettings) -> WritingSettings {
     }
 }
 
+fn validate_dictionary_languages(settings: &WritingSettings) -> Result<(), String> {
+    let scopes = settings
+        .replacements
+        .iter()
+        .map(|entry| entry.language.as_deref())
+        .chain(
+            settings
+                .custom_words
+                .iter()
+                .map(|entry| entry.language.as_deref()),
+        )
+        .chain(
+            settings
+                .snippets
+                .iter()
+                .map(|entry| entry.language.as_deref()),
+        );
+    for scope in scopes.flatten() {
+        let code = scope.trim().to_ascii_lowercase();
+        if !code.is_empty() && !crate::whisper::languages::is_language_supported(&code) {
+            return Err("Unsupported dictionary language code. Use a supported code such as en or de, or leave it empty for all languages.".to_string());
+        }
+    }
+    Ok(())
+}
+
 pub fn load_writing_settings(app: &AppHandle) -> Result<WritingSettings, String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
     if let Some(value) = store.get(WRITING_SETTINGS_KEY) {
         let settings: WritingSettings = serde_json::from_value(value.clone())
             .map_err(|e| format!("Failed to parse writing settings: {}", e))?;
+        if validate_dictionary_languages(&settings).is_err() {
+            log::warn!("Stored dictionary contains an unsupported language scope; preserving it");
+        }
         Ok(sanitize_writing_settings(settings))
     } else {
         Ok(WritingSettings::default())
@@ -288,6 +317,7 @@ pub fn load_writing_settings(app: &AppHandle) -> Result<WritingSettings, String>
 }
 
 pub fn save_writing_settings(app: &AppHandle, settings: &WritingSettings) -> Result<(), String> {
+    validate_dictionary_languages(settings)?;
     let store = app.store("settings").map_err(|e| e.to_string())?;
     let sanitized = sanitize_writing_settings(settings.clone());
     store.set(
@@ -303,6 +333,120 @@ pub fn save_writing_settings(app: &AppHandle, settings: &WritingSettings) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dictionary_languages_accept_empty_and_case_insensitive_supported_codes() {
+        for language in [
+            None,
+            Some(""),
+            Some("  "),
+            Some(" de "),
+            Some("DE"),
+            Some("yue"),
+        ] {
+            let settings = WritingSettings {
+                custom_words: vec![CustomWord {
+                    phrase: "Test".into(),
+                    language: language.map(str::to_string),
+                    ..CustomWord::default()
+                }],
+                ..WritingSettings::default()
+            };
+            assert!(
+                validate_dictionary_languages(&settings).is_ok(),
+                "{language:?}"
+            );
+        }
+        assert_eq!(
+            normalize_language_scope(Some(" DE ")).as_deref(),
+            Some("de")
+        );
+        assert_eq!(normalize_language_scope(Some(" ")), None);
+        assert_eq!(normalize_language_scope(None), None);
+    }
+
+    #[test]
+    fn dictionary_languages_reject_invalid_scopes_in_every_entry_kind() {
+        for language in ["d", "invalid", "auto", "de-AT", "de_CH", "english"] {
+            let scope = Some(language.to_string());
+            let cases = [
+                WritingSettings {
+                    custom_words: vec![CustomWord {
+                        phrase: "Test".into(),
+                        language: scope.clone(),
+                        ..CustomWord::default()
+                    }],
+                    ..WritingSettings::default()
+                },
+                WritingSettings {
+                    replacements: vec![TextReplacementRule {
+                        from: "A".into(),
+                        to: "B".into(),
+                        language: scope.clone(),
+                        ..TextReplacementRule::default()
+                    }],
+                    ..WritingSettings::default()
+                },
+                WritingSettings {
+                    snippets: vec![Snippet {
+                        trigger: "insert test".into(),
+                        body: "Test".into(),
+                        language: scope.clone(),
+                        ..Snippet::default()
+                    }],
+                    ..WritingSettings::default()
+                },
+            ];
+            for settings in cases {
+                assert!(validate_dictionary_languages(&settings)
+                    .unwrap_err()
+                    .contains("Unsupported dictionary language code"));
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_invalid_dictionary_scopes_are_preserved_not_reinterpreted() {
+        let settings = sanitize_writing_settings(WritingSettings {
+            custom_words: vec![CustomWord {
+                phrase: "Test".into(),
+                language: Some(" d ".into()),
+                ..CustomWord::default()
+            }],
+            replacements: vec![TextReplacementRule {
+                from: "A".into(),
+                to: "B".into(),
+                language: Some("invalid".into()),
+                ..TextReplacementRule::default()
+            }],
+            snippets: vec![Snippet {
+                trigger: "insert test".into(),
+                body: "Test".into(),
+                language: Some("de-AT".into()),
+                ..Snippet::default()
+            }],
+            ..WritingSettings::default()
+        });
+        assert_eq!(settings.custom_words[0].language.as_deref(), Some(" d "));
+        assert_eq!(
+            settings.replacements[0].language.as_deref(),
+            Some("invalid")
+        );
+        assert_eq!(settings.snippets[0].language.as_deref(), Some("de-AT"));
+        assert!(!super::super::language_scope_matches(
+            settings.custom_words[0].language.as_deref(),
+            Some("en")
+        ));
+        assert!(!super::super::language_scope_matches(
+            settings.replacements[0].language.as_deref(),
+            Some("en")
+        ));
+        assert!(!super::super::language_scope_matches(
+            settings.snippets[0].language.as_deref(),
+            Some("en")
+        ));
+        assert!(validate_dictionary_languages(&settings).is_err());
+    }
 
     #[test]
     fn test_sanitize_writing_settings_trims_and_drops_empty_entries() {

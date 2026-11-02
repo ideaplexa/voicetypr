@@ -11,7 +11,7 @@ use crate::commands::settings::{
     FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
 };
 use crate::transcription::TranscriptionResult;
-use crate::whisper::languages::validate_language;
+use crate::whisper::languages::is_language_supported;
 
 use super::{
     apply_final_restoration_guard, apply_library_rules, category_label, category_prompt_hint,
@@ -248,7 +248,16 @@ pub fn effective_personal_dictation_mode(app: &AppHandle) -> Result<bool, String
 pub(crate) fn normalize_language_scope(value: Option<&str>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| validate_language(Some(trimmed)).to_string())
+        if trimmed.is_empty() {
+            return None;
+        }
+        let lowercase = trimmed.to_ascii_lowercase();
+        Some(if is_language_supported(&lowercase) {
+            lowercase
+        } else {
+            // Preserve legacy invalid scopes instead of reinterpreting them.
+            value.to_string()
+        })
     })
 }
 

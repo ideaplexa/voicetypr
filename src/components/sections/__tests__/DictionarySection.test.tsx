@@ -145,6 +145,34 @@ describe("Dictionary", () => {
 
 describe("Dictionary regression cases", () => {
   it.each([
+    ["words", "custom_words", "Add word", "Canonical", "Alpha", null],
+    ["corrections", "replacements", "Add rule", "Match", "Alpha", "Replace"],
+    ["snippets", "snippets", "Add saved text", "Insert", "note", "Text to insert"],
+  ] as const)("blocks invalid language saves for %s and associates the inline error with the field", async (kind, key, addLabel, field, value, otherField) => {
+    const user = userEvent.setup();
+    await ready();
+    if (kind !== "words") await user.click(screen.getByRole("tab", { name: new RegExp(`^${kind}`, "i") }));
+    await user.click(screen.getByRole("button", { name: addLabel }));
+    await user.type(screen.getByLabelText(field), value);
+    if (otherField) await user.type(screen.getByLabelText(otherField), "Test");
+    const language = screen.getByLabelText("Language");
+    await user.type(language, "d");
+    expect(language).toHaveAttribute("aria-invalid", "true");
+    expect(language).toHaveAccessibleDescription(/supported language code/);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(useWritingSettings.getState().settings[key]).toEqual([]);
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "update_writing_settings")).toHaveLength(0);
+    await user.clear(language);
+    await user.type(language, " DE ");
+    expect(language).toHaveAttribute("aria-invalid", "false");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(useWritingSettings.getState().settings[key][0]?.language).toBe(" DE ");
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "update_writing_settings")).toHaveLength(1));
+  });
+
+  it.each([
     ["words", "custom_words", { phrase: "Alpha", enabled: true }, { phrase: "Beta", enabled: true }, "Canonical"],
     ["corrections", "replacements", { from: "Alpha", to: "A", enabled: true }, { from: "Beta", to: "B", enabled: true }, "Match"],
     ["snippets", "snippets", { trigger: "insert Alpha", body: "A", enabled: true, preserve_literal: true }, { trigger: "insert Beta", body: "B", enabled: true, preserve_literal: true }, "Insert"],
