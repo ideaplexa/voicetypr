@@ -566,7 +566,12 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (handoff && !machine.recording) rest();
     },
     blocked(value: DictationBlocked) { if (machine.observeGeneration(value.generation)) this.feedback(blockedCard(value,deps.mac),value.kind !== 'starting_up',!(value.kind==='accessibility_off' && machine.state==='no_permission')); },
-    recovery(value: DictationRecovery) { if (machine.observeGeneration(value.generation)) this.feedback(recoveryCard(value,performance.now())); },
+    recovery(value: DictationRecovery) {
+      // Retained clips outlive their take. Their id/lease, not the active-take watermark, owns the action.
+      if (!value.id || !(value.expires_in_ms > 0)) return;
+      if (value.kind === 'mic_dropped_empty' && value.generation < machine.takeGeneration) return;
+      this.feedback(recoveryCard(value,performance.now()),value.generation >= machine.takeGeneration);
+    },
     withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },
     note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.takeGeneration)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
     tooShort(value: RecordingTooShort) { if (machine.observeGeneration(value.generation)) this.feedback(shortCard(value)); },
