@@ -482,7 +482,6 @@ mod tests {
 
     #[test]
     fn legacy_invalid_scopes_do_not_block_unrelated_saves() {
-        use tauri::Manager;
         let dir = tempfile::tempdir().unwrap();
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
         context.config_mut().identifier = dir.path().to_str().unwrap().to_string();

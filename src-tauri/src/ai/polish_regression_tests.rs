@@ -93,14 +93,24 @@ fn baseline_guard_rejects_all_meta_answers_without_correct_output_regressions() 
 }
 
 #[test]
-fn golden_skip_list_requires_no_changes() {
+fn golden_english_skip_list_requires_no_changes() {
     let (golden, _) = corpus();
     let mut skipped = Vec::new();
     for case in &golden {
+        if case.language.is_none() {
+            assert!(!super::super::skip::should_skip(
+                &case.input,
+                case.style.preset(),
+                None,
+            ));
+        }
+        // Most fictional corpus cases predate language metadata. Replay their
+        // English heuristic contract explicitly, without changing unknown-language
+        // behavior in the application.
         if super::super::skip::should_skip(
             &case.input,
             case.style.preset(),
-            case.language.as_deref(),
+            Some(case.language.as_deref().unwrap_or("en")),
         ) {
             assert!(
                 polish_score::score(case, &case.input).passed,
