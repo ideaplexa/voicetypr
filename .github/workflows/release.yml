@@ -136,17 +136,17 @@ jobs:
           node-version: '22.19.0'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@e9540b3eafaf84907c087a645d3258bfaa861427  # v3.0.0
         with:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.91.1
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0  # 1.91.1
         with:
           targets: aarch64-apple-darwin
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -278,17 +278,17 @@ jobs:
           node-version: '22.19.0'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@e9540b3eafaf84907c087a645d3258bfaa861427  # v3.0.0
         with:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.91.1
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0  # 1.91.1
         with:
           targets: x86_64-apple-darwin
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -378,26 +378,25 @@ jobs:
           node-version: '22.19.0'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@e9540b3eafaf84907c087a645d3258bfaa861427  # v3.0.0
         with:
           version: 10.13.1
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.91.1
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0  # 1.91.1
         with:
           targets: x86_64-pc-windows-msvc
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           shared-key: windows-x64-build-vk${{ env.VULKAN_RUNTIME_VERSION }}
-          key: vulkan-${{ env.VULKAN_RUNTIME_VERSION }}
           workspaces: |
             src-tauri -> ../../../../b/app
             sidecar/whisper-vulkan -> ../../../../../b/vulkan
 
       - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1
+        uses: jakoch/install-vulkan-sdk-action@d17de7e2f5e50efb5d2123efed18497d3c58c533  # v1.7.0
         with:
           vulkan_version: 1.3.296.0
           install_runtime: true
@@ -536,6 +535,8 @@ jobs:
     outputs:
       ref: ${{ steps.push.outputs.ref }}
     steps:
+      # Stable releases normally run from `main`; a `hotfix/*` dispatch releases
+      # and bumps that branch instead, so `main` (the next minor) is untouched.
       - name: Checkout release branch
         uses: actions/checkout@v4
         with:
@@ -558,61 +559,8 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: node .github/scripts/release-tool.mjs check-tag "$RELEASE_TAG"
 
-      - name: Bump version files
-        run: |
-          export RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
-          node .github/scripts/release-tool.mjs apply-version "$RELEASE_VERSION"
-          cargo update \
-            --manifest-path src-tauri/Cargo.toml \
-            -p voicetypr \
-            --precise "$RELEASE_VERSION"
-          cargo metadata \
-            --manifest-path src-tauri/Cargo.toml \
-            --locked \
-            --format-version 1 \
-            --no-deps >/dev/null
-
-      - name: Commit, tag, and push
-        id: push
-        env:
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_BRANCH: ${{ github.ref_name }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock CHANGELOG.md
-          git diff --cached --stat
-          if git diff --cached --quiet; then
-            echo "No version file changes; tagging current commit"
-          else
-            git commit -m "chore: release ${{ needs.prepare.outputs.tag }}"
-          fi
-          git tag -a "${{ needs.prepare.outputs.tag }}" -m "Release ${{ needs.prepare.outputs.tag }}"
-
-          if [[ "$RELEASE_CHANNEL" == "beta" ]]; then
-            # Keep prerelease versions off the release branch. The tag makes the
-            # release commit immutable/reachable; stable promotion bumps its branch.
-            git push origin "${{ needs.prepare.outputs.tag }}"
-          else
-            git push --atomic origin "$RELEASE_BRANCH" "${{ needs.prepare.outputs.tag }}"
-          fi
-          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  # ===========================================
-  # Create Release (after publish succeeds)
-  # ===========================================
-  release:
-    needs: [prepare, build-macos-aarch64, build-macos-x86_64, build-windows, publish]
-    runs-on: ubuntu-latest
-    if: ${{ !inputs.dry_run }}
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.publish.outputs.ref }}
-
+      # Assemble and validate every release file BEFORE any git push: if a
+      # build artifact is missing or latest.json is wrong, the tag never lands.
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -650,6 +598,8 @@ jobs:
           LC_ALL=C grep -q '[^[:space:]]' release-body.md
 
       - name: Generate latest.json
+        env:
+          REPOSITORY: ${{ github.repository }}
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           TAG="${{ needs.prepare.outputs.tag }}"
@@ -668,11 +618,11 @@ jobs:
             --rawfile notes release-body.md \
             --arg pub_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
             --arg aarch64_sig "$AARCH64_SIG" \
-            --arg aarch64_url "https://github.com/${{ github.repository }}/releases/download/$TAG/Voicetypr_${VERSION}_aarch64.app.tar.gz" \
+            --arg aarch64_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_aarch64.app.tar.gz" \
             --arg x86_64_sig "$X86_64_SIG" \
-            --arg x86_64_url "https://github.com/${{ github.repository }}/releases/download/$TAG/Voicetypr_${VERSION}_x86_64.app.tar.gz" \
+            --arg x86_64_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_x86_64.app.tar.gz" \
             --arg windows_sig "$WINDOWS_SIG" \
-            --arg windows_url "https://github.com/${{ github.repository }}/releases/download/$TAG/Voicetypr_${VERSION}_x64-setup.exe" \
+            --arg windows_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_x64-setup.exe" \
             '{
               version: $version,
               notes: $notes,
@@ -684,8 +634,89 @@ jobs:
               }
             }' > release/latest.json
 
+          jq -e '
+            (.version | type == "string" and length > 0) and
+            (.platforms | type == "object") and
+            (.platforms | length == 3) and
+            all(.platforms[];
+              (.signature | type == "string" and length > 0) and
+              (.url | type == "string" and startswith("https://"))
+            )
+          ' release/latest.json >/dev/null
+
+      - name: Stage release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: release/
+          retention-days: 1
+
+      - name: Bump version files
+        run: |
+          export RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
+          node .github/scripts/release-tool.mjs apply-version "$RELEASE_VERSION"
+          cargo update \
+            --manifest-path src-tauri/Cargo.toml \
+            -p voicetypr \
+            --precise "$RELEASE_VERSION"
+          cargo metadata \
+            --manifest-path src-tauri/Cargo.toml \
+            --locked \
+            --format-version 1 \
+            --no-deps >/dev/null
+
+      - name: Commit, tag, and push
+        id: push
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock CHANGELOG.md
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo "No version file changes; tagging current commit"
+          else
+            git commit -m "chore: release ${{ needs.prepare.outputs.tag }}"
+          fi
+          git tag -a "${{ needs.prepare.outputs.tag }}" -m "Release ${{ needs.prepare.outputs.tag }}"
+
+          if [[ "$RELEASE_CHANNEL" == "beta" ]]; then
+            # Keep prerelease versions out of main. The tag makes the release commit
+            # immutable/reachable; Stable promotion later performs the normal main bump.
+            git push origin "${{ needs.prepare.outputs.tag }}"
+          else
+            git push --atomic origin "$RELEASE_BRANCH" "${{ needs.prepare.outputs.tag }}"
+          fi
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # ===========================================
+  # Create Release (after publish succeeds)
+  # ===========================================
+  release:
+    needs: [prepare, build-macos-aarch64, build-macos-x86_64, build-windows, publish]
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.dry_run }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.publish.outputs.ref }}
+
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
+
+      - name: Restore staged release body
+        run: jq -r '.notes' release/latest.json > release-body.md
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: Voicetypr ${{ needs.prepare.outputs.tag }}

@@ -1,8 +1,9 @@
-use super::contract::{output_token_cap_for_input, AiPolishRequest};
+use super::anthropic_current::{uses_raw_messages, AnthropicCurrentRuntime};
+use super::contract::{output_token_cap_for_input, thinking_token_allowance, AiPolishRequest};
 use super::error::{map_genai_error, AiProviderError, MappedAiProviderError};
 use crate::ai::catalog;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatOptions, ChatRequest, ReasoningEffort};
+use genai::chat::{ChatOptions, ChatRequest, ReasoningEffort, StopReason};
 use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ClientBuilder, ModelIden, ServiceTarget};
 use std::collections::HashMap;
@@ -10,10 +11,12 @@ use std::sync::Arc;
 
 pub type AiKeyResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1/";
+
 #[derive(Clone)]
 pub struct GenaiRuntime {
     client: Client,
-    anthropic_current: super::anthropic_current::AnthropicCurrentRuntime,
+    anthropic_current: AnthropicCurrentRuntime,
 }
 
 impl GenaiRuntime {
@@ -22,19 +25,11 @@ impl GenaiRuntime {
         key_resolver: AiKeyResolver,
         endpoint_overrides: HashMap<String, String>,
     ) -> Self {
-        let anthropic_current = super::anthropic_current::AnthropicCurrentRuntime {
-            client: reqwest_client.clone(),
-            key_resolver: key_resolver.clone(),
-            base_url: endpoint_overrides
-                .get("anthropic")
-                .cloned()
-                .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string()),
-        };
         let endpoint_overrides = Arc::new(endpoint_overrides);
         let auth_resolver = key_resolver.clone();
         let endpoint_resolver = endpoint_overrides.clone();
         let client = ClientBuilder::default()
-            .with_reqwest(reqwest_client)
+            .with_reqwest(reqwest_client.clone())
             .with_auth_resolver_fn(move |model: ModelIden| {
                 let provider_id = provider_id_for_adapter(model.adapter_kind).unwrap_or_default();
                 Ok(auth_resolver(provider_id).map(AuthData::from_single))
@@ -48,36 +43,38 @@ impl GenaiRuntime {
                 Ok(target)
             })
             .build();
+        let anthropic_base_url = endpoint_overrides
+            .get("anthropic")
+            .cloned()
+            .unwrap_or_else(|| ANTHROPIC_DEFAULT_BASE_URL.to_string());
         Self {
             client,
-            anthropic_current,
+            anthropic_current: AnthropicCurrentRuntime {
+                client: reqwest_client,
+                key_resolver,
+                base_url: anthropic_base_url,
+            },
         }
     }
 
-    pub async fn polish(&self, request: &AiPolishRequest) -> Result<String, MappedAiProviderError> {
-        if request.provider_id == "anthropic"
-            && matches!(
-                request.model_id.as_str(),
-                "claude-sonnet-5-5"
-                    | "claude-opus-5-5"
-                    | "claude-sonnet-5"
-                    | "claude-opus-5"
-                    | "claude-fable-5"
-                    | "claude-fable-5-1"
-                    | "claude-opus-4-7"
-                    | "claude-opus-4-8"
-            )
-        {
+    pub async fn polish(
+        &self,
+        request: &AiPolishRequest,
+        standard_after_fast_refusal: bool,
+    ) -> Result<String, MappedAiProviderError> {
+        // Claude 4.7+/5.x models reject genai's legacy thinking shape; they go
+        // through the raw Messages client (anthropic_current.rs).
+        if request.provider_id == "anthropic" && uses_raw_messages(&request.model_id) {
             return self.anthropic_current.polish(request).await;
         }
+
         let adapter_kind = adapter_kind_for_provider(&request.provider_id)
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::UnsupportedProvider))?;
         let model_str = namespaced_model(&request.provider_id, &request.model_id);
         let model = ModelIden::new(adapter_kind, model_str);
         let chat_request =
             ChatRequest::from_user(request.input_text.clone()).with_system(request.prompt.clone());
-
-        let chat_options = chat_options(request);
+        let chat_options = Some(chat_options(request, standard_after_fast_refusal));
 
         let response = self
             .client
@@ -85,49 +82,21 @@ impl GenaiRuntime {
             .await
             .map_err(|error| map_genai_error(&error))?;
 
+        // A max-tokens stop means the response is partial; pasting it would
+        // silently inject a truncated rewrite at the cursor.
+        if matches!(response.stop_reason, Some(StopReason::MaxTokens(_))) {
+            return Err(MappedAiProviderError::new(AiProviderError::BadResponse));
+        }
         response
             .into_first_text()
             .ok_or_else(|| MappedAiProviderError::new(AiProviderError::BadResponse))
     }
 }
 
-fn chat_options(request: &AiPolishRequest) -> Option<ChatOptions> {
-    let max_tokens = output_token_cap_for_input(request.input_text.len());
-    let mut options = ChatOptions::default();
-    let model = catalog::all_provider_models(&request.provider_id)
-        .into_iter()
-        .find(|model| model.model_id == request.model_id);
-    if model.is_none_or(|model| model.temperature) {
-        options = options.with_temperature(0.2);
-    }
-    // genai 0.6's token-name table only knows GPT-5 and o-series.
-    if request.provider_id == "openai" && request.model_id.starts_with("gpt-6") {
-        options = options.with_extra_body(serde_json::json!({"max_completion_tokens": max_tokens}));
-    } else {
-        options = options.with_max_tokens(max_tokens);
-    }
-    if let Some(effort) = catalog::reasoning_effort(
-        &request.provider_id,
-        &request.model_id,
-        request.reasoning_level.as_deref(),
-    ) {
-        let effort = match effort.as_str() {
-            "none" => ReasoningEffort::None,
-            "low" => ReasoningEffort::Low,
-            "medium" => ReasoningEffort::Medium,
-            "high" => ReasoningEffort::High,
-            "xhigh" => ReasoningEffort::XHigh,
-            "max" => ReasoningEffort::Max,
-            _ => ReasoningEffort::Minimal,
-        };
-        options = options.with_reasoning_effort(effort);
-    }
-    Some(options)
-}
-
 fn adapter_kind_for_provider(provider_id: &str) -> Option<AdapterKind> {
     match catalog::adapter_name(provider_id)? {
         "OpenAI" => Some(AdapterKind::OpenAI),
+        "OpenAIResp" => Some(AdapterKind::OpenAIResp),
         "Anthropic" => Some(AdapterKind::Anthropic),
         "Gemini" => Some(AdapterKind::Gemini),
         _ => None,
@@ -137,6 +106,7 @@ fn adapter_kind_for_provider(provider_id: &str) -> Option<AdapterKind> {
 fn provider_id_for_adapter(adapter_kind: AdapterKind) -> Option<&'static str> {
     let adapter_name = match adapter_kind {
         AdapterKind::OpenAI => "OpenAI",
+        AdapterKind::OpenAIResp => "OpenAIResp",
         AdapterKind::Anthropic => "Anthropic",
         AdapterKind::Gemini => "Gemini",
         _ => return None,
@@ -149,6 +119,69 @@ fn namespaced_model(provider_id: &str, model_id: &str) -> String {
         Some(namespace) => format!("{namespace}{model_id}"),
         None => model_id.to_string(),
     }
+}
+
+/// Map a resolved level onto genai's ReasoningEffort. Budget-only models
+/// (Gemini 2.5, older Claude) take legacy budgets via keyword efforts; "none"
+/// needs `thinkingBudget: 0` to actually disable thinking, which genai only
+/// emits through the explicit `Budget(0)` variant.
+fn genai_effort(provider_id: &str, model_id: &str, level: &str) -> ReasoningEffort {
+    if level == "none" && catalog::is_budget_only_reasoning(provider_id, model_id) {
+        return ReasoningEffort::Budget(0);
+    }
+    match level {
+        "none" => ReasoningEffort::None,
+        "minimal" => ReasoningEffort::Minimal,
+        "low" => ReasoningEffort::Low,
+        "high" => ReasoningEffort::High,
+        // medium and anything unlisted.
+        _ => ReasoningEffort::Medium,
+    }
+}
+
+/// Inline formatting is latency- and cost-sensitive, so reasoning models get
+/// the resolved effort and no temperature (reasoning APIs reject or ignore
+/// one); non-reasoning and unknown models keep the low temperature and never
+/// receive a reasoning parameter a provider would reject.
+fn chat_options(request: &AiPolishRequest, standard_after_fast_refusal: bool) -> ChatOptions {
+    let model = catalog::find_model(&request.provider_id, &request.model_id);
+    let effort = catalog::resolve_reasoning_level(
+        &request.provider_id,
+        &request.model_id,
+        request.reasoning_level.as_deref(),
+    );
+    let max_tokens = output_token_cap_for_input(
+        request.input_text.len(),
+        thinking_token_allowance(effort.as_deref()),
+        model.and_then(|model| model.output),
+    );
+
+    let mut options = ChatOptions::default().with_max_tokens(max_tokens);
+    let reasoning_model = model.is_some_and(|model| model.reasoning);
+    if !reasoning_model && model.is_none_or(|model| model.temperature) {
+        options = options.with_temperature(0.2);
+    }
+    if let Some(effort) = effort {
+        options = options.with_reasoning_effort(genai_effort(
+            &request.provider_id,
+            &request.model_id,
+            &effort,
+        ));
+    }
+    // Fast mode: genai's ServiceTier has no "fast" variant (and the Responses
+    // API expects the literal service_tier field), so it rides extra_body —
+    // merged last, it cannot conflict with anything the adapter sets.
+    if request.provider_id == "openai" {
+        if request.fast_mode {
+            options = options.with_extra_body(serde_json::json!({"service_tier": "fast"}));
+        } else if standard_after_fast_refusal {
+            // Standard-speed retry after a refusal: pin the tier explicitly —
+            // omitting it falls back to the project's Default Service Tier,
+            // which the user may have configured to Fast.
+            options = options.with_extra_body(serde_json::json!({"service_tier": "default"}));
+        }
+    }
+    options
 }
 
 fn ensure_trailing_slash(base_url: &str) -> String {
@@ -165,14 +198,14 @@ mod tests {
 
     #[test]
     fn namespaced_model_leaves_native_adapters_clean() {
-        assert_eq!(namespaced_model("openai", "gpt-6.1-sol"), "gpt-6.1-sol");
+        assert_eq!(namespaced_model("openai", "gpt-6-luna"), "gpt-6-luna");
         assert_eq!(
-            namespaced_model("anthropic", "claude-sonnet-5-5"),
-            "claude-sonnet-5-5"
+            namespaced_model("anthropic", "claude-haiku-5-5"),
+            "claude-haiku-5-5"
         );
         assert_eq!(
-            namespaced_model("gemini", "gemini-3.8-flash"),
-            "gemini-3.8-flash"
+            namespaced_model("gemini", "gemini-3.5-flash-lite"),
+            "gemini-3.5-flash-lite"
         );
     }
 
@@ -183,6 +216,14 @@ mod tests {
                 .unwrap_or_else(|| panic!("{provider_id} should map to a genai adapter"));
             assert_eq!(provider_id_for_adapter(kind), Some(provider_id));
         }
+    }
+
+    #[test]
+    fn openai_uses_responses_adapter() {
+        assert_eq!(
+            adapter_kind_for_provider("openai"),
+            Some(AdapterKind::OpenAIResp)
+        );
     }
 
     #[test]
@@ -200,18 +241,15 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_targets_only_reasoning_models() {
-        // Recommended reasoning models should be gated in for minimal effort.
-        assert!(catalog::reasoning_effort("openai", "gpt-6.1-sol", None).is_some());
-        assert!(catalog::reasoning_effort("gemini", "gemini-3.8-flash", None).is_some());
-        assert!(catalog::reasoning_effort("anthropic", "claude-sonnet-5-5", None).is_some());
-
-        // Non-reasoning models must be excluded so no reasoning param is sent.
-        assert!(catalog::reasoning_effort("openai", "gpt-4o", None).is_none());
-        assert!(catalog::reasoning_effort("gemini", "gemini-2.0-flash", None).is_none());
-
-        // Unknown provider/model resolves to false (safe default).
-        assert!(catalog::reasoning_effort("openai", "does-not-exist", None).is_none());
-        assert!(catalog::reasoning_effort("custom", "anything", None).is_none());
+    fn budget_only_none_needs_explicit_zero_budget() {
+        assert!(matches!(
+            genai_effort("gemini", "gemini-2.5-flash", "none"),
+            ReasoningEffort::Budget(0)
+        ));
+        // Effort-value models keep the None variant.
+        assert!(matches!(
+            genai_effort("openai", "gpt-6-luna", "none"),
+            ReasoningEffort::None
+        ));
     }
 }

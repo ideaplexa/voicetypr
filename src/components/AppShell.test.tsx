@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrayStatus } from "@/lib/tray";
 import { AppShell } from "./AppShell";
+import { toast } from "sonner";
 
 const platform = vi.hoisted(() => ({ current: "macos" }));
 vi.mock("@/lib/platform", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/lib/platform", () => ({
 const getTrayStatusMock = vi.fn<() => Promise<TrayStatus>>();
 const retryTrayCreationMock = vi.fn<() => Promise<TrayStatus>>();
 let trayStatusListener: ((event: { payload: TrayStatus }) => void) | undefined;
+let fastModeListener: ((event: { payload: { provider: string; model: string } }) => void) | undefined;
 
 vi.mock("@/lib/tray", () => ({
   getTrayStatus: () => getTrayStatusMock(),
@@ -21,10 +23,15 @@ vi.mock("@/lib/tray", () => ({
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(async (_eventName: string, listener: (event: { payload: TrayStatus }) => void) => {
-    trayStatusListener = listener;
+  listen: vi.fn(async (eventName: string, listener: (event: { payload: unknown }) => void) => {
+    if (eventName === "tray-status-changed") trayStatusListener = listener;
+    if (eventName === "ai-fast-mode-unavailable") fastModeListener = listener;
     return vi.fn();
   }),
+}));
+
+vi.mock("sonner", () => ({
+  toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("@/components/Sidebar", () => ({
@@ -45,6 +52,7 @@ describe("AppShell tray recovery", () => {
     platform.current = "macos";
     trayStatusListener = undefined;
     document.cookie = "sidebar_state=true; path=/";
+    fastModeListener = undefined;
   });
 
   it.each(["macos", "windows"])(
@@ -142,5 +150,25 @@ describe("AppShell tray recovery", () => {
     expect(screen.getByRole("main")).toHaveTextContent("home");
     await userEvent.click(screen.getByRole("button", { name: "History" }));
     expect(onSectionChange).toHaveBeenCalledWith("history");
+  });
+
+  it("notifies about unavailable fast mode while the formatting screen is unmounted", async () => {
+    getTrayStatusMock.mockResolvedValue({
+      available: true,
+      attempts: 0,
+      lastError: null,
+    });
+    render(<AppShell activeSection="overview" onSectionChange={vi.fn()} />);
+    expect(screen.getByRole("main")).toHaveTextContent("overview");
+    expect(screen.queryByRole("region", { name: "Provider" })).not.toBeInTheDocument();
+    await waitFor(() => expect(fastModeListener).toBeDefined());
+
+    act(() => {
+      fastModeListener?.({ payload: { provider: "openai", model: "gpt-5-mini" } });
+    });
+
+    expect(toast.info).toHaveBeenCalledExactlyOnceWith(
+      "Fast mode isn't available for OpenAI on your account — used standard speed and turned Fast off.",
+    );
   });
 });

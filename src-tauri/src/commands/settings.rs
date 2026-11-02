@@ -73,6 +73,7 @@ pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
         let _ = store.reload();
         return Err(error.to_string());
     }
+    crate::commands::ai_lifecycle::invalidate();
     Ok(())
 }
 

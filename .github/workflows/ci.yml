@@ -4,9 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'hotfix/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'hotfix/**']
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
@@ -86,7 +86,7 @@ jobs:
         run: node --test .github/scripts/*.node-test.mjs
 
       - name: Validate GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
   # ===========================================
   # Frontend (fast - no Rust)
@@ -202,12 +202,12 @@ jobs:
           pnpm --version
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.91.1
+        uses: dtolnay/rust-toolchain@67b7c9de7d66c881487796e401478f3cb00704b0  # 1.91.1
         with:
           components: clippy
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: src-tauri
 

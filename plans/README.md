@@ -50,6 +50,10 @@ Plan 074 — LOCAL CHECKS PASSED / NEEDS E2E first-word run — Claude 2026-09-2
 
 Plan 073 — LOCAL CHECKS PASSED / NEEDS real Soniox-key check — Claude 2026-09-27 (gpt-6-sol implemented, gpt-6-astra reviewed): Soniox streams every recording over the realtime WS (preview only controls the pill); REST stays the fallback. Target 2.1.0-beta.2. See `073-soniox-realtime-default.md`.
 
+Stable hotfix 2.0.11 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Droid 2026-11-02: ported only beta.5's macOS second-launch crash fix from `cb3a3516` to stable 2.0.10; all six main-window callers audited. Two targeted regressions and 1,579 Rust library tests pass (16 ignored); strict workspace/all-targets Clippy and formatting pass. Windows cfg usage audited, not built. Stable packaged second-launch (hidden/visible/minimized), Dock/tray reopen, traffic-light geometry, pill focus/back-to-back dictation and Windows reopen smoke remain unverified. Existing off-main lazy pill-to-NSPanel conversion and media-key NSEvent calls reported separately and left unchanged. No app launch, push, tag or release.
+
+Stable hotfix 2.0.10 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Droid 2026-11-01: app-owned Reset deletion and pre-mutation storage validation, incomplete-reset error handling, removed-provider migrations, and local-only release preparation complete; 1,570 Rust tests pass (16 ignored), 753 frontend tests pass, and typecheck, oxlint, workspace Clippy and formatting pass. Windows cfg usage audited; packaged macOS/Windows Reset and Polish migration smoke remains unverified. Nothing pushed, tagged or released.
+
 Plan 068 — LOCAL CHECKS PASSED / NEEDS-SMOKE — Amp 2026-09-19: reproduced and fixed spurious Whisper encoder -6 from incorrect callback wiring; real Base English Metal/CPU regression and 1,577 Rust tests pass. Packaged desktop and original-customer confirmation remain unverified. See `068-whisper-abort-callback.md`.
 
 Plan 067 — VERIFIED — Amp 2026-09-19: restored enabled clickable-control pointer cursors for #91 without changing shadcn primitives; real-browser cursor/label checks and 732 frontend tests pass. See `067-clickable-cursors.md`.

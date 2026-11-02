@@ -1,6 +1,6 @@
-//! Shared, state-free prompt/executor boundary used by desktop and measurement CLI.
+//! Shared prompt/executor boundary used by desktop and measurement CLI.
 use super::{
-    contract::{AiPolishRequest, AiPolishResult},
+    contract::{AiPolishError, AiPolishRequest, AiPolishResult},
     error::AiProviderError,
     executor::AiExecutor,
     EnhancementOptions,
@@ -55,7 +55,7 @@ pub(crate) async fn execute_prompt(
     prompt: String,
     timings: &mut PolishTimings,
     needs_output_language_transform: bool,
-) -> Result<AiPolishResult, AiProviderError> {
+) -> Result<AiPolishResult, AiPolishError> {
     let remembered = AiPolishRequest {
         provider_id: runtime.provider.clone(),
         model_id: runtime.model.clone(),
@@ -145,7 +145,7 @@ pub(crate) async fn measure(
             Err(error) => (
                 raw_fallback(text),
                 PolishOutcome::FallbackRaw,
-                Some(error_category(&error).to_string()),
+                Some(error_category(&error.error).to_string()),
             ),
         }
     };

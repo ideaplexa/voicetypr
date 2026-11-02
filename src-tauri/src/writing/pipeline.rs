@@ -397,6 +397,7 @@ async fn run_smart_formatting(
                 provider_id,
                 model_id,
                 duration_ms,
+                ..
             } = result;
             if enhanced.trim().is_empty() {
                 return Err(crate::commands::ai::AiPolishAttemptError {

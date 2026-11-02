@@ -344,7 +344,7 @@ async fn run_openai_chat_probe(
         .polish(request, tokio_util::sync::CancellationToken::new())
         .await
         .map(|_| ())
-        .map_err(|error| match error {
+        .map_err(|failure| match failure.error {
             AiProviderError::InvalidApiKey => {
                 "Invalid API key (the endpoint rejected the credentials).".to_string()
             }
@@ -417,8 +417,10 @@ pub async fn get_ai_settings(app: tauri::AppHandle) -> Result<AISettings, String
             (provider, model)
         })
         .collect();
-    let reasoning_by_provider = load_agent_cli_reasoning(&store);
-    let fast_mode_by_provider = load_agent_cli_fast_mode(&store);
+    let mut reasoning_by_provider = load_agent_cli_reasoning(&store);
+    reasoning_by_provider.extend(crate::ai::native_settings::load_native_reasoning(&store));
+    let mut fast_mode_by_provider = load_agent_cli_fast_mode(&store);
+    fast_mode_by_provider.extend(crate::ai::native_settings::load_native_fast_mode(&store));
 
     let ai_model_needs_reselection = store
         .get("ai_model_needs_reselection")
@@ -474,8 +476,10 @@ pub async fn get_ai_settings_for_provider(
             (provider, model)
         })
         .collect::<HashMap<_, _>>();
-    let reasoning_by_provider = load_agent_cli_reasoning(&store);
-    let fast_mode_by_provider = load_agent_cli_fast_mode(&store);
+    let mut reasoning_by_provider = load_agent_cli_reasoning(&store);
+    reasoning_by_provider.extend(crate::ai::native_settings::load_native_reasoning(&store));
+    let mut fast_mode_by_provider = load_agent_cli_fast_mode(&store);
+    fast_mode_by_provider.extend(crate::ai::native_settings::load_native_fast_mode(&store));
     let model = models_by_provider
         .get(&provider)
         .cloned()
@@ -653,6 +657,10 @@ pub async fn validate_ai_api_key(
         // back to gpt-6-luna — that would 404 against a local endpoint.
         let configured = configured_custom_model(&app);
         resolve_custom_validation_model(model.as_deref(), configured.as_deref())?
+    } else if catalog::is_native_provider(&provider) {
+        catalog::default_model_id(&provider)
+            .ok_or_else(|| "No validation model for this provider".to_string())?
+            .to_string()
     } else {
         model
             .filter(|candidate| !candidate.trim().is_empty())
@@ -711,10 +719,10 @@ pub async fn validate_ai_api_key(
     };
     let request = AiPolishRequest {
         provider_id: provider.clone(),
-        model_id: validation_model,
+        model_id: validation_model.clone(),
         input_text: "ok".to_string(),
         needs_output_language_transform: false,
-        reasoning_level: None,
+        reasoning_level: catalog::lowest_reasoning_level(&provider, &validation_model),
         fast_mode: false,
         prompt: "Reply with exactly: ok".to_string(),
         timeout_ms: 10_000,
@@ -724,14 +732,14 @@ pub async fn validate_ai_api_key(
         .polish(request, tokio_util::sync::CancellationToken::new())
         .await
         .map(|_| ())
-        .map_err(|error| {
+        .map_err(|failure| {
             log::warn!(
                 "AI provider validation failed: provider={} category={}",
                 provider,
-                persisted_message(&error)
+                persisted_message(&failure.error)
             );
             // Command errors can be logged by frontend callers.
-            persisted_message(&error).into_owned()
+            persisted_message(&failure.error).into_owned()
         })
 }
 
@@ -1115,7 +1123,7 @@ fn custom_no_auth_from_settings<R: tauri::Runtime>(
 // Native adapter endpoints are internal; hardcode best-effort origin hosts (a wrong host is a harmless no-op HEAD).
 fn native_origin(provider_id: &str) -> Option<&'static str> {
     match catalog::adapter_name(provider_id)? {
-        "OpenAI" => Some("https://api.openai.com"),
+        "OpenAI" | "OpenAIResp" => Some("https://api.openai.com"),
         "Anthropic" => Some("https://api.anthropic.com"),
         "Gemini" => Some("https://generativelanguage.googleapis.com"),
         _ => None,
@@ -1402,6 +1410,33 @@ fn executor_for_provider<R: tauri::Runtime>(
     ))
 }
 
+fn disable_native_fast_mode_after_refusal(app: &tauri::AppHandle, provider: &str, model: &str) {
+    let persisted = app
+        .store("settings")
+        .map_err(|error| error.to_string())
+        .and_then(|store| {
+            crate::ai::native_settings::persist_native_fast_mode_disabled(&store, provider)
+        });
+    if persisted.is_err() {
+        log::warn!("Failed to persist native fast mode disable");
+        return;
+    }
+    log::warn!(
+        "AI fast mode unavailable for provider={} model={}; persisted fast mode off",
+        provider,
+        model
+    );
+    if let Err(error) = app.emit(
+        "ai-fast-mode-unavailable",
+        json!({
+            "provider": provider,
+            "model": model,
+        }),
+    ) {
+        log::warn!("Failed to emit ai-fast-mode-unavailable: {error}");
+    }
+}
+
 pub(crate) fn prepare_polish_runtime<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     provider: &str,
@@ -1421,21 +1456,40 @@ pub(crate) fn prepare_polish_runtime<R: tauri::Runtime>(
         30_000
     };
     let is_agent_cli = catalog::runtime_kind(&runtime_provider) == Some("agent_cli");
-    let (reasoning_level, fast_mode) = if is_agent_cli {
+    let is_native = catalog::is_native_provider(&runtime_provider);
+    let (reasoning_level, fast_mode) = if is_agent_cli || is_native {
         let store = app.store("settings").map_err(|_| {
             AiPolishAttemptError::for_provider(AiProviderError::Internal, runtime_provider.clone())
                 .with_model(model.to_string())
         })?;
-        (
-            Some(
-                load_agent_cli_reasoning(&store)
+        if is_agent_cli {
+            (
+                Some(
+                    load_agent_cli_reasoning(&store)
+                        .remove(&runtime_provider)
+                        .unwrap_or_else(|| {
+                            default_agent_cli_reasoning(&runtime_provider).to_string()
+                        }),
+                ),
+                load_agent_cli_fast_mode(&store)
                     .remove(&runtime_provider)
-                    .unwrap_or_else(|| default_agent_cli_reasoning(&runtime_provider).to_string()),
-            ),
-            load_agent_cli_fast_mode(&store)
+                    .unwrap_or(false),
+            )
+        } else {
+            // Native providers send the stored level; the runtime resolves it
+            // against the model's catalog reasoning_levels.
+            let stored = crate::ai::native_settings::load_native_reasoning(&store)
                 .remove(&runtime_provider)
-                .unwrap_or(false),
-        )
+                .unwrap_or_else(|| crate::ai::catalog::DEFAULT_REASONING_LEVEL.to_string());
+            // Fast applies only to models whose catalog entry opts into the
+            // provider's fast tier.
+            let fast = crate::ai::native_settings::load_native_fast_mode(&store)
+                .remove(&runtime_provider)
+                .unwrap_or(false)
+                && catalog::find_model(&runtime_provider, model)
+                    .is_some_and(|model| model.fast_mode);
+            (Some(stored), fast)
+        }
     } else {
         (None, false)
     };
@@ -1489,6 +1543,7 @@ pub async fn polish_text_typed(
             provider_id: provider,
             model_id: model,
             duration_ms: 0,
+            fast_mode_fallback: false,
         });
     }
     let prompt = crate::ai::polish::assemble_prompt(
@@ -1529,7 +1584,11 @@ pub async fn polish_text_typed(
         needs_output_language_transform,
     )
     .await
-    .map_err(|error| {
+    .map_err(|failure| {
+        if failure.fast_mode_fallback {
+            disable_native_fast_mode_after_refusal(app, &runtime.provider, &runtime.model);
+        }
+        let error = failure.error;
         let provider = crate::telemetry::PROVIDERS
             .iter()
             .copied()
@@ -1569,6 +1628,9 @@ pub async fn polish_text_typed(
             model_id: model,
         }
     })?;
+    if result.fast_mode_fallback {
+        disable_native_fast_mode_after_refusal(app, &result.provider_id, &result.model_id);
+    }
     log::info!(
         "Text enhanced successfully via {} (original: {}, enhanced: {}, duration_ms: {})",
         result.provider_id,
@@ -1691,6 +1753,10 @@ pub struct ProviderModel {
     pub cost_input: Option<f64>,
     #[serde(rename = "costOutput")]
     pub cost_output: Option<f64>,
+    #[serde(rename = "reasoningLevels")]
+    pub reasoning_levels: Vec<String>,
+    #[serde(rename = "supportsFastMode")]
+    pub supports_fast_mode: bool,
 }
 
 fn provider_models(provider: &str) -> Vec<ProviderModel> {
@@ -1706,6 +1772,8 @@ fn provider_models(provider: &str) -> Vec<ProviderModel> {
             cli_default: false,
             cost_input: model.cost_input,
             cost_output: model.cost_output,
+            reasoning_levels: model.reasoning_levels.clone(),
+            supports_fast_mode: model.fast_mode,
         })
         .collect()
 }
@@ -1723,6 +1791,10 @@ fn provider_model_from_agent_cli(model: crate::ai::agent_cli::AgentCliModel) -> 
         // subscription CLIs must never be presented as having token costs.
         cost_input: None,
         cost_output: None,
+        // Reasoning levels and fast support are provider capabilities, not
+        // model discovery metadata; they come from the agent probe.
+        reasoning_levels: Vec::new(),
+        supports_fast_mode: false,
     }
 }
 

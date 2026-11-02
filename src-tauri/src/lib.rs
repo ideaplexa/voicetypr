@@ -1,4 +1,5 @@
 use crate::ai::settings_migration::migrate_ai_settings_before_key_cache;
+use ai::native_settings::{update_native_ai_fast_mode, update_native_ai_reasoning};
 use chrono::Local;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -1468,6 +1469,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             update_ai_settings,
             update_agent_cli_reasoning,
             update_agent_cli_fast_mode,
+            update_native_ai_reasoning,
+            update_native_ai_fast_mode,
             disable_ai_enhancement,
             get_enhancement_options,
             update_enhancement_options,
@@ -1707,11 +1710,15 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .unwrap_or_default();
 
+            // Local CLI providers need no API key and may use the CLI's default model.
+            let agent_cli = crate::ai::catalog::runtime_kind(&provider) == Some("agent_cli");
             // Check if API key is cached
             use crate::commands::ai::get_ai_settings;
             match get_ai_settings(app.clone()).await {
                 Ok(settings) => {
-                    if !settings.has_api_key {
+                    if agent_cli {
+                        log::info!("AI enhancement ready: {} (local CLI)", provider);
+                    } else if !settings.has_api_key {
                         log::warn!("AI enabled but no API key found for provider: {}", provider);
                         // Disable AI to prevent errors during recording
                         store.set("ai_enabled", serde_json::Value::Bool(false));

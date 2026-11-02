@@ -51,6 +51,20 @@ voicetypr record --until-silence --json
 
 Human-readable output is the default. Add `--json` for structured automation output. Audio stays on the machine unless the command explicitly selects a remote Voicetypr server.
 
+### Local agents for AI formatting
+
+The Polish provider picker also supports installed, signed-in coding CLIs.
+Each formatting request uses a fresh process in an empty temporary directory
+(Claude Code can prepare that single-use process ahead of time);
+the CLI still sends the transcript to its model provider.
+
+Claude Code defaults to Sonnet with Low effort. Codex defaults to GPT-6 Luna,
+Medium effort and Fast mode; pi and oh-my-pi use their CLI's default model
+with thinking Off. Saved model and reasoning choices remain unchanged.
+Claude Code disables skills with
+`--disable-slash-commands` when the installed CLI supports it; it does not use
+`--bare`, which interferes with subscription authentication.
+
 ## Privacy and data flow
 
 Voicetypr is offline-first, but the selected mode determines what leaves your computer:
