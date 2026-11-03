@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    voicetypr_lib::initialize_tls();
     match voicetypr_lib::cli::maybe_run_from_env_with_context(tauri::generate_context!()) {
         Ok(true) => return,
         Ok(false) => {}
