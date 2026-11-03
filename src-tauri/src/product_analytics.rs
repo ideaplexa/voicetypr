@@ -1010,7 +1010,7 @@ mod tests {
         DictationFacts {
             outcome: DictationOutcome::Delivered,
             engine: EngineKind::Cloud,
-            model: "stt-async-v5".to_string(),
+            model: "stt-async-v6".to_string(),
             transport: DictationTransport::Ws,
             live_preview: true,
             recording_ms: 1_234,

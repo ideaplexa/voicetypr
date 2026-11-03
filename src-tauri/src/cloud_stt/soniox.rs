@@ -1849,7 +1849,7 @@ mod tests {
     #[test]
     fn create_payload_includes_language_and_structured_context() {
         let payload = build_create_payload(
-            "stt-async-v5",
+            "stt-async-v6",
             "file_123",
             Some(" en "),
             Some(SonioxContext {
@@ -1866,7 +1866,7 @@ mod tests {
             false,
         );
 
-        assert_eq!(payload["model"].as_str(), Some("stt-async-v5"));
+        assert_eq!(payload["model"].as_str(), Some("stt-async-v6"));
         assert_eq!(payload["file_id"].as_str(), Some("file_123"));
         assert_eq!(
             payload["language_hints"].as_array().unwrap()[0].as_str(),
@@ -1885,7 +1885,7 @@ mod tests {
     #[test]
     fn create_payload_omits_empty_optional_fields() {
         let payload = build_create_payload(
-            "stt-async-v5",
+            "stt-async-v6",
             "file_123",
             Some(" "),
             Some(SonioxContext {
@@ -1896,16 +1896,16 @@ mod tests {
             false,
         );
 
-        assert_eq!(payload["model"].as_str(), Some("stt-async-v5"));
+        assert_eq!(payload["model"].as_str(), Some("stt-async-v6"));
         assert!(payload.get("language_hints").is_none());
         assert!(payload.get("context").is_none());
     }
 
     #[test]
     fn build_create_payload_diarize_flag_sets_field() {
-        let payload = build_create_payload("stt-async-v5", "fid", None, None, true);
+        let payload = build_create_payload("stt-async-v6", "fid", None, None, true);
         assert_eq!(payload["enable_speaker_diarization"].as_bool(), Some(true));
-        let payload_no_diarize = build_create_payload("stt-async-v5", "fid", None, None, false);
+        let payload_no_diarize = build_create_payload("stt-async-v6", "fid", None, None, false);
         assert!(payload_no_diarize
             .get("enable_speaker_diarization")
             .is_none());
@@ -2398,7 +2398,7 @@ mod tests {
                 attempt_typed_once(
                     &client,
                     "new-key",
-                    "stt-async-v5",
+                    "stt-async-v6",
                     Path::new("audio.wav"),
                     b"audio",
                     None,
@@ -2758,7 +2758,7 @@ mod tests {
                                 attempt_diarized_once(
                                     &client,
                                     "k",
-                                    "stt-async-v5",
+                                    "stt-async-v6",
                                     Path::new("audio.wav"),
                                     b"audio",
                                     None,
@@ -2770,7 +2770,7 @@ mod tests {
                                 attempt_typed_once(
                                     &client,
                                     "k",
-                                    "stt-async-v5",
+                                    "stt-async-v6",
                                     Path::new("audio.wav"),
                                     b"audio",
                                     None,
@@ -2864,7 +2864,7 @@ mod tests {
                         attempt_diarized_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -2876,7 +2876,7 @@ mod tests {
                         attempt_typed_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -2912,7 +2912,7 @@ mod tests {
                     }
                 }).expect(2).mount(&server).await;
             let owner = ActiveJobGuard::register("throttled-file", "k");
-            let payload = build_create_payload("stt-async-v5", "throttled-file", None, None, false);
+            let payload = build_create_payload("stt-async-v6", "throttled-file", None, None, false);
             let id = create_transcription(&common::http_client(), "k", "throttled-file", &payload)
                 .await
                 .unwrap();
@@ -2949,7 +2949,7 @@ mod tests {
                         attempt_diarized_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -2961,7 +2961,7 @@ mod tests {
                         attempt_typed_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -3374,7 +3374,7 @@ mod tests {
                         attempt_diarized_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -3386,7 +3386,7 @@ mod tests {
                         attempt_typed_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -3457,7 +3457,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_typed_transcription(&client, "k", "stt-async-v5", "f1", Some("en"), None).await;
+                run_typed_transcription(&client, "k", "stt-async-v6", "f1", Some("en"), None).await;
             assert_eq!(result.unwrap(), "hello world");
             assert_eq!(tid.as_deref(), Some("t1"));
 
@@ -3504,7 +3504,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_typed_transcription(&client, "k", "stt-async-v5", "f1", None, None).await;
+                run_typed_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
             assert!(matches!(result, Err(common::SttError::Server)));
             assert_eq!(tid.as_deref(), Some("t1"));
 
@@ -3536,7 +3536,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_typed_transcription(&client, "k", "stt-async-v5", "f1", None, None).await;
+                run_typed_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
             assert!(
                 matches!(result, Err(common::SttError::LimitExceeded { .. })),
                 "expected LimitExceeded, got {result:?}"
@@ -3657,7 +3657,7 @@ mod tests {
             let text = transcribe_typed_with_autoheal(
                 &client,
                 "k",
-                "stt-async-v5",
+                "stt-async-v6",
                 &wav,
                 b"RIFF....WAVEfmt ".to_vec(),
                 None,
@@ -3718,7 +3718,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_diarized_transcription(&client, "k", "stt-async-v5", "f1", None, None).await;
+                run_diarized_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
             assert_eq!(result.unwrap().text, "hi");
             assert_eq!(tid.as_deref(), Some("t9"));
 
@@ -4030,7 +4030,7 @@ mod tests {
             let error = transcribe_typed_with_autoheal(
                 &client,
                 "k",
-                "stt-async-v5",
+                "stt-async-v6",
                 &wav,
                 b"RIFF....WAVEfmt ".to_vec(),
                 None,
@@ -4584,7 +4584,7 @@ mod tests {
             let result = transcribe_typed_with_autoheal(
                 &client,
                 "k",
-                "stt-async-v5",
+                "stt-async-v6",
                 &wav,
                 b"RIFF....WAVEfmt ".to_vec(),
                 None,

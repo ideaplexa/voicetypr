@@ -30,9 +30,9 @@ test("settings seed matches the isolated Tauri store and selected mode", () => {
   assert.equal(settings.current_model_engine, "parakeet");
   assert.equal(settings.play_sound_on_recording, false);
   assert.equal(seedSettings({ engine: "whisper", model: "base.en", livePreview: false }).transcription_mode, "regular");
-  const cloud = seedSettings({ engine: "soniox", model: "stt-async-v5", livePreview: true });
+  const cloud = seedSettings({ engine: "soniox", model: "stt-async-v6", livePreview: true });
   assert.equal(cloud.current_model, "soniox");
-  assert.deepEqual(cloud.cloud_stt_models_by_provider, { soniox: "stt-async-v5" });
+  assert.deepEqual(cloud.cloud_stt_models_by_provider, { soniox: "stt-async-v6" });
   assert.equal(PARAKEET_CACHE_SUBDIRS["parakeet-unified-640ms"], "parakeet-unified-en-0.6b");
   assert.equal(PARAKEET_CACHE_SUBDIRS["nemotron-multilingual-1120ms"], "nemotron-multilingual/multilingual/1120ms");
 });

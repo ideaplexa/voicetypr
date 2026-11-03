@@ -61,8 +61,8 @@ const soniox: CloudModelInfo = {
   engine: "soniox",
   kind: "cloud",
   requires_setup: false,
-  underlying_model: "stt-async-v5",
-  available_models: [{ id: "stt-async-v5", display_name: "Soniox v5" }],
+  underlying_model: "stt-async-v6",
+  available_models: [{ id: "stt-async-v6", display_name: "Soniox v6" }],
 };
 
 const whisper: LocalModelInfo = {
@@ -146,11 +146,11 @@ describe("Transcription source cards", () => {
     const user = userEvent.setup();
     const props = renderModels();
     expect(screen.getByRole("button", { name: "Cloud" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Soniox v5 · Key added")).toBeInTheDocument();
+    expect(screen.getByText("Soniox v6 · Key added")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Another computer" }));
     expect(screen.getByRole("button", { name: "Another computer" })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByText("No remote Voicetyprs configured")).toBeInTheDocument();
-    expect(screen.queryByText("Soniox v5 · Key added")).not.toBeInTheDocument();
+    expect(screen.queryByText("Soniox v6 · Key added")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "On this Mac" }));
     expect(screen.getByRole("button", { name: "On this Mac" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Cloud" }));
@@ -220,7 +220,7 @@ describe("Transcription source cards", () => {
     try {
       render(<ControlledSources currentModel="tiny" initialFilter="cloud" />);
       expect(screen.getByRole("button", { name: "Cloud" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByText("Soniox v5 · Key added")).toBeInTheDocument();
+      expect(screen.getByText("Soniox v6 · Key added")).toBeInTheDocument();
       expect(errorSpy.mock.calls.flat().some((arg) => typeof arg === "string" && arg.includes("Cannot update a component"))).toBe(false);
     } finally {
       errorSpy.mockRestore();
@@ -281,7 +281,7 @@ describe("Transcription source cards", () => {
   it("shows curated model labels and a picker only when a provider has choices", () => {
     renderModels();
     expect(screen.getByText("GPT Transcribe · Key added")).toBeInTheDocument();
-    expect(screen.getByText("Soniox v5 · Key added")).toBeInTheDocument();
+    expect(screen.getByText("Soniox v6 · Key added")).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "OpenAI transcription model" }),
     ).toBeInTheDocument();

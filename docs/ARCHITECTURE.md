@@ -92,10 +92,14 @@ Idle`; any → `Error`; `Error → Idle`. Transitions happen in
 | Parakeet TDT v3 | Swift sidecar | full-context decode-ahead (plan 070) | 25 European languages; optional CTC custom vocabulary |
 | Parakeet Unified (EN) | Swift sidecar | native streaming | best English preview |
 | Nemotron multilingual | Swift sidecar | native streaming | |
-| Soniox | cloud | realtime WS (`stt-rt-v5`) | WS final authoritative; REST `stt-async-v5` fallback |
+| Soniox | cloud | realtime WS (`stt-rt-v6`) | WS final authoritative; REST `stt-async-v6` fallback |
 | Deepgram | cloud | realtime WS | same authority model as Soniox |
 | OpenAI, Groq, Cohere | cloud | final only | |
 | Remote (LAN) | another Voicetypr (strong host, weak client) | final only | local network only |
+
+Soniox v5 selections resolve to v6 and are rewritten on settings save; history
+is untouched. Both transports use Bearer authentication (WS on the upgrade).
+v6 emits spoken commands literally; command handling is separate from this upgrade.
 
 Contract (`transcription/stream.rs`): `EngineStreamCapabilities::for_engine`;
 events on `transcription-stream` (`Started/Partial/Final/Cancelled/Error`).

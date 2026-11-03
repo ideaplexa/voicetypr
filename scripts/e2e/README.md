@@ -7,7 +7,7 @@ Create an uncommitted real-speech clip directory with `manifest.json` containing
 ```bash
 node scripts/e2e/dictation-e2e.mjs --clips .tmp/e2e-clips --engines parakeet:parakeet-tdt-0.6b-v3,whisper:base.en
 node scripts/e2e/dictation-e2e.mjs --clips .tmp/e2e-clips --engine parakeet --model parakeet-tdt-0.6b-v3 --cases regular,live-preview --baseline .tmp/e2e/previous/report.json
-node scripts/e2e/dictation-e2e.mjs --clips .tmp/e2e-clips --engine soniox --model stt-async-v5 --secure-store .tmp/e2e-cloud-secure.dat
+node scripts/e2e/dictation-e2e.mjs --clips .tmp/e2e-clips --engine soniox --model stt-async-v6 --secure-store .tmp/e2e-cloud-secure.dat
 node --test scripts/e2e/
 ```
 

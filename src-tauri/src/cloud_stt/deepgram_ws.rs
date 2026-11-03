@@ -182,7 +182,7 @@ async fn run_task<F>(
     };
 
     // Auth: `Token <key>` header on the WS upgrade request — same AuthScheme as
-    // the REST path, but as a WS handshake header (NOT a body frame like Soniox).
+    // the REST path, but as a WS handshake header (as with Soniox).
     // Marked sensitive so no tracing/interceptor can leak it; NEVER logged.
     let mut request = match url.as_str().into_client_request() {
         Ok(request) => request,
