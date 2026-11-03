@@ -8,6 +8,8 @@ use tauri_plugin_store::StoreExt;
 use super::audio::current_recording_generation;
 use super::settings::{resolve_pill_indicator_mode, Settings};
 
+mod replay;
+
 static PENDING_HIDE: Mutex<Option<u64>> = Mutex::new(None);
 
 pub(crate) fn pill_focus_safe() -> bool {
@@ -311,9 +313,30 @@ pub(crate) fn send<R: tauri::Runtime>(
 #[tauri::command]
 pub fn pill_feedback_ready(app: AppHandle) {
     use tauri::Emitter;
-    let mut queued = QUEUED.lock().unwrap();
-    READY.store(true, Ordering::SeqCst);
-    for (event, payload) in queued.drain(..) {
+    // Match kept deletion/publication's lock order: store -> status -> queue.
+    // Withdrawal removes entries under QUEUED; generation changes use PENDING_HIDE.
+    let replay = crate::recording::kept::with_live_recoveries(|recoveries| {
+        crate::menu::runtime::with_blocked_kind(|blocked| {
+            let mut queued = QUEUED.lock().unwrap();
+            let _generation = PENDING_HIDE.lock().unwrap();
+            let had_queued = !queued.is_empty();
+            let replay = replay::revalidate(
+                std::mem::take(&mut *queued),
+                current_recording_generation(),
+                crate::get_recording_state(&app),
+                blocked,
+                recoveries,
+            );
+            if had_queued && replay.is_empty() {
+                FEEDBACK_OWNED.store(false, Ordering::SeqCst);
+            }
+            READY.store(true, Ordering::SeqCst);
+            replay
+        })
+    });
+    // Never hold the queue or live-state locks across renderer emits. Frontend
+    // generation/id guards remain the second line for changes after this snapshot.
+    for (event, payload) in replay {
         let _ = app.emit_to("pill", event, payload);
     }
 }

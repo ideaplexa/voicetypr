@@ -38,6 +38,11 @@ pub fn fix_action() -> Option<IslandAction> {
 pub fn clear_blocked() {
     STATUS.lock().unwrap_or_else(|e| e.into_inner()).blocked = None;
 }
+/// Read the live blocker while replay drains, without emitting under this lock.
+pub(crate) fn with_blocked_kind<T>(work: impl FnOnce(Option<BlockedKind>) -> T) -> T {
+    let status = STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    work(status.blocked.map(|(kind, _)| kind))
+}
 pub fn snapshot() -> (Option<u64>, Option<String>) {
     let status = STATUS.lock().unwrap_or_else(|e| e.into_inner());
     (

@@ -74,6 +74,13 @@ struct Store {
 }
 static STORE: Lazy<Mutex<Store>> = Lazy::new(|| Mutex::new(Store::default()));
 
+/// Replay is serialized with deletion, retry and metadata changes. The callback
+/// may take the feedback queue lock, but must not emit or re-enter the store.
+pub(crate) fn with_live_recoveries<T>(work: impl FnOnce(&[serde_json::Value]) -> T) -> T {
+    let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    work(&store.live_recoveries(Instant::now()))
+}
+
 /// Borrow an existing file without taking ownership of its deletion. Registration
 /// and maintenance deletion use the same store lock; overlapping jobs are counted.
 pub(crate) struct ProtectedPath(PathBuf);
@@ -98,6 +105,19 @@ impl Drop for ProtectedPath {
 }
 
 impl Store {
+    fn live_recoveries(&self, now: Instant) -> Vec<serde_json::Value> {
+        self.clips
+            .iter()
+            .filter(|clip| !self.closed && !clip.busy && clip.expires > now)
+            .filter_map(|clip| {
+                let mut recovery = clip.recovery.clone();
+                recovery.expires_in_ms =
+                    clip.expires.saturating_duration_since(now).as_millis() as u64;
+                (recovery.expires_in_ms > 0).then(|| serde_json::to_value(recovery).unwrap())
+            })
+            .collect()
+    }
+
     fn retain(
         &mut self,
         dir: &Path,
@@ -985,6 +1005,33 @@ fn resolve_clip(clip: &Clip, resolution: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn replay_snapshot_checks_expiry_busy_retry_deletion_and_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        let id = clip.recovery.id.clone();
+        let expires = clip.expires;
+        store.insert(clip).unwrap();
+        let now = expires - Duration::from_millis(1234);
+        let live = store.live_recoveries(now);
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0]["id"], id);
+        assert_eq!(live[0]["expires_in_ms"], 1234);
+        // Expired, even before the expiry task removes it from the store.
+        assert!(store.live_recoveries(expires).is_empty());
+        store.clips[0].busy = true;
+        assert!(store.live_recoveries(now).is_empty());
+        store.complete_retry(&id, false);
+        assert_eq!(store.live_recoveries(now).len(), 1);
+        store.closed = true;
+        assert!(store.live_recoveries(now).is_empty());
+        store.closed = false;
+        store.complete_retry(&id, true);
+        assert!(store.live_recoveries(now).is_empty());
+        assert!(store.clips.is_empty());
+    }
+
     #[tokio::test]
     async fn capture_handoff_preserves_no_speech_and_failed_retry_audio_until_bounded_expiry() {
         for kind in [RecoveryKind::NoSpeech, RecoveryKind::CloudFailed] {
