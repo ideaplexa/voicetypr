@@ -1356,24 +1356,21 @@ mod tests {
         }
     }
     fn queue_recoveries(store: &Store) {
-        let mut queued = crate::commands::pill_feedback::queued_for_test()
-            .lock()
-            .unwrap();
-        for clip in &store.clips {
-            queued.push((
-                "dictation-recovery",
-                serde_json::to_value(&clip.recovery).unwrap(),
-            ));
-        }
+        crate::commands::pill_feedback::with_queue_for_test(|queued| {
+            for clip in &store.clips {
+                queued.push((
+                    "dictation-recovery",
+                    serde_json::to_value(&clip.recovery).unwrap(),
+                ));
+            }
+        });
     }
     fn recovery_is_queued(id: &str) -> bool {
-        crate::commands::pill_feedback::queued_for_test()
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(event, payload)| {
+        crate::commands::pill_feedback::with_queue_for_test(|queued| {
+            queued.iter().any(|(event, payload)| {
                 *event == "dictation-recovery" && payload["id"].as_str() == Some(id)
             })
+        })
     }
     #[test]
     fn every_recovery_kind_has_only_safe_metadata_and_the_correct_ttl() {

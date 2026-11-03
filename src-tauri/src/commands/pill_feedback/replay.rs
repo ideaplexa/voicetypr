@@ -31,18 +31,23 @@ pub(super) fn revalidate(
     // Last publication wins per card kind, or per opaque recovery id. Distinct
     // kept clips must not supersede each other's retry actions.
     for (event, mut payload) in queued.into_iter().rev() {
-        let key = if event == "dictation-recovery" {
-            payload["id"].as_str().unwrap_or_default()
+        let key = if matches!(event, "dictation-recovery" | "kept-dictation-expired") {
+            payload["id"].as_str().unwrap_or_default().to_owned()
+        } else if payload["kind"] == "mic_silent_live" {
+            format!("mic_silent_live:{}", payload["generation"])
         } else {
-            payload["kind"].as_str().unwrap_or_default()
-        }
-        .to_owned();
-        let family = if event == "island-notice-clear" {
-            "island-notice"
-        } else {
-            event
+            payload["kind"].as_str().unwrap_or_default().to_owned()
         };
-        if event == "dictation-recovery" {
+        let family = match event {
+            "island-notice-clear" => "island-notice",
+            "dictation-note-withdraw" => "dictation-note",
+            "kept-dictation-expired" => "dictation-recovery",
+            _ => event,
+        };
+        if !produces_ui(event) {
+            // Removals must reach cards emitted in an earlier batch, including
+            // older generations. They need no live lease or generation match.
+        } else if event == "dictation-recovery" {
             // Compare all actionable metadata, not only the id: a failed retry
             // can republish the same clip with another generation/alternative.
             let Some(live) = recoveries.iter().find(|live| {

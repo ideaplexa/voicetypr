@@ -8,6 +8,7 @@ use tauri_plugin_store::StoreExt;
 use super::audio::current_recording_generation;
 use super::settings::{resolve_pill_indicator_mode, Settings};
 
+mod outbox;
 mod replay;
 
 static PENDING_HIDE: Mutex<Option<u64>> = Mutex::new(None);
@@ -238,8 +239,7 @@ mod tests {
 
 // Feedback owns the reused, non-activating panel across idle transitions.
 static FEEDBACK_OWNED: AtomicBool = AtomicBool::new(false);
-static READY: AtomicBool = AtomicBool::new(false);
-static QUEUED: Mutex<Vec<(&'static str, serde_json::Value)>> = Mutex::new(Vec::new());
+static OUTBOX: Mutex<outbox::Outbox> = Mutex::new(outbox::Outbox::new());
 pub(crate) fn release_feedback_ownership() {
     FEEDBACK_OWNED.store(false, Ordering::SeqCst);
 }
@@ -268,18 +268,15 @@ fn withdraw_queued_live_mic_silent(
 /// A withdrawal cannot acquire feedback ownership or show/reposition the native panel.
 pub(crate) fn withdraw_live_mic_silent<R: tauri::Runtime>(app: &AppHandle<R>, generation: u64) {
     use tauri::Emitter;
-    let mut queued = QUEUED.lock().unwrap();
-    withdraw_queued_live_mic_silent(
-        &mut queued,
-        generation,
-        READY.load(Ordering::SeqCst),
-        &FEEDBACK_OWNED,
-    );
-    let _ = app.emit_to(
-        "pill",
-        "dictation-note-withdraw",
-        serde_json::json!({"generation":generation,"kind":"mic_silent_live"}),
-    );
+    let mut outbox = OUTBOX.lock().unwrap();
+    outbox.withdraw(generation, &FEEDBACK_OWNED);
+    if outbox.ready {
+        let _ = app.emit_to(
+            "pill",
+            "dictation-note-withdraw",
+            serde_json::json!({"generation":generation,"kind":"mic_silent_live"}),
+        );
+    }
 }
 pub(crate) fn send<R: tauri::Runtime>(
     app: &AppHandle<R>,
@@ -290,21 +287,18 @@ pub(crate) fn send<R: tauri::Runtime>(
     if app.try_state::<crate::AppState>().is_some() && pill_mode(app) == "never" {
         return;
     }
-    let mut queued = QUEUED.lock().unwrap();
+    let mut outbox = OUTBOX.lock().unwrap();
     // Serialize ownership with pre-ready withdrawal so a waiting send cannot lose its claim.
     let produces_ui = replay::produces_ui(event);
     if produces_ui {
         FEEDBACK_OWNED.store(true, Ordering::SeqCst);
     }
-    if READY.load(Ordering::SeqCst) || app.try_state::<crate::AppState>().is_none() {
+    if outbox.ready || app.try_state::<crate::AppState>().is_none() {
         let _ = app.emit_to("pill", event, payload);
     } else {
-        if queued.len() == 32 {
-            queued.remove(0);
-        }
-        queued.push((event, payload));
+        outbox.enqueue(event, payload);
     }
-    drop(queued);
+    drop(outbox);
     if produces_ui {
         if let Some(state) = app.try_state::<crate::AppState>() {
             if let Some(manager) = state.get_window_manager() {
@@ -318,31 +312,33 @@ pub(crate) fn send<R: tauri::Runtime>(
 #[tauri::command]
 pub fn pill_feedback_ready(app: AppHandle) {
     use tauri::Emitter;
-    // Match kept deletion/publication's lock order: store -> status -> queue.
-    // Withdrawal removes entries under QUEUED; generation changes use PENDING_HIDE.
-    let replay = crate::recording::kept::with_live_recoveries(|recoveries| {
-        crate::menu::runtime::with_blocked_kind(|blocked| {
-            let mut queued = QUEUED.lock().unwrap();
-            let _generation = PENDING_HIDE.lock().unwrap();
-            let had_queued = !queued.is_empty();
-            let replay = replay::revalidate(
-                std::mem::take(&mut *queued),
-                current_recording_generation(),
-                crate::get_recording_state(&app),
-                blocked,
-                recoveries,
-            );
-            if had_queued {
-                replay::release_nonvisual_replay(&replay, &FEEDBACK_OWNED);
-            }
-            READY.store(true, Ordering::SeqCst);
-            replay
-        })
-    });
-    // Never hold the queue or live-state locks across renderer emits. Frontend
-    // generation/id guards remain the second line for changes after this snapshot.
-    for (event, payload) in replay {
-        let _ = app.emit_to("pill", event, payload);
+    if !OUTBOX.lock().unwrap().begin_flush() {
+        return;
+    }
+    loop {
+        // Match kept deletion/publication's lock order: store -> status -> queue.
+        let batch = crate::recording::kept::with_live_recoveries(|recoveries| {
+            crate::menu::runtime::with_blocked_kind(|blocked| {
+                let mut outbox = OUTBOX.lock().unwrap();
+                let _generation = PENDING_HIDE.lock().unwrap();
+                let queued = outbox.take_batch(&FEEDBACK_OWNED)?;
+                let replay = replay::revalidate(
+                    queued,
+                    current_recording_generation(),
+                    crate::get_recording_state(&app),
+                    blocked,
+                    recoveries,
+                );
+                outbox.validated(&replay);
+                Some(replay)
+            })
+        });
+        let Some(batch) = batch else { break };
+        // READY stays false while unlocked: every publication AND invalidation
+        // joins the next batch, never overtaking this one. No locks across emits.
+        for (event, payload) in batch {
+            let _ = app.emit_to("pill", event, payload);
+        }
     }
 }
 #[tauri::command]
@@ -377,27 +373,27 @@ fn retire_queued_kept_id(
     }
 }
 pub(crate) fn retire_kept_id(id: &str) {
-    retire_queued_kept_id(
-        &mut QUEUED.lock().unwrap(),
-        id,
-        READY.load(Ordering::SeqCst),
-        &FEEDBACK_OWNED,
-    );
+    OUTBOX.lock().unwrap().retire(id, &FEEDBACK_OWNED);
 }
 #[cfg(test)]
-pub(crate) fn queued_for_test() -> &'static Mutex<Vec<(&'static str, serde_json::Value)>> {
-    &QUEUED
+pub(crate) fn with_queue_for_test<T>(
+    work: impl FnOnce(&mut Vec<(&'static str, serde_json::Value)>) -> T,
+) -> T {
+    work(&mut OUTBOX.lock().unwrap().pending)
 }
 /// Every permanent deletion invalidates queued and already-rendered recovery ids.
 pub(crate) fn expire_kept_id<R: tauri::Runtime>(app: &AppHandle<R>, id: &str) {
     use tauri::Emitter;
-    retire_kept_id(id);
-    let _ = app.emit_to(
-        "pill",
-        "kept-dictation-expired",
-        serde_json::json!({"id":id}),
-    );
+    let mut outbox = OUTBOX.lock().unwrap();
+    outbox.retire(id, &FEEDBACK_OWNED);
+    if outbox.ready {
+        let _ = app.emit_to(
+            "pill",
+            "kept-dictation-expired",
+            serde_json::json!({"id":id}),
+        );
+    }
 }
 pub(crate) fn renderer_closed() {
-    READY.store(false, Ordering::SeqCst);
+    OUTBOX.lock().unwrap().close();
 }
