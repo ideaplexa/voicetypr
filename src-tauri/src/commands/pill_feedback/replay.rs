@@ -5,6 +5,19 @@ use std::collections::HashSet;
 
 type Event = (&'static str, Value);
 
+pub(super) fn produces_ui(event: &str) -> bool {
+    !matches!(
+        event,
+        "island-notice-clear" | "dictation-note-withdraw" | "kept-dictation-expired"
+    )
+}
+
+pub(super) fn release_nonvisual_replay(replay: &[Event], owned: &std::sync::atomic::AtomicBool) {
+    if !replay.iter().any(|(event, _)| produces_ui(event)) {
+        owned.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub(super) fn revalidate(
     queued: Vec<Event>,
     generation: u64,

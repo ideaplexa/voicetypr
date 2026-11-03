@@ -224,3 +224,25 @@ fn flush_does_not_flash_a_notice_cleared_before_readiness() {
         vec![clear],
     );
 }
+
+#[test]
+fn clear_only_replay_releases_native_feedback_ownership() {
+    let replay = revalidate(
+        vec![
+            ("island-notice", json!({"kind":"long_silence"})),
+            ("island-notice-clear", json!({"kind":"long_silence"})),
+        ],
+        7,
+        RecordingState::Recording,
+        None,
+        &[],
+    );
+    assert_eq!(replay.len(), 1);
+    let owned = AtomicBool::new(true);
+    release_nonvisual_replay(&replay, &owned);
+    assert!(!owned.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!produces_ui("island-notice-clear"));
+    assert!(!produces_ui("dictation-note-withdraw"));
+    assert!(!produces_ui("kept-dictation-expired"));
+    assert!(produces_ui("dictation-note"));
+}

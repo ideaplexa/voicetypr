@@ -292,7 +292,10 @@ pub(crate) fn send<R: tauri::Runtime>(
     }
     let mut queued = QUEUED.lock().unwrap();
     // Serialize ownership with pre-ready withdrawal so a waiting send cannot lose its claim.
-    FEEDBACK_OWNED.store(true, Ordering::SeqCst);
+    let produces_ui = replay::produces_ui(event);
+    if produces_ui {
+        FEEDBACK_OWNED.store(true, Ordering::SeqCst);
+    }
     if READY.load(Ordering::SeqCst) || app.try_state::<crate::AppState>().is_none() {
         let _ = app.emit_to("pill", event, payload);
     } else {
@@ -302,11 +305,13 @@ pub(crate) fn send<R: tauri::Runtime>(
         queued.push((event, payload));
     }
     drop(queued);
-    if let Some(state) = app.try_state::<crate::AppState>() {
-        if let Some(manager) = state.get_window_manager() {
-            tauri::async_runtime::spawn(async move {
-                let _ = manager.show_pill_window().await;
-            });
+    if produces_ui {
+        if let Some(state) = app.try_state::<crate::AppState>() {
+            if let Some(manager) = state.get_window_manager() {
+                tauri::async_runtime::spawn(async move {
+                    let _ = manager.show_pill_window().await;
+                });
+            }
         }
     }
 }
@@ -327,8 +332,8 @@ pub fn pill_feedback_ready(app: AppHandle) {
                 blocked,
                 recoveries,
             );
-            if had_queued && replay.is_empty() {
-                FEEDBACK_OWNED.store(false, Ordering::SeqCst);
+            if had_queued {
+                replay::release_nonvisual_replay(&replay, &FEEDBACK_OWNED);
             }
             READY.store(true, Ordering::SeqCst);
             replay
