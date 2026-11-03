@@ -234,9 +234,8 @@ mod tests {
 
     #[test]
     fn rt_tokens_are_concatenated_verbatim_without_inserted_spaces() {
-        // RT tokens carry their OWN leading spaces. Unlike the REST join in
-        // soniox.rs (which inserts a space between every token → "world !"),
-        // RT concatenation is verbatim: the space before "world" comes from the
+        // Tokens carry their OWN leading spaces. Concatenation is verbatim:
+        // the space before "world" comes from the
         // token, and "!" (no leading space) glues directly onto "world".
         let mut folder = SonioxRtFolder::new();
         let p = folder.ingest(&response(vec![
@@ -246,13 +245,38 @@ mod tests {
         ]));
         assert_eq!(p.committed, "Hello world!");
 
-        // A token whose text already has TWO leading spaces keeps BOTH — REST
-        // join would collapse to a single space. Contrast proves no insertion.
+        // A token whose text already has TWO leading spaces keeps BOTH.
         let p2 = folder.ingest(&response(vec![token("  indented", true)]));
         assert_eq!(p2.committed, "Hello world!  indented");
         assert!(StreamSessionGate::assert_committed_monotonic(
             &p.committed,
             &p2.committed
+        ));
+    }
+
+    #[test]
+    fn realtime_real_shaped_subwords_keep_word_boundaries() {
+        let mut folder = SonioxRtFolder::new();
+        let first = folder.ingest(&response(vec![
+            token("my", true),
+            token(" f", true),
+            token("ellow", true),
+            token(" Amer", false),
+            token("ic", false),
+            token("ans", false),
+        ]));
+        assert_eq!(first.committed, "my fellow");
+        assert_eq!(first.tentative, " Americans");
+        let last = folder.ingest(&response(vec![
+            token(" Amer", true),
+            token("ic", true),
+            token("ans", true),
+            token(".", true),
+        ]));
+        assert_eq!(last.committed, "my fellow Americans.");
+        assert!(StreamSessionGate::assert_committed_monotonic(
+            &first.committed,
+            &last.committed
         ));
     }
 

@@ -3419,10 +3419,11 @@ mod tests {
                 .await;
             Mock::given(method("GET"))
                 .and(path("/v1/transcriptions/t1/transcript"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_json(serde_json::json!({ "text": "hello world" })),
-                )
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "tokens": [
+                            {"text":"hel"}, {"text":"lo"}, {"text":" wor"}, {"text":"ld"}
+                        ] }),
+                ))
                 .expect(1)
                 .mount(&server)
                 .await;
@@ -3681,10 +3682,17 @@ mod tests {
                 .await;
             Mock::given(method("GET"))
                 .and(path("/v1/transcriptions/t9/transcript"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_json(serde_json::json!({ "text": "hi", "tokens": [] })),
-                )
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "tokens": [
+                            {"text":"my","start_ms":0,"end_ms":10,"speaker":"1"},
+                            {"text":" f","start_ms":10,"end_ms":20,"speaker":"1"},
+                            {"text":"ellow","start_ms":20,"end_ms":30,"speaker":"1"},
+                            {"text":" Amer","start_ms":30,"end_ms":40,"speaker":"1"},
+                            {"text":"ic","start_ms":40,"end_ms":50,"speaker":"1"},
+                            {"text":"ans","start_ms":50,"end_ms":60,"speaker":"1"},
+                            {"text":".","start_ms":60,"end_ms":70,"speaker":"1"}
+                        ] }),
+                ))
                 .mount(&server)
                 .await;
             Mock::given(method("DELETE"))
@@ -3704,7 +3712,15 @@ mod tests {
 
             let (tid, result) =
                 run_diarized_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
-            assert_eq!(result.unwrap().text, "hi");
+            let result = result.unwrap();
+            assert_eq!(result.text, "my fellow Americans.");
+            assert_eq!(result.words.len(), 3);
+            assert_eq!(result.words[2].start_ms, Some(30));
+            assert_eq!(result.words[2].end_ms, Some(70));
+            assert_eq!(
+                crate::commands::audio::group_words_into_speaker_text(&result.words),
+                "Speaker 1: my fellow Americans."
+            );
             assert_eq!(tid.as_deref(), Some("t9"));
 
             cleanup_stored_records(&client, "k", tid.as_deref(), "f1").await;
