@@ -1518,18 +1518,7 @@ async fn run_typed_transcription(
             return Ok(text.to_string());
         }
         if let Some(tokens) = json.get("tokens").and_then(|v| v.as_array()) {
-            let mut out = String::new();
-            let mut first = true;
-            for t in tokens {
-                if let Some(txt) = t.get("text").and_then(|v| v.as_str()) {
-                    if !first {
-                        out.push(' ');
-                    } else {
-                        first = false;
-                    }
-                    out.push_str(txt);
-                }
-            }
+            let out = super::soniox_tokens::text(tokens);
             if !out.is_empty() {
                 return Ok(out);
             }
@@ -1792,13 +1781,9 @@ async fn run_diarized_transcription(
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| {
-                json.get("tokens").and_then(|v| v.as_array()).map(|tokens| {
-                    tokens
-                        .iter()
-                        .filter_map(|t| t.get("text").and_then(|v| v.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
+                json.get("tokens")
+                    .and_then(|v| v.as_array())
+                    .map(|tokens| super::soniox_tokens::text(tokens))
             })
             .filter(|s| !s.is_empty())
             .ok_or(common::SttError::BadResponse)?;
@@ -1807,7 +1792,7 @@ async fn run_diarized_transcription(
         let words = json
             .get("tokens")
             .and_then(|v| v.as_array())
-            .map(|tokens| tokens.iter().filter_map(parse_soniox_token).collect())
+            .map(|tokens| super::soniox_tokens::words(tokens.iter().filter_map(parse_soniox_token)))
             .unwrap_or_default();
 
         Ok(super::CloudTranscript {

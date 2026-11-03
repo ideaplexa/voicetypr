@@ -5,10 +5,9 @@
 //! authoritative pasted result (plan 043b); REST-on-WAV is the fallback path.
 //! The live WS handshake stays a MANUAL smoke (needs a Soniox key in secure store).
 //!
-//! Key difference from the REST path (`soniox.rs:230-241`): realtime tokens carry
-//! their OWN leading spaces, so committed/tentative text is the VERBATIM
-//! concatenation of token `text` fields — never the space-inserting join used
-//! for REST. The committed prefix is append-only by construction (finals are
+//! Like REST tokens, realtime tokens carry their OWN leading spaces, so
+//! committed/tentative text is the VERBATIM concatenation of token `text` fields,
+//! including subword fragments. The committed prefix is append-only (finals are
 //! emitted once and never reissued by Soniox RT), satisfying
 //! `StreamSessionGate::assert_committed_monotonic`.
 

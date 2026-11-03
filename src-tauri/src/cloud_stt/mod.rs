@@ -14,6 +14,7 @@ mod deepgram;
 mod groq;
 mod openai;
 mod soniox;
+mod soniox_tokens;
 // Realtime (WebSocket) streaming path — reachable from the recorder tap factory
 // in commands::audio (plan 043).
 pub(crate) mod deepgram_rt;
