@@ -152,7 +152,22 @@ async fn run_task<F>(
 {
     let mut final_slot = Some(final_tx);
 
-    let stream = match tokio_tungstenite::connect_async(RT_ENDPOINT).await {
+    let connector = match crate::tls::websocket_connector() {
+        Ok(connector) => connector,
+        Err(_) => {
+            log::warn!("provider=Soniox status=unknown code=tls_configuration");
+            finish(&mut final_slot, Err(SttError::Network));
+            return;
+        }
+    };
+    let stream = match tokio_tungstenite::connect_async_tls_with_config(
+        RT_ENDPOINT,
+        None,
+        false,
+        Some(connector),
+    )
+    .await
+    {
         Ok((stream, _response)) => stream,
         Err(_error) => {
             log::warn!("provider=Soniox status=unknown code=network");
