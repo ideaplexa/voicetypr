@@ -193,6 +193,16 @@ impl CloudProvider {
             .unwrap_or_else(|| self.default_model().id)
     }
 
+    /// Soniox has one API model. Report its executed id, not the caller's
+    /// provider shorthand or retired alias; other providers retain their ids.
+    pub fn canonical_model_id(self, requested: &str) -> &str {
+        if self == Self::Soniox {
+            self.resolve_model_id(Some(requested))
+        } else {
+            requested
+        }
+    }
+
     /// Selected API model for this provider from `cloud_stt_models_by_provider`.
     pub fn selected_model(self, app: &AppHandle) -> &'static CloudSttModel {
         let stored = read_stored_cloud_stt_model_id(app, self.id());

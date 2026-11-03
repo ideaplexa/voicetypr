@@ -498,6 +498,7 @@ async fn run_transcribe(
             (!settings.current_model_engine.is_empty())
                 .then_some(settings.current_model_engine.clone())
         });
+        let model = canonical_cli_model(&model, engine.as_deref()).to_string();
         let t = transcribe_audio_file_for_cli(
             app.clone(),
             args.file.to_string_lossy().to_string(),
@@ -517,6 +518,13 @@ async fn run_transcribe(
         println!("{}", payload["text"].as_str().unwrap_or_default());
     }
     Ok(())
+}
+
+fn canonical_cli_model<'a>(model: &'a str, engine: Option<&str>) -> &'a str {
+    let engine = engine.map(str::to_ascii_lowercase);
+    crate::cloud_stt::CloudProvider::from_id(engine.as_deref().unwrap_or(model))
+        .map(|provider| provider.canonical_model_id(model))
+        .unwrap_or(model)
 }
 
 async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<dyn Error>> {
@@ -571,6 +579,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
             (!settings.current_model_engine.is_empty())
                 .then_some(settings.current_model_engine.clone())
         });
+        let model = canonical_cli_model(&model, engine.as_deref()).to_string();
         let t = transcribe_audio_file_for_cli(
             app.clone(),
             output_path.to_string_lossy().to_string(),
@@ -906,6 +915,23 @@ fn format_availability(snap: &crate::RecognitionAvailabilitySnapshot) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_reports_executed_soniox_model_not_the_legacy_argument() {
+        for engine in ["soniox", "SoNiOx"] {
+            for requested in ["stt-async-v5", "stt-async-v6", "soniox", " stt-async-v5 "] {
+                assert_eq!(canonical_cli_model(requested, Some(engine)), "stt-async-v6");
+            }
+        }
+        assert_eq!(canonical_cli_model("soniox", None), "stt-async-v6");
+        for (model, engine) in [
+            ("base.en", Some("whisper")),
+            ("nova-2", Some("deepgram")),
+            ("openai", None),
+        ] {
+            assert_eq!(canonical_cli_model(model, engine), model);
+        }
+    }
     #[test]
     fn reset_removed_capture_fails_cleanly_without_advertising_a_missing_retry() {
         let data = tempfile::tempdir().unwrap();

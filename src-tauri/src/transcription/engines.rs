@@ -321,7 +321,7 @@ pub(crate) async fn resolve_engine_for_model(
             if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
                 Ok(ActiveEngineSelection::Cloud {
                     provider,
-                    model_name: model_name.to_string(),
+                    model_name: provider.canonical_model_id(model_name).to_string(),
                 })
             } else {
                 Err(format!(
@@ -368,7 +368,7 @@ pub(crate) async fn resolve_engine_for_model(
                 if crate::secure_store::secure_has(app, provider.key_name()).unwrap_or(false) {
                     return Ok(ActiveEngineSelection::Cloud {
                         provider,
-                        model_name: model_name.to_string(),
+                        model_name: provider.canonical_model_id(model_name).to_string(),
                     });
                 } else {
                     return Err(format!(
