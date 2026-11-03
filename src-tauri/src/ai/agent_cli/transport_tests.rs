@@ -121,10 +121,14 @@ print(len(data))
 "#,
     );
     let input = vec![b'x'; 2 * 1024 * 1024];
+    // One deadline covers interpreter startup, the stdin write and the waits.
+    // A loaded CI runner can exceed a few seconds on startup alone, so the
+    // budget is generous. A real deadlock still fails: the child blocks forever
+    // on stderr or stdin and the 30 s deadline fires.
     let capture = run_isolated_command(
         Command::new(binary),
         Some(&input),
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         MAX_CAPTURE_BYTES,
     )
     .await
