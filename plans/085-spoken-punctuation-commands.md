@@ -16,6 +16,14 @@ German legal documents, with Polish off. Spoken punctuation currently appears
 as words. This must work without a network, cloud recognition or AI, as well as
 with cloud engines selected by other users. Do not collect their documents.
 
+Soniox v6 now reliably emits spoken commands such as `period`, `new line`
+and `scratch that` as words, with no API flag to change this. This plan should
+handle the supported punctuation and line commands when enabled; `scratch that`
+is an editing command and remains out of scope. V6 also writes spoken prices
+as words, such as "15 dollars and 20 cents". A price-formatting rule is a
+possible later cleanup, not part of this plan now. See plan 083 for the v6
+migration.
+
 On 2026-11-02 the founder approved a narrow punctuation-only exception for
 2.1, off by default, with the Dragon-style trigger policy below. This overrides
 the master plan's 2.2 timing and separate-trigger rule for this feature only.
