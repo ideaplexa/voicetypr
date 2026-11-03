@@ -86,6 +86,13 @@ beta.6 is Windows Parakeet v3, default-on context when Polish is on, selected-CL
 Silero VAD, clipboard receipts and Secure Input fallback (083). Our Liquid local Polish model moves to
 084 and a separate beta only after eval passes. This supersedes the older local-Polish release placement.
 
+**Release follow-up:** beta.6 also includes multilingual text correctness
+(086) and the beta.5 release follow-ups in [plan 083 section 13](083-2.1-beta6.md):
+island replay and F6, CI reliability, DMG notarization, Soniox v6, carried
+hardware checks and the stable CLI Metal teardown investigation. These
+follow-ups are not yet included in the beta.6 effort estimate. Spoken
+punctuation (085) remains opt-in 2.1 work outside the beta.6 estimate.
+
 Ship 2.1 as small betas on the beta channel, each with tests for what it
 changes; promote the tested final beta to 2.1.0 stable; then start
 2.2.0-beta.1. Any change after a beta is published goes into the next beta.

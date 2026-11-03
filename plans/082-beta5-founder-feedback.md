@@ -465,6 +465,8 @@ Ranked:
    - Cache rects and compare them numerically.
    - Hover from cached rects.
    - This goes with section G (after the A fix round).
+   - The broader compositor and clip rewrite remains beta.6 work. See
+     [plan 083 section 13](083-2.1-beta6.md) for acceptance and measurement.
 7. **History reads all keys and sorts them on every call.** Keep a key index and count in managed state, and load in `spawn_blocking`.
 8. **Icon PNG encoding** runs on the main thread. Add a disk cache, or encode off the main thread.
    - Slice 6: macOS now does only AppKit lookup/rasterization and a bounded

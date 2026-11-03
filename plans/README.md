@@ -66,6 +66,8 @@ Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified 
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
+| 085 | [Spoken punctuation commands](085-spoken-punctuation-commands.md), opt-in for 2.1 | P1 | L | Beta.5 baseline; quote and spacing decisions | TODO — scope and trigger approved; not claimed for execution |
+| 086 | [Multilingual text correctness](086-multilingual-text-correctness.md), beta.6 | P0 | XL | Beta.5 baseline; security review for bidi changes | TODO — beta.6 scope approved; not claimed for execution |
 | 013  | *(reserved: close 004/008 smoke blockers — checklist, no plan file yet)* | P1 | S | 004, 008 | RESERVED — no executable plan file yet |
 | 021  | V2 feature track + carried-over work (roadmap index; waves → 022+) | P2 | XL | 2.0.0 smoke gates | TODO — roadmap/index only; Part A Waves 0–8 are release-boundary **B** (fold into 2.0.0); Part B carry-over is noted/uncommitted (opt-in); each wave graduates to its own 022+ plan when claimed |
 | 022  | Wave 1 (F3) — save uploaded transcript to `.txt`/`.md` | P2 | S | 021 | DONE (code) — NEEDS-SMOKE 022-S1 (`82039e8`) |
