@@ -50,6 +50,7 @@
     without key equivalents, and AppKit automatically binds Escape to "Cancel".
     On Windows, rfd enables TaskDialog cancellation; Escape returns `IDCANCEL`,
     mapped through tauri-plugin-dialog to the cancel caption, never Update.
+  - Both macOS DMGs are separately notarized, stapled and Gatekeeper-checked before upload, including in dry runs.
 - `update-beta-channel.yml` updates the rolling `beta` prerelease manifest when
   a release is published (the public URL is CDN-cached for a few minutes).
   Updater endpoints (`commands/updater.rs`): stable
