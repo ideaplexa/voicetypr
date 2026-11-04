@@ -309,7 +309,11 @@ pub(crate) fn send<R: tauri::Runtime>(
     }
 }
 #[tauri::command]
-pub fn pill_feedback_ready(app: AppHandle) {
+pub async fn pill_feedback_ready(app: AppHandle) {
+    // Queue contention must not block the native UI thread.
+    let _ = tauri::async_runtime::spawn_blocking(move || drain_feedback(app)).await;
+}
+fn drain_feedback(app: AppHandle) {
     use tauri::Emitter;
     let mut queued = QUEUED.lock().unwrap();
     READY.store(true, Ordering::SeqCst);

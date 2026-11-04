@@ -1,5 +1,8 @@
 use crate::recording::island::{BlockedKind, IslandAction};
-use std::{sync::Mutex, time::Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 #[derive(Default)]
@@ -13,10 +16,18 @@ static STATUS: Mutex<Status> = Mutex::new(Status {
     blocked: None,
     revision: 0,
 });
-static STATUS_ITEM: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>> = Mutex::new(None);
+static STATUS_ITEM: Mutex<Option<Arc<tauri::menu::MenuItem<tauri::Wry>>>> = Mutex::new(None);
 pub fn install(menu: &tauri::menu::Menu<tauri::Wry>) {
-    *STATUS_ITEM.lock().unwrap_or_else(|e| e.into_inner()) =
-        menu.get("status").and_then(|i| i.as_menuitem().cloned());
+    let item = menu
+        .get("status")
+        .and_then(|i| i.as_menuitem().cloned())
+        .map(Arc::new);
+    let old = {
+        let mut slot = STATUS_ITEM.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::replace(&mut *slot, item)
+    };
+    // Native item lookup AND destruction must happen outside our mutex.
+    drop(old);
 }
 pub fn refresh(app: &AppHandle) {
     let app = app.clone();
@@ -80,27 +91,74 @@ pub fn recording_changed(app: &AppHandle, state: crate::RecordingState) {
     };
     refresh(app);
     if changed {
+        let app = app.clone();
         tauri::async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let status = STATUS.lock().unwrap_or_else(|e| e.into_inner());
-                if status.revision != revision {
-                    return;
+                {
+                    let status = STATUS.lock().unwrap_or_else(|e| e.into_inner());
+                    if status.revision != revision || status.started.is_none() {
+                        return;
+                    }
                 }
-                let Some(started) = status.started else {
-                    return;
-                };
-                let seconds = started.elapsed().as_secs();
-                if let Some(item) = STATUS_ITEM
+                let captured = STATUS_ITEM
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .as_ref()
+                    .clone();
+                if app
+                    .run_on_main_thread(move || {
+                        update_recording_label(
+                            &STATUS,
+                            &STATUS_ITEM,
+                            revision,
+                            captured,
+                            |item, text| {
+                                let _ = item.set_text(text);
+                            },
+                        );
+                    })
+                    .is_err()
                 {
-                    let _ = item.set_text(super::model::recording_label(seconds));
+                    return;
                 }
             }
         });
     }
+}
+/// Runs on main: reject a stopped take or replaced menu before calling native
+/// code. Arc identity distinguishes different installs of the same "status" id.
+fn update_recording_label<T>(
+    status: &Mutex<Status>,
+    item: &Mutex<Option<Arc<T>>>,
+    revision: u64,
+    captured: Option<Arc<T>>,
+    set_text: impl FnOnce(Arc<T>, String),
+) -> bool {
+    let Some(captured) = captured else {
+        return false;
+    };
+    let text = {
+        let status = status.lock().unwrap_or_else(|e| e.into_inner());
+        if status.revision != revision {
+            return false;
+        }
+        let Some(started) = status.started else {
+            return false;
+        };
+        super::model::recording_label(started.elapsed().as_secs())
+    };
+    let current = {
+        let item = item.lock().unwrap_or_else(|e| e.into_inner());
+        item.as_ref()
+            .is_some_and(|item| Arc::ptr_eq(item, &captured))
+    };
+    if !current {
+        return false;
+    }
+    // Windows menu APIs synchronously marshal to the UI thread. That thread
+    // may itself need STATUS or STATUS_ITEM: never hold either across this call.
+    set_text(captured, text);
+    true
 }
 pub fn shortcut_text(app: &AppHandle) -> String {
     let primary = crate::commands::shortcuts::get_effective_primary_shortcut(app.clone()).ok();
@@ -163,3 +221,6 @@ pub fn shortcut_text(app: &AppHandle) -> String {
             .replace("Control", "Ctrl")
     }
 }
+
+#[cfg(test)]
+mod tests;
