@@ -13,7 +13,8 @@ const state = (state: string, generation = 2) => h.emit('recording-state-changed
 it.each(['no_speech','cloud_failed','network_offline','model_missing','remote_offline','integrity'] as const)('keeps queued %s recovery after a newer Starting overtakes readiness', async kind => {
   h=pillHarness();
   let flush: (() => void) | undefined;
-  h.invoke.mockImplementation(async command => {
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready' && args?.epoch === undefined) return 0;
     if(command==='pill_feedback_ready') return new Promise(resolve => {flush=()=>{h.emit('dictation-recovery',recovery(kind));resolve(null);};});
     if(command==='get_settings')return {pill_indicator_mode:'always'};
     return null;
@@ -57,7 +58,8 @@ it('uses clip expiry and explicit id retirement rather than generation to retire
 it.each(['stopping','transcribing'] as const)('keeps cold-renderer %s state when an older recovery flushes at readiness', async phase => {
   h=pillHarness();
   let flush: (() => void) | undefined;
-  h.invoke.mockImplementation(async command => {
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready' && args?.epoch === undefined) return 0;
     if(command==='pill_feedback_ready')return new Promise(resolve=>{flush=()=>{h.emit('dictation-recovery',recovery());resolve(null);};});
     if(command==='get_settings')return {pill_indicator_mode:'always'};
     return null;
@@ -78,7 +80,8 @@ it.each(['stopping','transcribing'] as const)('keeps cold-renderer %s state when
 
 it('keeps a cold window-creation Transcribing snapshot when older recovery flushes and hydration is suppressed', async () => {
   h=pillHarness();
-  h.invoke.mockImplementation(async command => {
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready' && args?.epoch === undefined) return 0;
     if(command==='pill_feedback_ready') {
       // Window creation supplies the only accepted state; no Starting/Recording/context arrived.
       state('transcribing',2);
@@ -97,7 +100,8 @@ it('keeps a cold window-creation Transcribing snapshot when older recovery flush
 it.each(['idle','transcribing'] as const)('retires already-flushed old mic status on %s hydration while retaining clip actions', async phase => {
   h=pillHarness();
   let hydrate: (() => void) | undefined;
-  h.invoke.mockImplementation(async command => {
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready' && args?.epoch === undefined) return 0;
     if(command==='pill_feedback_ready') {
       h.emit('dictation-note',{generation:1,kind:'mic_silent'});
       h.emit('dictation-recovery',{...recovery('mic_dropped_empty'),id:'empty'});
@@ -137,7 +141,8 @@ it.each(['starting','recording','stopping','transcribing','idle','error'])('reti
 
 it('preserves current-take mic status and unresolved mic blockers on hydration', async () => {
   h=pillHarness();
-  h.invoke.mockImplementation(async command => {
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready' && args?.epoch === undefined) return 0;
     if(command==='pill_feedback_ready') {
       h.emit('dictation-blocked',{generation:1,kind:'mic_missing',action:'choose_mic'});
       h.emit('dictation-note',{generation:2,kind:'mic_silent'});

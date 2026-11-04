@@ -42,12 +42,15 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       sendingRegions = false;
     })();
   };
+  let feedbackEpoch: number | undefined;
+  const pendingFeedback: Array<{ epoch: number; run: () => void }> = [];
   let feedbackQueued: boolean | undefined, feedbackSending = false;
   const feedbackVisible = (visible: boolean): Promise<void> => {
+    if (destroyed) return Promise.resolve();
     feedbackQueued=visible;
-    if(feedbackSending)return Promise.resolve();
+    if(feedbackSending || feedbackEpoch === undefined)return Promise.resolve();
     feedbackSending=true;
-    return (async()=>{while(feedbackQueued!==undefined){const latest=feedbackQueued;feedbackQueued=undefined;try{await call('pill_feedback_visible',{visible:latest});}catch{ /* A later state change can retry. */ }}feedbackSending=false;})();
+    return (async()=>{while(!destroyed && feedbackQueued!==undefined){const latest=feedbackQueued;feedbackQueued=undefined;try{await call('pill_feedback_visible',{visible:latest,epoch:feedbackEpoch});}catch{ /* A later state change can retry. */ }}feedbackSending=false;})();
   };
   let streamUnlisten: (() => void) | undefined, streamPending = false, streamEnabled = false;
   const action = (name: 'dictate' | 'stop' | 'cancel' | 'copy' | 'retry' | 'discard' | 'open_accessibility') => {
@@ -82,6 +85,15 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     subscriptions.push(on<T>(event, ({ payload }) => { if (!destroyed) handler(payload); }).then(stop => {
       if (destroyed) stop(); else unlisteners.push(stop);
     }).catch(() => {}));
+  };
+  const subscribeFeedback = <T extends object>(event: string, handler: (payload: T) => void) => {
+    subscribe<T & { renderer_epoch?: number }>(event, value => {
+      // Untagged local/test events keep their existing immediate semantics.
+      // Native delivery is tagged even across the close/check/emit race.
+      if (value.renderer_epoch === undefined) { handler(value); return; }
+      if (feedbackEpoch === undefined) pendingFeedback.push({ epoch: value.renderer_epoch, run: () => handler(value) });
+      else if (value.renderer_epoch === feedbackEpoch) handler(value);
+    });
   };
   const syncStream = () => {
     if (!streamEnabled) { streamUnlisten?.(); streamUnlisten = undefined; return; }
@@ -127,7 +139,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       // A start that ended before Recording leaves nothing to show: let the backend hide the window it opened early.
       if (payload.state === 'idle' && shownForStart) {
         shownForStart = false;
-        if (!island.feedbackActive) void call('pill_feedback_visible', { visible: false }).catch(() => {});
+        if (!island.feedbackActive) void feedbackVisible(false);
       }
     }
   };
@@ -140,22 +152,30 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   subscribe('transcription-started', () => { recordingEventReceived = true; island.work('transcribing'); });
   subscribe('enhancing-started', () => { recordingEventReceived = true; island.work('polishing'); });
   for (const name of ['enhancing-completed', 'enhancing-failed']) subscribe(name, () => { if (island.machine.state === 'polishing') island.work('transcribing'); });
-  subscribe<RecordingTooShort>('recording-too-short', value => island.tooShort(value));
-  subscribe<DictationBlocked>('dictation-blocked', value => island.blocked(value));
-  subscribe<DictationRecovery>('dictation-recovery', value => island.recovery(value));
-  subscribe<DictationNote>('dictation-note', value => island.note(value));
-  subscribe<{generation:number;kind:'mic_silent_live'}>('dictation-note-withdraw', value => island.withdrawNote(value));
-  subscribe<EscapeHint>('escape-hint', value => { if(island.machine.observeGeneration(value.generation)) island.escapeHint(); });
-  subscribe<IslandNotice>('island-notice', value => island.notice(value));
-  subscribe<{id:string}>('kept-dictation-expired', value => island.expired(value.id));
-  subscribe<{kind: IslandNotice['kind']}>('island-notice-clear', value => island.clearNotice(value.kind));
-  subscribe<PasteOutcomePayload>('paste-outcome', value => island.outcome(value));
+  subscribeFeedback<RecordingTooShort>('recording-too-short', value => island.tooShort(value));
+  subscribeFeedback<DictationBlocked>('dictation-blocked', value => island.blocked(value));
+  subscribeFeedback<DictationRecovery>('dictation-recovery', value => island.recovery(value));
+  subscribeFeedback<DictationNote>('dictation-note', value => island.note(value));
+  subscribeFeedback<{generation:number;kind:'mic_silent_live'}>('dictation-note-withdraw', value => island.withdrawNote(value));
+  subscribeFeedback<EscapeHint>('escape-hint', value => { if(island.machine.observeGeneration(value.generation)) island.escapeHint(); });
+  subscribeFeedback<IslandNotice>('island-notice', value => island.notice(value));
+  subscribeFeedback<{id:string}>('kept-dictation-expired', value => island.expired(value.id));
+  subscribeFeedback<{kind: IslandNotice['kind']}>('island-notice-clear', value => island.clearNotice(value.kind));
+  subscribeFeedback<PasteOutcomePayload>('paste-outcome', value => island.outcome(value));
   subscribe('settings-changed', () => { void readSettings(); void readQuick(); });
   for (const event of ['model-changed', 'audio-device-changed', 'polish-options-changed', 'ai-enabled-changed', 'sharing-status-changed', 'shortcut-settings-changed']) subscribe(event, () => { void readQuick(); });
   subscribe('island-escape', () => island.closeQuick());
   void Promise.resolve().then(async () => {
     await Promise.all(subscriptions);
-    await call('pill_feedback_ready').catch(() => {});
+    const epoch = await call<number>('pill_feedback_ready').catch(() => 0);
+    if (destroyed) return;
+    // Bind the drain request before any worker can outlive this renderer.
+    const requestedEpoch = typeof epoch === 'number' ? epoch : 0;
+    await call('pill_feedback_ready', { epoch: requestedEpoch }).catch(() => {});
+    if (destroyed) return;
+    feedbackEpoch = requestedEpoch;
+    for (const queued of pendingFeedback.splice(0)) if (queued.epoch === feedbackEpoch) queued.run();
+    if (feedbackQueued !== undefined) void feedbackVisible(feedbackQueued);
     const statePromise = call<RecordingStatePayload>('get_current_recording_state');
     void readSettings();
     void readQuick();

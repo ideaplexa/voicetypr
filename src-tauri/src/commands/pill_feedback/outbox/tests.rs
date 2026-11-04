@@ -46,9 +46,10 @@ fn retirement_ignores_tombstones_but_preserves_another_visual_candidate() {
 }
 
 fn validate(outbox: &mut Outbox, owned: &AtomicBool, live: &[Value]) -> Option<Vec<Event>> {
+    outbox.rebuild_from_live(live);
     let batch = outbox.take_batch(owned)?;
     let batch = replay::revalidate(batch, 7, crate::RecordingState::Recording, None, live);
-    outbox.validated(&batch);
+    outbox.validated(&batch, owned);
     Some(batch)
 }
 
@@ -199,7 +200,7 @@ fn close_during_emit_cannot_install_a_second_flusher() {
     outbox.enqueue(warning().0, warning().1);
     assert!(outbox.begin_flush());
     validate(&mut outbox, &owned, &[]).unwrap();
-    outbox.close();
+    outbox.close(&owned);
     assert!(
         !outbox.begin_flush(),
         "the original emitter still owns its batch"

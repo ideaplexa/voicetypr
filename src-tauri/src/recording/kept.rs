@@ -1445,10 +1445,9 @@ mod tests {
                 Some(recovery.id.as_str())
             );
             emit_recovery(app.handle(), &recovery);
-            assert_eq!(
-                received.lock().unwrap().last(),
-                Some(&serde_json::to_value(&recovery).unwrap())
-            );
+            let mut expected = serde_json::to_value(&recovery).unwrap();
+            expected["renderer_epoch"] = 0.into();
+            assert_eq!(received.lock().unwrap().last(), Some(&expected));
             store.clear();
         }
         assert_eq!(received.lock().unwrap().len(), 7);

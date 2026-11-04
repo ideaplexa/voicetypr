@@ -274,7 +274,7 @@ pub(crate) fn withdraw_live_mic_silent<R: tauri::Runtime>(app: &AppHandle<R>, ge
         let _ = app.emit_to(
             "pill",
             "dictation-note-withdraw",
-            serde_json::json!({"generation":generation,"kind":"mic_silent_live"}),
+            outbox.tag(serde_json::json!({"generation":generation,"kind":"mic_silent_live"})),
         );
     }
 }
@@ -294,7 +294,8 @@ pub(crate) fn send<R: tauri::Runtime>(
         FEEDBACK_OWNED.store(true, Ordering::SeqCst);
     }
     if outbox.ready || app.try_state::<crate::AppState>().is_none() {
-        let _ = app.emit_to("pill", event, payload);
+        outbox.remember(event, &payload);
+        let _ = app.emit_to("pill", event, outbox.tag(payload));
     } else {
         outbox.enqueue(event, payload);
     }
@@ -310,15 +311,25 @@ pub(crate) fn send<R: tauri::Runtime>(
     }
 }
 #[tauri::command]
-pub async fn pill_feedback_ready(app: AppHandle) {
+pub async fn pill_feedback_ready(app: AppHandle, epoch: Option<u64>) -> u64 {
     // Live-state locks may be contended; do not block the UI thread or an async
     // executor thread while draining. The command still awaits complete replay.
-    let _ = tauri::async_runtime::spawn_blocking(move || drain_feedback(app)).await;
+    tauri::async_runtime::spawn_blocking(move || match epoch {
+        // A query first binds readiness to this renderer's epoch, even when
+        // the blocking worker starts only after a close/replacement.
+        Some(epoch) => drain_feedback(app, epoch),
+        None => OUTBOX.lock().unwrap().epoch(),
+    })
+    .await
+    .unwrap_or_default()
 }
-fn drain_feedback(app: AppHandle) {
+fn drain_feedback(app: AppHandle, epoch: u64) -> u64 {
     use tauri::Emitter;
-    if !OUTBOX.lock().unwrap().begin_flush() {
-        return;
+    {
+        let mut outbox = OUTBOX.lock().unwrap();
+        if !outbox.begin_flush_for(epoch) {
+            return epoch;
+        }
     }
     loop {
         // Match kept deletion/publication's lock order: store -> status -> queue.
@@ -326,6 +337,7 @@ fn drain_feedback(app: AppHandle) {
             crate::menu::runtime::with_blocked_kind(|blocked| {
                 let mut outbox = OUTBOX.lock().unwrap();
                 let _generation = PENDING_HIDE.lock().unwrap();
+                outbox.rebuild_from_live(recoveries);
                 let queued = outbox.take_batch(&FEEDBACK_OWNED)?;
                 let replay = replay::revalidate(
                     queued,
@@ -334,22 +346,39 @@ fn drain_feedback(app: AppHandle) {
                     blocked,
                     recoveries,
                 );
-                outbox.validated(&replay);
-                Some(replay)
+                outbox.validated(&replay, &FEEDBACK_OWNED);
+                Some((outbox.epoch(), replay))
             })
         });
-        let Some(batch) = batch else { break };
+        let Some((batch_epoch, batch)) = batch else {
+            break;
+        };
         // READY stays false while unlocked: every publication AND invalidation
         // joins the next batch, never overtaking this one. No locks across emits.
-        for (event, payload) in batch {
+        for (event, mut payload) in batch {
+            if OUTBOX.lock().unwrap().epoch() != batch_epoch {
+                break;
+            }
+            payload["renderer_epoch"] = batch_epoch.into();
             let _ = app.emit_to("pill", event, payload);
         }
     }
+    epoch
 }
 #[tauri::command]
-pub async fn pill_feedback_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+pub async fn pill_feedback_visible(
+    app: AppHandle,
+    visible: bool,
+    epoch: u64,
+) -> Result<(), String> {
     let mode = pill_mode(&app);
-    FEEDBACK_OWNED.store(owns_feedback(&mode, visible), Ordering::SeqCst);
+    {
+        let outbox = OUTBOX.lock().unwrap();
+        if !outbox.accepts_visibility(epoch) {
+            return Ok(());
+        }
+        FEEDBACK_OWNED.store(owns_feedback(&mode, visible), Ordering::SeqCst);
+    }
     if mode == "never" {
         return crate::commands::window::hide_pill_widget(app).await;
     }
@@ -395,10 +424,10 @@ pub(crate) fn expire_kept_id<R: tauri::Runtime>(app: &AppHandle<R>, id: &str) {
         let _ = app.emit_to(
             "pill",
             "kept-dictation-expired",
-            serde_json::json!({"id":id}),
+            outbox.tag(serde_json::json!({"id":id})),
         );
     }
 }
 pub(crate) fn renderer_closed() {
-    OUTBOX.lock().unwrap().close();
+    OUTBOX.lock().unwrap().close(&FEEDBACK_OWNED);
 }

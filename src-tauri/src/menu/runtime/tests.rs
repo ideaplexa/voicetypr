@@ -46,5 +46,6 @@ fn stale_or_stopped_timer_does_not_call_native_menu() {
 fn readiness_runs_contended_drain_on_a_blocking_worker() {
     let source = include_str!("../../commands/pill_feedback.rs");
     assert!(source.contains("pub async fn pill_feedback_ready("));
-    assert!(source.contains("spawn_blocking(move || drain_feedback(app))"));
+    assert!(source.contains("spawn_blocking(move ||"));
+    assert!(source.contains("drain_feedback(app, epoch)"));
 }
