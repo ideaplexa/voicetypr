@@ -53,10 +53,10 @@ describe("Sidebar navigation", () => {
       "Home",
       "History",
       "Insights",
-      "Transcription",
-      "Polish",
-      "Dictionary",
       "Recording",
+      "Transcription",
+      "Dictionary",
+      "Polish",
     ]);
     expect(main.queryByText("Setup")).not.toBeInTheDocument();
     expect(main.getByRole("separator")).toHaveClass("bg-border");

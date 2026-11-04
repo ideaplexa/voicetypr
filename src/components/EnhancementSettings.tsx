@@ -65,7 +65,7 @@ export function EnhancementSettings({
             <p className="mt-1.5 text-[13px] leading-[19px] text-muted-foreground">{selectedExample}</p>
           </div>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">Illustrative example; your results depend on the selected provider.</p>
+        <p className="mt-2 text-xs text-muted-foreground">For your info: results depend on the selected provider and model.</p>
       </SettingsCard>
     </section>
 

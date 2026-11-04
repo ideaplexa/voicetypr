@@ -581,6 +581,9 @@ describe("EnhancementsSection", () => {
       expect(invoke).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Writing" } });
       expect(screen.getByText("Let's meet on Wednesday to review the draft.")).toBeInTheDocument();
     });
+    expect(screen.getByText("For your info: results depend on the selected provider and model.")).toBeInTheDocument();
+    expect(screen.getByText("You said")).toBeInTheDocument();
+    expect(screen.getByText("You get")).toBeInTheDocument();
   });
 
   it("shows cloud and local setup tabs when Polish is unconfigured", async () => {
