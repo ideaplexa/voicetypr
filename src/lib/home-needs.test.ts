@@ -34,6 +34,11 @@ describe("homeNeeds", () => {
   it("disables Retry while a retry is running", () => {
     const [row] = homeNeeds({ ...none, kept: [{ id: "a", engine_short: "X", alt_engine_short: null, alt_engine_id: null, remaining_ms: 1000, busy: true }] });
     expect(row.disabled).toBe(true);
+    expect(row.discard).toEqual({ kind: "discard", id: "a" });
+  });
+  it("keeps Discard available while audio is finalizing, but not Retry", () => {
+    const [row] = homeNeeds({ ...none, kept: [{ id: "a", engine_short: "Parakeet", alt_engine_short: "Parakeet", alt_engine_id: "v3", remaining_ms: 1000, busy: false, retry_ready: false }] });
+    expect(row).toMatchObject({ button: "Finishing…", disabled: true, discard: { kind: "discard", id: "a" } });
   });
 });
 

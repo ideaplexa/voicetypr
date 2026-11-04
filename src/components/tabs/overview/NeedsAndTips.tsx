@@ -22,7 +22,7 @@ function Group({ id, title, children }: { id: string; title: string; children: R
   );
 }
 
-function Row({ icon: Icon, title, description, button, disabled, onClick }: { icon: ComponentType<{ className?: string }>; title: string; description: string; button: string; disabled?: boolean; onClick: () => void }) {
+function Row({ icon: Icon, title, description, button, disabled, onClick, secondary }: { icon: ComponentType<{ className?: string }>; title: string; description: string; button: string; disabled?: boolean; onClick: () => void; secondary?: React.ReactNode }) {
   return (
     <li className="flex items-center gap-3.5 px-4 py-3">
       <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
@@ -31,6 +31,7 @@ function Row({ icon: Icon, title, description, button, disabled, onClick }: { ic
         <p className="mt-0.5 text-xs leading-[normal] text-muted-foreground">{description}</p>
       </div>
       <Button variant="outline" size="sm" disabled={disabled} onClick={onClick} aria-label={`${button}: ${title}`}>{button}</Button>
+      {secondary}
     </li>
   );
 }
@@ -39,7 +40,7 @@ export function NeedsYou({ rows, onAct }: { rows: NeedRow[]; onAct: (row: NeedRo
   if (rows.length === 0) return null;
   return (
     <Group id="needs-you-title" title="Needs you">
-      {rows.map((row) => <Row key={row.id} icon={needIcons[row.icon]} title={row.title} description={row.description} button={row.button} disabled={row.disabled} onClick={() => onAct(row)} />)}
+      {rows.map((row) => <Row key={row.id} icon={needIcons[row.icon]} title={row.title} description={row.description} button={row.button} disabled={row.disabled} onClick={() => onAct(row)} secondary={row.discard && <Button variant="ghost" size="sm" aria-label={`Discard: ${row.title}`} onClick={() => { if(row.discard) onAct({...row,action:row.discard}); }}>Discard</Button>} />)}
     </Group>
   );
 }

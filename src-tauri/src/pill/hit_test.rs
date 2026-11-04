@@ -12,6 +12,10 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
+#[cfg(target_os = "macos")]
+#[path = "cursor.rs"]
+mod cursor;
+
 #[cfg(any(target_os = "macos", test))]
 const POINTER_QUERY_MAX_AGE: Duration = Duration::from_millis(200);
 
@@ -128,22 +132,38 @@ pub fn hit_test(rects: &[Rect], x: f64, y: f64, was_inside: bool) -> bool {
         .any(|r| r.contains(x, y, if was_inside { 2.0 } else { 0.0 }))
 }
 #[derive(Default)]
+struct Regions {
+    click: Vec<Rect>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Windows uses the CSS cursor.
+    actions: Vec<Rect>,
+}
+#[derive(Default)]
 pub struct PointerState {
-    rects: Mutex<Vec<Rect>>,
+    regions: Mutex<Regions>,
     inside: AtomicBool,
     task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     #[cfg(target_os = "macos")]
     query: Arc<PointerQuery>,
+    #[cfg(target_os = "macos")]
+    cursor_owned: AtomicBool,
 }
 #[tauri::command]
-pub fn pill_set_hit_regions(window: WebviewWindow, rects: Vec<Rect>) -> Result<(), String> {
+pub fn pill_set_hit_regions(
+    window: WebviewWindow,
+    rects: Vec<Rect>,
+    action_rects: Option<Vec<Rect>>,
+) -> Result<(), String> {
     if window.label() != "pill" {
         return Err("Pill window required".into());
     }
-    if rects.len() > 32 || rects.iter().any(|r| !r.valid()) {
+    let actions = action_rects.unwrap_or_default();
+    if rects.len() > 32 || actions.len() > 32 || rects.iter().chain(&actions).any(|r| !r.valid()) {
         return Err("Invalid hit regions".into());
     }
-    *window.state::<PointerState>().rects.lock().unwrap() = rects;
+    *window.state::<PointerState>().regions.lock().unwrap() = Regions {
+        click: rects,
+        actions,
+    };
     Ok(())
 }
 pub fn stop(app: &AppHandle) {
@@ -158,6 +178,8 @@ fn reset_pointer(app: &AppHandle) {
     reset_hover(app);
 }
 fn reset_hover(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    cursor::reset(app);
     if app
         .state::<PointerState>()
         .inside
@@ -218,7 +240,11 @@ pub fn start(window: &WebviewWindow) {
                     generation,
                     Instant::now(),
                     |work| task_app.run_on_main_thread(work).is_ok(),
-                    move || pointer_position(&query_app, &query_window),
+                    move || {
+                        let point = pointer_position(&query_app, &query_window);
+                        cursor::update(&query_app, &query_window, point, generation);
+                        point
+                    },
                 );
                 point
             };
@@ -226,7 +252,12 @@ pub fn start(window: &WebviewWindow) {
             let point = pointer_position(&task_app, &window);
             let next = point.is_some_and(|(x, y)| {
                 hit_test(
-                    &task_app.state::<PointerState>().rects.lock().unwrap(),
+                    &task_app
+                        .state::<PointerState>()
+                        .regions
+                        .lock()
+                        .unwrap()
+                        .click,
                     x,
                     y,
                     inside,
@@ -301,6 +332,42 @@ fn pointer_moved(last: Option<(f64, f64)>, next: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn broad_surfaces_text_and_disabled_retry_are_not_cursor_targets() {
+        let click = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 300.0,
+            height: 70.0,
+        };
+        let retry = Rect {
+            x: 100.0,
+            y: 40.0,
+            width: 100.0,
+            height: 24.0,
+        };
+        let close = Rect {
+            x: 260.0,
+            y: 40.0,
+            width: 24.0,
+            height: 24.0,
+        };
+        let mut regions = Regions {
+            click: vec![click],
+            actions: vec![retry, close],
+        };
+        assert!(hit_test(&regions.click, 20.0, 20.0, false));
+        assert!(!hit_test(&regions.actions, 20.0, 20.0, false));
+        assert!(hit_test(&regions.actions, 150.0, 50.0, false));
+        regions.actions = vec![close]; // Retry pending, X remains enabled.
+        assert!(!hit_test(&regions.actions, 150.0, 50.0, false));
+        assert!(hit_test(&regions.actions, 270.0, 50.0, false));
+        assert!(
+            !hit_test(&regions.actions, 259.0, 50.0, false),
+            "cursor has no broad-region hysteresis"
+        );
+    }
 
     #[test]
     fn pointer_query_never_waits_or_queues_behind_itself() {

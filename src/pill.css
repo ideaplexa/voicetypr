@@ -54,7 +54,7 @@ button { font:inherit }
 .ctl .round:first-child { margin-left:6px }
 .round { width:26px;height:26px;border-radius:13px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:0;color:rgba(255,255,255,.92);cursor:pointer;padding:0;flex:none;font-size:16px;line-height:1 }
 .round:hover,.round.hov { background:rgba(255,255,255,.2) }
-.round:disabled { opacity:.4;cursor:default }
+.round:disabled,.act:disabled { opacity:.4;cursor:default }
 .words-layer { bottom:32px }
 .pill-preview { height:30px;padding:9px 13px 0;font-size:12.5px;white-space:nowrap;overflow:clip;direction:rtl;text-align:right;width:100%;mask-image:linear-gradient(to right,transparent,#000 24px,#000 calc(100% - 13px),transparent) }
 .pill-preview-line { direction:ltr;unicode-bidi:isolate }

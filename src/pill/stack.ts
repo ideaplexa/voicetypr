@@ -20,7 +20,7 @@ export class FeedbackStack {
   push(card: FeedbackCard, now: number) {
     this.advance(now);
     const existing = this.items.find(i => i.key === card.key);
-    if (existing) { Object.assign(existing,card); existing.count++; existing.left=Math.max(existing.left,card.duration ?? 0); this.items=this.items.filter(i=>i!==existing).concat(existing); }
+    if (existing) { Object.assign(existing,card); if(!card.key.startsWith('recovery:'))existing.count++; existing.left=Math.max(existing.left,card.duration ?? 0); this.items=this.items.filter(i=>i!==existing).concat(existing); }
     else this.items.push({...card,serial:++this.serial,count:1,left:card.duration ?? 0});
   }
   remove(key: string) { this.items=this.items.filter(i=>i.key!==key); }

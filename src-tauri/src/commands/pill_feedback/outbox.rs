@@ -1,4 +1,4 @@
-//! One pre-ready drainer; publications and removals share its FIFO.
+//! One unlocked emitter; publications and removals always share its FIFO.
 use super::{replay, retire_queued_kept_id, withdraw_queued_live_mic_silent};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +12,7 @@ pub(super) struct Outbox {
     requested: bool,
     had_pending: bool,
     produced_ui: bool,
+    renderer_has_ui: bool,
     epoch: u64,
     rebuild: bool,
     statuses: Vec<Event>,
@@ -26,6 +27,7 @@ impl Outbox {
             requested: false,
             had_pending: false,
             produced_ui: false,
+            renderer_has_ui: false,
             epoch: 0,
             rebuild: false,
             statuses: Vec::new(),
@@ -88,9 +90,31 @@ impl Outbox {
         self.epoch == epoch && self.requested
     }
 
+    pub fn visibility(&mut self, epoch: u64, visible: bool) -> bool {
+        if !self.accepts_visibility(epoch) {
+            return false;
+        }
+        self.renderer_has_ui = visible;
+        true
+    }
+
     pub fn tag(&self, mut payload: Value) -> Value {
         payload["renderer_epoch"] = self.epoch.into();
         payload
+    }
+
+    /// Claim the emitter atomically with a ready-state publication/removal.
+    /// In-flight sends keep ready false; their successors join the next batch.
+    pub fn resume(&mut self) -> bool {
+        if !self.ready {
+            return false;
+        }
+        self.ready = false;
+        let start = self.begin_flush();
+        // A removal-only live batch must not release another rendered card.
+        // Once the renderer reports empty, stale candidates can release again.
+        self.produced_ui = self.renderer_has_ui;
+        start
     }
 
     pub fn begin_flush_for(&mut self, epoch: u64) -> bool {
@@ -121,7 +145,7 @@ impl Outbox {
             if self.had_pending && !self.produced_ui {
                 replay::release_nonvisual_replay(&[], owned);
             }
-            // The empty observation and the switch to direct sends are atomic.
+            // Empty observation and release of the emitter slot are atomic.
             self.ready = true;
             self.flushing = false;
             return None;
@@ -133,6 +157,7 @@ impl Outbox {
     pub fn validated(&mut self, batch: &[Event], owned: &AtomicBool) {
         let visual = batch.iter().any(|(event, _)| replay::produces_ui(event));
         self.produced_ui |= visual;
+        self.renderer_has_ui |= visual;
         if visual {
             owned.store(true, Ordering::SeqCst);
         }
@@ -146,21 +171,17 @@ impl Outbox {
             self.ready || self.flushing,
             owned,
         );
-        if !self.ready {
-            self.enqueue(
-                "dictation-note-withdraw",
-                json!({
-                    "generation":generation, "kind":"mic_silent_live"
-                }),
-            );
-        }
+        self.enqueue(
+            "dictation-note-withdraw",
+            json!({
+                "generation":generation, "kind":"mic_silent_live"
+            }),
+        );
     }
 
     pub fn retire(&mut self, id: &str, owned: &AtomicBool) {
         retire_queued_kept_id(&mut self.pending, id, self.ready || self.flushing, owned);
-        if !self.ready {
-            self.enqueue("kept-dictation-expired", json!({"id":id}));
-        }
+        self.enqueue("kept-dictation-expired", json!({"id":id}));
     }
 
     pub fn close(&mut self, owned: &AtomicBool) {
@@ -171,6 +192,7 @@ impl Outbox {
         self.pending.clear();
         self.had_pending = false;
         self.produced_ui = false;
+        self.renderer_has_ui = false;
         owned.store(false, Ordering::SeqCst);
         // An in-flight drainer still owns the emit slot. A subsequent ready
         // call requests another pass rather than starting a second emitter.

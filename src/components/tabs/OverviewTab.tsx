@@ -63,7 +63,8 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
     else if (action.kind === "restart") void update.restartNow();
     else if (action.kind === "pane") onNavigateSettingsPane?.(action.pane);
     else if (action.kind === "screen") { if (action.source) onSourceFilterChange?.(action.source); onNavigate?.(action.screen); }
-    else void invoke("retry_kept_dictation", { id: action.id, engine: action.engine }).catch((error: unknown) => { toast.error(typeof error === "string" && error ? error : "Couldn't retry that recording."); }).finally(() => void refreshKept());
+    else if (action.kind === "discard") void invoke("discard_kept_dictation", { id: action.id }).catch(() => { toast.error("Couldn't discard that recording."); }).finally(() => void refreshKept());
+    else void invoke(action.anyway ? "transcribe_anyway" : "retry_kept_dictation", action.anyway ? { id: action.id } : { id: action.id, engine: action.engine }).catch(() => { toast.error("Couldn't retry that recording. It may have expired, or the engine may no longer be ready."); }).finally(() => void refreshKept());
   };
   const openTip = (tip: TipRow) => onNavigate?.(tip.screen);
 

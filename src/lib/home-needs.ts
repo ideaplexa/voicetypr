@@ -1,6 +1,7 @@
 import type { ScreenId, SettingsPane } from "@/components/navigation";
 import type { SourceFilter } from "@/components/sections/models/types";
 import type { HomeStatus } from "@/lib/home-readiness";
+import type { RecoveryKind } from "@/types/island-events";
 
 /** A failed dictation whose audio is still kept, as reported by `list_kept_dictations`. */
 export interface KeptRecording {
@@ -10,10 +11,13 @@ export interface KeptRecording {
   alt_engine_id: string | null;
   remaining_ms: number;
   busy: boolean;
+  retry_ready?: boolean;
+  kind?: RecoveryKind;
 }
 
 export type NeedAction =
-  | { kind: "retry"; id: string; engine: string | null }
+  | { kind: "retry"; id: string; engine: string | null; anyway?: boolean }
+  | { kind: "discard"; id: string }
   | { kind: "install" }
   | { kind: "restart" }
   | { kind: "screen"; screen: ScreenId; source?: SourceFilter }
@@ -27,6 +31,7 @@ export interface NeedRow {
   button: string;
   disabled?: boolean;
   action: NeedAction;
+  discard?: { kind: "discard"; id: string };
 }
 
 function minutesLeft(ms: number): string {
@@ -52,10 +57,11 @@ export function homeNeeds({
     id: `kept:${clip.id}`,
     icon: "retry",
     title: "A recording was kept",
-    description: `${clip.engine_short} couldn't finish it. Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
-    button: clip.busy ? "Retrying…" : "Retry",
-    disabled: clip.busy,
-    action: { kind: "retry", id: clip.id, engine: clip.alt_engine_id },
+    description: clip.kind === "no_speech" ? "No speech heard. Audio kept temporarily for 30 seconds." : `${clip.engine_short} couldn't finish it. Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
+    button: clip.busy ? "Retrying…" : clip.retry_ready === false ? "Finishing…" : clip.kind === "no_speech" ? "Transcribe anyway" : "Retry",
+    disabled: clip.busy || clip.retry_ready === false,
+    action: { kind: "retry", id: clip.id, engine: clip.alt_engine_id, ...(clip.kind === "no_speech" ? { anyway: true } : {}) },
+    discard: { kind: "discard", id: clip.id },
   }));
   if (updateVersion) {
     const busy = updateInstall === "prompting" || updateInstall === "installing";

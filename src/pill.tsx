@@ -32,15 +32,15 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   const subscriptions: Promise<void>[] = [];
   const unlisteners: Array<() => void> = [];
   type Regions = Array<{ x: number; y: number; width: number; height: number }>;
-  let queuedRegions: Regions | undefined, sendingRegions = false;
-  const sendRegions = (rects: Regions) => {
-    queuedRegions = rects;
+  let queuedRegions: { rects: Regions; actionRects: Regions } | undefined, sendingRegions = false;
+  const sendRegions = (rects: Regions, actionRects: Regions) => {
+    queuedRegions = { rects, actionRects };
     if (sendingRegions) return;
     sendingRegions = true;
     void (async () => {
       while (queuedRegions) {
         const latest = queuedRegions; queuedRegions = undefined;
-        try { await call('pill_set_hit_regions', { rects: latest }); } catch { /* No logging of geometry. */ }
+        try { await call('pill_set_hit_regions', latest); } catch { /* No logging of geometry. */ }
       }
       sendingRegions = false;
     })();

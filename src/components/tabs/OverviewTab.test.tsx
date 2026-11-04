@@ -190,6 +190,27 @@ describe("Home", () => {
     await waitFor(() => expect(mock.refreshKept).toHaveBeenCalled());
   });
 
+  it("offers Home Discard even with saving Never, live preview and Parakeet v3", async () => {
+    mock.settings.save_recordings = false;
+    mock.kept = [{ id: "k1", engine_short: "Parakeet v3", alt_engine_short: null, alt_engine_id: null, remaining_ms: 540_000, busy: false }];
+    render(<OverviewTab />);
+    const section = screen.getByRole("region", { name: "Needs you" });
+    expect(within(section).getByRole("button", { name: /Retry/ })).toBeEnabled();
+    await userEvent.setup().click(within(section).getByRole("button", { name: /Discard/ }));
+    expect(invoke).toHaveBeenCalledWith("discard_kept_dictation", { id: "k1" });
+    await waitFor(() => expect(mock.refreshKept).toHaveBeenCalled());
+    expect(invoke).not.toHaveBeenCalledWith("retry_kept_dictation", expect.anything());
+  });
+
+  it("keeps no-speech audio in Home after closing its island card", async () => {
+    mock.kept = [{ id: "quiet", kind: "no_speech", engine_short: "Parakeet v3", alt_engine_short: null, alt_engine_id: null, remaining_ms: 20_000, busy: false }];
+    render(<OverviewTab />);
+    const section = screen.getByRole("region", { name: "Needs you" });
+    expect(within(section).getByRole("button", { name: /Discard/ })).toBeEnabled();
+    await userEvent.setup().click(within(section).getByRole("button", { name: /Transcribe anyway/ }));
+    expect(invoke).toHaveBeenCalledWith("transcribe_anyway", { id: "quiet" });
+  });
+
   it("shows a ready update with Install that opens the update dialog", async () => {
     mock.update = { available: { version: "2.1.0-beta.6" }, checking: false, install: "idle", restartVersion: null };
     render(<OverviewTab />);

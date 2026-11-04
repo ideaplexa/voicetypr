@@ -120,7 +120,7 @@ describe('P5 quick settings',()=>{
   });
   it('hit target extends only upward and includes every expanded shape',async()=>{
     const h=renderer();await h.settle();
-    expect(h.regions).toHaveBeenLastCalledWith([{x:221,y:405,width:20,height:20}]);await h.peek();await h.settle(1500);expect(h.regions).toHaveBeenLastCalledWith([{x:42,y:366,width:378,height:70}]);
+    expect(h.regions).toHaveBeenLastCalledWith([{x:221,y:405,width:20,height:20}],[]);await h.peek();await h.settle(1500);expect(h.regions).toHaveBeenLastCalledWith([{x:42,y:366,width:378,height:70}],[]);
   });
   it('settled peek and rest do not maintain requestAnimationFrame loops',async()=>{
     const h=renderer();const raf=vi.spyOn(window,'requestAnimationFrame');await h.peek();await h.settle(2000);raf.mockClear();await h.settle(500);expect(raf).not.toHaveBeenCalled();h.island.rest();await h.settle(2000);raf.mockClear();await h.settle(500);expect(raf).not.toHaveBeenCalled();

@@ -1,6 +1,48 @@
 use super::*;
 use std::sync::{atomic::Ordering, Arc, Mutex};
 
+#[test]
+fn ready_publications_and_removals_use_one_unlocked_emitter() {
+    let owned = AtomicBool::new(false);
+    let mut outbox = Outbox::new();
+    assert!(outbox.begin_flush());
+    assert!(outbox.take_batch(&owned).is_none());
+    outbox.enqueue(warning().0, warning().1);
+    assert!(outbox.resume());
+    let captured = validate(&mut outbox, &owned, &[]).unwrap();
+    outbox.withdraw(7, &owned);
+    assert!(!outbox.resume(), "removal must join the existing emitter");
+    assert!(!outbox.begin_flush());
+    let removal = validate(&mut outbox, &owned, &[]).unwrap();
+    assert_eq!(captured[0].0, "dictation-note");
+    assert_eq!(removal[0].0, "dictation-note-withdraw");
+    assert!(validate(&mut outbox, &owned, &[]).is_none());
+    assert!(outbox.ready);
+}
+
+#[test]
+fn live_removal_preserves_rendered_ownership_but_stale_empty_send_releases_it() {
+    let owned = AtomicBool::new(true);
+    let mut outbox = Outbox::new();
+    assert!(outbox.begin_flush());
+    assert!(outbox.take_batch(&owned).is_none());
+    assert!(outbox.visibility(0, true));
+    outbox.retire("one-of-two-cards", &owned);
+    assert!(outbox.resume());
+    validate(&mut outbox, &owned, &[]).unwrap();
+    assert!(validate(&mut outbox, &owned, &[]).is_none());
+    assert!(owned.load(Ordering::SeqCst));
+    assert!(outbox.visibility(0, false));
+    outbox.enqueue(
+        "dictation-note",
+        json!({"generation":6,"kind":"mic_dropped"}),
+    );
+    assert!(outbox.resume());
+    assert!(validate(&mut outbox, &owned, &[]).unwrap().is_empty());
+    assert!(validate(&mut outbox, &owned, &[]).is_none());
+    assert!(!owned.load(Ordering::SeqCst));
+}
+
 fn warning() -> Event {
     (
         "dictation-note",

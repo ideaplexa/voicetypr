@@ -2,6 +2,27 @@ use super::*;
 use serde_json::json;
 use std::sync::atomic::AtomicBool;
 
+#[test]
+fn finalized_readiness_and_remaining_ttl_refresh_without_losing_the_offer() {
+    for ready in [true, false] {
+        let mut queued = recovery(6, "kept", "cloud_failed");
+        queued["retry_ready"] = (!ready).into();
+        let mut live = queued.clone();
+        live["retry_ready"] = ready.into();
+        live["expires_in_ms"] = 8000.into();
+        assert_eq!(
+            revalidate(
+                vec![("dictation-recovery", queued)],
+                7,
+                RecordingState::Idle,
+                None,
+                &[live.clone()]
+            ),
+            vec![("dictation-recovery", live)]
+        );
+    }
+}
+
 fn note(generation: u64, kind: &str) -> Event {
     (
         "dictation-note",

@@ -17,6 +17,8 @@ export interface DictationRecovery {
   alt_engine_short: string | null;
   alt_engine_id: string | null;
   expires_in_ms: number;
+  /** False while the retained WAV is still finalizing. Older producers omit it. */
+  retry_ready?: boolean;
 }
 export interface DictationBlocked { generation: number; kind: BlockedKind; action: IslandAction }
 export type PolishSkippedReason = "timeout" | "rate_limited" | "network" | "guard" | "error";

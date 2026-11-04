@@ -2,10 +2,10 @@ import { FeedbackStack, type StackItem } from '@/pill/stack';
 import { Spring, clamp } from '@/pill/spring';
 import { icon } from '@/pill/icons';
 import { OutlineClock } from '@/pill/outline-clock';
-import type { CardCommand, FeedbackCard } from '@/pill/feedback';
+import { retryErrorCard, type CardCommand, type FeedbackCard } from '@/pill/feedback';
 import type { PillGeometry } from '@/pill-geometry';
 type Rect = {x:number;y:number;width:number;height:number};
-interface View { el: HTMLElement; w: Spring; h: Spring; y: Spring; scale: Spring; alpha: number; targetAlpha: number; key: string; clock?: OutlineClock }
+interface View { el: HTMLElement; w: Spring; h: Spring; y: Spring; scale: Spring; alpha: number; targetAlpha: number; key: string; clock?: OutlineClock; pending?: object }
 export class StackView {
   readonly stack = new FeedbackStack();
   private views = new Map<string,View>();
@@ -16,6 +16,7 @@ export class StackView {
   private alpha = 0;
   private handoff: string | undefined;
   private snapshot = '';
+  private destroyed = false;
   constructor(root: HTMLElement, private deps: {wake():void; changed():void; call(c:CardCommand):Promise<unknown>; announce(s:string):void; setTimeout:typeof window.setTimeout; clearTimeout(id:number):void}) {
     this.container=document.createElement('div'); this.container.className='feedback-stack';
     this.more=document.createElement('span');this.more.className='stack-more';this.more.hidden=true;
@@ -56,13 +57,32 @@ export class StackView {
     const actions=document.createElement('div');actions.className='card-actions';
     for(const a of item.actions) {
       const button=document.createElement('button');button.type='button';button.className='act';button.textContent=a.label;
-      button.onclick=()=>{button.disabled=true;void this.deps.call(a.call).then(()=>this.remove(item.key)).catch(()=>{button.disabled=false;});};actions.append(button);
+      button.disabled=Boolean(this.views.get(item.key)?.pending);
+      button.onclick=()=>{
+        const view=this.views.get(item.key);
+        if(!view || view.pending)return;
+        const request={};view.pending=request;
+        for(const action of view.el.querySelectorAll<HTMLButtonElement>('.act')) action.disabled=true;
+        this.deps.wake(); // Withdraw the native cursor target even with settled geometry.
+        void this.deps.call(a.call).then(()=>{
+          if(!this.destroyed && this.views.get(item.key)===view && view.pending===request){view.pending=undefined;this.remove(item.key);}
+        }).catch(error=>{
+          if(this.destroyed)return;
+          if(this.views.get(item.key)===view && view.pending===request) {
+            view.pending=undefined;
+            for(const action of view.el.querySelectorAll<HTMLButtonElement>('.act')) action.disabled=false;
+            this.deps.wake();
+          }
+          if(a.call.command==='retry_kept_dictation' || a.call.command==='transcribe_anyway') this.push(retryErrorCard(error));
+        });
+      };actions.append(button);
     }
-    const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='round card-dismiss';dismiss.setAttribute('aria-label','Dismiss');dismiss.innerHTML=icon('close',12);dismiss.onclick=()=>this.remove(item.key);
+    const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='round card-dismiss';dismiss.setAttribute('aria-label',item.closeLabel ?? 'Dismiss');dismiss.innerHTML=icon('close',12);dismiss.onclick=()=>this.remove(item.key);
     if(!item.sub && !item.actions.length) {
       el.classList.add('single-row');el.replaceChildren(glyph,txt,dismiss);
     } else {
-      actions.append(dismiss);const bottom=document.createElement('div');bottom.className='card-bottom';bottom.append(sub,actions);el.replaceChildren(glyph,txt,bottom);
+      actions.append(dismiss);
+      const bottom=document.createElement('div');bottom.className='card-bottom';bottom.append(sub,actions);el.replaceChildren(glyph,txt,bottom);
     }
     if(item.key.startsWith('escape_hint:')) {
       el.classList.add('escape-hint-card');
@@ -73,12 +93,12 @@ export class StackView {
     return undefined;
   }
   private sync() {
-    const signature=JSON.stringify(this.stack.items.map(i=>[i.key,i.count,i.title,i.sub,i.expiresAt]));
+    const signature=JSON.stringify(this.stack.items.map(i=>[i.key,i.count,i.title,i.sub,i.expiresAt,i.actions,i.closeLabel]));
     if(signature===this.snapshot)return;this.snapshot=signature;
     for(const item of this.stack.items) {
       let v=this.views.get(item.key);
       if(!v) {const el=document.createElement('div');this.container.append(el);v={el,w:new Spring(300),h:new Spring(54),y:new Spring(8),scale:new Spring(.96),alpha:0,targetAlpha:1,key:item.key};this.views.set(item.key,v);}
-      const content=JSON.stringify([item.count,item.title,item.sub,item.expiresAt]);
+      const content=JSON.stringify([item.count,item.title,item.sub,item.expiresAt,item.actions,item.closeLabel]);
       if(v.el.dataset.content!==content) {v.clock=this.fill(v.el,item);v.el.dataset.content=content;}
     }
     this.more.textContent=`+${this.stack.more}`;this.more.hidden=!this.stack.more;
@@ -146,5 +166,5 @@ export class StackView {
     return out;
   }
   pointer(x?:number,y?:number) { if(this.container.inert&&!this.views.size)return; for(const b of this.container.querySelectorAll('button')) {const r=b.getBoundingClientRect();b.classList.toggle('hov',x!==undefined&&y!==undefined&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom);} }
-  destroy(){if(this.timer!==undefined)this.deps.clearTimeout(this.timer);this.container.remove();}
+  destroy(){this.destroyed=true;if(this.timer!==undefined)this.deps.clearTimeout(this.timer);this.container.remove();}
 }

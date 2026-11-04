@@ -15,12 +15,13 @@ use tauri_plugin_store::StoreExt;
 #[derive(Clone, Serialize)]
 pub struct Recovery {
     generation: u64,
-    id: String,
+    pub(crate) id: String,
     kind: RecoveryKind,
     engine_short: String,
     alt_engine_short: Option<String>,
     alt_engine_id: Option<String>,
     expires_in_ms: u64,
+    retry_ready: bool,
 }
 impl Recovery {
     fn set_alternative(&mut self, alternative: Option<(String, String)>) {
@@ -57,6 +58,8 @@ struct Clip {
     path: PathBuf,
     expires: Instant,
     busy: bool,
+    retire_after_retry: bool,
+    announced: bool,
     terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     target: PathBuf,
     retry_generation: Option<u64>,
@@ -74,11 +77,46 @@ struct Store {
 }
 static STORE: Lazy<Mutex<Store>> = Lazy::new(|| Mutex::new(Store::default()));
 
-/// Replay is serialized with deletion, retry and metadata changes. The callback
-/// may take the feedback queue lock, but must not emit or re-enter the store.
+/// Probe files without the global store lock, then reconcile and snapshot in
+/// Store -> status -> outbox order. The callback must not emit or re-enter.
 pub(crate) fn with_live_recoveries<T>(work: impl FnOnce(&[serde_json::Value]) -> T) -> T {
-    let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    work(&store.live_recoveries(Instant::now()))
+    let paths = STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .availability_paths();
+    let probes = probe_availability(paths);
+    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    store.apply_availability(probes);
+    let now = Instant::now();
+    // Expired leases are excluded here; their deadline task owns file deletion.
+    // Readiness does no file work while holding STORE.
+    work(&store.live_recoveries(now))
+}
+struct Availability {
+    id: String,
+    path: PathBuf,
+    missing: bool,
+    ready: bool,
+    was_ready: bool,
+}
+fn probe_availability(paths: Vec<(String, PathBuf, bool)>) -> Vec<Availability> {
+    paths
+        .into_iter()
+        .map(|(id, path, was_ready)| {
+            let missing = match std::fs::metadata(&path) {
+                Ok(metadata) => !metadata.is_file(),
+                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            };
+            let ready = !missing && finalized_wav(&path);
+            Availability {
+                id,
+                path,
+                missing,
+                ready,
+                was_ready,
+            }
+        })
+        .collect()
 }
 
 /// Borrow an existing file without taking ownership of its deletion. Registration
@@ -128,6 +166,10 @@ impl Store {
         if self.closed {
             return Err("Recovery is shutting down".into());
         }
+        // A missing source is not a pending writer. Never advertise a phantom retry.
+        if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+            return Err("Recording expired or discarded".into());
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let expires_in_ms = kind.ttl_ms();
         std::fs::create_dir_all(dir).map_err(|_| "Recovery storage unavailable")?;
@@ -153,6 +195,7 @@ impl Store {
             alt_engine_short: None,
             alt_engine_id: None,
             expires_in_ms,
+            retry_ready: finalized,
         };
         self.insert(Clip {
             _capture_files: capture_files,
@@ -163,6 +206,8 @@ impl Store {
             path: owned_path,
             expires: Instant::now() + Duration::from_millis(expires_in_ms),
             busy: false,
+            retire_after_retry: false,
+            announced: false,
             terminal: Default::default(),
             target,
             retry_generation: None,
@@ -175,6 +220,13 @@ impl Store {
         }
     }
     fn discard(&mut self, id: &str) {
+        if let Some(clip) = self.take(id) {
+            super::storage::remove_finished_audio(&clip.path);
+        }
+    }
+    /// Retire ownership/UI without touching the filesystem. Missing-file
+    /// reconciliation already probed outside STORE and needs no second probe.
+    fn take(&mut self, id: &str) -> Option<Clip> {
         if self
             .active_retry
             .as_ref()
@@ -182,16 +234,14 @@ impl Store {
         {
             self.cancel_retry();
         }
-        if let Some(index) = self.clips.iter().position(|c| c.recovery.id == id) {
-            if let Some(clip) = self.clips.remove(index) {
-                super::storage::remove_finished_audio(&clip.path);
-                if let Some(app) = &self.app {
-                    crate::commands::pill_feedback::expire_kept_id(app, id);
-                } else {
-                    crate::commands::pill_feedback::retire_kept_id(id);
-                }
-            }
+        let index = self.clips.iter().position(|c| c.recovery.id == id)?;
+        let clip = self.clips.remove(index)?;
+        if let Some(app) = &self.app {
+            crate::commands::pill_feedback::expire_kept_id(app, id);
+        } else {
+            crate::commands::pill_feedback::retire_kept_id(id);
         }
+        Some(clip)
     }
     fn discard_generation(&mut self, generation: u64) {
         let ids: Vec<_> = self
@@ -209,6 +259,18 @@ impl Store {
             self.discard(&id);
         }
     }
+    /// Expiry/cap pressure never cancels an accepted retry or deletes its
+    /// original audio. Explicit Discard/Esc still uses discard() immediately.
+    fn retire_automatically(&mut self, id: &str, resolution: &'static str) {
+        if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
+            if clip.busy {
+                clip.retire_after_retry = true;
+                return;
+            }
+            resolve_clip(clip, resolution);
+        }
+        self.discard(id);
+    }
     fn expire(&mut self, now: Instant) {
         let ids: Vec<_> = self
             .clips
@@ -217,9 +279,54 @@ impl Store {
             .map(|c| c.recovery.id.clone())
             .collect();
         for id in ids {
-            if let Some(clip) = self.clips.iter().find(|c| c.recovery.id == id) {
-                resolve_clip(clip, "expired");
+            self.retire_automatically(&id, "expired");
+        }
+    }
+    fn availability_paths(&self) -> Vec<(String, PathBuf, bool)> {
+        self.clips
+            .iter()
+            .filter(|c| !self.closed && !c.busy)
+            .map(|c| {
+                (
+                    c.recovery.id.clone(),
+                    c.path.clone(),
+                    c.recovery.retry_ready,
+                )
+            })
+            .collect()
+    }
+    fn apply_availability(&mut self, probes: Vec<Availability>) {
+        for probe in probes {
+            let Some(clip) = self.clips.iter_mut().find(|c| {
+                c.recovery.id == probe.id
+                    && c.path == probe.path
+                    && !c.busy
+                    && c.recovery.retry_ready == probe.was_ready
+            }) else {
+                continue;
+            };
+            // Do not overwrite a finalizer publication that won while this
+            // unlocked probe was reading the old placeholder header.
+            clip.recovery.retry_ready = probe.ready;
+            if probe.missing {
+                drop(self.take(&probe.id));
             }
+        }
+    }
+    fn prune_missing(&mut self) {
+        let ids: Vec<_> = self
+            .clips
+            .iter()
+            .filter(|clip| {
+                !clip.busy
+                    && match std::fs::metadata(&clip.path) {
+                        Ok(metadata) => !metadata.is_file(),
+                        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+                    }
+            })
+            .map(|clip| clip.recovery.id.clone())
+            .collect();
+        for id in ids {
             self.discard(&id);
         }
     }
@@ -229,9 +336,19 @@ impl Store {
             return Err("Recovery is shutting down".into());
         }
         while self.clips.len() >= 3 {
-            resolve_clip(&self.clips[0], "discarded");
-            let id = self.clips[0].recovery.id.clone();
-            self.discard(&id);
+            // Busy originals remain protected; retire them after completion
+            // and evict the oldest idle candidate to keep the physical cap.
+            let mut candidate = None;
+            for old in &mut self.clips {
+                if old.busy {
+                    old.retire_after_retry = true;
+                } else {
+                    candidate = Some(old.recovery.id.clone());
+                    break;
+                }
+            }
+            let id = candidate.ok_or("Recovery is busy")?;
+            self.retire_automatically(&id, "discarded");
         }
         self.clips.push_back(clip);
         Ok(())
@@ -244,7 +361,11 @@ impl Store {
         {
             self.active_retry = None;
         }
-        if succeeded {
+        if succeeded
+            || self.clips.iter().any(|c| {
+                c.recovery.id == id && (c.retire_after_retry || c.expires <= Instant::now())
+            })
+        {
             self.discard(id);
         } else if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             clip.busy = false;
@@ -264,6 +385,25 @@ impl Store {
         } else {
             false
         }
+    }
+    fn poll_finalization(&mut self, id: &str, now: Instant) -> Option<(bool, Option<Recovery>)> {
+        self.prune_missing();
+        if !self.promote(id) {
+            return None;
+        }
+        let clip = self.clips.iter_mut().find(|c| c.recovery.id == id)?;
+        let ready = finalized_wav(&clip.path);
+        clip.recovery.retry_ready = ready;
+        // A hydration/Home probe may have refreshed the cache first. That
+        // must not suppress the notification to an already-rendered card.
+        let publication = if ready && clip.announced && !clip.busy && clip.expires > now {
+            clip.recovery.expires_in_ms =
+                clip.expires.saturating_duration_since(now).as_millis() as u64;
+            Some(clip.recovery.clone())
+        } else {
+            None
+        };
+        Some((ready, publication))
     }
     fn clear(&mut self) {
         self.cancel_retry();
@@ -321,23 +461,24 @@ pub struct KeptSummary {
     alt_engine_id: Option<String>,
     remaining_ms: u64,
     busy: bool,
+    retry_ready: bool,
+    kind: RecoveryKind,
 }
-/// Failed dictations still waiting for a retry. Quiet kinds (no speech, empty mic) stay in the island.
+/// Failed dictations still waiting for a retry, even after the island card is closed.
 #[tauri::command]
 pub fn list_kept_dictations() -> Vec<KeptSummary> {
-    let now = Instant::now();
-    STORE
+    let paths = STORE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
+        .availability_paths();
+    let probes = probe_availability(paths);
+    let now = Instant::now();
+    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    store.apply_availability(probes);
+    store
         .clips
         .iter()
-        .filter(|c| {
-            c.expires > now
-                && !matches!(
-                    c.recovery.kind,
-                    RecoveryKind::NoSpeech | RecoveryKind::MicDroppedEmpty
-                )
-        })
+        .filter(|c| c.expires > now && !matches!(c.recovery.kind, RecoveryKind::MicDroppedEmpty))
         .map(|c| KeptSummary {
             id: c.recovery.id.clone(),
             engine_short: c.recovery.engine_short.clone(),
@@ -345,6 +486,8 @@ pub fn list_kept_dictations() -> Vec<KeptSummary> {
             alt_engine_id: c.recovery.alt_engine_id.clone(),
             remaining_ms: c.expires.saturating_duration_since(now).as_millis() as u64,
             busy: c.busy,
+            retry_ready: c.recovery.retry_ready,
+            kind: c.recovery.kind,
         })
         .collect()
 }
@@ -510,17 +653,16 @@ pub async fn keep(
     tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(expires_in_ms);
         loop {
-            let ready = {
-                let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-                if !store.promote(&expiry_id) {
-                    return;
-                }
-                store
-                    .clips
-                    .iter()
-                    .find(|c| c.recovery.id == expiry_id)
-                    .is_some_and(|c| c.path == c.target)
+            let finalized = STORE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .poll_finalization(&expiry_id, Instant::now());
+            let Some((ready, publication)) = finalized else {
+                return;
             };
+            if let Some(recovery) = publication {
+                emit_recovery(&expiry_app, &recovery);
+            }
             if ready || tokio::time::Instant::now() >= deadline {
                 break;
             }
@@ -530,11 +672,10 @@ pub async fn keep(
             .await;
         }
         tokio::time::sleep_until(deadline).await;
-        resolve_id(&expiry_id, "expired");
         STORE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .discard(&expiry_id);
+            .retire_automatically(&expiry_id, "expired");
         crate::menu::runtime::refresh(&expiry_app);
     });
     let alternative = local_alternative(app).await;
@@ -558,6 +699,8 @@ pub async fn keep(
         store.discard(&id);
         return Err("Dictation discarded".into());
     }
+    store.prune_missing();
+    let mut publication = None;
     if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
         clip.recovery.engine_short = if kind == RecoveryKind::RemoteOffline {
             "Network".into()
@@ -565,15 +708,20 @@ pub async fn keep(
             engine_short
         };
         clip.recovery.set_alternative(alternative);
+        clip.recovery.retry_ready = finalized_wav(&clip.path);
+        clip.announced = true;
         clip.recovery.expires_in_ms = clip
             .expires
             .saturating_duration_since(Instant::now())
             .as_millis() as u64;
         if !audio::recording_generation_is_stale(generation) {
-            emit_recovery(app, &clip.recovery);
+            publication = Some(clip.recovery.clone());
         }
     }
     drop(store);
+    if let Some(recovery) = publication {
+        emit_recovery(app, &recovery);
+    }
     crate::menu::runtime::refresh(app);
     Ok(())
 }
@@ -609,6 +757,14 @@ struct Lease {
     file: tempfile::NamedTempFile,
     terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     trace: Option<crate::observability::Trace>,
+    original_generation: u64,
+    generation: u64,
+    cancelled: tokio::sync::watch::Receiver<bool>,
+}
+struct RetryRegistration {
+    generation: u64,
+    cancel: tokio::sync::watch::Sender<bool>,
+    cancelled: tokio::sync::watch::Receiver<bool>,
 }
 impl Drop for Lease {
     fn drop(&mut self) {
@@ -622,41 +778,61 @@ impl Drop for Lease {
         store.leases.retain(|p| p != self.file.path());
     }
 }
-fn lease(id: &str, anyway: bool) -> Result<Lease, String> {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    store.expire(Instant::now());
-    let clip = store
-        .clips
-        .iter_mut()
-        .find(|c| c.recovery.id == id)
-        .ok_or("Recording expired or discarded")?;
-    if anyway && clip.recovery.kind != RecoveryKind::NoSpeech {
-        return Err("This action requires a no-speech clip".into());
+impl Store {
+    fn lease(
+        &mut self,
+        id: &str,
+        anyway: bool,
+        register: impl FnOnce() -> RetryRegistration,
+    ) -> Result<Lease, String> {
+        self.expire(Instant::now());
+        if self.clips.iter().any(|c| c.busy && c.recovery.id != id) {
+            return Err("Dictation is busy".into());
+        }
+        self.prune_missing();
+        let clip = self
+            .clips
+            .iter_mut()
+            .find(|c| c.recovery.id == id)
+            .ok_or("Recording expired or discarded")?;
+        if anyway && clip.recovery.kind != RecoveryKind::NoSpeech {
+            return Err("This action requires a no-speech clip".into());
+        }
+        if clip.busy {
+            return Err("Recording is already being retried".into());
+        }
+        if !finalized_wav(&clip.path) {
+            return Err("Recording is still finalizing".into());
+        }
+        let file = tempfile::Builder::new()
+            .suffix(".wav")
+            .tempfile_in(clip.path.parent().ok_or("Recovery unavailable")?)
+            .map_err(|_| "Recovery unavailable")?;
+        std::fs::copy(&clip.path, file.path()).map_err(|_| "Could not read kept recording")?;
+        let kind = clip.recovery.kind;
+        clip.terminal = Default::default();
+        let terminal = clip.terminal.clone();
+        let trace = clip.trace.clone();
+        clip.busy = true;
+        // Neither expiry nor explicit Discard can enter between lease acceptance
+        // and cancellation registration. Generation advancement uses Store -> hide.
+        let registered = register();
+        let generation = registered.generation;
+        clip.retry_generation = Some(generation);
+        let original_generation = clip.recovery.generation;
+        self.active_retry = Some((id.into(), generation, registered.cancel));
+        self.leases.push(file.path().to_owned());
+        Ok(Lease {
+            id: id.into(),
+            kind,
+            file,
+            terminal,
+            trace,
+            original_generation,
+            generation,
+            cancelled: registered.cancelled,
+        })
     }
-    if clip.busy {
-        return Err("Recording is already being retried".into());
-    }
-    if !finalized_wav(&clip.path) {
-        return Err("Recording is still finalizing".into());
-    }
-    let file = tempfile::Builder::new()
-        .suffix(".wav")
-        .tempfile_in(clip.path.parent().ok_or("Recovery unavailable")?)
-        .map_err(|_| "Recovery unavailable")?;
-    std::fs::copy(&clip.path, file.path()).map_err(|_| "Could not read kept recording")?;
-    let kind = clip.recovery.kind;
-    clip.terminal = Default::default();
-    let terminal = clip.terminal.clone();
-    let trace = clip.trace.clone();
-    clip.busy = true;
-    store.leases.push(file.path().to_owned());
-    Ok(Lease {
-        id: id.into(),
-        kind,
-        file,
-        terminal,
-        trace,
-    })
 }
 #[tauri::command]
 pub fn discard_kept_dictation(app: AppHandle, id: String) {
@@ -701,32 +877,25 @@ async fn retry(
     ) {
         return Err("Dictation is busy".into());
     }
-    let lease = retry_setup(state.stop_in_flight.clone(), || lease(&id, anyway))?;
-    let (original_generation, trace) = {
-        let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        store
-            .clips
-            .iter()
-            .find(|c| c.recovery.id == id)
-            .map(|c| (c.recovery.generation, c.trace.clone()))
-            .unwrap_or((0, None))
-    };
-    let generation = audio::begin_recording_generation();
-    crate::observability::inherit(original_generation, generation, trace);
+    let lease = retry_setup(state.stop_in_flight.clone(), || {
+        STORE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .lease(&id, anyway, || {
+                state.clear_cancellation();
+                let generation = audio::begin_recording_generation();
+                let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                RetryRegistration {
+                    generation,
+                    cancel,
+                    cancelled,
+                }
+            })
+    })?;
+    let generation = lease.generation;
+    crate::observability::inherit(lease.original_generation, generation, lease.trace.clone());
     let _trace_lease = crate::observability::pin(generation);
     let retry_started = Instant::now();
-    let (cancel, cancelled) = tokio::sync::watch::channel(false);
-    state.clear_cancellation();
-    {
-        let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        let clip = store
-            .clips
-            .iter_mut()
-            .find(|c| c.recovery.id == id)
-            .ok_or("Recording discarded")?;
-        clip.retry_generation = Some(generation);
-        store.active_retry = Some((id.clone(), generation, cancel));
-    }
     if let Some(context) = crate::writing::capture_active_app_context() {
         state.set_recording_app_context(context);
     }
@@ -749,7 +918,11 @@ async fn retry(
             }
         })
         .unwrap_or("none");
-    let result = cancellable_retry(cancelled, retry_inner(&app, &lease, generation, engine)).await;
+    let result = cancellable_retry(
+        lease.cancelled.clone(),
+        retry_inner(&app, &lease, generation, engine),
+    )
+    .await;
     let cancelled = matches!(&result, Err(RetryError::Cancelled))
         || audio::delivery_aborted(state.is_cancellation_requested(), generation);
     let result = if cancelled {
@@ -780,26 +953,37 @@ async fn retry(
     if !audio::recording_generation_is_stale(generation) {
         crate::update_recording_state(&app, crate::RecordingState::Idle, None);
     }
+    // A model may have been removed or the selected engine changed since this card's offer.
+    let alternative = if result.is_err() && !cancelled {
+        local_alternative(&app).await
+    } else {
+        None
+    };
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     let discarded = audio::delivery_aborted(state.is_cancellation_requested(), generation);
     store.complete_retry(&id, result.is_ok());
+    store.prune_missing();
+    let retained = store.clips.iter().any(|c| c.recovery.id == id);
+    let mut publication = None;
     if result.is_err() && !discarded {
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
+            clip.recovery.set_alternative(alternative);
+            clip.recovery.retry_ready = finalized_wav(&clip.path);
             clip._retry_trace_lease = crate::observability::pin(generation);
             clip.recovery.generation = generation;
             clip.recovery.expires_in_ms = clip
                 .expires
                 .saturating_duration_since(Instant::now())
                 .as_millis() as u64;
-            emit_recovery(&app, &clip.recovery);
+            publication = Some(clip.recovery.clone());
         }
     }
     drop(store);
+    if let Some(recovery) = publication {
+        emit_recovery(&app, &recovery);
+    }
     crate::menu::runtime::refresh(&app);
-    result.map_err(|error| match error {
-        RetryError::Cancelled => "Retry discarded".to_string(),
-        RetryError::Failed => "Retry failed; recording remains available until expiry".to_string(),
-    })
+    result.map_err(|error| retry_error_message(error, retained).to_owned())
 }
 fn retry_setup<T>(
     flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -811,7 +995,16 @@ fn retry_setup<T>(
 #[derive(Debug, PartialEq, Eq)]
 enum RetryError {
     Cancelled,
+    EngineUnavailable,
     Failed,
+}
+fn retry_error_message(error: RetryError, retained: bool) -> &'static str {
+    match error {
+        RetryError::Cancelled => "Retry discarded",
+        _ if !retained => "Retry failed; recording is no longer available",
+        RetryError::EngineUnavailable => "Requested local engine is not ready",
+        RetryError::Failed => "Retry failed; recording remains available until expiry",
+    }
 }
 fn claim_terminal(terminal: &std::sync::atomic::AtomicBool) -> bool {
     !terminal.swap(true, std::sync::atomic::Ordering::SeqCst)
@@ -839,7 +1032,13 @@ async fn cancellable_retry<T>(
     tokio::select! {
         biased;
         _ = cancelled.changed() => Err(RetryError::Cancelled),
-        result = work => result.map_err(|_| RetryError::Failed),
+        result = work => result.map_err(|error| {
+            if error == "Requested local engine is not ready" {
+                RetryError::EngineUnavailable
+            } else {
+                RetryError::Failed
+            }
+        }),
     }
 }
 async fn retry_inner(
@@ -1003,6 +1202,10 @@ fn resolve_clip(clip: &Clip, resolution: &str) {
 }
 
 #[cfg(test)]
+#[path = "kept_availability_tests.rs"]
+mod availability_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -1087,7 +1290,7 @@ mod tests {
     fn clip(dir: &Path, kind: RecoveryKind) -> Clip {
         let id = uuid::Uuid::new_v4().to_string();
         let path = dir.join(&id);
-        std::fs::write(&path, b"clip").unwrap();
+        super::availability_tests::writer(&path).finalize().unwrap();
         Clip {
             _capture_files: None,
             trace: None,
@@ -1101,12 +1304,15 @@ mod tests {
                 alt_engine_short: None,
                 alt_engine_id: None,
                 expires_in_ms: kind.ttl_ms(),
+                retry_ready: false,
             },
             target: path.clone(),
             path,
             retry_generation: None,
             expires: Instant::now() + Duration::from_millis(kind.ttl_ms()),
             busy: false,
+            retire_after_retry: false,
+            announced: false,
             terminal: Default::default(),
         }
     }
@@ -1131,34 +1337,202 @@ mod tests {
         assert_eq!(events[0].2.as_deref(), Some(id.as_str()));
     }
     #[tokio::test]
-    async fn discarded_or_expired_retry_has_one_terminal_and_no_failure() {
-        for resolution in ["discarded", "expired"] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut store = Store::default();
-            let mut clip = clip(dir.path(), RecoveryKind::CloudFailed);
-            clip.retry_generation = Some(2);
-            let id = clip.recovery.id.clone();
-            let terminal = clip.terminal.clone();
-            store.insert(clip).unwrap();
-            let (cancel, cancelled) = tokio::sync::watch::channel(false);
-            store.active_retry = Some((id.clone(), 2, cancel));
-            if resolution == "expired" {
-                store.expire(Instant::now() + Duration::from_secs(601));
-            } else {
-                store.discard_generation(2);
-            }
-            let result =
-                cancellable_retry(cancelled, std::future::pending::<Result<(), String>>()).await;
-            assert_eq!(result, Err(RetryError::Cancelled));
-            assert!(
-                !claim_terminal(&terminal),
-                "a second terminal event would be emitted"
-            );
-            assert_eq!(retry_resolution(false, true, false), "discarded");
-            assert_ne!(retry_resolution(false, true, false), "retried_failed");
-        }
+    async fn explicitly_discarded_retry_has_one_terminal_and_no_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let mut clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        clip.retry_generation = Some(2);
+        clip.busy = true;
+        let id = clip.recovery.id.clone();
+        let terminal = clip.terminal.clone();
+        store.insert(clip).unwrap();
+        let (cancel, cancelled) = tokio::sync::watch::channel(false);
+        store.active_retry = Some((id, 2, cancel));
+        store.discard_generation(2);
+        assert_eq!(
+            cancellable_retry(cancelled, std::future::pending::<Result<(), String>>()).await,
+            Err(RetryError::Cancelled)
+        );
+        assert!(
+            !claim_terminal(&terminal),
+            "a second terminal would be emitted"
+        );
+        assert_eq!(retry_resolution(false, true, false), "discarded");
         assert_eq!(retry_resolution(false, false, false), "retried_failed");
         assert_eq!(retry_resolution(true, false, true), "transcribed_anyway");
+    }
+    fn registration() -> RetryRegistration {
+        let (cancel, cancelled) = tokio::sync::watch::channel(false);
+        RetryRegistration {
+            generation: 77,
+            cancel,
+            cancelled,
+        }
+    }
+    #[tokio::test]
+    async fn no_speech_retry_at_29s_survives_30s_then_success_or_failure_retires_audio() {
+        for succeeds in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = Store::default();
+            let mut clip = clip(dir.path(), RecoveryKind::NoSpeech);
+            // The 30-second lease has one second left when Retry is accepted.
+            clip.expires = Instant::now() + Duration::from_secs(1);
+            let deadline = clip.expires;
+            let id = clip.recovery.id.clone();
+            let path = clip.path.clone();
+            store.insert(clip).unwrap();
+            let lease = store.lease(&id, true, registration).unwrap();
+            assert!(store.clips[0].busy);
+            assert_eq!(store.clips[0].retry_generation, Some(77));
+            assert_eq!(store.active_retry.as_ref().unwrap().1, 77);
+            let (finish, finished) = tokio::sync::oneshot::channel();
+            let retry =
+                cancellable_retry(lease.cancelled.clone(), async { finished.await.unwrap() });
+            tokio::pin!(retry);
+            assert!(tokio::time::timeout(Duration::from_millis(1), &mut retry)
+                .await
+                .is_err());
+            store.expire(deadline);
+            assert!(
+                path.exists(),
+                "expiry removed the accepted retry's original"
+            );
+            assert!(lease.file.path().exists());
+            assert!(!*lease.cancelled.borrow(), "expiry cancelled accepted work");
+            assert!(store.live_recoveries(deadline).is_empty());
+            assert!(tokio::time::timeout(Duration::from_millis(1), &mut retry)
+                .await
+                .is_err());
+            finish
+                .send(if succeeds {
+                    Ok(())
+                } else {
+                    Err("provider failure".into())
+                })
+                .unwrap();
+            let result = retry.await;
+            assert_eq!(
+                result,
+                if succeeds {
+                    Ok(())
+                } else {
+                    Err(RetryError::Failed)
+                }
+            );
+            assert!(claim_terminal(&lease.terminal));
+            store.complete_retry(&id, succeeds);
+            assert!(!path.exists());
+            assert!(store.clips.is_empty());
+            assert!(store.active_retry.is_none());
+            assert!(!claim_terminal(&lease.terminal));
+            store.clear();
+        }
+    }
+    #[test]
+    fn cap_eviction_defers_busy_original_until_retry_completion() {
+        for succeeds in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = Store::default();
+            let first = clip(dir.path(), RecoveryKind::CloudFailed);
+            let id = first.recovery.id.clone();
+            let path = first.path.clone();
+            store.insert(first).unwrap();
+            let lease = store.lease(&id, false, registration).unwrap();
+            for _ in 0..3 {
+                store
+                    .insert(clip(dir.path(), RecoveryKind::Integrity))
+                    .unwrap();
+            }
+            assert_eq!(store.clips.len(), 3);
+            assert!(path.exists());
+            assert!(!*lease.cancelled.borrow());
+            assert!(store.clips[0].retire_after_retry);
+            store.complete_retry(&id, succeeds);
+            assert!(!path.exists());
+            assert_eq!(store.clips.len(), 2);
+            store.clear();
+        }
+    }
+    #[test]
+    fn retired_retry_failure_never_claims_audio_is_still_kept() {
+        assert_eq!(
+            retry_error_message(RetryError::Failed, false),
+            "Retry failed; recording is no longer available"
+        );
+        assert_eq!(
+            retry_error_message(RetryError::Cancelled, false),
+            "Retry discarded"
+        );
+        assert_eq!(
+            retry_error_message(RetryError::Failed, true),
+            "Retry failed; recording remains available until expiry"
+        );
+    }
+    #[test]
+    fn another_retry_cannot_replace_the_accepted_cancellation_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        store
+            .insert(clip(dir.path(), RecoveryKind::CloudFailed))
+            .unwrap();
+        store
+            .insert(clip(dir.path(), RecoveryKind::CloudFailed))
+            .unwrap();
+        let first = store.clips[0].recovery.id.clone();
+        let second = store.clips[1].recovery.id.clone();
+        let lease = store.lease(&first, false, registration).unwrap();
+        assert_eq!(
+            store.lease(&second, false, registration).err().as_deref(),
+            Some("Dictation is busy")
+        );
+        assert_eq!(store.active_retry.as_ref().unwrap().0, first);
+        assert!(!*lease.cancelled.borrow());
+        store.clear();
+    }
+    #[test]
+    fn lease_acceptance_and_active_registration_share_the_store_lock() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let clip = clip(dir.path(), RecoveryKind::CloudFailed);
+        let id = clip.recovery.id.clone();
+        let path = clip.path.clone();
+        store.insert(clip).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let accepted = Arc::new(Barrier::new(2));
+        let checked = Arc::new(Barrier::new(2));
+        let contender = {
+            let store = store.clone();
+            let accepted = accepted.clone();
+            let checked = checked.clone();
+            std::thread::spawn(move || {
+                accepted.wait();
+                assert!(matches!(
+                    store.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ));
+                checked.wait();
+            })
+        };
+        let lease = store
+            .lock()
+            .unwrap()
+            .lease(&id, false, || {
+                accepted.wait();
+                checked.wait();
+                registration()
+            })
+            .unwrap();
+        contender.join().unwrap();
+        let mut store = store.lock().unwrap();
+        assert!(store.clips[0].busy);
+        assert_eq!(store.clips[0].retry_generation, Some(77));
+        assert_eq!(store.active_retry.as_ref().unwrap().0, id);
+        // Discard immediately after acceptance sees the registered retry.
+        store.discard_generation(77);
+        assert!(*lease.cancelled.borrow());
+        assert!(!path.exists());
+        store.clear();
     }
     #[tokio::test]
     async fn cancel_pending_retry_then_new_recording_can_stop() {
@@ -1386,7 +1760,7 @@ mod tests {
         ] {
             let clip = clip(dir.path(), kind);
             let value = serde_json::to_value(&clip.recovery).unwrap();
-            assert_eq!(value.as_object().unwrap().len(), 7);
+            assert_eq!(value.as_object().unwrap().len(), 8);
             assert!(value.get("path").is_none());
             assert!(value.get("text").is_none());
             assert_eq!(

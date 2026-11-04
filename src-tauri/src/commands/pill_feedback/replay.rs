@@ -55,7 +55,9 @@ pub(super) fn revalidate(
                     && live.as_object().is_some_and(|fields| {
                         fields
                             .iter()
-                            .filter(|(key, _)| key.as_str() != "expires_in_ms")
+                            .filter(|(key, _)| {
+                                !matches!(key.as_str(), "expires_in_ms" | "retry_ready")
+                            })
                             .all(|(key, value)| payload.get(key) == Some(value))
                     })
             }) else {
@@ -66,6 +68,8 @@ pub(super) fn revalidate(
             {
                 continue;
             }
+            // Lease time and finalized readiness are derived live state, not
+            // offer identity. Refresh both even when the queued offer was finishing.
             // Do not restart the original TTL when the renderer was slow to boot.
             payload = live.clone();
         } else {

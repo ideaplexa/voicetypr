@@ -267,17 +267,14 @@ fn withdraw_queued_live_mic_silent(
 }
 /// A withdrawal cannot acquire feedback ownership or show/reposition the native panel.
 pub(crate) fn withdraw_live_mic_silent<R: tauri::Runtime>(app: &AppHandle<R>, generation: u64) {
-    use tauri::Emitter;
-    let mut outbox = OUTBOX.lock().unwrap();
-    outbox.withdraw(generation, &FEEDBACK_OWNED);
-    if outbox.ready {
-        let _ = app.emit_to(
-            "pill",
-            "dictation-note-withdraw",
-            outbox.tag(serde_json::json!({"generation":generation,"kind":"mic_silent_live"})),
-        );
-    }
+    let start = {
+        let mut outbox = OUTBOX.lock().unwrap();
+        outbox.withdraw(generation, &FEEDBACK_OWNED);
+        outbox.resume()
+    };
+    dispatch(app, start);
 }
+
 pub(crate) fn send<R: tauri::Runtime>(
     app: &AppHandle<R>,
     event: &'static str,
@@ -287,19 +284,27 @@ pub(crate) fn send<R: tauri::Runtime>(
     if app.try_state::<crate::AppState>().is_some() && pill_mode(app) == "never" {
         return;
     }
-    let mut outbox = OUTBOX.lock().unwrap();
-    // Serialize ownership with pre-ready withdrawal so a waiting send cannot lose its claim.
     let produces_ui = replay::produces_ui(event);
-    if produces_ui {
-        FEEDBACK_OWNED.store(true, Ordering::SeqCst);
+    // Headless unit-test handles have no AppState/renderer. Keep their event
+    // assertions synchronous, but never hold the queue across an emit.
+    if app.try_state::<crate::AppState>().is_none() {
+        let payload = {
+            let mut outbox = OUTBOX.lock().unwrap();
+            outbox.remember(event, &payload);
+            outbox.tag(payload)
+        };
+        let _ = app.emit_to("pill", event, payload);
+        return;
     }
-    if outbox.ready || app.try_state::<crate::AppState>().is_none() {
-        outbox.remember(event, &payload);
-        let _ = app.emit_to("pill", event, outbox.tag(payload));
-    } else {
+    let start = {
+        let mut outbox = OUTBOX.lock().unwrap();
+        if produces_ui {
+            FEEDBACK_OWNED.store(true, Ordering::SeqCst);
+        }
         outbox.enqueue(event, payload);
-    }
-    drop(outbox);
+        outbox.resume()
+    };
+    dispatch(app, start);
     if produces_ui {
         if let Some(state) = app.try_state::<crate::AppState>() {
             if let Some(manager) = state.get_window_manager() {
@@ -324,13 +329,26 @@ pub async fn pill_feedback_ready(app: AppHandle, epoch: Option<u64>) -> u64 {
     .unwrap_or_default()
 }
 fn drain_feedback(app: AppHandle, epoch: u64) -> u64 {
-    use tauri::Emitter;
     {
         let mut outbox = OUTBOX.lock().unwrap();
         if !outbox.begin_flush_for(epoch) {
             return epoch;
         }
     }
+    flush_feedback(&app);
+    epoch
+}
+
+/// The same single emitter handles ready-state publications and hydration.
+/// Starting it never waits on the kept store (callers may still own that lock).
+fn dispatch<R: tauri::Runtime>(app: &AppHandle<R>, start: bool) {
+    if start {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || flush_feedback(&app));
+    }
+}
+fn flush_feedback<R: tauri::Runtime>(app: &AppHandle<R>) {
+    use tauri::Emitter;
     loop {
         // Match kept deletion/publication's lock order: store -> status -> queue.
         let batch = crate::recording::kept::with_live_recoveries(|recoveries| {
@@ -342,7 +360,7 @@ fn drain_feedback(app: AppHandle, epoch: u64) -> u64 {
                 let replay = replay::revalidate(
                     queued,
                     current_recording_generation(),
-                    crate::get_recording_state(&app),
+                    app.state::<crate::AppState>().get_current_state(),
                     blocked,
                     recoveries,
                 );
@@ -363,7 +381,6 @@ fn drain_feedback(app: AppHandle, epoch: u64) -> u64 {
             let _ = app.emit_to("pill", event, payload);
         }
     }
-    epoch
 }
 #[tauri::command]
 pub async fn pill_feedback_visible(
@@ -373,8 +390,8 @@ pub async fn pill_feedback_visible(
 ) -> Result<(), String> {
     let mode = pill_mode(&app);
     {
-        let outbox = OUTBOX.lock().unwrap();
-        if !outbox.accepts_visibility(epoch) {
+        let mut outbox = OUTBOX.lock().unwrap();
+        if !outbox.visibility(epoch, visible) {
             return Ok(());
         }
         FEEDBACK_OWNED.store(owns_feedback(&mode, visible), Ordering::SeqCst);
@@ -417,17 +434,14 @@ pub(crate) fn with_queue_for_test<T>(
 }
 /// Every permanent deletion invalidates queued and already-rendered recovery ids.
 pub(crate) fn expire_kept_id<R: tauri::Runtime>(app: &AppHandle<R>, id: &str) {
-    use tauri::Emitter;
-    let mut outbox = OUTBOX.lock().unwrap();
-    outbox.retire(id, &FEEDBACK_OWNED);
-    if outbox.ready {
-        let _ = app.emit_to(
-            "pill",
-            "kept-dictation-expired",
-            outbox.tag(serde_json::json!({"id":id})),
-        );
-    }
+    let start = {
+        let mut outbox = OUTBOX.lock().unwrap();
+        outbox.retire(id, &FEEDBACK_OWNED);
+        outbox.resume()
+    };
+    dispatch(app, start);
 }
+
 pub(crate) fn renderer_closed() {
     OUTBOX.lock().unwrap().close(&FEEDBACK_OWNED);
 }
