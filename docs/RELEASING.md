@@ -41,6 +41,12 @@
     GitHub release body. The workflow stages the full generated/existing body
     in a separate `release-body` artifact for `body_path`; do not reconstruct
     it from manifest notes. The update confirmation never displays `notes`.
+  - Update confirmation actions are **Update**, **View notes**, and **Cancel**.
+    Cancel defers installation and keeps the update available. Its literal
+    caption is required for macOS Escape: rfd 0.16.0 adds custom NSAlert buttons
+    without key equivalents, and AppKit automatically binds Escape to "Cancel".
+    On Windows, rfd enables TaskDialog cancellation; Escape returns `IDCANCEL`,
+    mapped through tauri-plugin-dialog to the cancel caption, never Update.
 - `update-beta-channel.yml` updates the rolling `beta` prerelease manifest when
   a release is published (the public URL is CDN-cached for a few minutes).
   Updater endpoints (`commands/updater.rs`): stable

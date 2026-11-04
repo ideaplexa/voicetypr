@@ -168,11 +168,11 @@ describe("UpdateService update checks", () => {
   it("never includes manifest notes in the short, three-button prompt", async () => {
     const body = "# Full release\n\n" + "PRIVATE_MANIFEST_BODY ".repeat(1000);
     mockDirectDistribution({ version: "2.1.0-beta.6", body, channel: "beta" });
-    vi.mocked(message).mockResolvedValue("Later");
+    vi.mocked(message).mockResolvedValue("Cancel");
     await service.checkForUpdatesManually();
     expect(message).toHaveBeenCalledWith(
       "Voicetypr 2.1.0-beta.6 is available.\n\nDownload and install it now? The app will restart when recording ends.",
-      { title: "Update Available", kind: "info", buttons: { yes: "Update", no: "View notes", cancel: "Later" } },
+      { title: "Update Available", kind: "info", buttons: { yes: "Update", no: "View notes", cancel: "Cancel" } },
     );
     expect(vi.mocked(message).mock.calls[0][0]).not.toContain("PRIVATE_MANIFEST_BODY");
     expect(service.getStatus().install).toBe("idle");
@@ -206,12 +206,13 @@ describe("UpdateService update checks", () => {
     expect(invoke).not.toHaveBeenCalledWith("install_app_update", expect.anything());
   });
 
-  it.each(["Later", "Cancel", "No", "Yes"])("does not install on dismissal or an unexpected result: %s", async (choice) => {
+  // Both macOS Escape and Windows TaskDialog IDCANCEL resolve to the cancel caption.
+  it.each(["Cancel", "Later", "No", "Yes"])("does not install on dismissal or an unexpected result: %s", async (choice) => {
     mockDirectDistribution({ version: "2.1.0-beta.6", body: "", channel: "beta" });
     vi.mocked(message).mockResolvedValue(choice);
     await service.checkForUpdatesManually();
     expect(invoke).not.toHaveBeenCalledWith("install_app_update", expect.anything());
-    expect(service.getStatus().install).toBe("idle");
+    expect(service.getStatus()).toMatchObject({ install: "idle", available: { version: "2.1.0-beta.6" } });
   });
 
   it("clears the prompt lock if the native message fails", async () => {
@@ -219,7 +220,7 @@ describe("UpdateService update checks", () => {
     vi.mocked(message).mockRejectedValueOnce(new Error("dialog failed"));
     await service.checkForUpdatesManually();
     expect(service.getStatus().install).toBe("idle");
-    vi.mocked(message).mockResolvedValue("Later");
+    vi.mocked(message).mockResolvedValue("Cancel");
     await service.promptInstall();
     expect(message).toHaveBeenCalledTimes(2);
   });
@@ -264,7 +265,7 @@ describe("UpdateService update checks", () => {
   it("checkNow reports status quietly, then promptInstall opens the existing dialog", async () => {
     const update = { version: "2.0.0-beta.3", body: "Notes", channel: "beta" } as AppUpdateInfo;
     mockDirectDistribution(update);
-    vi.mocked(message).mockResolvedValue("Later");
+    vi.mocked(message).mockResolvedValue("Cancel");
     const seen: boolean[] = [];
     service.subscribe(() => seen.push(service.getStatus().checking));
 
@@ -294,7 +295,7 @@ describe("UpdateService update checks", () => {
       body: "Beta notes",
       channel: "beta",
     });
-    vi.mocked(message).mockResolvedValue("Later");
+    vi.mocked(message).mockResolvedValue("Cancel");
 
     await service.checkForUpdatesManually();
 

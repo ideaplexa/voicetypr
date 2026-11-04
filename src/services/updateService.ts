@@ -418,12 +418,13 @@ export class UpdateService {
     try {
       // Native three-button messages work even when the main window is hidden in the tray.
       // Manifest notes belong only in What's new, never in an install confirmation.
+      // rfd's macOS backend has no cancel-key option: AppKit binds Escape by this title.
       const choice = await message(
         `Voicetypr ${update.version} is available.\n\nDownload and install it now? The app will restart when recording ends.`,
         {
           title: "Update Available",
           kind: "info",
-          buttons: { yes: "Update", no: "View notes", cancel: "Later" },
+          buttons: { yes: "Update", no: "View notes", cancel: "Cancel" },
         },
       );
       if (choice === "View notes") {
