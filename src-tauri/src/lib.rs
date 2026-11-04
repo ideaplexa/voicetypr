@@ -37,6 +37,8 @@ mod simple_cache;
 mod state;
 mod state_machine;
 mod telemetry;
+#[cfg(target_os = "macos")]
+mod titlebar;
 mod tls;
 pub use tls::initialize_tls;
 pub mod transcription;
@@ -62,73 +64,6 @@ pub fn hide_dock_icon(app: &tauri::AppHandle) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     log::debug!("Dock icon hidden (ActivationPolicy::Accessory)");
 }
-#[cfg(target_os = "macos")]
-fn main_window_controls_thread() -> Option<objc2::MainThreadMarker> {
-    let main_thread = objc2::MainThreadMarker::new();
-    if main_thread.is_none() {
-        log::debug!("Skipping main window controls alignment off the main thread");
-    }
-    main_thread
-}
-
-#[cfg(target_os = "macos")]
-fn align_main_window_controls(window: &tauri::WebviewWindow) {
-    use objc2::msg_send;
-    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
-    const TITLEBAR_HEIGHT: f64 = 36.0;
-    const TRAFFIC_LIGHT_LEFT: f64 = 12.0;
-    const TRAFFIC_LIGHT_VERTICAL_OFFSET: f64 = 2.0;
-
-    let Some(_main_thread) = main_window_controls_thread() else {
-        return;
-    };
-    let Ok(ns_window) = window.ns_window() else {
-        log::warn!("Could not access the main NSWindow to align window controls");
-        return;
-    };
-
-    // SAFETY: Tauri owns this NSWindow for the lifetime of `window`. The marker
-    // above proves these AppKit calls run on the main thread, even if a caller
-    // originates on a runtime worker.
-    unsafe {
-        let ns_window = &*(ns_window.cast::<NSWindow>());
-        let Some(close) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
-            return;
-        };
-        let Some(minimize) = ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton)
-        else {
-            return;
-        };
-        let Some(zoom) = ns_window.standardWindowButton(NSWindowButton::ZoomButton) else {
-            return;
-        };
-        let Some(button_container) = close.superview() else {
-            return;
-        };
-        let Some(titlebar_container) = button_container.superview() else {
-            return;
-        };
-
-        let close_frame = NSView::frame(&close);
-        let mut titlebar_frame = NSView::frame(&titlebar_container);
-        titlebar_frame.size.height = TITLEBAR_HEIGHT;
-        titlebar_frame.origin.y = ns_window.frame().size.height - TITLEBAR_HEIGHT;
-        let _: () = msg_send![&titlebar_container, setFrame: titlebar_frame];
-        let mut button_container_frame = NSView::frame(&button_container);
-        button_container_frame.origin.y = (TITLEBAR_HEIGHT - button_container_frame.size.height)
-            / 2.0
-            - TRAFFIC_LIGHT_VERTICAL_OFFSET;
-        button_container.setFrameOrigin(button_container_frame.origin);
-
-        let horizontal_step = NSView::frame(&minimize).origin.x - close_frame.origin.x;
-        for (index, button) in [close, minimize, zoom].into_iter().enumerate() {
-            let mut origin = NSView::frame(&button).origin;
-            origin.x = TRAFFIC_LIGHT_LEFT + index as f64 * horizontal_step;
-            button.setFrameOrigin(origin);
-        }
-    }
-}
-
 fn should_start_hidden(has_model: bool, onboarding_completed: bool, remote_active: bool) -> bool {
     has_model && onboarding_completed && !remote_active
 }
@@ -146,7 +81,7 @@ fn show_main_window(app: &tauri::AppHandle) {
                     crate::pill::level::main_window_visibility_changed(&window, true);
                 }
                 #[cfg(target_os = "macos")]
-                align_main_window_controls(&window);
+                titlebar::align(&window);
                 let _ = window.set_focus();
                 #[cfg(target_os = "macos")]
                 show_dock_icon(&main_thread_app);
@@ -800,7 +735,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let main_thread_handle = app_handle.clone();
                     let _ = app_handle.run_on_main_thread(move || {
                         if let Some(window) = main_thread_handle.get_webview_window("main") {
-                            align_main_window_controls(&window);
+                            titlebar::align(&window);
                         }
                     });
                 });
@@ -1551,6 +1486,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::Moved(_)
+                        | tauri::WindowEvent::Focused(_)
+                        | tauri::WindowEvent::ThemeChanged(_)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. }
+                )
+            {
+                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                    titlebar::align(&webview);
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Only hide the window instead of closing it (except for pill)
                 if window.label() == "main" {

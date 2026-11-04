@@ -9,7 +9,6 @@
         "title": "Voicetypr Dev",
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 12, "y": 15 },
         "label": "main",
         "width": 1000,
         "height": 680,
