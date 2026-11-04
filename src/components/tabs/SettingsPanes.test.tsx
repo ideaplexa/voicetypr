@@ -35,9 +35,10 @@ const updateState = vi.hoisted(() => ({
 }));
 const restartNow = vi.hoisted(() => vi.fn());
 const checkNow = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const checkForUpdatesManually = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/services/updateService", () => ({
   updateService: {
-    checkForUpdatesManually: vi.fn().mockResolvedValue(undefined),
+    checkForUpdatesManually,
     getStatus: () => updateState.status,
     subscribe: () => () => {},
     checkNow,
@@ -94,7 +95,8 @@ describe("Settings pane controls", () => {
       expect(updateSettings).toHaveBeenCalledWith({ check_updates_automatically: true }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Check now" }));
-    expect(checkNow).toHaveBeenCalledOnce();
+    expect(checkForUpdatesManually).toHaveBeenCalledOnce();
+    expect(checkNow).not.toHaveBeenCalled();
   });
 
   it("renders app shortcut actions without the dictation shortcut", async () => {

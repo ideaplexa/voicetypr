@@ -1,4 +1,4 @@
-//! Installed-version release notes. Network failures return a friendly UI fallback.
+//! Installed-version manifest highlights. Full notes live only on the release page.
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,8 +14,17 @@ pub struct ReleaseNotes {
     url: String,
 }
 #[derive(Deserialize)]
-struct GitHubRelease {
-    body: Option<String>,
+struct ReleaseManifest {
+    version: String,
+    notes: Option<String>,
+}
+impl ReleaseManifest {
+    fn highlights_for(self, version: &str) -> Option<String> {
+        // Never show a different release's highlights (including a rolling channel manifest).
+        (self.version.trim_start_matches('v') == version.trim_start_matches('v'))
+            .then_some(self.notes)
+            .flatten()
+    }
 }
 static CACHE: LazyLock<Mutex<HashMap<String, (Instant, ReleaseNotes)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -56,19 +65,47 @@ async fn fetch_body(version: &str) -> Option<String> {
         .ok()?;
     let response = client
         .get(format!(
-            "https://api.github.com/repos/ideaplexa/voicetypr/releases/tags/v{version}"
+            "https://github.com/ideaplexa/voicetypr/releases/download/v{version}/latest.json"
         ))
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
         .await
         .ok()?
         .error_for_status()
         .ok()?;
-    response.json::<GitHubRelease>().await.ok()?.body
+    response
+        .json::<ReleaseManifest>()
+        .await
+        .ok()?
+        .highlights_for(version)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn manifest_highlights_are_for_the_installed_version_only() {
+        for version in ["2.1.0-beta.6", "v2.1.0-beta.6"] {
+            let manifest: ReleaseManifest = serde_json::from_str(
+                r#"{"version":"v2.1.0-beta.6","notes":"- Better dictation\n- Faster startup"}"#,
+            )
+            .unwrap();
+            assert_eq!(
+                manifest.highlights_for(version).as_deref(),
+                Some("- Better dictation\n- Faster startup")
+            );
+        }
+        let manifest = ReleaseManifest {
+            version: "v2.1.0-beta.7".into(),
+            notes: Some("- Newer release".into()),
+        };
+        assert!(manifest.highlights_for("2.1.0-beta.6").is_none());
+    }
+    #[test]
+    fn missing_manifest_notes_does_not_use_the_full_release_body() {
+        let manifest: ReleaseManifest =
+            serde_json::from_str(r#"{"version":"v2.1.0-beta.6","body":"Full release body"}"#)
+                .unwrap();
+        assert!(manifest.highlights_for("2.1.0-beta.6").is_none());
+    }
     #[test]
     fn missing_or_empty_body_keeps_version_release_link() {
         for body in [None, Some("  ".into())] {

@@ -616,7 +616,7 @@ jobs:
 
           jq -n \
             --arg version "$TAG" \
-            --rawfile notes release-body.md \
+            --arg notes "See the release notes for $TAG" \
             --arg pub_date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
             --arg aarch64_sig "$AARCH64_SIG" \
             --arg aarch64_url "https://github.com/${REPOSITORY}/releases/download/$TAG/Voicetypr_${VERSION}_aarch64.app.tar.gz" \
@@ -644,6 +644,14 @@ jobs:
               (.url | type == "string" and startswith("https://"))
             )
           ' release/latest.json >/dev/null
+
+      # Full release copy is staged separately, never embedded in updater notes.
+      - name: Stage release body
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-body
+          path: release-body.md
+          retention-days: 1
 
       - name: Stage release files
         uses: actions/upload-artifact@v4
@@ -714,7 +722,10 @@ jobs:
           path: release
 
       - name: Restore staged release body
-        run: jq -r '.notes' release/latest.json > release-body.md
+        uses: actions/download-artifact@v4
+        with:
+          name: release-body
+          path: .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
