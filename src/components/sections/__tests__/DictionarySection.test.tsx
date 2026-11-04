@@ -33,6 +33,9 @@ describe("Dictionary", () => {
   it("adds, edits, searches and deletes words with their spoken form and language", async () => {
     const user = userEvent.setup();
     await ready();
+    expect(screen.getByRole("tab", { name: "Words 0" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Corrections 0" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Snippets 0" })).toBeInTheDocument();
     expect(screen.getByText("No words yet — add names, brands and jargon so Voicetypr spells them right.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add word" }));
     await user.type(screen.getByLabelText("Canonical"), "Voicetypr");
@@ -42,6 +45,7 @@ describe("Dictionary", () => {
     expect(useWritingSettings.getState().settings.custom_words).toEqual([
       { phrase: "Voicetypr", spoken_form: "voice typer", language: "en", enabled: true },
     ]);
+    expect(screen.getByRole("tab", { name: "Words 1" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "voice typer" })).toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "Search words" }), "missing");
     expect(screen.queryByRole("cell", { name: "Voicetypr" })).not.toBeInTheDocument();
@@ -54,6 +58,7 @@ describe("Dictionary", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     await user.click(screen.getByRole("button", { name: "Delete row 1" }));
     expect(useWritingSettings.getState().settings.custom_words).toEqual([]);
+    expect(screen.getByRole("tab", { name: "Words 0" })).toBeInTheDocument();
   });
 
   it("adds, edits, searches and deletes corrections", async () => {
