@@ -36,6 +36,9 @@
     publishing so the rolling beta channel copies the same summary.
     A placeholder, missing notes or an offline request gets a friendly generic
     overview in What's new, always with a link to the installed release.
+    The tagged manifest download is capped at **64 KiB**, including responses
+    without a trustworthy Content-Length; oversized or malformed responses use
+    that same fallback. Keep the complete JSON asset within this limit.
   - What's new reads `notes` from the **installed version's tagged**
     `releases/download/v<version>/latest.json`, never a rolling channel or the
     GitHub release body. The workflow stages the full generated/existing body
