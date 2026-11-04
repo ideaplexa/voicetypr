@@ -212,8 +212,8 @@ export function AppBehaviorCard({
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => void update.checkNow()}
-                      disabled={update.checking}
+                      onClick={() => void handleCheckUpdate()}
+                      disabled={update.checking || isCheckingUpdate}
                     >
                       Check now
                     </Button>

@@ -1,5 +1,5 @@
 import { relaunch } from "@tauri-apps/plugin-process";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { message } from "@tauri-apps/plugin-dialog";
 import {
   sendNotification,
   isPermissionGranted,
@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import type { AppSettings, UpdateChannel } from "@/types";
 import { createLogger } from "@/lib/logger";
+import { openReleaseLink, releasePageUrl } from "@/lib/releaseNotes";
 import { isStoreDistribution, type DistributionInfo } from "@/types/distribution";
 
 const log = createLogger("update");
@@ -415,16 +416,21 @@ export class UpdateService {
     if (this.status.install !== "idle") return;
     this.setStatus({ install: "prompting" });
     try {
-      const yes = await ask(
-        `Update ${update.version} is available!\n\nRelease notes:\n${update.body}\n\nDo you want to download and install it now?`,
+      // Native three-button messages work even when the main window is hidden in the tray.
+      // Manifest notes belong only in What's new, never in an install confirmation.
+      // rfd's macOS backend has no cancel-key option: AppKit binds Escape by this title.
+      const choice = await message(
+        `Voicetypr ${update.version} is available.\n\nDownload and install it now? The app will restart when recording ends.`,
         {
           title: "Update Available",
           kind: "info",
-          okLabel: "Update",
-          cancelLabel: "Later",
+          buttons: { yes: "Update", no: "View notes", cancel: "Cancel" },
         },
       );
-      if (!yes) {
+      if (choice === "View notes") {
+        await openReleaseLink(releasePageUrl(update.version));
+      }
+      if (choice !== "Update") {
         this.setStatus({ install: "idle" });
         return;
       }

@@ -20,6 +20,36 @@
   - The job fails if the dispatched branch moves during the build — don't push
     to that branch while a release runs.
   - `CHANGELOG.md` is edited by hand before releasing.
+  - **Updater highlights are not the release body.** `latest.json` → `notes`
+    must contain a short, plain summary (3–5 Markdown bullets), never the full
+    release body, headings, images or a commit list. Full notes live only on
+    the GitHub release page. Example:
+    ```text
+    - More reliable back-to-back dictation.
+    - Clearer update controls and release highlights.
+    - Fixes for microphone recovery.
+    ```
+  - The workflow defaults `notes` to `See the release notes for vX`. Before
+    publishing the draft, the release operator should replace this field in
+    its `latest.json` asset with reviewed highlights and re-upload that asset
+    (preserve version, signatures, URLs and publication date). Do this before
+    publishing so the rolling beta channel copies the same summary.
+    A placeholder, missing notes or an offline request gets a friendly generic
+    overview in What's new, always with a link to the installed release.
+    The tagged manifest download is capped at **64 KiB**, including responses
+    without a trustworthy Content-Length; oversized or malformed responses use
+    that same fallback. Keep the complete JSON asset within this limit.
+  - What's new reads `notes` from the **installed version's tagged**
+    `releases/download/v<version>/latest.json`, never a rolling channel or the
+    GitHub release body. The workflow stages the full generated/existing body
+    in a separate `release-body` artifact for `body_path`; do not reconstruct
+    it from manifest notes. The update confirmation never displays `notes`.
+  - Update confirmation actions are **Update**, **View notes**, and **Cancel**.
+    Cancel defers installation and keeps the update available. Its literal
+    caption is required for macOS Escape: rfd 0.16.0 adds custom NSAlert buttons
+    without key equivalents, and AppKit automatically binds Escape to "Cancel".
+    On Windows, rfd enables TaskDialog cancellation; Escape returns `IDCANCEL`,
+    mapped through tauri-plugin-dialog to the cancel caption, never Update.
 - `update-beta-channel.yml` updates the rolling `beta` prerelease manifest when
   a release is published (the public URL is CDN-cached for a few minutes).
   Updater endpoints (`commands/updater.rs`): stable
