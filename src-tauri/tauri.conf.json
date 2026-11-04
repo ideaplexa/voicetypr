@@ -14,7 +14,6 @@
         "title": "Voicetypr",
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 12, "y": 12 },
         "label": "main",
         "width": 1000,
         "height": 680,

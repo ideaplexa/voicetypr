@@ -669,9 +669,12 @@ titlebar traffic-light/toggle alignment measured at 0.0px delta. Full
       History — container rhythm renders sanely at the 1000×680 min size and
       the share modal export (Copy image / Download) produces the 2400×1600
       PNG.
-- [ ] 050-S2 Packaged macOS build (non-dev): traffic lights at `y:12` stay
-      pixel-aligned with the sidebar-toggle glyph, and the branded share card
-      (logo, gradient CTA) renders identically to the dev build.
+- [ ] 050-S2 Packaged macOS build (non-dev): traffic lights stay aligned with
+      the sidebar-toggle glyph at launch, after hide/show from the tray,
+      fullscreen entry/exit, theme switching, resizing, and moving between
+      built-in and external displays; check button clicks, dragging, and both
+      sidebar states on macOS 14 and 26+. The branded share card (logo,
+      gradient CTA) renders identically to the dev build.
 - [ ] 050-S3 Real `pi` CLI against an OpenAI provider: Polish → Local Agents
       → pi → Thinking selector offers Off/Minimal/Low/Medium and a polish run
       at Minimal succeeds end-to-end (contract covered by

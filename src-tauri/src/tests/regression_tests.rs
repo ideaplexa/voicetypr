@@ -151,7 +151,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn main_window_controls_reject_worker_thread() {
-        thread::spawn(|| assert!(crate::main_window_controls_thread().is_none()))
+        thread::spawn(|| assert!(objc2::MainThreadMarker::new().is_none()))
             .join()
             .unwrap();
     }
@@ -166,11 +166,16 @@ mod tests {
             show.find(".run_on_main_thread(").unwrap() < show.find(".get_webview_window(").unwrap()
         );
 
-        let align = src.split("fn align_main_window_controls(").nth(1).unwrap();
+        let titlebar = include_str!("../titlebar.rs").replace("\r\n", "\n");
+        let align = titlebar.split("pub fn align(").nth(1).unwrap();
         let align = align.split("\n}\n").next().unwrap();
         let guard = align
-            .find("let Some(_main_thread) = main_window_controls_thread() else {\n        return;\n    };")
-            .expect("alignment must return without a main-thread marker");
+            .find("if objc2::MainThreadMarker::new().is_none()")
+            .expect("alignment must dispatch without a main-thread marker");
+        assert!(
+            align[guard..].find("run_on_main_thread").unwrap()
+                < align[guard..].find("return;").unwrap()
+        );
         assert!(guard < align.find(".ns_window()").unwrap());
     }
 
