@@ -280,8 +280,8 @@ fn should_use_active_remote(engine_hint: Option<&str>) -> bool {
     engine_hint.is_none()
 }
 
-pub(crate) async fn resolve_engine_for_model(
-    app: &AppHandle,
+pub(crate) async fn resolve_engine_for_model<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     model_name: &str,
     engine_hint: Option<&str>,
 ) -> Result<ActiveEngineSelection, String> {
