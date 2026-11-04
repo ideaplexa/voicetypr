@@ -94,7 +94,15 @@ else:
             "text",
             OutputParser::ClaudeJson,
         );
-        let result = tokio::time::timeout(Duration::from_secs(2), invocation).await;
+        // The cancel case uses a short budget on purpose: the child sleeps 30 s,
+        // so timing out proves the invocation was cancelled. The error case must
+        // finish on its own, so it gets a generous budget for interpreter startup.
+        let budget = if cancel {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(30)
+        };
+        let result = tokio::time::timeout(budget, invocation).await;
         if cancel {
             assert!(result.is_err());
         } else {
