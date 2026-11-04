@@ -27,15 +27,16 @@ export function DictionaryTabs({
         <TabsList
           aria-label="Dictionary tabs"
           activateOnFocus
-          className="h-auto w-fit max-w-full gap-0.5 overflow-x-auto rounded-[10px] bg-muted p-[3px]"
+          className="w-fit max-w-full flex-wrap justify-start gap-0.5 rounded-[10px] bg-muted p-[3px] group-data-horizontal/tabs:h-auto"
         >
           {kinds.map((kind) => (
             <TabsTrigger
               key={kind}
               value={kind}
-              className="h-auto rounded-[7px] px-3 py-1.5 text-[12.5px] leading-[normal] data-active:bg-card dark:data-active:bg-card dark:data-active:border-transparent"
+              className="h-auto rounded-[7px] px-3 py-1.5 text-[12.5px] leading-[normal] after:hidden data-active:bg-card dark:data-active:bg-card dark:data-active:border-transparent"
             >
-              {kind[0].toUpperCase() + kind.slice(1)} {counts[kind]}
+              {kind[0].toUpperCase() + kind.slice(1)}{" "}
+              <span className="text-muted-foreground">{counts[kind]}</span>
             </TabsTrigger>
           ))}
         </TabsList>
