@@ -14,6 +14,7 @@ mod deepgram;
 mod groq;
 mod openai;
 mod soniox;
+mod soniox_tokens;
 // Realtime (WebSocket) streaming path — reachable from the recorder tap factory
 // in commands::audio (plan 043).
 pub(crate) mod deepgram_rt;
@@ -67,8 +68,8 @@ pub struct CloudSttModel {
 }
 
 const SONIOX_MODELS: &[CloudSttModel] = &[CloudSttModel {
-    id: "stt-async-v5",
-    display_name: "Soniox v5",
+    id: "stt-async-v6",
+    display_name: "Soniox v6",
 }];
 
 const OPENAI_MODELS: &[CloudSttModel] = &[
@@ -169,8 +170,14 @@ impl CloudProvider {
         &self.available_models()[0]
     }
 
-    /// Exact catalog lookup. Unknown, empty, and legacy ids return `None`.
+    /// Catalog lookup, accepting the retired Soniox v5 id as a v6 alias.
+    /// Returning the canonical entry also makes stale settings saves write v6.
     pub fn model_by_id(self, model_id: &str) -> Option<&'static CloudSttModel> {
+        let model_id = if self == Self::Soniox && model_id == "stt-async-v5" {
+            "stt-async-v6"
+        } else {
+            model_id
+        };
         self.available_models()
             .iter()
             .find(|model| model.id == model_id)
@@ -184,6 +191,16 @@ impl CloudProvider {
             .and_then(|id| self.model_by_id(id))
             .map(|model| model.id)
             .unwrap_or_else(|| self.default_model().id)
+    }
+
+    /// Soniox has one API model. Report its executed id, not the caller's
+    /// provider shorthand or retired alias; other providers retain their ids.
+    pub fn canonical_model_id(self, requested: &str) -> &str {
+        if self == Self::Soniox {
+            self.resolve_model_id(Some(requested))
+        } else {
+            requested
+        }
     }
 
     /// Selected API model for this provider from `cloud_stt_models_by_provider`.
@@ -271,9 +288,15 @@ impl CloudProvider {
         language: Option<&str>,
     ) -> Result<CloudTranscript, common::SttError> {
         match self {
-            Self::Soniox => soniox::transcribe_typed(app, api_key, model, audio_path, language)
-                .await
-                .map(CloudTranscript::from),
+            Self::Soniox => {
+                let model = self.resolve_model_id(Some(model));
+                let result =
+                    soniox::transcribe_typed(app, api_key, model, audio_path, language).await;
+                if result.is_ok() {
+                    log::debug!("provider=Soniox transport=rest model={model} finished=true");
+                }
+                result.map(CloudTranscript::from)
+            }
             Self::Openai => {
                 openai::transcribe_typed(app, api_key, model, audio_path, language).await
             }
@@ -341,9 +364,98 @@ fn read_stored_cloud_stt_model_id(app: &AppHandle, provider_id: &str) -> Option<
     stored_models_by_provider(&store).get(provider_id).cloned()
 }
 
+/// Migrate only the selected API model, never historical transcription records.
+/// Provider selections (`current_model` / engine) remain the stable id `soniox`.
+pub(crate) fn migrate_soniox_model<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) {
+    let Some(mut models) = store.get(CLOUD_STT_MODELS_BY_PROVIDER_KEY) else {
+        return;
+    };
+    if models
+        .get("soniox")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        == Some("stt-async-v5")
+    {
+        models["soniox"] = serde_json::json!("stt-async-v6");
+        store.set(CLOUD_STT_MODELS_BY_PROVIDER_KEY, models);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn soniox_v5_selection_resolves_to_v6() {
+        let soniox = CloudProvider::Soniox;
+        assert_eq!(
+            soniox.resolve_model_id(Some("stt-async-v5")),
+            "stt-async-v6"
+        );
+        assert_eq!(
+            soniox.resolve_model_id(Some(" stt-async-v5 ")),
+            "stt-async-v6"
+        );
+        assert_eq!(
+            soniox.model_by_id("stt-async-v5"),
+            soniox.model_by_id("stt-async-v6")
+        );
+        assert!(CloudProvider::Openai.model_by_id("stt-async-v5").is_none());
+    }
+
+    #[tokio::test]
+    async fn settings_save_migrates_soniox_even_when_another_provider_is_active() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(app.handle(), &path)
+            .build()
+            .unwrap();
+        store.set("current_model", serde_json::json!("openai"));
+        store.set("current_model_engine", serde_json::json!("openai"));
+        store.set(
+            CLOUD_STT_MODELS_BY_PROVIDER_KEY,
+            serde_json::json!({
+                "soniox": "stt-async-v5", "openai": "gpt-4o-mini-transcribe", "future": "custom"
+            }),
+        );
+        let history_path = dir.path().join("history.json");
+        let history = br#"[{"model":"stt-async-v5","text":"historical"}]"#;
+        std::fs::write(&history_path, history).unwrap();
+        assert_eq!(
+            CloudProvider::Soniox.resolve_model_id(
+                stored_models_by_provider(&store)
+                    .get("soniox")
+                    .map(String::as_str)
+            ),
+            "stt-async-v6"
+        );
+        // Reading the old selection does not mutate the store.
+        assert_eq!(
+            store.get(CLOUD_STT_MODELS_BY_PROVIDER_KEY).unwrap()["soniox"],
+            "stt-async-v5"
+        );
+        crate::commands::settings::persist_generic_settings(&store)
+            .await
+            .unwrap();
+        crate::commands::settings::persist_generic_settings(&store)
+            .await
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            saved[CLOUD_STT_MODELS_BY_PROVIDER_KEY],
+            serde_json::json!({
+                "soniox": "stt-async-v6", "openai": "gpt-4o-mini-transcribe", "future": "custom"
+            })
+        );
+        assert_eq!(saved["current_model"], "openai");
+        assert_eq!(saved["current_model_engine"], "openai");
+        assert_eq!(std::fs::read(history_path).unwrap(), history);
+    }
 
     #[test]
     fn from_id_round_trips_all_providers() {
@@ -416,7 +528,7 @@ mod tests {
                 .iter()
                 .map(|m| (m.id, m.display_name))
                 .collect::<Vec<_>>(),
-            vec![("stt-async-v5", "Soniox v5")]
+            vec![("stt-async-v6", "Soniox v6")]
         );
         assert_eq!(
             CloudProvider::Openai

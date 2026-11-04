@@ -176,6 +176,7 @@ struct StreamBenchArgs {
 pub fn maybe_run_from_env_with_context(
     context: tauri::Context<tauri::Wry>,
 ) -> Result<bool, Box<dyn Error>> {
+    crate::initialize_tls();
     let first_arg = env::args().nth(1);
     let Some(first_arg) = first_arg.as_deref() else {
         return Ok(false);
@@ -486,17 +487,8 @@ async fn run_transcribe(
         transcribe_via_remote(app, &args.file, server, password).await?
     } else {
         let settings = get_settings(app.clone()).await?;
-        let model = args
-            .model
-            .clone()
-            .or_else(|| {
-                (!settings.current_model.is_empty()).then_some(settings.current_model.clone())
-            })
-            .ok_or_else(|| "No model specified and no model is selected in the app. Pass --model <name> (run `voicetypr models` to list installed models) or choose a default model in Voicetypr settings.".to_string())?;
-        let engine = args.engine.clone().or_else(|| {
-            (!settings.current_model_engine.is_empty())
-                .then_some(settings.current_model_engine.clone())
-        });
+        let (model, engine) =
+            resolve_cli_model_selection(args.model.as_deref(), args.engine.as_deref(), &settings)?;
         let t = transcribe_audio_file_for_cli(
             app.clone(),
             args.file.to_string_lossy().to_string(),
@@ -516,6 +508,35 @@ async fn run_transcribe(
         println!("{}", payload["text"].as_str().unwrap_or_default());
     }
     Ok(())
+}
+
+fn resolve_cli_model_selection(
+    model: Option<&str>,
+    engine: Option<&str>,
+    settings: &crate::commands::settings::Settings,
+) -> Result<(String, Option<String>), String> {
+    let model = model
+        .or_else(|| (!settings.current_model.is_empty()).then_some(settings.current_model.as_str()))
+        .ok_or_else(|| "No model specified and no model is selected in the app. Pass --model <name> (run `voicetypr models` to list installed models) or choose a default model in Voicetypr settings.".to_string())?;
+    let engine = engine
+        .or_else(|| {
+            (!settings.current_model_engine.is_empty())
+                .then_some(settings.current_model_engine.as_str())
+        })
+        .map(str::to_owned)
+        // Pin the inferred provider before replacing its shorthand with an API
+        // model id: the engine resolver cannot infer Soniox from stt-async-v6.
+        .or_else(|| crate::cloud_stt::CloudProvider::from_id(model).map(|p| p.id().to_string()));
+    let provider = engine
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        .and_then(crate::cloud_stt::CloudProvider::from_id);
+    let model = provider
+        .map(|provider| provider.canonical_model_id(model))
+        .unwrap_or(model)
+        .to_string();
+    Ok((model, engine))
 }
 
 async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<dyn Error>> {
@@ -559,17 +580,8 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         payload["stop_reason"] = json!(stop_message);
         payload
     } else {
-        let model = args
-            .model
-            .clone()
-            .or_else(|| {
-                (!settings.current_model.is_empty()).then_some(settings.current_model.clone())
-            })
-            .ok_or_else(|| "No model specified and no model is selected in the app. Pass --model <name> (run `voicetypr models` to list installed models) or choose a default model in Voicetypr settings.".to_string())?;
-        let engine = args.engine.clone().or_else(|| {
-            (!settings.current_model_engine.is_empty())
-                .then_some(settings.current_model_engine.clone())
-        });
+        let (model, engine) =
+            resolve_cli_model_selection(args.model.as_deref(), args.engine.as_deref(), &settings)?;
         let t = transcribe_audio_file_for_cli(
             app.clone(),
             output_path.to_string_lossy().to_string(),
@@ -905,6 +917,156 @@ fn format_availability(snap: &crate::RecognitionAvailabilitySnapshot) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_reports_executed_soniox_model_not_the_legacy_argument() {
+        let settings = crate::commands::settings::Settings {
+            current_model_engine: String::new(),
+            ..Default::default()
+        };
+        for engine in ["soniox", "SoNiOx"] {
+            for requested in ["stt-async-v5", "stt-async-v6", "soniox", " stt-async-v5 "] {
+                let (model, selected_engine) =
+                    resolve_cli_model_selection(Some(requested), Some(engine), &settings).unwrap();
+                assert_eq!(model, "stt-async-v6");
+                assert_eq!(selected_engine.as_deref(), Some(engine));
+            }
+        }
+        assert_eq!(
+            resolve_cli_model_selection(Some("soniox"), None, &settings).unwrap(),
+            ("stt-async-v6".to_string(), Some("soniox".to_string()))
+        );
+        for (model, engine) in [
+            ("base.en", Some("whisper")),
+            ("nova-2", Some("deepgram")),
+            ("openai", None),
+        ] {
+            assert_eq!(
+                resolve_cli_model_selection(Some(model), engine, &settings)
+                    .unwrap()
+                    .0,
+                model
+            );
+        }
+    }
+
+    async fn assert_cli_model_resolution(command: &str) {
+        use crate::transcription::engines::{resolve_engine_for_model, ActiveEngineSelection};
+
+        // A memory-only runtime and absolute temporary store identifier keep
+        // this on the real resolver without GUI, audio, network or user data.
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.config_mut().identifier = dir.path().to_str().unwrap().to_string();
+        let models_dir = dir.path().join("models");
+        std::fs::create_dir(&models_dir).unwrap();
+        let mut whisper = WhisperManager::new(models_dir.clone());
+        let size = whisper.get_models_status()["base.en"].size;
+        std::fs::File::create(models_dir.join("base.en.bin"))
+            .unwrap()
+            .set_len(size)
+            .unwrap(); // Sparse catalog-size fixture; never loaded or decoded.
+        whisper.refresh_downloaded_status();
+        crate::initialize_tls();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .manage(AsyncMutex::new(
+                crate::remote::settings::RemoteSettings::default(),
+            ))
+            .manage(AsyncRwLock::new(whisper))
+            .manage(ParakeetManager::new(dir.path().join("parakeet")))
+            .build(context)
+            .unwrap();
+        assert_eq!(
+            tauri_plugin_store::resolve_store_path(app.handle(), "secure.dat").unwrap(),
+            dir.path().join("secure.dat")
+        );
+        crate::secure_store::initialize_encryption_key().unwrap();
+        crate::secure_store::secure_set(
+            app.handle(),
+            crate::cloud_stt::CloudProvider::Soniox.key_name(),
+            "unit-test-placeholder-not-a-credential",
+        )
+        .unwrap();
+
+        let settings = crate::commands::settings::Settings {
+            current_model: "stt-async-v5".to_string(),
+            current_model_engine: String::new(),
+            ..Default::default()
+        };
+        for (flags, expected_engine, expected_model) in [
+            (vec!["--model", "soniox"], "soniox", "stt-async-v6"),
+            (
+                vec!["--model", "stt-async-v5", "--engine", "soniox"],
+                "soniox",
+                "stt-async-v6",
+            ),
+            (vec!["--engine", "soniox"], "soniox", "stt-async-v6"),
+            (vec!["--model", "base.en"], "whisper", "base.en"),
+        ] {
+            let mut argv = vec!["voicetypr", command];
+            if command == "record" {
+                argv.push("--until-silence");
+            } else {
+                argv.extend(["--file", "sample.wav"]);
+            }
+            argv.extend(flags);
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let (model, engine) = match cli.command.unwrap() {
+                CliCommand::Transcribe(args) => resolve_cli_model_selection(
+                    args.model.as_deref(),
+                    args.engine.as_deref(),
+                    &settings,
+                )
+                .unwrap(),
+                CliCommand::Record(args) => resolve_cli_model_selection(
+                    args.model.as_deref(),
+                    args.engine.as_deref(),
+                    &settings,
+                )
+                .unwrap(),
+                _ => unreachable!(),
+            };
+            let active = resolve_engine_for_model(app.handle(), &model, engine.as_deref())
+                .await
+                .unwrap();
+            assert_eq!(active.engine_name(), expected_engine);
+            assert_eq!(active.model_name(), expected_model);
+            assert_eq!(
+                model, expected_model,
+                "CLI JSON must report the executed model"
+            );
+            match active {
+                ActiveEngineSelection::Cloud { provider, .. } => {
+                    assert_eq!(provider, crate::cloud_stt::CloudProvider::Soniox);
+                    assert_eq!(engine.as_deref(), Some("soniox"));
+                }
+                ActiveEngineSelection::Whisper { ref model_path, .. } => {
+                    assert_eq!(model_path, &models_dir.join("base.en.bin"));
+                    assert!(engine.is_none());
+                }
+                _ => panic!("Unexpected engine selection"),
+            }
+            let job = TranscriptionJob::from_legacy_settings(
+                ContractSource::AudioFile,
+                active.engine_name(),
+                active.model_name(),
+                None,
+                false,
+            );
+            assert_eq!(serde_json::to_value(job).unwrap()["model"], expected_model);
+        }
+    }
+
+    #[tokio::test]
+    async fn transcribe_model_selection_reaches_real_engine_resolver() {
+        assert_cli_model_resolution("transcribe").await;
+    }
+
+    #[tokio::test]
+    async fn record_model_selection_reaches_real_engine_resolver() {
+        assert_cli_model_resolution("record").await;
+    }
     #[test]
     fn reset_removed_capture_fails_cleanly_without_advertising_a_missing_retry() {
         let data = tempfile::tempdir().unwrap();

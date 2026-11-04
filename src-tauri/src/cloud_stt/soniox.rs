@@ -1518,18 +1518,7 @@ async fn run_typed_transcription(
             return Ok(text.to_string());
         }
         if let Some(tokens) = json.get("tokens").and_then(|v| v.as_array()) {
-            let mut out = String::new();
-            let mut first = true;
-            for t in tokens {
-                if let Some(txt) = t.get("text").and_then(|v| v.as_str()) {
-                    if !first {
-                        out.push(' ');
-                    } else {
-                        first = false;
-                    }
-                    out.push_str(txt);
-                }
-            }
+            let out = super::soniox_tokens::text(tokens);
             if !out.is_empty() {
                 return Ok(out);
             }
@@ -1792,13 +1781,9 @@ async fn run_diarized_transcription(
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| {
-                json.get("tokens").and_then(|v| v.as_array()).map(|tokens| {
-                    tokens
-                        .iter()
-                        .filter_map(|t| t.get("text").and_then(|v| v.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
+                json.get("tokens")
+                    .and_then(|v| v.as_array())
+                    .map(|tokens| super::soniox_tokens::text(tokens))
             })
             .filter(|s| !s.is_empty())
             .ok_or(common::SttError::BadResponse)?;
@@ -1807,7 +1792,7 @@ async fn run_diarized_transcription(
         let words = json
             .get("tokens")
             .and_then(|v| v.as_array())
-            .map(|tokens| tokens.iter().filter_map(parse_soniox_token).collect())
+            .map(|tokens| super::soniox_tokens::words(tokens.iter().filter_map(parse_soniox_token)))
             .unwrap_or_default();
 
         Ok(super::CloudTranscript {
@@ -1849,7 +1834,7 @@ mod tests {
     #[test]
     fn create_payload_includes_language_and_structured_context() {
         let payload = build_create_payload(
-            "stt-async-v5",
+            "stt-async-v6",
             "file_123",
             Some(" en "),
             Some(SonioxContext {
@@ -1866,7 +1851,7 @@ mod tests {
             false,
         );
 
-        assert_eq!(payload["model"].as_str(), Some("stt-async-v5"));
+        assert_eq!(payload["model"].as_str(), Some("stt-async-v6"));
         assert_eq!(payload["file_id"].as_str(), Some("file_123"));
         assert_eq!(
             payload["language_hints"].as_array().unwrap()[0].as_str(),
@@ -1885,7 +1870,7 @@ mod tests {
     #[test]
     fn create_payload_omits_empty_optional_fields() {
         let payload = build_create_payload(
-            "stt-async-v5",
+            "stt-async-v6",
             "file_123",
             Some(" "),
             Some(SonioxContext {
@@ -1896,16 +1881,16 @@ mod tests {
             false,
         );
 
-        assert_eq!(payload["model"].as_str(), Some("stt-async-v5"));
+        assert_eq!(payload["model"].as_str(), Some("stt-async-v6"));
         assert!(payload.get("language_hints").is_none());
         assert!(payload.get("context").is_none());
     }
 
     #[test]
     fn build_create_payload_diarize_flag_sets_field() {
-        let payload = build_create_payload("stt-async-v5", "fid", None, None, true);
+        let payload = build_create_payload("stt-async-v6", "fid", None, None, true);
         assert_eq!(payload["enable_speaker_diarization"].as_bool(), Some(true));
-        let payload_no_diarize = build_create_payload("stt-async-v5", "fid", None, None, false);
+        let payload_no_diarize = build_create_payload("stt-async-v6", "fid", None, None, false);
         assert!(payload_no_diarize
             .get("enable_speaker_diarization")
             .is_none());
@@ -2398,7 +2383,7 @@ mod tests {
                 attempt_typed_once(
                     &client,
                     "new-key",
-                    "stt-async-v5",
+                    "stt-async-v6",
                     Path::new("audio.wav"),
                     b"audio",
                     None,
@@ -2758,7 +2743,7 @@ mod tests {
                                 attempt_diarized_once(
                                     &client,
                                     "k",
-                                    "stt-async-v5",
+                                    "stt-async-v6",
                                     Path::new("audio.wav"),
                                     b"audio",
                                     None,
@@ -2770,7 +2755,7 @@ mod tests {
                                 attempt_typed_once(
                                     &client,
                                     "k",
-                                    "stt-async-v5",
+                                    "stt-async-v6",
                                     Path::new("audio.wav"),
                                     b"audio",
                                     None,
@@ -2864,7 +2849,7 @@ mod tests {
                         attempt_diarized_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -2876,7 +2861,7 @@ mod tests {
                         attempt_typed_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -2912,7 +2897,7 @@ mod tests {
                     }
                 }).expect(2).mount(&server).await;
             let owner = ActiveJobGuard::register("throttled-file", "k");
-            let payload = build_create_payload("stt-async-v5", "throttled-file", None, None, false);
+            let payload = build_create_payload("stt-async-v6", "throttled-file", None, None, false);
             let id = create_transcription(&common::http_client(), "k", "throttled-file", &payload)
                 .await
                 .unwrap();
@@ -2949,7 +2934,7 @@ mod tests {
                         attempt_diarized_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -2961,7 +2946,7 @@ mod tests {
                         attempt_typed_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -3374,7 +3359,7 @@ mod tests {
                         attempt_diarized_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -3386,7 +3371,7 @@ mod tests {
                         attempt_typed_once(
                             &client,
                             "k",
-                            "stt-async-v5",
+                            "stt-async-v6",
                             Path::new("audio.wav"),
                             b"audio",
                             None,
@@ -3434,10 +3419,11 @@ mod tests {
                 .await;
             Mock::given(method("GET"))
                 .and(path("/v1/transcriptions/t1/transcript"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_json(serde_json::json!({ "text": "hello world" })),
-                )
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "tokens": [
+                            {"text":"hel"}, {"text":"lo"}, {"text":" wor"}, {"text":"ld"}
+                        ] }),
+                ))
                 .expect(1)
                 .mount(&server)
                 .await;
@@ -3457,7 +3443,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_typed_transcription(&client, "k", "stt-async-v5", "f1", Some("en"), None).await;
+                run_typed_transcription(&client, "k", "stt-async-v6", "f1", Some("en"), None).await;
             assert_eq!(result.unwrap(), "hello world");
             assert_eq!(tid.as_deref(), Some("t1"));
 
@@ -3504,7 +3490,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_typed_transcription(&client, "k", "stt-async-v5", "f1", None, None).await;
+                run_typed_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
             assert!(matches!(result, Err(common::SttError::Server)));
             assert_eq!(tid.as_deref(), Some("t1"));
 
@@ -3536,7 +3522,7 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_typed_transcription(&client, "k", "stt-async-v5", "f1", None, None).await;
+                run_typed_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
             assert!(
                 matches!(result, Err(common::SttError::LimitExceeded { .. })),
                 "expected LimitExceeded, got {result:?}"
@@ -3657,7 +3643,7 @@ mod tests {
             let text = transcribe_typed_with_autoheal(
                 &client,
                 "k",
-                "stt-async-v5",
+                "stt-async-v6",
                 &wav,
                 b"RIFF....WAVEfmt ".to_vec(),
                 None,
@@ -3696,10 +3682,17 @@ mod tests {
                 .await;
             Mock::given(method("GET"))
                 .and(path("/v1/transcriptions/t9/transcript"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_json(serde_json::json!({ "text": "hi", "tokens": [] })),
-                )
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "tokens": [
+                            {"text":"my","start_ms":0,"end_ms":10,"speaker":"1"},
+                            {"text":" f","start_ms":10,"end_ms":20,"speaker":"1"},
+                            {"text":"ellow","start_ms":20,"end_ms":30,"speaker":"1"},
+                            {"text":" Amer","start_ms":30,"end_ms":40,"speaker":"1"},
+                            {"text":"ic","start_ms":40,"end_ms":50,"speaker":"1"},
+                            {"text":"ans","start_ms":50,"end_ms":60,"speaker":"1"},
+                            {"text":".","start_ms":60,"end_ms":70,"speaker":"1"}
+                        ] }),
+                ))
                 .mount(&server)
                 .await;
             Mock::given(method("DELETE"))
@@ -3718,8 +3711,16 @@ mod tests {
                 .await;
 
             let (tid, result) =
-                run_diarized_transcription(&client, "k", "stt-async-v5", "f1", None, None).await;
-            assert_eq!(result.unwrap().text, "hi");
+                run_diarized_transcription(&client, "k", "stt-async-v6", "f1", None, None).await;
+            let result = result.unwrap();
+            assert_eq!(result.text, "my fellow Americans.");
+            assert_eq!(result.words.len(), 3);
+            assert_eq!(result.words[2].start_ms, Some(30));
+            assert_eq!(result.words[2].end_ms, Some(70));
+            assert_eq!(
+                crate::commands::audio::group_words_into_speaker_text(&result.words),
+                "Speaker 1: my fellow Americans."
+            );
             assert_eq!(tid.as_deref(), Some("t9"));
 
             cleanup_stored_records(&client, "k", tid.as_deref(), "f1").await;
@@ -4030,7 +4031,7 @@ mod tests {
             let error = transcribe_typed_with_autoheal(
                 &client,
                 "k",
-                "stt-async-v5",
+                "stt-async-v6",
                 &wav,
                 b"RIFF....WAVEfmt ".to_vec(),
                 None,
@@ -4584,7 +4585,7 @@ mod tests {
             let result = transcribe_typed_with_autoheal(
                 &client,
                 "k",
-                "stt-async-v5",
+                "stt-async-v6",
                 &wav,
                 b"RIFF....WAVEfmt ".to_vec(),
                 None,

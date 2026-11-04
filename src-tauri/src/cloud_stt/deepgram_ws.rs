@@ -182,7 +182,7 @@ async fn run_task<F>(
     };
 
     // Auth: `Token <key>` header on the WS upgrade request — same AuthScheme as
-    // the REST path, but as a WS handshake header (NOT a body frame like Soniox).
+    // the REST path, but as a WS handshake header (as with Soniox).
     // Marked sensitive so no tracing/interceptor can leak it; NEVER logged.
     let mut request = match url.as_str().into_client_request() {
         Ok(request) => request,
@@ -204,7 +204,22 @@ async fn run_task<F>(
         }
     }
 
-    let stream = match tokio_tungstenite::connect_async(request).await {
+    let connector = match crate::tls::websocket_connector() {
+        Ok(connector) => connector,
+        Err(_) => {
+            log::warn!("provider=Deepgram status=unknown code=tls_configuration");
+            finish(&mut final_slot, Err(SttError::Network));
+            return;
+        }
+    };
+    let stream = match tokio_tungstenite::connect_async_tls_with_config(
+        request,
+        None,
+        false,
+        Some(connector),
+    )
+    .await
+    {
         Ok((stream, _response)) => stream,
         Err(_error) => {
             log::warn!("provider=Deepgram status=unknown code=network");

@@ -37,6 +37,8 @@ mod simple_cache;
 mod state;
 mod state_machine;
 mod telemetry;
+mod tls;
+pub use tls::initialize_tls;
 pub mod transcription;
 mod tray_status;
 mod trigger;
@@ -576,6 +578,7 @@ async fn retry_tray_creation(app: tauri::AppHandle) -> Result<tray_status::TrayS
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    initialize_tls();
     let app_start = Instant::now();
     let app_version = env!("CARGO_PKG_VERSION");
 

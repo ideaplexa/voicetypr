@@ -70,6 +70,7 @@ pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
         "crash_reporting_enabled":store.get("crash_reporting_enabled"),
     })));
     crate::telemetry::save_consent_values(store, consent, false);
+    crate::cloud_stt::migrate_soniox_model(store);
     if let Err(error) = store.save() {
         // Reload remains inside the same consent transaction.
         let _ = store.reload();

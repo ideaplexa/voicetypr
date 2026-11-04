@@ -236,7 +236,7 @@ mod dictation_transport_tests {
     fn soniox_transport_follows_whether_ws_final_supplied_text() {
         let soniox = ActiveEngineSelection::Cloud {
             provider: crate::cloud_stt::CloudProvider::Soniox,
-            model_name: "stt-async-v5".to_string(),
+            model_name: "stt-async-v6".to_string(),
         };
         assert_eq!(
             dictation_transport(&soniox, Some(true)),

@@ -5,7 +5,8 @@
 //! `parakeet::sidecar::ParakeetStreamHandle`. `send_chunk` NEVER blocks (it only
 //! enqueues), so it cannot stall the recorder mutex; the unbounded channel also
 //! buffers audio produced before the socket finishes connecting. The task connects,
-//! sends the JSON config frame (with the API key in the BODY — never logged),
+//! authenticates the upgrade request with a sensitive Bearer header (never logged),
+//! sends the JSON config frame (without the API key),
 //! streams raw `pcm_s16le` binary frames, folds token responses into
 //! committed/tentative preview text, and on finalize drains late finals until the
 //! server reports `finished` or a hard timeout fires (then REST-on-WAV is the
@@ -15,6 +16,8 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{header::AUTHORIZATION, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::cloud_stt::common::SttError;
@@ -25,8 +28,8 @@ use crate::cloud_stt::soniox_rt::{
 /// Soniox realtime WebSocket endpoint — a DIFFERENT origin than the REST API
 /// (`api.soniox.com`), so warm-up must target this host separately.
 const RT_ENDPOINT: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
-/// Realtime model, pairs with the async REST `stt-async-v5`.
-const RT_MODEL: &str = "stt-rt-v5";
+/// Realtime model, pairs with the async REST `stt-async-v6`.
+const RT_MODEL: &str = "stt-rt-v6";
 /// Hard cap on draining late finals after an empty-frame finalize; on expiry the
 /// caller falls back to REST-on-WAV (the WS final is authoritative on success).
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -39,7 +42,7 @@ enum Control {
     Cancel,
 }
 
-/// Connection parameters. `api_key` is written only into the config frame body and
+/// Connection parameters. `api_key` is written only into the WS upgrade header and
 /// is never logged.
 pub(crate) struct SonioxStreamConfig {
     pub api_key: String,
@@ -107,11 +110,24 @@ where
     }
 }
 
-/// Build the first-frame JSON config. The API key lives in the body per the Soniox
-/// RT protocol; this string is NEVER logged.
+/// Authenticate on connect, not in the deprecated start-message `api_key` field.
+/// Never log the request or key; mark the header sensitive for debug formatting.
+fn build_request(
+    api_key: &str,
+) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, SttError> {
+    let mut request = RT_ENDPOINT
+        .into_client_request()
+        .map_err(|_| SttError::Network)?;
+    let mut auth =
+        HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|_| SttError::Auth)?;
+    auth.set_sensitive(true);
+    request.headers_mut().insert(AUTHORIZATION, auth);
+    Ok(request)
+}
+
+/// Build the first-frame JSON config. Authentication belongs to the upgrade.
 fn build_config_frame(config: &SonioxStreamConfig) -> String {
     let mut payload = serde_json::json!({
-        "api_key": config.api_key,
         "model": RT_MODEL,
         "audio_format": "pcm_s16le",
         "sample_rate": config.sample_rate,
@@ -152,7 +168,29 @@ async fn run_task<F>(
 {
     let mut final_slot = Some(final_tx);
 
-    let stream = match tokio_tungstenite::connect_async(RT_ENDPOINT).await {
+    let request = match build_request(&config.api_key) {
+        Ok(request) => request,
+        Err(error) => {
+            finish(&mut final_slot, Err(error));
+            return;
+        }
+    };
+    let connector = match crate::tls::websocket_connector() {
+        Ok(connector) => connector,
+        Err(_) => {
+            log::warn!("provider=Soniox status=unknown code=tls_configuration");
+            finish(&mut final_slot, Err(SttError::Network));
+            return;
+        }
+    };
+    let stream = match tokio_tungstenite::connect_async_tls_with_config(
+        request,
+        None,
+        false,
+        Some(connector),
+    )
+    .await
+    {
         Ok((stream, _response)) => stream,
         Err(_error) => {
             log::warn!("provider=Soniox status=unknown code=network");
@@ -162,7 +200,7 @@ async fn run_task<F>(
     };
     let (mut write, mut read) = stream.split();
 
-    // Config frame (api_key in body — never logged).
+    // Config frame contains no credential.
     if write
         .send(Message::text(build_config_frame(&config)))
         .await
@@ -219,6 +257,7 @@ async fn run_task<F>(
                         on_partial(folder.ingest(&response));
                     }
                     if response.finished {
+                        log::debug!("provider=Soniox transport=ws model={RT_MODEL} finished=true");
                         finish(&mut final_slot, Ok(folder.committed().to_string()));
                         return;
                     }
@@ -254,7 +293,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_frame_includes_required_fields_and_hides_nothing_extra() {
+    fn config_frame_includes_v6_fields_without_api_key() {
         let config = SonioxStreamConfig {
             api_key: "secret-key".to_string(),
             sample_rate: 16_000,
@@ -264,15 +303,35 @@ mod tests {
         };
         let frame = build_config_frame(&config);
         let parsed: serde_json::Value = serde_json::from_str(&frame).unwrap();
-        assert_eq!(parsed["model"], "stt-rt-v5");
+        assert_eq!(parsed["model"], "stt-rt-v6");
         assert_eq!(parsed["audio_format"], "pcm_s16le");
         assert_eq!(parsed["sample_rate"], 16_000);
         assert_eq!(parsed["num_channels"], 1);
-        assert_eq!(parsed["api_key"], "secret-key");
+        assert!(parsed.get("api_key").is_none());
+        assert!(!frame.contains("secret-key"));
         assert_eq!(parsed["enable_endpoint_detection"], true);
         assert_eq!(parsed["language_hints"][0], "en");
         // No context key when none supplied.
         assert!(parsed.get("context").is_none());
+    }
+
+    #[test]
+    fn upgrade_request_carries_sensitive_bearer_auth() {
+        let request = build_request("secret-key").unwrap();
+        assert_eq!(request.uri().to_string(), RT_ENDPOINT);
+        let auth = &request.headers()[AUTHORIZATION];
+        assert_eq!(auth.to_str().unwrap(), "Bearer secret-key");
+        assert!(auth.is_sensitive());
+        assert!(!format!("{request:?}").contains("secret-key"));
+        assert!(request.headers().contains_key("sec-websocket-key"));
+        assert!(!request.headers().contains_key("sec-websocket-protocol"));
+    }
+
+    #[test]
+    fn invalid_auth_header_is_rejected_without_exposing_the_key() {
+        let error = build_request("secret\r\ninjected").unwrap_err();
+        assert!(matches!(error, SttError::Auth));
+        assert!(!format!("{error:?}").contains("secret"));
     }
 
     #[test]
