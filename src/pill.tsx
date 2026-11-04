@@ -26,8 +26,8 @@ interface RecordingPillDeps {
 export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps = {}): RecordingPillController {
   const call = deps.invoke ?? invoke, on = deps.listen ?? listen;
   const setTimer = deps.setTimeout ?? setTimeout, clearTimer = deps.clearTimeout ?? clearTimeout;
-  let hydrationTimer: ReturnType<typeof setTimer> | undefined;
-  let finishHydration: (() => void) | undefined;
+  let hydrationTimer: ReturnType<typeof setTimer> | undefined, retryTimer: ReturnType<typeof setTimer> | undefined;
+  let finishHydration: ((retry?: boolean) => void) | undefined;
   let destroyed = false, settingsRevision = 0, geometryReceived = false;
   const subscriptions: Promise<void>[] = [];
   const unlisteners: Array<() => void> = [];
@@ -47,13 +47,21 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   };
   let feedbackEpoch: number | undefined;
   const pendingFeedback: Array<{ epoch: number; run: () => void }> = [];
-  let feedbackQueued: boolean | undefined, feedbackSending = false;
-  const feedbackVisible = (visible: boolean): Promise<void> => {
-    if (destroyed) return Promise.resolve();
-    feedbackQueued=visible;
-    if(feedbackSending || feedbackEpoch === undefined)return Promise.resolve();
-    feedbackSending=true;
-    return (async()=>{while(!destroyed && feedbackQueued!==undefined){const latest=feedbackQueued;feedbackQueued=undefined;try{await call('pill_feedback_visible',{visible:latest,epoch:feedbackEpoch});}catch{ /* A later state change can retry. */ }}feedbackSending=false;})();
+  let liveNote: DictationNote | undefined;
+  let renderedFeedback = false, feedbackSending = false;
+  let reportedVisibility: boolean | undefined;
+  const syncFeedbackVisibility = async () => {
+    if (feedbackSending) return;
+    feedbackSending = true;
+    // A promotion, handoff or replay batch is one change, not an intermediate hide.
+    await Promise.resolve();
+    while (feedbackEpoch !== undefined) {
+      const visible = !destroyed && (renderedFeedback || liveNote !== undefined);
+      if (visible === reportedVisibility) break;
+      reportedVisibility = visible;
+      try { await call('pill_feedback_visible', { visible, epoch: feedbackEpoch }); } catch { /* No sensitive logging. */ }
+    }
+    feedbackSending = false;
   };
   let streamUnlisten: (() => void) | undefined, streamPending = false, streamEnabled = false;
   const action = (name: 'dictate' | 'stop' | 'cancel' | 'copy' | 'retry' | 'discard' | 'open_accessibility') => {
@@ -66,7 +74,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       cancel: () => { action('cancel'); return call('cancel_recording'); }, dismiss: () => call('hide_pill_widget'),
       original: () => { action('copy'); return call('copy_last_original'); },
       card: c => { if(c.command !== 'island_action') action(c.command === 'discard_kept_dictation' ? 'discard' : 'retry'); return call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}); },
-      feedbackVisible,
+      feedbackChanged: visible => { renderedFeedback = visible; void syncFeedbackVisibility(); },
       quickSet: async (kind, id) => { await call('island_quick_set', { kind, id }); await readQuick(); },
       openSettings: () => call('island_action', { action: 'open_settings' }),
       openPrivacySettings: () => { action('open_accessibility'); return call('open_accessibility_settings'); },
@@ -126,15 +134,12 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       if (!destroyed && revision === settingsRevision && geometry?.anchor) { geometryReceived = true; island.geometry(geometry); }
     } catch { /* Subsequent settings/geometry events recover without sensitive logs. */ }
   };
-  // True while the window was shown for a Starting that has not reached Recording yet.
-  let shownForStart = false;
-  let recordingStateKnown = false, liveNote: DictationNote | undefined;
+  let recordingStateKnown = false;
   let liveNoteTimer: ReturnType<typeof setTimer> | undefined;
   const dropLiveNote = () => {
     if (liveNoteTimer !== undefined) clearTimer(liveNoteTimer);
-    const dropped = liveNote;
     liveNoteTimer = undefined; liveNote = undefined;
-    if (dropped && !island.feedbackActive && !island.feedbackOwned) void feedbackVisible(false);
+    void syncFeedbackVisibility();
   };
   const knownRecordingState = () => {
     recordingStateKnown = true;
@@ -147,31 +152,39 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       if (liveNoteTimer !== undefined) clearTimer(liveNoteTimer);
       liveNote = value;
       liveNoteTimer = setTimer(dropLiveNote, 2000);
+      void syncFeedbackVisibility();
     } else island.note(value);
+  };
+  const retryHeldWarning = () => {
+    retryTimer = undefined;
+    void call<RecordingStatePayload>('get_current_recording_state').then(state => {
+      if (destroyed || !liveNote || typeof state?.generation !== 'number' || state.generation < liveNote.generation) return;
+      // This snapshot decides only the held warning; it never starts/stops the island.
+      if (state.state === 'recording' && state.generation === liveNote.generation) island.note(liveNote, state.generation);
+      dropLiveNote();
+    }).catch(() => { /* The held warning still expires or resolves through a real event. */ });
   };
   const recordingState = (payload: RecordingStatePayload) => {
     // Starting shows the island at once (mic still opening); Recording makes it live.
     if (payload.generation !== undefined && !island.observeRecordingGeneration(payload.generation)) return false;
-    if (payload.state === 'starting') { shownForStart = true; island.starting(payload.generation); }
-    else if (payload.state === 'recording') { shownForStart = false; island.start(payload.generation); }
+    if (payload.state === 'starting') island.starting(payload.generation);
+    else if (payload.state === 'recording') island.start(payload.generation);
     else if (payload.state === 'stopping' || payload.state === 'transcribing') {
       if (island.machine.state !== 'polishing') island.work('transcribing');
     } else if (!island.machine.terminal) {
       // A start that failed before Recording shows no flash: the window folds away as it did before the early show.
       if (payload.state === 'error' && !island.feedbackActive && !island.machine.pending) island.flash('error', 'Recording failed');
       else if (!['error', 'too_short', 'nospeech'].includes(island.machine.state)) island.rest();
-      // A start that ended before Recording leaves nothing to show: let the backend hide the window it opened early.
-      if (payload.state === 'idle' && shownForStart) {
-        shownForStart = false;
-        if (!island.feedbackActive) void feedbackVisible(false);
-      }
     }
     return true;
   };
   const hydrateRecordingState = () => call<RecordingStatePayload>('get_current_recording_state').then(state => {
     // Only the startup request, while its release gate is still open, may set state.
-    if (!destroyed && finishHydration && !recordingStateKnown && state?.state && recordingState(state)) knownRecordingState();
-  }).catch(() => { /* Real events remain authoritative. */ });
+    if (!destroyed && finishHydration && !recordingStateKnown) {
+      if (state?.state && recordingState(state)) knownRecordingState();
+      else finishHydration(true);
+    }
+  }).catch(() => finishHydration?.(true));
   const recordingEvent = () => { knownRecordingState(); finishHydration?.(); };
   subscribe<PillGeometry>('pill-geometry', value => { geometryReceived = true; island.geometry(value); });
   subscribe<PillPointer>('pill-pointer', value => island.pointer(value));
@@ -207,9 +220,13 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     await call('pill_feedback_ready', { epoch: requestedEpoch }).catch(() => {});
     if (destroyed) return;
     const hydrated = new Promise<void>(resolve => {
-      finishHydration = () => { finishHydration = undefined; resolve(); };
+      finishHydration = (retry = false) => {
+        finishHydration = undefined;
+        if (retry) retryTimer = setTimer(retryHeldWarning, 500);
+        resolve();
+      };
     });
-    hydrationTimer = setTimer(() => finishHydration?.(), 1800);
+    hydrationTimer = setTimer(() => finishHydration?.(true), 1800);
     if (recordingStateKnown) finishHydration?.();
     void hydrateRecordingState().finally(() => finishHydration?.());
     void readSettings();
@@ -218,13 +235,20 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     if (hydrationTimer !== undefined) clearTimer(hydrationTimer);
     hydrationTimer = undefined; finishHydration = undefined;
     if (destroyed) return;
-    // Release once. An unresolved live warning may wait briefly for a real event,
-    // but no snapshot may change island state after this handoff.
+    // Release once. A held warning can await an event or the one retry,
+    // but no snapshot may change recording state after this handoff.
     feedbackEpoch = requestedEpoch;
     for (const queued of pendingFeedback.splice(0)) if (queued.epoch === feedbackEpoch) queued.run();
-    if (feedbackQueued !== undefined) void feedbackVisible(feedbackQueued);
+    void syncFeedbackVisibility();
   });
-  return { destroy() { destroyed = true; if (hydrationTimer !== undefined) clearTimer(hydrationTimer); finishHydration?.(); dropLiveNote(); pendingFeedback.length = 0; settingsRevision++; quickRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop()); island.destroy(); } };
+  return { destroy() {
+    destroyed = true;
+    if (hydrationTimer !== undefined) clearTimer(hydrationTimer);
+    if (retryTimer !== undefined) clearTimer(retryTimer);
+    finishHydration?.(); dropLiveNote(); pendingFeedback.length = 0;
+    settingsRevision++; quickRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop());
+    island.destroy(); void syncFeedbackVisibility();
+  } };
 }
 const root = document.getElementById('root');
 if (root) createRecordingPill(root);

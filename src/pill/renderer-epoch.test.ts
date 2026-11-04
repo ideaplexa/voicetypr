@@ -48,7 +48,7 @@ it.each([0, 1800])('cleans up startup timers on destruction after %i ms', async 
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it.each(['reject', 'timeout'] as const)('does not retry hydration or apply late snapshots to held warnings after %s', async failure => {
+it.each(['reject', 'timeout'] as const)('retries once at 500 ms after %s, promoting only the warning without changing island state', async failure => {
   h = pillHarness();
   let reads = 0, late!: (state: { state: string; generation: number; error: null }) => void;
   h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
@@ -71,8 +71,15 @@ it.each(['reject', 'timeout'] as const)('does not retry hydration or apply late 
   expect(reads).toBe(1);
   expect(h.get('.pill-root').dataset.state).toBe('idle');
   expect(h.get('[data-key="mic_silent_live:7"]')).toBeNull();
-  h.emit('recording-state-changed', { state: 'recording', generation: 7, error: null }); await h.settle(0);
+  await h.settle(499);
+  expect(reads).toBe(1);
+  await h.settle(1);
+  expect(reads).toBe(2);
+  expect(h.get('.pill-root').dataset.state).toBe('idle');
   expect(h.get('[data-key="mic_silent_live:7"]')).not.toBeNull();
+  await h.settle(5000);
+  expect(reads).toBe(2);
+  expect(h.root.textContent).not.toContain('×2');
 });
 
 it.each(['transcribing', 'recording'])('ignores late same-generation %s hydration after timeout and recovery handoff', async state => {
@@ -123,7 +130,7 @@ it('does not release ownership when a recording error replaces the held warning'
   failedLiveHydration('reject'); await h.settle(0); h.invoke.mockClear();
   h.emit('recording-state-changed', { state: 'error', generation: 7, error: 'unavailable' }); await h.settle(0);
   expect(h.get('.pill-root').dataset.state).toBe('error');
-  expect(h.invoke).toHaveBeenCalledWith('pill_feedback_visible', { visible: true, epoch: 1 });
+  expect(h.invoke.mock.calls.filter(([command]) => command === 'pill_feedback_visible')).toEqual([]);
   expect(h.invoke).not.toHaveBeenCalledWith('pill_feedback_visible', { visible: false, epoch: 1 });
 });
 

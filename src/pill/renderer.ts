@@ -41,7 +41,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let pick: { kind: QuickKind; from: 'peek' | 'start'; y: number; height: number; selected: number; width: number } | undefined;
   let quickPending = false, clickPending = false;
   const pickGuard = new PickGuard();
-  let feedbackOwned = false, polished = false, pastedLeft = 2400, pastedSince = 0;
+  let polished = false, pastedLeft = 2400, pastedSince = 0;
   const stack = new StackView(dom.root, {
     wake: () => wake(), changed: () => sync(),
     call: c => deps.actions.card?.(c) ?? Promise.reject(new Error('Unavailable')),
@@ -234,8 +234,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.root.dataset.platform = deps.mac ? 'macos' : 'windows';
     dom.root.dataset.reducedMotion = String(reduced);
     dom.surface.hidden = mode === 'never' || (rest && mode !== 'always' && !stack.present);
-    const owns = mode !== 'never' && (stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state));
-    if (owns !== feedbackOwned) { feedbackOwned=owns; void deps.actions.feedbackVisible?.(owns).catch(() => {}); }
+    deps.actions.feedbackChanged?.(mode !== 'never' && (stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state)));
     dom.root.dataset.visible = String(!dom.surface.hidden);
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
     dom.get<HTMLElement>('.core').classList.toggle('bad', !machine.context.mic.ok);
@@ -566,7 +565,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       contextText(); if (pick) renderPick(); sync(); },
     closeQuick() { if (pick) closePick(); else if (machine.state === 'peek') rest(); },
     get feedbackActive() { return stack.active; },
-    get feedbackOwned() { return feedbackOwned; },
     observeRecordingGeneration(generation: number) {
       if (!machine.observeRecordingGeneration(generation)) return false;
       // Hydration may learn about a newer take only after readiness flushed old status.
@@ -587,7 +585,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       this.feedback(recoveryCard(value,performance.now()),value.generation >= latest);
     },
     withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },
-    note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.takeGeneration)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
+    // A retry may confirm a held note's take without changing the recording UI.
+    note(value: DictationNote, recordingGeneration = machine.recording ? machine.takeGeneration : undefined) {
+      if (value.kind === 'mic_silent_live' && value.generation !== recordingGeneration) return;
+      if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value), false);
+    },
     tooShort(value: RecordingTooShort) { if (machine.observeGeneration(value.generation)) this.feedback(shortCard(value)); },
     notice(value: IslandNotice) {
       if (value.kind === "long_silence" && !machine.recording) return;
