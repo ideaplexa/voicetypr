@@ -310,7 +310,12 @@ pub(crate) fn send<R: tauri::Runtime>(
     }
 }
 #[tauri::command]
-pub fn pill_feedback_ready(app: AppHandle) {
+pub async fn pill_feedback_ready(app: AppHandle) {
+    // Live-state locks may be contended; do not block the UI thread or an async
+    // executor thread while draining. The command still awaits complete replay.
+    let _ = tauri::async_runtime::spawn_blocking(move || drain_feedback(app)).await;
+}
+fn drain_feedback(app: AppHandle) {
     use tauri::Emitter;
     if !OUTBOX.lock().unwrap().begin_flush() {
         return;
