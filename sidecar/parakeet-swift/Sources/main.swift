@@ -1789,7 +1789,7 @@ struct ParakeetSidecar {
             } catch {
                 sendError(
                     "model_load_error",
-                    message: "Failed to load Nemotron Multilingual: \(error.localizedDescription)",
+                    message: "Failed to load Nemotron 3.5: \(error.localizedDescription)",
                     encoder: encoder
                 )
                 return
@@ -2792,7 +2792,7 @@ struct ParakeetSidecar {
 
             case "nemotron_multilingual":
                 guard let manager = nemotronMultilingualManager else {
-                    sendError("model_not_loaded", message: "Nemotron Multilingual is not loaded", encoder: encoder)
+                    sendError("model_not_loaded", message: "Nemotron 3.5 is not loaded", encoder: encoder)
                     return
                 }
                 await manager.reset()

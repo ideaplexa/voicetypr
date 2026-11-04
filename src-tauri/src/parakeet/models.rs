@@ -166,7 +166,7 @@ pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
         },
         ParakeetModelDefinition {
             id: "nemotron-multilingual-1120ms",
-            display_name: "Nemotron Multilingual",
+            display_name: "Nemotron 3.5",
             repo_id: "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
             cache_subdir: "nemotron-multilingual/multilingual/1120ms",
             description: "Native multilingual streaming with language detection",
