@@ -91,16 +91,16 @@ export const mainNavScreens: ScreenDefinition[] = [
 
 export const tuningNavScreens: ScreenDefinition[] = [
   {
+    id: "recording",
+    label: "Recording",
+    icon: Mic,
+    description: "Microphone, shortcut, and recording behavior.",
+  },
+  {
     id: "transcription",
     label: "Transcription",
     icon: AudioLines,
     description: "Choose a transcription source.",
-  },
-  {
-    id: "polish",
-    label: "Polish",
-    icon: Sparkles,
-    description: "Configure AI cleanup and writing tools.",
   },
   {
     id: "dictionary",
@@ -109,10 +109,10 @@ export const tuningNavScreens: ScreenDefinition[] = [
     description: "Words, corrections, and snippets.",
   },
   {
-    id: "recording",
-    label: "Recording",
-    icon: Mic,
-    description: "Microphone, shortcut, and recording behavior.",
+    id: "polish",
+    label: "Polish",
+    icon: Sparkles,
+    description: "Configure AI cleanup and writing tools.",
   },
 ];
 
