@@ -570,7 +570,7 @@ describe("EnhancementsSection", () => {
     expect(screen.queryByRole("region", { name: "Style" })).not.toBeInTheDocument();
   });
 
-  it("changes the default style and its illustrative result", async () => {
+  it("changes the default style without an illustrative example", async () => {
     aiSettingsResponse = { ...enabledAISettings, enabled: true };
     vi.mocked(hasApiKey).mockImplementation(async (providerId: string) => providerId === "openai");
     const user = userEvent.setup();
@@ -579,8 +579,10 @@ describe("EnhancementsSection", () => {
     await user.click(screen.getByRole("button", { name: "Writing" }));
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Writing" } });
-      expect(screen.getByText("Let's meet on Wednesday to review the draft.")).toBeInTheDocument();
     });
+    expect(screen.getByText("For your info: results depend on the selected provider and model.")).toBeInTheDocument();
+    expect(screen.queryByText("You said")).not.toBeInTheDocument();
+    expect(screen.queryByText("You get")).not.toBeInTheDocument();
   });
 
   it("shows cloud and local setup tabs when Polish is unconfigured", async () => {

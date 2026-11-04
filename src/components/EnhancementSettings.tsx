@@ -5,7 +5,7 @@ import { Switch } from "@/components/settings/SettingsSwitch";
 import { Segmented, SettingRow, SettingsCard } from "@/components/settings/settings-ui";
 import { presetRequiresAiFormatting, type EnhancementPreset } from "@/types/ai";
 import type { AppFormattingRule, WritingSettings } from "@/types/writing";
-import { ArrowRight, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 
 interface EnhancementSettingsProps {
@@ -21,13 +21,13 @@ interface EnhancementSettingsProps {
   writingSettingsDisabled?: boolean;
 }
 
-const modes: { value: EnhancementPreset; label: string; example: string }[] = [
-  { value: "PersonalDictation", label: "Off", example: "so um I think we should uh meet on Tuesday no wait Wednesday and bring the draft" },
-  { value: "CleanDictation", label: "Clean", example: "I think we should meet on Wednesday and bring the draft." },
-  { value: "Writing", label: "Writing", example: "Let's meet on Wednesday to review the draft." },
-  { value: "Notes", label: "Notes", example: "Meeting: Wednesday. Bring the draft." },
-  { value: "Message", label: "Message", example: "Let's meet Wednesday. Please bring the draft!" },
-  { value: "Code", label: "Code", example: "// Meet on Wednesday and bring the draft." },
+const modes: { value: EnhancementPreset; label: string }[] = [
+  { value: "PersonalDictation", label: "Off" },
+  { value: "CleanDictation", label: "Clean" },
+  { value: "Writing", label: "Writing" },
+  { value: "Notes", label: "Notes" },
+  { value: "Message", label: "Message" },
+  { value: "Code", label: "Code" },
 ];
 
 export function EnhancementSettings({
@@ -36,7 +36,6 @@ export function EnhancementSettings({
   disabled = false, writingSettingsDisabled = disabled,
 }: EnhancementSettingsProps) {
   const rules = writingSettings.app_formatting_rules;
-  const selectedExample = modes.find((mode) => mode.value === preset)?.example ?? modes[0].example;
   const updateRule = (index: number, patch: Partial<AppFormattingRule>) => {
     onWritingSettingsChange({
       app_formatting_rules: rules.map((rule, current) => current === index ? { ...rule, ...patch } : rule),
@@ -54,18 +53,7 @@ export function EnhancementSettings({
               disabled: disabled || (!aiFormattingEnabled && presetRequiresAiFormatting(mode.value) && preset !== mode.value) }))} />
         </div>
       }>
-        <div className="mt-[14px] grid items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr]">
-          <div className="rounded-[10px] bg-muted p-3.5">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">You said</p>
-            <p className="mt-1.5 text-[13px] leading-[19px] text-muted-foreground">so um I think we should uh meet on Tuesday no wait Wednesday and bring the draft</p>
-          </div>
-          <ArrowRight className="hidden size-4 self-center text-muted-foreground sm:block" aria-hidden="true" />
-          <div className="rounded-[10px] bg-sage-bg p-3.5">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">You get</p>
-            <p className="mt-1.5 text-[13px] leading-[19px] text-muted-foreground">{selectedExample}</p>
-          </div>
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">Illustrative example; your results depend on the selected provider.</p>
+        <p className="mt-3 text-xs text-muted-foreground">For your info: results depend on the selected provider and model.</p>
       </SettingsCard>
     </section>
 
