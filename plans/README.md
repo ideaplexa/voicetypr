@@ -27,6 +27,8 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
+Update prompt / What's new follow-up — IN PROGRESS — claimed Droid update-prompt worker: founder-approved short native prompt, installed-release manifest highlights, full-notes links and release workflow separation; branch `feat/update-prompt-notes`. Supersedes plan 082's full-body-in-manifest decision only.
+
 Current audio/streaming continuation: [Plan 069](069-handy-informed-audio-streaming-recovery.md)
 and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcile
 the historical research and plan statuses against the integration application
