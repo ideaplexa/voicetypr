@@ -97,3 +97,6 @@
   go in `plans/SMOKE.md`; `NEEDS-SMOKE` means code-frozen and unverified.
 - Any code change after a beta is published needs a new `X.Y.Z-beta.N+1`.
   Stable promotes the tested final beta without unrelated changes.
+- Every release must be significant (founder rule): batch finished work into
+  one beta instead of shipping one small fix at a time, since each release
+  goes through the full build, check and publish steps.
