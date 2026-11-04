@@ -173,9 +173,6 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     const requestedEpoch = typeof epoch === 'number' ? epoch : 0;
     await call('pill_feedback_ready', { epoch: requestedEpoch }).catch(() => {});
     if (destroyed) return;
-    feedbackEpoch = requestedEpoch;
-    for (const queued of pendingFeedback.splice(0)) if (queued.epoch === feedbackEpoch) queued.run();
-    if (feedbackQueued !== undefined) void feedbackVisible(feedbackQueued);
     const statePromise = call<RecordingStatePayload>('get_current_recording_state');
     void readSettings();
     void readQuick();
@@ -184,6 +181,12 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
       // Hydration cannot overwrite an event received while the command was in flight.
       if (!destroyed && !recordingEventReceived && state?.state) recordingState(state);
     } catch { /* Real events remain authoritative. */ }
+    if (destroyed) return;
+    // Live warnings require the hydrated Recording state. Keep feedback
+    // buffered through hydration, including events arriving while it awaits.
+    feedbackEpoch = requestedEpoch;
+    for (const queued of pendingFeedback.splice(0)) if (queued.epoch === feedbackEpoch) queued.run();
+    if (feedbackQueued !== undefined) void feedbackVisible(feedbackQueued);
   });
   return { destroy() { destroyed = true; settingsRevision++; quickRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop()); island.destroy(); } };
 }

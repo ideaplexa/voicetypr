@@ -23,6 +23,44 @@ it('buffers tagged replay until readiness identifies the renderer epoch', async 
   expect(h.invoke).toHaveBeenCalledWith('pill_feedback_visible', { visible: true, epoch: 1 });
 });
 
+it('hydrates Recording before replaying a rebuilt live warning in a replacement renderer', async () => {
+  h = pillHarness();
+  let hydrate!: (state: { state: string; generation: number; error: null }) => void;
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready') {
+      if (args?.epoch !== undefined) h.emit('dictation-note', { generation: 7, kind: 'mic_silent_live', renderer_epoch: 1 });
+      return 1;
+    }
+    if (command === 'get_current_recording_state') return new Promise(resolve => { hydrate = resolve; });
+    return null;
+  });
+  await h.settle(0);
+  expect(h.get('[data-key="mic_silent_live:7"]')).toBeNull();
+  // No Recording event was received by this renderer; only hydration can
+  // establish the state required to accept the backend's rebuilt warning.
+  hydrate({ state: 'recording', generation: 7, error: null }); await h.settle(100);
+  expect(h.get('.pill-root').dataset.state).toBe('listening');
+  expect(h.get('[data-key="mic_silent_live:7"]')).not.toBeNull();
+});
+
+it('uses a newer stop event instead of stale Recording hydration before replay', async () => {
+  h = pillHarness();
+  let hydrate!: (state: { state: string; generation: number; error: null }) => void;
+  h.invoke.mockImplementation(async (command, args?: { epoch?: number }) => {
+    if (command === 'pill_feedback_ready') {
+      if (args?.epoch !== undefined) h.emit('dictation-note', { generation: 7, kind: 'mic_silent_live', renderer_epoch: 1 });
+      return 1;
+    }
+    if (command === 'get_current_recording_state') return new Promise(resolve => { hydrate = resolve; });
+    return null;
+  });
+  await h.settle(0);
+  h.emit('recording-state-changed', { state: 'idle', generation: 7, error: null });
+  hydrate({ state: 'recording', generation: 7, error: null }); await h.settle(100);
+  expect(h.get('[data-key="mic_silent_live:7"]')).toBeNull();
+  expect(h.get('.pill-root').dataset.state).toBe('idle');
+});
+
 it('rejects old-epoch publications and removals after replacement readiness', async () => {
   h = pillHarness();
   h.invoke.mockImplementation(async command => command === 'pill_feedback_ready' ? 2 : null);
