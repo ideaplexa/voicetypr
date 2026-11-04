@@ -31,7 +31,8 @@ try {
       const failures = [];
       let checked = 0;
       for (const anchor of ['bottom-left', 'bottom-center', 'bottom-right', 'top-left', 'top-center', 'top-right']) {
-        for (const details of ['compact', 'smart', 'expanded']) {
+        // Smart/expanded are identical here: both set show_start_card=true.
+        for (const details of ['compact', 'expanded']) {
           for (const depth of [0, 1, 2, 3]) {
             const label = `${anchor}/${details}/depth=${depth}`;
             let regions = [], actionRects = [];
@@ -134,7 +135,7 @@ try {
     checked += result.checked;
     await page.close();
   }
-  console.log(`PASS: ${checked} rendered card actions; 144 anchor/start-detail/stack/scale cases.`);
+  console.log(`PASS: ${checked} rendered card actions; 96 anchor/start-detail/stack/scale cases.`);
 } finally {
   await browser?.close();
   await server.close();

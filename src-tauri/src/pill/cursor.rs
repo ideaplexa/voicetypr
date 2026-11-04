@@ -124,27 +124,20 @@ pub(super) fn reset(app: &AppHandle) {
 mod tests {
     use super::*;
     #[test]
-    fn stationary_polls_never_reassert_the_cursor() {
-        assert_eq!(change(true, true, false, false), Change::Hand);
-        for _ in 0..300 {
-            assert_eq!(change(true, true, true, true), Change::None);
+    fn cursor_transitions_claim_once_and_release_only_our_unchanged_hand() {
+        for ((interactive, frontmost, owned, is_hand), expected) in [
+            ((true, true, false, false), Change::Hand),
+            ((true, false, false, false), Change::None),
+            ((false, true, false, false), Change::None),
+            ((true, true, true, true), Change::None),
+            ((true, true, true, false), Change::None),
+            ((false, false, true, true), Change::Arrow),
+            ((true, false, true, true), Change::Arrow),
+            ((false, false, true, false), Change::None),
+            ((false, false, false, true), Change::None),
+            ((false, false, false, false), Change::None),
+        ] {
+            assert_eq!(change(interactive, frontmost, owned, is_hand), expected);
         }
-        assert_eq!(change(false, false, true, true), Change::Arrow);
-        assert_eq!(change(false, false, false, false), Change::None);
-    }
-    #[test]
-    fn non_key_island_claims_only_its_interactive_frontmost_region() {
-        assert_eq!(change(true, true, false, false), Change::Hand);
-        assert_eq!(change(true, false, false, false), Change::None);
-        assert_eq!(change(false, true, false, false), Change::None);
-        assert_eq!(change(true, true, true, true), Change::None);
-        assert_eq!(change(true, true, true, false), Change::None);
-    }
-    #[test]
-    fn leaving_hiding_or_occluding_releases_only_our_unchanged_hand() {
-        assert_eq!(change(false, false, true, true), Change::Arrow);
-        assert_eq!(change(true, false, true, true), Change::Arrow);
-        assert_eq!(change(false, false, true, false), Change::None);
-        assert_eq!(change(false, false, false, true), Change::None);
     }
 }

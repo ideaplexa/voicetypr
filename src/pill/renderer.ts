@@ -499,7 +499,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
           .finally(() => { quickPending = false; if (!destroyed && pick === active) renderPick(); });
       };
     }
+    buttonRects = undefined;
+    wake(); // Replaced/disabled picker rows invalidate native action targets.
   };
+  dom.get<HTMLElement>('.pick-list').onscroll = () => { buttonRects = undefined; wake(); };
   const openPick = (kind: QuickKind, chip: HTMLElement) => {
     if (!quick || !deps.actions.quickSet || !['peek', 'start'].includes(machine.state)) return;
     if (machine.state === 'start' && (kind !== 'polish' || !machine.context.polish.style)) return;

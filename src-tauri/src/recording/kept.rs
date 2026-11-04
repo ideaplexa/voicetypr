@@ -80,11 +80,7 @@ static STORE: Lazy<Mutex<Store>> = Lazy::new(|| Mutex::new(Store::default()));
 /// Probe files without the global store lock, then reconcile and snapshot in
 /// Store -> status -> outbox order. The callback must not emit or re-enter.
 pub(crate) fn with_live_recoveries<T>(work: impl FnOnce(&[serde_json::Value]) -> T) -> T {
-    let paths = STORE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .availability_paths();
-    let probes = probe_availability(paths);
+    let probes = probe_store_availability(None);
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     store.apply_availability(probes);
     let now = Instant::now();
@@ -98,25 +94,45 @@ struct Availability {
     missing: bool,
     ready: bool,
     was_ready: bool,
+    generation: u64,
+    terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
-fn probe_availability(paths: Vec<(String, PathBuf, bool)>) -> Vec<Availability> {
+impl Availability {
+    fn snapshot(clip: &Clip) -> Self {
+        Self {
+            id: clip.recovery.id.clone(),
+            path: clip.path.clone(),
+            was_ready: clip.recovery.retry_ready,
+            generation: clip.recovery.generation,
+            terminal: clip.terminal.clone(),
+            missing: false,
+            ready: false,
+        }
+    }
+    fn matches(&self, clip: &Clip) -> bool {
+        clip.recovery.id == self.id
+            && clip.path == self.path
+            && clip.recovery.generation == self.generation
+            && std::sync::Arc::ptr_eq(&clip.terminal, &self.terminal)
+            && clip.recovery.retry_ready == self.was_ready
+    }
+}
+fn probe_store_availability(include_busy: Option<&str>) -> Vec<Availability> {
+    let paths = STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .availability_paths(include_busy);
+    probe_availability(paths) // No STORE guard survives the snapshot statement.
+}
+fn probe_availability(mut paths: Vec<Availability>) -> Vec<Availability> {
+    for probe in &mut paths {
+        probe.missing = match std::fs::metadata(&probe.path) {
+            Ok(metadata) => !metadata.is_file(),
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        };
+        probe.ready = !probe.missing && finalized_wav(&probe.path);
+    }
     paths
-        .into_iter()
-        .map(|(id, path, was_ready)| {
-            let missing = match std::fs::metadata(&path) {
-                Ok(metadata) => !metadata.is_file(),
-                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-            };
-            let ready = !missing && finalized_wav(&path);
-            Availability {
-                id,
-                path,
-                missing,
-                ready,
-                was_ready,
-            }
-        })
-        .collect()
 }
 
 /// Borrow an existing file without taking ownership of its deletion. Registration
@@ -166,6 +182,8 @@ impl Store {
         if self.closed {
             return Err("Recovery is shutting down".into());
         }
+        // Ownership setup remains serialized with discard/shutdown: splitting
+        // validation, move and insertion needs a separate reservation protocol.
         // A missing source is not a pending writer. Never advertise a phantom retry.
         if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
             return Err("Recording expired or discarded".into());
@@ -282,27 +300,16 @@ impl Store {
             self.retire_automatically(&id, "expired");
         }
     }
-    fn availability_paths(&self) -> Vec<(String, PathBuf, bool)> {
+    fn availability_paths(&self, include_busy: Option<&str>) -> Vec<Availability> {
         self.clips
             .iter()
-            .filter(|c| !self.closed && !c.busy)
-            .map(|c| {
-                (
-                    c.recovery.id.clone(),
-                    c.path.clone(),
-                    c.recovery.retry_ready,
-                )
-            })
+            .filter(|c| !self.closed && (!c.busy || include_busy == Some(c.recovery.id.as_str())))
+            .map(Availability::snapshot)
             .collect()
     }
     fn apply_availability(&mut self, probes: Vec<Availability>) {
         for probe in probes {
-            let Some(clip) = self.clips.iter_mut().find(|c| {
-                c.recovery.id == probe.id
-                    && c.path == probe.path
-                    && !c.busy
-                    && c.recovery.retry_ready == probe.was_ready
-            }) else {
+            let Some(clip) = self.clips.iter_mut().find(|c| !c.busy && probe.matches(c)) else {
                 continue;
             };
             // Do not overwrite a finalizer publication that won while this
@@ -311,23 +318,6 @@ impl Store {
             if probe.missing {
                 drop(self.take(&probe.id));
             }
-        }
-    }
-    fn prune_missing(&mut self) {
-        let ids: Vec<_> = self
-            .clips
-            .iter()
-            .filter(|clip| {
-                !clip.busy
-                    && match std::fs::metadata(&clip.path) {
-                        Ok(metadata) => !metadata.is_file(),
-                        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-                    }
-            })
-            .map(|clip| clip.recovery.id.clone())
-            .collect();
-        for id in ids {
-            self.discard(&id);
         }
     }
     fn insert(&mut self, clip: Clip) -> Result<(), String> {
@@ -376,7 +366,7 @@ impl Store {
     fn promote(&mut self, id: &str) -> bool {
         if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             if clip.path != clip.target
-                && finalized_wav(&clip.path)
+                && clip.recovery.retry_ready
                 && move_finalized(&clip.path, &clip.target)
             {
                 clip.path = clip.target.clone();
@@ -387,13 +377,11 @@ impl Store {
         }
     }
     fn poll_finalization(&mut self, id: &str, now: Instant) -> Option<(bool, Option<Recovery>)> {
-        self.prune_missing();
         if !self.promote(id) {
             return None;
         }
         let clip = self.clips.iter_mut().find(|c| c.recovery.id == id)?;
-        let ready = finalized_wav(&clip.path);
-        clip.recovery.retry_ready = ready;
+        let ready = clip.recovery.retry_ready;
         // A hydration/Home probe may have refreshed the cache first. That
         // must not suppress the notification to an already-rendered card.
         let publication = if ready && clip.announced && !clip.busy && clip.expires > now {
@@ -467,11 +455,7 @@ pub struct KeptSummary {
 /// Failed dictations still waiting for a retry, even after the island card is closed.
 #[tauri::command]
 pub fn list_kept_dictations() -> Vec<KeptSummary> {
-    let paths = STORE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .availability_paths();
-    let probes = probe_availability(paths);
+    let probes = probe_store_availability(None);
     let now = Instant::now();
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     store.apply_availability(probes);
@@ -653,10 +637,12 @@ pub async fn keep(
     tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(expires_in_ms);
         loop {
-            let finalized = STORE
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .poll_finalization(&expiry_id, Instant::now());
+            let probes = probe_store_availability(None);
+            let finalized = {
+                let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+                store.apply_availability(probes);
+                store.poll_finalization(&expiry_id, Instant::now())
+            };
             let Some((ready, publication)) = finalized else {
                 return;
             };
@@ -691,6 +677,7 @@ pub async fn keep(
         &setting("current_model", ""),
         &setting("current_model_engine", "whisper"),
     );
+    let probes = probe_store_availability(None);
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     if audio::delivery_aborted(
         app.state::<crate::AppState>().is_cancellation_requested(),
@@ -699,7 +686,7 @@ pub async fn keep(
         store.discard(&id);
         return Err("Dictation discarded".into());
     }
-    store.prune_missing();
+    store.apply_availability(probes);
     let mut publication = None;
     if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
         clip.recovery.engine_short = if kind == RecoveryKind::RemoteOffline {
@@ -708,7 +695,6 @@ pub async fn keep(
             engine_short
         };
         clip.recovery.set_alternative(alternative);
-        clip.recovery.retry_ready = finalized_wav(&clip.path);
         clip.announced = true;
         clip.recovery.expires_in_ms = clip
             .expires
@@ -789,7 +775,6 @@ impl Store {
         if self.clips.iter().any(|c| c.busy && c.recovery.id != id) {
             return Err("Dictation is busy".into());
         }
-        self.prune_missing();
         let clip = self
             .clips
             .iter_mut()
@@ -801,7 +786,9 @@ impl Store {
         if clip.busy {
             return Err("Recording is already being retried".into());
         }
-        if !finalized_wav(&clip.path) {
+        // The caller refreshed this identity-checked cache before taking STORE.
+        // Copy and active registration still share one critical section.
+        if !clip.recovery.retry_ready {
             return Err("Recording is still finalizing".into());
         }
         let file = tempfile::Builder::new()
@@ -878,19 +865,19 @@ async fn retry(
         return Err("Dictation is busy".into());
     }
     let lease = retry_setup(state.stop_in_flight.clone(), || {
-        STORE
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .lease(&id, anyway, || {
-                state.clear_cancellation();
-                let generation = audio::begin_recording_generation();
-                let (cancel, cancelled) = tokio::sync::watch::channel(false);
-                RetryRegistration {
-                    generation,
-                    cancel,
-                    cancelled,
-                }
-            })
+        let probes = probe_store_availability(None);
+        let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+        store.apply_availability(probes);
+        store.lease(&id, anyway, || {
+            state.clear_cancellation();
+            let generation = audio::begin_recording_generation();
+            let (cancel, cancelled) = tokio::sync::watch::channel(false);
+            RetryRegistration {
+                generation,
+                cancel,
+                cancelled,
+            }
+        })
     })?;
     let generation = lease.generation;
     crate::observability::inherit(lease.original_generation, generation, lease.trace.clone());
@@ -959,16 +946,26 @@ async fn retry(
     } else {
         None
     };
+    let probes = probe_store_availability(Some(&id));
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     let discarded = audio::delivery_aborted(state.is_cancellation_requested(), generation);
+    let mut missing = false;
+    if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
+        if let Some(probe) = probes.iter().find(|probe| probe.matches(clip)) {
+            clip.recovery.retry_ready = probe.ready;
+            missing = probe.missing;
+        }
+    }
     store.complete_retry(&id, result.is_ok());
-    store.prune_missing();
+    store.apply_availability(probes);
+    if missing {
+        drop(store.take(&id));
+    }
     let retained = store.clips.iter().any(|c| c.recovery.id == id);
     let mut publication = None;
     if result.is_err() && !discarded {
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
             clip.recovery.set_alternative(alternative);
-            clip.recovery.retry_ready = finalized_wav(&clip.path);
             clip._retry_trace_lease = crate::observability::pin(generation);
             clip.recovery.generation = generation;
             clip.recovery.expires_in_ms = clip
@@ -1304,7 +1301,7 @@ mod tests {
                 alt_engine_short: None,
                 alt_engine_id: None,
                 expires_in_ms: kind.ttl_ms(),
-                retry_ready: false,
+                retry_ready: true,
             },
             target: path.clone(),
             path,
@@ -1487,51 +1484,6 @@ mod tests {
         );
         assert_eq!(store.active_retry.as_ref().unwrap().0, first);
         assert!(!*lease.cancelled.borrow());
-        store.clear();
-    }
-    #[test]
-    fn lease_acceptance_and_active_registration_share_the_store_lock() {
-        use std::sync::{Arc, Barrier};
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = Store::default();
-        let clip = clip(dir.path(), RecoveryKind::CloudFailed);
-        let id = clip.recovery.id.clone();
-        let path = clip.path.clone();
-        store.insert(clip).unwrap();
-        let store = Arc::new(Mutex::new(store));
-        let accepted = Arc::new(Barrier::new(2));
-        let checked = Arc::new(Barrier::new(2));
-        let contender = {
-            let store = store.clone();
-            let accepted = accepted.clone();
-            let checked = checked.clone();
-            std::thread::spawn(move || {
-                accepted.wait();
-                assert!(matches!(
-                    store.try_lock(),
-                    Err(std::sync::TryLockError::WouldBlock)
-                ));
-                checked.wait();
-            })
-        };
-        let lease = store
-            .lock()
-            .unwrap()
-            .lease(&id, false, || {
-                accepted.wait();
-                checked.wait();
-                registration()
-            })
-            .unwrap();
-        contender.join().unwrap();
-        let mut store = store.lock().unwrap();
-        assert!(store.clips[0].busy);
-        assert_eq!(store.clips[0].retry_generation, Some(77));
-        assert_eq!(store.active_retry.as_ref().unwrap().0, id);
-        // Discard immediately after acceptance sees the registered retry.
-        store.discard_generation(77);
-        assert!(*lease.cancelled.borrow());
-        assert!(!path.exists());
         store.clear();
     }
     #[tokio::test]

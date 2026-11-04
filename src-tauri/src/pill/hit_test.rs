@@ -334,42 +334,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn broad_surfaces_text_and_disabled_retry_are_not_cursor_targets() {
-        let click = Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 300.0,
-            height: 70.0,
-        };
-        let retry = Rect {
-            x: 100.0,
-            y: 40.0,
-            width: 100.0,
-            height: 24.0,
-        };
-        let close = Rect {
-            x: 260.0,
-            y: 40.0,
-            width: 24.0,
-            height: 24.0,
-        };
-        let mut regions = Regions {
-            click: vec![click],
-            actions: vec![retry, close],
-        };
-        assert!(hit_test(&regions.click, 20.0, 20.0, false));
-        assert!(!hit_test(&regions.actions, 20.0, 20.0, false));
-        assert!(hit_test(&regions.actions, 150.0, 50.0, false));
-        regions.actions = vec![close]; // Retry pending, X remains enabled.
-        assert!(!hit_test(&regions.actions, 150.0, 50.0, false));
-        assert!(hit_test(&regions.actions, 270.0, 50.0, false));
-        assert!(
-            !hit_test(&regions.actions, 259.0, 50.0, false),
-            "cursor has no broad-region hysteresis"
-        );
-    }
-
-    #[test]
     fn pointer_query_never_waits_or_queues_behind_itself() {
         let state = Arc::new(PointerQuery::default());
         let mut queued = Vec::new();

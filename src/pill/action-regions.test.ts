@@ -32,6 +32,17 @@ it('clips to click-through surfaces and clears on hide/empty regions', () => {
   root.hidden = true;
   expect(enabledActionRects(root, [surface])).toEqual([]);
 });
+it('intersects every scrolling ancestor and drops fully clipped picker rows', () => {
+  const root = document.createElement('div');
+  root.innerHTML = '<div style="overflow-x:hidden"><div class="pick-list" style="overflow-y:auto"><button>Partial</button><button>Outside</button></div></div>';
+  document.body.append(root);
+  root.firstElementChild!.getBoundingClientRect = () => new DOMRect(70, 10, 80, 90);
+  root.querySelector('.pick-list')!.getBoundingClientRect = () => new DOMRect(60, 40, 120, 40);
+  const buttons = root.querySelectorAll('button');
+  buttons[0].getBoundingClientRect = () => new DOMRect(50, 30, 130, 60);
+  buttons[1].getBoundingClientRect = () => new DOMRect(50, 5, 130, 20);
+  expect(enabledActionRects(root, [surface])).toEqual([{ x: 70, y: 40, width: 80, height: 40 }]);
+});
 it('excludes transparent outgoing layers and noninteractive ghosts', () => {
   const root = fixture(), retry = root.querySelector('button')!;
   retry.parentElement!.style.opacity = '0';

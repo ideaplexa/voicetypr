@@ -1,6 +1,6 @@
 use super::*;
 fn snapshots(store: &mut Store, now: Instant) -> Vec<serde_json::Value> {
-    let probes = probe_availability(store.availability_paths());
+    let probes = probe_availability(store.availability_paths(None));
     store.apply_availability(probes);
     store.expire(now);
     store.live_recoveries(now)
@@ -54,8 +54,8 @@ fn live_writer_is_kept_but_only_finalized_audio_offers_retry() {
     );
     assert!(source.exists(), "pending audio must not be lost");
     writer.finalize().unwrap();
-    assert!(store.promote(&recovery.id));
     assert!(snapshots(&mut store, Instant::now())[0]["retry_ready"] == true);
+    assert!(store.promote(&recovery.id));
     assert!(store.clips[0].path.exists());
     store.clear();
 }
@@ -139,7 +139,7 @@ fn old_unlocked_probe_cannot_overwrite_a_finalizer_readiness_publication() {
     store
         .retain(dir.path(), &source, 7, RecoveryKind::Integrity)
         .unwrap();
-    let probes = probe_availability(store.availability_paths());
+    let probes = probe_availability(store.availability_paths(None));
     writer.finalize().unwrap();
     // A finalizer can publish readiness without moving the source (e.g. rename fails).
     store.clips[0].recovery.retry_ready = true;
@@ -159,7 +159,7 @@ fn a_probe_winning_the_cache_race_does_not_suppress_finalization_notification() 
         .unwrap();
     store.clips[0].announced = true; // The renderer currently has a finishing card.
     writer.finalize().unwrap();
-    let probes = probe_availability(store.availability_paths());
+    let probes = probe_availability(store.availability_paths(None));
     store.apply_availability(probes);
     assert!(store.clips[0].recovery.retry_ready);
     let (ready, publication) = store
