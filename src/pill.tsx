@@ -28,7 +28,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   const setTimer = deps.setTimeout ?? setTimeout, clearTimer = deps.clearTimeout ?? clearTimeout;
   let hydrationTimer: ReturnType<typeof setTimer> | undefined;
   let finishHydration: (() => void) | undefined;
-  let destroyed = false, settingsRevision = 0, recordingEventReceived = false, geometryReceived = false;
+  let destroyed = false, settingsRevision = 0, geometryReceived = false;
   const subscriptions: Promise<void>[] = [];
   const unlisteners: Array<() => void> = [];
   type Regions = Array<{ x: number; y: number; width: number; height: number }>;
@@ -129,23 +129,24 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   // True while the window was shown for a Starting that has not reached Recording yet.
   let shownForStart = false;
   let recordingStateKnown = false, liveNote: DictationNote | undefined;
-  let retriedHydration = false;
   let liveNoteTimer: ReturnType<typeof setTimer> | undefined;
   const dropLiveNote = () => {
     if (liveNoteTimer !== undefined) clearTimer(liveNoteTimer);
+    const dropped = liveNote;
     liveNoteTimer = undefined; liveNote = undefined;
+    if (dropped && !island.feedbackActive && !island.feedbackOwned) void feedbackVisible(false);
   };
   const knownRecordingState = () => {
     recordingStateKnown = true;
-    const note = liveNote; dropLiveNote();
-    if (note) island.note(note); // Existing state/generation checks drop obsolete notes.
+    if (liveNote) island.note(liveNote); // Existing state/generation checks drop obsolete notes.
+    dropLiveNote(); // Reconcile only after the note has been displayed or rejected.
   };
   const note = (value: DictationNote) => {
     if (value.kind === 'mic_silent_live' && !recordingStateKnown && !island.machine.recording) {
       if (value.generation < Math.max(island.machine.takeGeneration, island.machine.latestRecordingGeneration, liveNote?.generation ?? 0)) return;
-      dropLiveNote(); liveNote = value;
+      if (liveNoteTimer !== undefined) clearTimer(liveNoteTimer);
+      liveNote = value;
       liveNoteTimer = setTimer(dropLiveNote, 2000);
-      if (feedbackEpoch !== undefined && !retriedHydration) { retriedHydration = true; void hydrateRecordingState(); }
     } else island.note(value);
   };
   const recordingState = (payload: RecordingStatePayload) => {
@@ -168,10 +169,10 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     return true;
   };
   const hydrateRecordingState = () => call<RecordingStatePayload>('get_current_recording_state').then(state => {
-    // The first accepted snapshot or event wins over any late hydration response.
-    if (!destroyed && !recordingStateKnown && state?.state && recordingState(state)) knownRecordingState();
+    // Only the startup request, while its release gate is still open, may set state.
+    if (!destroyed && finishHydration && !recordingStateKnown && state?.state && recordingState(state)) knownRecordingState();
   }).catch(() => { /* Real events remain authoritative. */ });
-  const recordingEvent = () => { recordingEventReceived = true; knownRecordingState(); finishHydration?.(); };
+  const recordingEvent = () => { knownRecordingState(); finishHydration?.(); };
   subscribe<PillGeometry>('pill-geometry', value => { geometryReceived = true; island.geometry(value); });
   subscribe<PillPointer>('pill-pointer', value => island.pointer(value));
   subscribe<DictationContext>('dictation-context', value => island.context(value));
@@ -205,9 +206,11 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     const requestedEpoch = typeof epoch === 'number' ? epoch : 0;
     await call('pill_feedback_ready', { epoch: requestedEpoch }).catch(() => {});
     if (destroyed) return;
-    const hydrated = new Promise<void>(resolve => { finishHydration = resolve; });
+    const hydrated = new Promise<void>(resolve => {
+      finishHydration = () => { finishHydration = undefined; resolve(); };
+    });
     hydrationTimer = setTimer(() => finishHydration?.(), 1800);
-    if (recordingEventReceived || recordingStateKnown) finishHydration?.();
+    if (recordingStateKnown) finishHydration?.();
     void hydrateRecordingState().finally(() => finishHydration?.());
     void readSettings();
     void readQuick();
@@ -215,8 +218,8 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     if (hydrationTimer !== undefined) clearTimer(hydrationTimer);
     hydrationTimer = undefined; finishHydration = undefined;
     if (destroyed) return;
-    // Live warnings require the hydrated Recording state. Keep feedback
-    // buffered through hydration, including events arriving while it awaits.
+    // Release once. An unresolved live warning may wait briefly for a real event,
+    // but no snapshot may change island state after this handoff.
     feedbackEpoch = requestedEpoch;
     for (const queued of pendingFeedback.splice(0)) if (queued.epoch === feedbackEpoch) queued.run();
     if (feedbackQueued !== undefined) void feedbackVisible(feedbackQueued);

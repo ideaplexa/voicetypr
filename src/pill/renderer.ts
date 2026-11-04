@@ -566,6 +566,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       contextText(); if (pick) renderPick(); sync(); },
     closeQuick() { if (pick) closePick(); else if (machine.state === 'peek') rest(); },
     get feedbackActive() { return stack.active; },
+    get feedbackOwned() { return feedbackOwned; },
     observeRecordingGeneration(generation: number) {
       if (!machine.observeRecordingGeneration(generation)) return false;
       // Hydration may learn about a newer take only after readiness flushed old status.
