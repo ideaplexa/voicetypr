@@ -19,7 +19,7 @@ jobs:
   # Build macOS (Apple Silicon)
   # ===========================================
   build-macos:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
