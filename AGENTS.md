@@ -11,6 +11,7 @@ decisions: `plans/MASTER-PLAN-2026-Q4.md`.
 
 ## Rules
 
+- Review and tests: use a fresh adversarial review only for risky or core changes (recording and data loss, locks and threading, native code, release and updater, security and keys, cloud engines); small UI and copy changes get a self-check with screenshots. Write tests that would catch a real regression in core behaviour; no showcase tests.
 - Follow the founder's requirements exactly; check `plans/` for the task first.
 - Never push, release or publish without the founder's explicit instruction.
   Commit locally, one git worktree per slice.
