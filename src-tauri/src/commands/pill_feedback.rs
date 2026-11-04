@@ -261,8 +261,8 @@ fn withdraw_queued_live_mic_silent(
             || payload["generation"].as_u64() != Some(generation)
             || payload["kind"].as_str() != Some("mic_silent_live")
     });
-    if !ready && queued.len() < before && queued.is_empty() {
-        owned.store(false, Ordering::SeqCst);
+    if !ready && queued.len() < before {
+        replay::release_nonvisual_replay(queued, owned);
     }
 }
 /// A withdrawal cannot acquire feedback ownership or show/reposition the native panel.
@@ -373,8 +373,8 @@ fn retire_queued_kept_id(
         *event != "dictation-recovery"
             || payload.get("id").and_then(serde_json::Value::as_str) != Some(id)
     });
-    if !ready && queued.len() < before && queued.is_empty() {
-        owned.store(false, Ordering::SeqCst);
+    if !ready && queued.len() < before {
+        replay::release_nonvisual_replay(queued, owned);
     }
 }
 pub(crate) fn retire_kept_id(id: &str) {

@@ -8,6 +8,43 @@ fn warning() -> Event {
     )
 }
 
+#[test]
+fn repeated_pre_ready_withdrawals_release_ownership_despite_removal_tombstones() {
+    let owned = AtomicBool::new(false);
+    let mut outbox = Outbox::new();
+    for _ in 0..3 {
+        outbox.enqueue(warning().0, warning().1);
+        owned.store(true, Ordering::SeqCst); // send claims ownership for this warning
+        outbox.withdraw(7, &owned);
+        assert!(!outbox.ready);
+        assert!(
+            !outbox.pending.is_empty(),
+            "ordered removals must still be retained"
+        );
+        assert!(
+            !owned.load(Ordering::SeqCst),
+            "removals are not visible feedback"
+        );
+    }
+}
+
+#[test]
+fn retirement_ignores_tombstones_but_preserves_another_visual_candidate() {
+    let owned = AtomicBool::new(true);
+    let mut outbox = Outbox::new();
+    outbox.withdraw(6, &owned);
+    outbox.enqueue("dictation-recovery", json!({"id":"kept"}));
+    outbox.enqueue(warning().0, warning().1);
+    outbox.withdraw(7, &owned);
+    assert!(owned.load(Ordering::SeqCst));
+    outbox.retire("kept", &owned);
+    assert!(!owned.load(Ordering::SeqCst));
+    assert!(outbox
+        .pending
+        .iter()
+        .all(|(event, _)| !replay::produces_ui(event)));
+}
+
 fn validate(outbox: &mut Outbox, owned: &AtomicBool, live: &[Value]) -> Option<Vec<Event>> {
     let batch = outbox.take_batch(owned)?;
     let batch = replay::revalidate(batch, 7, crate::RecordingState::Recording, None, live);
