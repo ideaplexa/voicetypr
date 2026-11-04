@@ -27,7 +27,7 @@ it.each(['mic_permission_denied', 'mic_missing', 'mic_busy'] as const)('resolves
   expect(h.get('.feedback-card')).toBeNull();
 });
 
-it('retires only mic status, keeping retry/discard and no-speech leases intact', () => {
+it('retires only mic status, keeping retry and no-speech leases intact', () => {
   const s = new FeedbackStack();
   const recovery = {generation:1,id:'kept',kind:'integrity' as const,engine_short:'Local',alt_engine_short:'Cloud',alt_engine_id:'cloud',expires_in_ms:30000};
   s.push(recoveryCard(recovery,0),0);
@@ -38,7 +38,7 @@ it('retires only mic status, keeping retry/discard and no-speech leases intact',
   s.push(noteCard({generation:1,kind:'mic_silent'}),0);
   s.resolveMicStatus('new_take',2); s.resolveMicStatus('recording',2);
   expect(s.items.map(i=>i.key)).toEqual(['recovery:kept','recovery:speech','blocked:trial_ended']);
-  expect(s.items[0].actions.map(a=>a.call.command)).toEqual(['retry_kept_dictation','discard_kept_dictation']);
+  expect(s.items[0].actions.map(a=>a.call.command)).toEqual(['retry_kept_dictation']);
   expect(s.items[1].actions[0].call.command).toBe('transcribe_anyway');
   expect(s.items[0].expiresAt).toBe(30000);
 });

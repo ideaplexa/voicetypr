@@ -2,6 +2,7 @@ import { recordEvent } from "@/lib/observability";
 import { dotCentre, pickPlacement, PickGuard, quickKinds, quickRows, quickTitles, type QuickKind, type QuickOptions } from '@/pill/quick-settings';
 import { icon } from '@/pill/icons';
 import { StackView } from '@/pill/stack-view';
+import { enabledActionRects } from '@/pill/action-regions';
 import { blockedCard, recoveryCard, noteCard, shortCard, noticeCard, type FeedbackCard } from '@/pill/feedback';
 import type { DictationBlocked, DictationRecovery, DictationNote, RecordingTooShort, IslandNotice } from '@/types/island-events';
 import { formatKeyForDisplay } from '@/lib/keyboard-normalizer';
@@ -30,7 +31,7 @@ export interface RendererDeps {
   actions: IslandActions;
   mac: boolean;
   icon: (key: string) => Promise<unknown>;
-  hitRegions: (rects: Array<{ x: number; y: number; width: number; height: number }>) => void;
+  hitRegions: (rects: Rect[], actionRects: Rect[]) => void;
   setTimeout: typeof window.setTimeout;
   clearTimeout: (id: number) => void;
 }
@@ -41,7 +42,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let pick: { kind: QuickKind; from: 'peek' | 'start'; y: number; height: number; selected: number; width: number } | undefined;
   let quickPending = false, clickPending = false;
   const pickGuard = new PickGuard();
-  let feedbackOwned = false, polished = false, pastedLeft = 2400, pastedSince = 0;
+  let polished = false, pastedLeft = 2400, pastedSince = 0;
   const stack = new StackView(dom.root, {
     wake: () => wake(), changed: () => sync(),
     call: c => deps.actions.card?.(c) ?? Promise.reject(new Error('Unavailable')),
@@ -85,9 +86,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const width = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect().width : 0;
     range.detach(); return width;
   };
-  // Hit regions come from the spring values, never from the DOM, and are sent only when they change.
-  let sentRects: Rect[] = [];
-  const hit = (settled = true) => {
+  // Broad click-through regions remain spring-derived. Cursor targets additionally
+  // follow actual enabled button layout; both are published atomically on change.
+  let sentRects: Rect[] = [], sentActionRects: Rect[] = [], actionRegionsDirty = true;
+  const hit = (settled = true, targetsMoving = false) => {
     const rects: Rect[] = [];
     if (!dom.surface.hidden) {
       const b = shapeNow();
@@ -96,10 +98,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     }
     for (const rect of stack.rects()) rects.push(rect);
     // Sub-pixel jitter is not worth an IPC while moving; the settled shape is always sent exactly.
-    if (sameRects(rects, sentRects, settled ? 0 : .01)) return;
-    sentRects = rects; deps.hitRegions(rects);
+    // Never measure DOM per animation/wave frame. Moving targets temporarily
+    // release the hand; measure once when they land or enabled state changes.
+    const actionRects = targetsMoving ? [] : actionRegionsDirty ? enabledActionRects(dom.root, rects) : sentActionRects;
+    actionRegionsDirty = targetsMoving;
+    if (sameRects(rects, sentRects, settled ? 0 : .01) && sameRects(actionRects, sentActionRects, settled ? 0 : .01)) return;
+    sentRects = rects; sentActionRects = actionRects; deps.hitRegions(rects, actionRects);
   };
-  const wake = () => { if (!deps.staticPreview && !destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
+  const wake = () => { actionRegionsDirty = true; if (!deps.staticPreview && !destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
   const syncTime = (now: number) => {
     if (machine.recording) waveSeconds = Math.max(0, (now - machine.startedAt) / 1000);
     // While starting the clock waits at 0:00; the bars idle on the same time base.
@@ -196,9 +202,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     else for (const spring of springs) { const before = spring.x; shapeMoving = spring.step(dt, reduced) || spring.x !== before || shapeMoving; }
     moving = shapeMoving || moving;
     if (farRow(machine.state)) { IY.x = H.x - 2 - ITOP.x; IY.v = H.v - ITOP.v; GY.x = H.x - 2 - GTOP.x; GY.v = H.v - GTOP.v; }
-    moving = layers.step(dt, reduced, W.x, W.to, H.x, H.to) || moving;
+    let targetsMoving = layers.step(dt, reduced, W.x, W.to, H.x, H.to) || shapeMoving;
+    moving = targetsMoving || moving;
     moving = words.step(dt, reduced) || moving;
-    moving = crossfade.step(dt) || moving;
+    const fading = crossfade.step(dt);
+    targetsMoving = fading || targetsMoving; moving = fading || moving;
     if (!machine.recording && layers.entries.words.alpha === 0) words.clear();
     if (machine.recording) { syncTime(now); glyph.wave.advance(waveSeconds, dt); }
     moving = glyph.step(dt, reduced) || moving;
@@ -210,12 +218,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const landed = machine.state === 'rest' && W.x < 12.5 && H.x < 12.5;
     stack.tuck(mode === 'never' || !landed);
     stack.setGeometry(machine.recording || machine.processing ? {...geometry,anchorY:geometry.anchorY+(top ? 1 : -1)*Math.max(0,H.x-12)} : geometry);
-    moving = stack.step(dt,reduced,landed,mode !== "never") || moving;
-    hit(!moving);
+    const stackMoving = stack.step(dt,reduced,landed,mode !== "never");
+    targetsMoving = stackMoving || targetsMoving; moving = stackMoving || moving;
+    hit(!moving, targetsMoving);
     if (!deps.staticPreview && (moving || (!dom.surface.hidden && machine.recording && !reduced))) frame = requestAnimationFrame(tick);
     else dom.surface.style.willChange = 'auto';
   }
   const sync = () => {
+    actionRegionsDirty = true;
     const state = machine.state, fromStart = lastState === 'start' && state !== 'start';
     if (state !== lastState && reduced) crossfade.capture();
     if (state !== lastState && !reduced && (machine.width < W.to || machine.height < H.to)) closeHold = .08;
@@ -234,8 +244,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.root.dataset.platform = deps.mac ? 'macos' : 'windows';
     dom.root.dataset.reducedMotion = String(reduced);
     dom.surface.hidden = mode === 'never' || (rest && mode !== 'always' && !stack.present);
-    const owns = mode !== 'never' && (stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state));
-    if (owns !== feedbackOwned) { feedbackOwned=owns; void deps.actions.feedbackVisible?.(owns).catch(() => {}); }
+    deps.actions.feedbackChanged?.(mode !== 'never' && (stack.present || machine.terminal || ['too_short','nospeech','error'].includes(state)));
     dom.root.dataset.visible = String(!dom.surface.hidden);
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
     dom.get<HTMLElement>('.core').classList.toggle('bad', !machine.context.mic.ok);
@@ -490,7 +499,10 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
           .finally(() => { quickPending = false; if (!destroyed && pick === active) renderPick(); });
       };
     }
+    buttonRects = undefined;
+    wake(); // Replaced/disabled picker rows invalidate native action targets.
   };
+  dom.get<HTMLElement>('.pick-list').onscroll = () => { buttonRects = undefined; wake(); };
   const openPick = (kind: QuickKind, chip: HTMLElement) => {
     if (!quick || !deps.actions.quickSet || !['peek', 'start'].includes(machine.state)) return;
     if (machine.state === 'start' && (kind !== 'polish' || !machine.context.polish.style)) return;
@@ -586,7 +598,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       this.feedback(recoveryCard(value,performance.now()),value.generation >= latest);
     },
     withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },
-    note(value: DictationNote) { if (value.kind === "mic_silent_live" && (!machine.recording || value.generation !== machine.takeGeneration)) return; if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value),false); },
+    // A retry may confirm a held note's take without changing the recording UI.
+    note(value: DictationNote, recordingGeneration = machine.recording ? machine.takeGeneration : undefined) {
+      if (value.kind === 'mic_silent_live' && value.generation !== recordingGeneration) return;
+      if (machine.observeGeneration(value.generation)) this.feedback(noteCard(value), false);
+    },
     tooShort(value: RecordingTooShort) { if (machine.observeGeneration(value.generation)) this.feedback(shortCard(value)); },
     notice(value: IslandNotice) {
       if (value.kind === "long_silence" && !machine.recording) return;
@@ -649,6 +665,6 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       stack.push({key:`escape_hint:${machine.takeGeneration}`,title:`Press Esc again to ${machine.processing ? 'discard' : 'cancel'}`,sub:'',tone:'neutral',glyph:'back',duration:null,liveGeneration:machine.takeGeneration,expiresAt:performance.now()+2000,actions:[]});
       sync();
     },
-    destroy() { destroyed = true; perf?.destroy(); perf = undefined; window.removeEventListener('keydown', keydown); stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([]); host.replaceChildren(); },
+    destroy() { destroyed = true; perf?.destroy(); perf = undefined; window.removeEventListener('keydown', keydown); stack.destroy(); appIcon.destroy(); timers(); crossfade.clear(); if (frame !== undefined) cancelAnimationFrame(frame); media.removeEventListener('change', motionChanged); deps.hitRegions([], []); host.replaceChildren(); },
   };
 }

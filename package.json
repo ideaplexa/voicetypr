@@ -25,6 +25,7 @@
     "test:watch": "vitest --watch",
     "test:backend": "cd src-tauri && cargo test",
     "test:frontend": "vitest run",
+    "test:pill-layout": "node scripts/test-pill-card-actions.mjs",
     "test:all": "pnpm test:backend && pnpm test:frontend",
     "benchmark": "node scripts/perf-harness.mjs",
     "macos:sign": "./scripts/macos-sign-app.sh",

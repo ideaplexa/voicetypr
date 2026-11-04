@@ -5,13 +5,14 @@ import { quickFixture } from '@/ui-preview/pill-quick';
 import { PickGuard, pickPlacement, quickRows, dotCentre } from '@/pill/quick-settings';
 import { pillHarness } from '@/pill/test-harness';
 import type { PillIndicatorPosition } from '@/types';
+import type { Rect } from '@/pill/shape';
 
 let cleanup: (() => void) | undefined;
 afterEach(() => { cleanup?.(); cleanup = undefined; vi.useRealTimers(); vi.restoreAllMocks(); });
 function renderer(mac = true) {
   vi.useFakeTimers(); vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(null);
   const host=document.createElement('div'); document.body.append(host);
-  const start=vi.fn(async()=>true), quickSet=vi.fn(async()=>{}), regions=vi.fn();
+  const start=vi.fn(async()=>true), quickSet=vi.fn(async()=>{}), regions=vi.fn<(rects: Rect[], actionRects: Rect[]) => void>();
   const island=createIsland(host,{mac, actions:{start,quickSet,stop:async()=>{},cancel:async()=>{},dismiss:async()=>{}},icon:async()=>null,hitRegions:regions,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window)});
   island.settings({pill_indicator_mode:'always'}); island.quickOptions(quickFixture(!mac));
   const get=<T extends HTMLElement=HTMLElement>(selector:string)=>host.querySelector<T>(selector)!;
@@ -54,6 +55,28 @@ describe('P5 quick settings',()=>{
   it('errors retain the selection, reenable rows and show content-free copy',async()=>{
     const h=renderer();h.quickSet.mockRejectedValueOnce(new Error('secret'));await h.peek();fireEvent.click(h.get('.peek-style'));await h.settle(250);fireEvent.click(h.get('.pick-option'));await h.settle(0);
     expect(h.get('.pick-error').hidden).toBe(false);expect(h.get('.pick-error').textContent).not.toContain('secret');expect(h.get<HTMLButtonElement>('.pick-option').disabled).toBe(false);
+  });
+  it('refreshes settled action regions when picker rows change or scroll',async()=>{
+    const h=renderer();await h.peek();fireEvent.click(h.get('.peek-style'));await h.settle(1000);
+    const surface=h.regions.mock.lastCall![0][0];
+    let y=surface.y+50;
+    const original=HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
+      if(this.matches('.pick-option[data-id="style_Off"]'))return new DOMRect(surface.x+15,y,100,20);
+      if(this.matches('.pick-list,.pill-surface'))return new DOMRect(surface.x,surface.y,surface.width,surface.height);
+      return original.call(this);
+    });
+    h.island.quickOptions(quickFixture());await h.settle(500);
+    const rect=()=>({x:surface.x+15,y,width:100,height:20});
+    expect(h.regions.mock.lastCall![1]).toEqual([rect()]);
+    let reject=(_error:Error)=>{};
+    h.quickSet.mockImplementationOnce(()=>new Promise<void>((_resolve,fail)=>{reject=fail;}));
+    fireEvent.click(h.get('.pick-option[data-id="style_Off"]'));await h.settle(100);
+    expect(h.regions.mock.lastCall![1]).toEqual([]);
+    reject(new Error('Unavailable'));await h.settle(100);
+    expect(h.regions.mock.lastCall![1]).toEqual([rect()]);
+    y+=10;fireEvent.scroll(h.get('.pick-list'));await h.settle(100);
+    expect(h.regions.mock.lastCall![1]).toEqual([rect()]);
   });
   it('shows disabled engine group headers and back returns to peek',async()=>{
     const h=renderer(false);await h.peek();fireEvent.click(h.get('.peek-engine'));expect([...h.host.querySelectorAll<HTMLButtonElement>('.pick-option:disabled')].map(el=>el.textContent)).toEqual(['On this PC✓','Cloud✓','Network✓']);
@@ -120,7 +143,7 @@ describe('P5 quick settings',()=>{
   });
   it('hit target extends only upward and includes every expanded shape',async()=>{
     const h=renderer();await h.settle();
-    expect(h.regions).toHaveBeenLastCalledWith([{x:221,y:405,width:20,height:20}]);await h.peek();await h.settle(1500);expect(h.regions).toHaveBeenLastCalledWith([{x:42,y:366,width:378,height:70}]);
+    expect(h.regions).toHaveBeenLastCalledWith([{x:221,y:405,width:20,height:20}],[]);await h.peek();await h.settle(1500);expect(h.regions).toHaveBeenLastCalledWith([{x:42,y:366,width:378,height:70}],[]);
   });
   it('settled peek and rest do not maintain requestAnimationFrame loops',async()=>{
     const h=renderer();const raf=vi.spyOn(window,'requestAnimationFrame');await h.peek();await h.settle(2000);raf.mockClear();await h.settle(500);expect(raf).not.toHaveBeenCalled();h.island.rest();await h.settle(2000);raf.mockClear();await h.settle(500);expect(raf).not.toHaveBeenCalled();

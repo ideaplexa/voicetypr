@@ -2650,7 +2650,7 @@ mod tests {
         emit_recording_too_short_feedback(app.handle(), "0.5", 42);
         assert_eq!(
             short_events.lock().unwrap().as_slice(),
-            &[serde_json::json!({"generation":42,"mode":"toggle"})]
+            &[serde_json::json!({"generation":42,"mode":"toggle","renderer_epoch":0})]
         );
     }
 

@@ -35,7 +35,7 @@ export interface IslandActions {
   retry?: (engine: string) => Promise<unknown>;
   transcribeAnyway?: (id: string) => Promise<unknown>;
   card?: (call: import('@/pill/feedback').CardCommand) => Promise<unknown>;
-  feedbackVisible?: (visible: boolean) => Promise<unknown>;
+  feedbackChanged?: (visible: boolean) => void;
   quickSet?: (kind: import('@/pill/quick-settings').QuickKind, id: string) => Promise<unknown>;
   openSettings?: () => Promise<unknown>;
   feedback?: (kind: string) => void;
