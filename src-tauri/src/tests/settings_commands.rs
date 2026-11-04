@@ -529,7 +529,13 @@ mod tests {
         let mut value = serde_json::to_value(Settings::default()).unwrap();
         value.as_object_mut().unwrap().remove("update_channel");
         let parsed: Settings = serde_json::from_value(value).unwrap();
-        assert_eq!(parsed.update_channel, "stable");
+        // Prerelease builds default to the beta channel, stable builds to stable.
+        let expected = if crate::release_channel::IS_PRERELEASE_BUILD {
+            "beta"
+        } else {
+            "stable"
+        };
+        assert_eq!(parsed.update_channel, expected);
 
         let settings = Settings {
             update_channel: "beta".to_string(),
