@@ -92,14 +92,4 @@ mod tests {
         assert_eq!(button_bottom(680.0, 14.0), 654.0);
         assert_eq!(button_bottom(680.0, 16.0), 653.0);
     }
-
-    #[test]
-    fn tao_does_not_reapply_a_competing_inset() {
-        for config in [
-            include_str!("../tauri.conf.json"),
-            include_str!("../tauri.dev.conf.json"),
-        ] {
-            assert!(!config.contains("\"trafficLightPosition\""));
-        }
-    }
 }

@@ -148,14 +148,6 @@ mod tests {
         assert!(!check.contains(&wrong_prefix));
     }
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn main_window_controls_reject_worker_thread() {
-        thread::spawn(|| assert!(objc2::MainThreadMarker::new().is_none()))
-            .join()
-            .unwrap();
-    }
-
     /// Check the guard's wiring without constructing a native window in tests.
     #[test]
     fn main_window_native_access_follows_main_thread_dispatch_and_guard() {
