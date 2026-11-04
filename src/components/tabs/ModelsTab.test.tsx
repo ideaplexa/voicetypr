@@ -77,7 +77,7 @@ let mockModels: Record<string, ModelInfo> = {
   },
   "nemotron-multilingual-1120ms": {
     name: "nemotron-multilingual-1120ms",
-    display_name: "Nemotron Multilingual",
+    display_name: "Nemotron 3.5",
     size: 665,
     url: "",
     sha256: "",
