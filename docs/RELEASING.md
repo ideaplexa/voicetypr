@@ -20,6 +20,7 @@
   - The job fails if the dispatched branch moves during the build — don't push
     to that branch while a release runs.
   - `CHANGELOG.md` is edited by hand before releasing.
+  - Both macOS DMGs are separately notarized, stapled and Gatekeeper-checked before upload, including in dry runs.
 - `update-beta-channel.yml` updates the rolling `beta` prerelease manifest when
   a release is published (the public URL is CDN-cached for a few minutes).
   Updater endpoints (`commands/updater.rs`): stable

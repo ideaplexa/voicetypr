@@ -191,6 +191,27 @@ jobs:
           TAURI_CONFIG_OVERRIDE=$(jq -nc --arg identity "$APPLE_SIGNING_IDENTITY" '{bundle:{macOS:{signingIdentity:$identity}}}')
           pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.macos.conf.json --config "$TAURI_CONFIG_OVERRIDE" --ci --verbose
 
+      - name: Notarize and verify DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          : "${APPLE_ID:?}" "${APPLE_PASSWORD:?}" "${APPLE_TEAM_ID:?}"
+          shopt -s nullglob
+          dmgs=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one DMG"
+            exit 1
+          fi
+          dmg="${dmgs[0]}"
+          result=$(xcrun notarytool submit "$dmg" --wait --output-format json \
+            --apple-id "$APPLE_ID" --password "@env:APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+          echo "$result" | jq -e '.status == "Accepted"' > /dev/null
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl -a -t open --context context:primary-signature -v "$dmg"
+
       - name: Create app.tar.gz for updater
         run: |
           cd src-tauri/target/aarch64-apple-darwin/release/bundle/macos
@@ -323,6 +344,27 @@ jobs:
         run: |
           TAURI_CONFIG_OVERRIDE=$(jq -nc --arg identity "$APPLE_SIGNING_IDENTITY" '{bundle:{macOS:{signingIdentity:$identity}}}')
           pnpm tauri build --target x86_64-apple-darwin --bundles app,dmg --config src-tauri/tauri.macos.conf.json --config "$TAURI_CONFIG_OVERRIDE" --ci --verbose
+
+      - name: Notarize and verify DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          : "${APPLE_ID:?}" "${APPLE_PASSWORD:?}" "${APPLE_TEAM_ID:?}"
+          shopt -s nullglob
+          dmgs=(src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one DMG"
+            exit 1
+          fi
+          dmg="${dmgs[0]}"
+          result=$(xcrun notarytool submit "$dmg" --wait --output-format json \
+            --apple-id "$APPLE_ID" --password "@env:APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+          echo "$result" | jq -e '.status == "Accepted"' > /dev/null
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl -a -t open --context context:primary-signature -v "$dmg"
 
       - name: Create app.tar.gz for updater
         run: |
