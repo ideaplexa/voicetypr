@@ -27,7 +27,7 @@ Verification commands used across all plans: `pnpm typecheck`, `pnpm lint`,
 
 ## Active plans
 
-Update prompt / What's new follow-up — IN PROGRESS — claimed Droid update-prompt worker: founder-approved short native prompt, installed-release manifest highlights, full-notes links and release workflow separation; branch `feat/update-prompt-notes`. Supersedes plan 082's full-body-in-manifest decision only.
+Update prompt / What's new follow-up — LOCAL CHECKS PASSED / NEEDS-SMOKE — Droid update-prompt worker, branch `feat/update-prompt-notes`: short three-button native prompt, Settings manual-check routing, installed-release manifest highlights, full-notes links and separate release-body artifact. Supersedes plan 082's full-body-in-manifest decision only. TypeScript, oxlint, 1,521 frontend tests, production build, three release-notes Rust tests, Rust formatting and actionlint pass; five browser screenshots under `/tmp/voicetypr-update-prompt/` (native prompt is a browser IPC mock). Packaged macOS/Windows tray-hidden prompt visibility, native buttons/Escape, browser opening and real post-update overview remain NEEDS-SMOKE. No app launch, app-data changes, push, release or workflow run.
 
 Current audio/streaming continuation: [Plan 069](069-handy-informed-audio-streaming-recovery.md)
 and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcile
