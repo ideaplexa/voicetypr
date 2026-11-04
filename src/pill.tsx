@@ -25,6 +25,9 @@ interface RecordingPillDeps {
 /** Only event transport and startup hydration live here. The pill has no React runtime. */
 export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps = {}): RecordingPillController {
   const call = deps.invoke ?? invoke, on = deps.listen ?? listen;
+  const setTimer = deps.setTimeout ?? setTimeout, clearTimer = deps.clearTimeout ?? clearTimeout;
+  let hydrationTimer: ReturnType<typeof setTimer> | undefined;
+  let finishHydration: (() => void) | undefined;
   let destroyed = false, settingsRevision = 0, recordingEventReceived = false, geometryReceived = false;
   const subscriptions: Promise<void>[] = [];
   const unlisteners: Array<() => void> = [];
@@ -125,9 +128,29 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   };
   // True while the window was shown for a Starting that has not reached Recording yet.
   let shownForStart = false;
+  let recordingStateKnown = false, liveNote: DictationNote | undefined;
+  let retriedHydration = false;
+  let liveNoteTimer: ReturnType<typeof setTimer> | undefined;
+  const dropLiveNote = () => {
+    if (liveNoteTimer !== undefined) clearTimer(liveNoteTimer);
+    liveNoteTimer = undefined; liveNote = undefined;
+  };
+  const knownRecordingState = () => {
+    recordingStateKnown = true;
+    const note = liveNote; dropLiveNote();
+    if (note) island.note(note); // Existing state/generation checks drop obsolete notes.
+  };
+  const note = (value: DictationNote) => {
+    if (value.kind === 'mic_silent_live' && !recordingStateKnown && !island.machine.recording) {
+      if (value.generation < Math.max(island.machine.takeGeneration, island.machine.latestRecordingGeneration, liveNote?.generation ?? 0)) return;
+      dropLiveNote(); liveNote = value;
+      liveNoteTimer = setTimer(dropLiveNote, 2000);
+      if (feedbackEpoch !== undefined && !retriedHydration) { retriedHydration = true; void hydrateRecordingState(); }
+    } else island.note(value);
+  };
   const recordingState = (payload: RecordingStatePayload) => {
     // Starting shows the island at once (mic still opening); Recording makes it live.
-    if (payload.generation !== undefined && !island.observeRecordingGeneration(payload.generation)) return;
+    if (payload.generation !== undefined && !island.observeRecordingGeneration(payload.generation)) return false;
     if (payload.state === 'starting') { shownForStart = true; island.starting(payload.generation); }
     else if (payload.state === 'recording') { shownForStart = false; island.start(payload.generation); }
     else if (payload.state === 'stopping' || payload.state === 'transcribing') {
@@ -142,21 +165,30 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
         if (!island.feedbackActive) void feedbackVisible(false);
       }
     }
+    return true;
   };
+  const hydrateRecordingState = () => call<RecordingStatePayload>('get_current_recording_state').then(state => {
+    // The first accepted snapshot or event wins over any late hydration response.
+    if (!destroyed && !recordingStateKnown && state?.state && recordingState(state)) knownRecordingState();
+  }).catch(() => { /* Real events remain authoritative. */ });
+  const recordingEvent = () => { recordingEventReceived = true; knownRecordingState(); finishHydration?.(); };
   subscribe<PillGeometry>('pill-geometry', value => { geometryReceived = true; island.geometry(value); });
   subscribe<PillPointer>('pill-pointer', value => island.pointer(value));
   subscribe<DictationContext>('dictation-context', value => island.context(value));
   subscribe<PillAudioLevel>('audio-level', value => island.level(value));
-  subscribe<RecordingStatePayload>('recording-state-changed', value => { recordingEventReceived = true; recordingState(value); });
-  subscribe('recording-started', () => { recordingEventReceived = true; island.start(); });
-  subscribe('transcription-started', () => { recordingEventReceived = true; island.work('transcribing'); });
-  subscribe('enhancing-started', () => { recordingEventReceived = true; island.work('polishing'); });
+  subscribe<RecordingStatePayload>('recording-state-changed', value => { if (recordingState(value)) recordingEvent(); });
+  subscribe('recording-started', () => { island.start(); recordingEvent(); });
+  subscribe('transcription-started', () => { island.work('transcribing'); recordingEvent(); });
+  subscribe('enhancing-started', () => { island.work('polishing'); recordingEvent(); });
   for (const name of ['enhancing-completed', 'enhancing-failed']) subscribe(name, () => { if (island.machine.state === 'polishing') island.work('transcribing'); });
   subscribeFeedback<RecordingTooShort>('recording-too-short', value => island.tooShort(value));
   subscribeFeedback<DictationBlocked>('dictation-blocked', value => island.blocked(value));
   subscribeFeedback<DictationRecovery>('dictation-recovery', value => island.recovery(value));
-  subscribeFeedback<DictationNote>('dictation-note', value => island.note(value));
-  subscribeFeedback<{generation:number;kind:'mic_silent_live'}>('dictation-note-withdraw', value => island.withdrawNote(value));
+  subscribeFeedback<DictationNote>('dictation-note', note);
+  subscribeFeedback<{generation:number;kind:'mic_silent_live'}>('dictation-note-withdraw', value => {
+    if (liveNote?.generation === value.generation) dropLiveNote();
+    island.withdrawNote(value);
+  });
   subscribeFeedback<EscapeHint>('escape-hint', value => { if(island.machine.observeGeneration(value.generation)) island.escapeHint(); });
   subscribeFeedback<IslandNotice>('island-notice', value => island.notice(value));
   subscribeFeedback<{id:string}>('kept-dictation-expired', value => island.expired(value.id));
@@ -173,14 +205,15 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     const requestedEpoch = typeof epoch === 'number' ? epoch : 0;
     await call('pill_feedback_ready', { epoch: requestedEpoch }).catch(() => {});
     if (destroyed) return;
-    const statePromise = call<RecordingStatePayload>('get_current_recording_state');
+    const hydrated = new Promise<void>(resolve => { finishHydration = resolve; });
+    hydrationTimer = setTimer(() => finishHydration?.(), 1800);
+    if (recordingEventReceived || recordingStateKnown) finishHydration?.();
+    void hydrateRecordingState().finally(() => finishHydration?.());
     void readSettings();
     void readQuick();
-    try {
-      const state = await statePromise;
-      // Hydration cannot overwrite an event received while the command was in flight.
-      if (!destroyed && !recordingEventReceived && state?.state) recordingState(state);
-    } catch { /* Real events remain authoritative. */ }
+    await hydrated; // Success, rejection, authoritative event, or timeout: open once.
+    if (hydrationTimer !== undefined) clearTimer(hydrationTimer);
+    hydrationTimer = undefined; finishHydration = undefined;
     if (destroyed) return;
     // Live warnings require the hydrated Recording state. Keep feedback
     // buffered through hydration, including events arriving while it awaits.
@@ -188,7 +221,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
     for (const queued of pendingFeedback.splice(0)) if (queued.epoch === feedbackEpoch) queued.run();
     if (feedbackQueued !== undefined) void feedbackVisible(feedbackQueued);
   });
-  return { destroy() { destroyed = true; settingsRevision++; quickRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop()); island.destroy(); } };
+  return { destroy() { destroyed = true; if (hydrationTimer !== undefined) clearTimer(hydrationTimer); finishHydration?.(); dropLiveNote(); pendingFeedback.length = 0; settingsRevision++; quickRevision++; streamUnlisten?.(); unlisteners.forEach(stop => stop()); island.destroy(); } };
 }
 const root = document.getElementById('root');
 if (root) createRecordingPill(root);
