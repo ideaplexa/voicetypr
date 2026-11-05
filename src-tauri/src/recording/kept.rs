@@ -3,6 +3,8 @@ use super::island::RecoveryKind;
 use crate::commands::audio;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+#[path = "kept_durable.rs"]
+mod durable;
 #[path = "kept_persistent.rs"]
 mod persistent;
 #[path = "kept_selection.rs"]
@@ -259,7 +261,7 @@ impl Store {
         // until the header is finalized, then the expiry task promotes them.
         let finalized = finalized_wav(path);
         let owned_path = if finalized {
-            if move_finalized(path, &target) {
+            if move_finalized(path, &target, durable) {
                 target.clone()
             } else {
                 path.to_owned()
@@ -449,7 +451,7 @@ impl Store {
         if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             if clip.path != clip.target
                 && clip.recovery.retry_ready
-                && move_finalized(&clip.path, &clip.target)
+                && move_finalized(&clip.path, &clip.target, clip.disk.is_some())
             {
                 clip.path = clip.target.clone();
             }
@@ -830,7 +832,10 @@ pub async fn keep(
     crate::menu::runtime::refresh(app);
     Ok(())
 }
-fn move_finalized(source: &Path, target: &Path) -> bool {
+fn move_finalized(source: &Path, target: &Path, persistent: bool) -> bool {
+    if persistent {
+        return durable::move_audio(source, target);
+    }
     if std::fs::rename(source, target).is_ok() {
         return true;
     }

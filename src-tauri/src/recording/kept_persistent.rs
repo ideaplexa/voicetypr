@@ -64,6 +64,12 @@ impl DiskClip {
     }
 
     fn write(&self, clip: &Clip) -> std::io::Result<()> {
+        // Audio bytes/header, then WAV name, then synced JSON replacement.
+        // No committed index may point at audio not yet flushed to storage.
+        durable::sync_file(&clip.path)?;
+        durable::sync_parent(&clip.path)?;
+        let dir = self.index.parent().unwrap();
+        durable::sync_parent(dir)?;
         self.write_deadline(clip, self.expires_at_ms)
     }
 
@@ -84,9 +90,7 @@ impl DiskClip {
             .tempfile_in(self.index.parent().unwrap())?;
         serde_json::to_writer(&mut file, &entry)?;
         file.flush()?;
-        file.as_file().sync_all()?;
-        file.persist(&self.index).map_err(|e| e.error)?;
-        Ok(())
+        durable::replace_index(file, &self.index)
     }
 }
 
