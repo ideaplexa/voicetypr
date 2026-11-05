@@ -403,22 +403,14 @@ impl Store {
             .count()
             >= cap
         {
-            // Busy originals remain protected; retire them after completion
-            // and evict the oldest idle candidate to keep the physical cap.
-            let mut candidate = None;
-            for old in self
+            // Evict only the oldest idle original. Once this satisfies the
+            // cap, a busy original needs no deferred retirement.
+            let id = self
                 .clips
-                .iter_mut()
-                .filter(|c| c.disk.is_some() == durable)
-            {
-                if old.busy {
-                    old.retire_after_retry = true;
-                } else {
-                    candidate = Some(old.recovery.id.clone());
-                    break;
-                }
-            }
-            let id = candidate.ok_or("Recovery is busy")?;
+                .iter()
+                .find(|old| old.disk.is_some() == durable && !old.busy)
+                .map(|old| old.recovery.id.clone())
+                .ok_or("Recovery is busy")?;
             self.retire_automatically(&id, "discarded");
         }
         self.clips.push_back(clip);
@@ -1566,7 +1558,7 @@ mod tests {
         }
     }
     #[test]
-    fn cap_eviction_defers_busy_original_until_retry_completion() {
+    fn cap_eviction_preserves_busy_original_unless_retry_succeeds() {
         for succeeds in [true, false] {
             let dir = tempfile::tempdir().unwrap();
             let mut store = Store::default();
@@ -1583,10 +1575,10 @@ mod tests {
             assert_eq!(store.clips.len(), 3);
             assert!(path.exists());
             assert!(!*lease.cancelled.borrow());
-            assert!(store.clips[0].retire_after_retry);
+            assert!(!store.clips[0].retire_after_retry);
             store.complete_retry(&id, succeeds);
-            assert!(!path.exists());
-            assert_eq!(store.clips.len(), 2);
+            assert_eq!(path.exists(), !succeeds);
+            assert_eq!(store.clips.len(), if succeeds { 2 } else { 3 });
             store.clear();
         }
     }

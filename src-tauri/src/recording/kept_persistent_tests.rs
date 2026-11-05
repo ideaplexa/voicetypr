@@ -276,3 +276,51 @@ fn recovered_orphans_share_the_twenty_take_cap_and_oldest_first_order() {
     assert!(paths[2..].iter().all(|path| path.exists()));
     store.clear();
 }
+
+#[tokio::test]
+async fn failed_or_cancelled_busy_retry_survives_cap_eviction() {
+    for cancel in [false, true] {
+        let data = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let first = retain(&mut store, data.path());
+        let original = store.clips[0].path.clone();
+        let lease = store
+            .lease(&first.id, false, || {
+                let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                RetryRegistration {
+                    generation: 77,
+                    cancel,
+                    cancelled,
+                }
+            })
+            .unwrap();
+        retain(&mut store, data.path());
+        let oldest_idle = store.clips[1].path.clone();
+        for _ in 1..CAP {
+            retain(&mut store, data.path());
+        }
+        assert_eq!(store.clips.len(), CAP);
+        assert!(!oldest_idle.exists());
+        assert!(original.exists());
+        if cancel {
+            store.cancel_retry();
+        }
+        let outcome =
+            cancellable_retry(lease.cancelled.clone(), async { Err("Failed".into()) }).await;
+        assert_eq!(
+            outcome,
+            Err(if cancel {
+                RetryError::Cancelled
+            } else {
+                RetryError::Failed
+            })
+        );
+        store.complete_retry(&first.id, false);
+        assert!(original.exists());
+        assert!(original.with_extension("json").exists());
+        assert_eq!(store.clips.len(), CAP);
+        assert!(!store.clips[0].busy);
+        drop(lease);
+        store.clear();
+    }
+}
