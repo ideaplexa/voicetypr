@@ -180,6 +180,7 @@ pub fn maybe_run_from_env_with_context(
     context: tauri::Context<tauri::Wry>,
 ) -> Result<bool, Box<dyn Error>> {
     crate::initialize_tls();
+    crate::audio::silero_vad::initialize_logging();
     let first_arg = env::args().nth(1);
     let Some(first_arg) = first_arg.as_deref() else {
         return Ok(false);
@@ -250,7 +251,6 @@ pub fn maybe_run_from_env_with_context(
         }
         return Ok(true);
     }
-
     // Fixtures run before Tauri setup, secure-store reads, license checks or HTTP.
     if let CliCommand::PolishEval(args) = &command {
         if args.fixture.is_some() {

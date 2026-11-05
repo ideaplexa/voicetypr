@@ -1,0 +1,23 @@
+name: GGML CPU baseline
+description: Pin the existing non-native whisper-rs-sys CPU baseline for Windows and Intel builds.
+
+runs:
+  using: composite
+  steps:
+    - name: Set GGML CPU baseline
+      shell: bash
+      run: |
+        # Never inherit the build runner's ISA; Rust caches include GGML_*.
+        cat <<'GGML_ENV' >> "$GITHUB_ENV"
+        GGML_NATIVE=OFF
+        GGML_AVX=ON
+        GGML_AVX2=ON
+        GGML_BMI2=OFF
+        GGML_AVX_VNNI=OFF
+        GGML_FMA=ON
+        GGML_F16C=ON
+        GGML_AVX512=OFF
+        GGML_AVX512_VBMI=OFF
+        GGML_AVX512_VNNI=OFF
+        GGML_AVX512_BF16=OFF
+        GGML_ENV

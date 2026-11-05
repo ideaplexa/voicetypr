@@ -56,7 +56,7 @@ pub fn run(args: &VadArgs) -> Result<(), &'static str> {
     }
     let output = serde_json::json!({
         "mode": "shadow",
-        "model": "silero-v6.2-16k-op15",
+        "model": "ggml-silero-v6.2.0",
         "model_sha256": super::silero_vad::MODEL_SHA256,
         "budget_ms": super::silero_vad::BUDGET.as_millis() as u64,
         "runs": runs,

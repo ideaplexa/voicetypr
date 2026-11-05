@@ -148,7 +148,13 @@ pub(crate) fn selected_parakeet_preload_candidate<'a>(
     selected_model: &'a str,
     downloaded: bool,
 ) -> Option<&'a str> {
-    (engine == "parakeet" && !selected_model.is_empty() && downloaded).then_some(selected_model)
+    // Windows ORT must stay unloaded at startup, even when Parakeet is selected.
+    // Explicit selection/download preloads still count as user-initiated use.
+    (!cfg!(all(target_os = "windows", target_arch = "x86_64"))
+        && engine == "parakeet"
+        && !selected_model.is_empty()
+        && downloaded)
+        .then_some(selected_model)
 }
 
 pub(crate) async fn recover_downloads(app: &AppHandle) {
@@ -203,7 +209,7 @@ mod startup_model_decision_tests {
         let model = "parakeet-tdt-0.6b-v3";
         assert_eq!(
             selected_parakeet_preload_candidate("parakeet", model, true),
-            Some(model)
+            (!cfg!(all(target_os = "windows", target_arch = "x86_64"))).then_some(model)
         );
         assert_eq!(
             selected_parakeet_preload_candidate("parakeet", model, false),

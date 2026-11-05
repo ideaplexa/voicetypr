@@ -1,4 +1,4 @@
-; Windows installer hook: app-local Visual C++ runtime DLLs + debug symbols.
+; Windows installer hook: app-local VC runtime + CPU ONNX Runtime + symbols.
 ; Voicetypr's main executable is CPU-safe; Vulkan is isolated in a sidecar.
 
 !include "LogicLib.nsh"
@@ -27,6 +27,7 @@
 
     ${IfNot} ${FileExists} "$INSTDIR\vcomp140.dll"
     ${OrIfNot} ${FileExists} "$INSTDIR\vcruntime140.dll"
+    ${OrIfNot} ${FileExists} "$INSTDIR\onnxruntime.dll"
         DetailPrint "Visual C++ runtime files are missing"
         ${If} ${Silent}
             SetErrorLevel 2
@@ -35,6 +36,9 @@
         ${EndIf}
         Abort
     ${EndIf}
+    ; Never leave the obsolete DirectML dependency behind on an upgrade.
+    Delete "$INSTDIR\DirectML.dll"
+    Delete "$INSTDIR\windows\resources\vcredist\DirectML.dll"
 !macroend
 
 !macro InstallPdbSymbols

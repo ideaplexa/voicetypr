@@ -91,11 +91,6 @@ tokio-util = "0.7"
 which = "4.4.2"
 posthog-rs = { version = "0.22.0", default-features = false, features = ["error-tracking"] }
 
-# Match Windows Parakeet's single static ORT. rc.13 publishes no Intel macOS
-# archive: that target reports runtime_unsupported, never breaks dictation.
-[target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dependencies]
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-28"] }
-
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
@@ -110,8 +105,10 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
-# Runtime/link/TLS policy is owned by the one direct ort declaration above.
-parakeet-rs = { version = "=0.3.8", default-features = false, features = ["cpu", "api-28"] }
+# Official Microsoft CPU DLL, loaded only on explicit Parakeet use after its
+# CPU and integrity checks. No static/download-binaries/DirectML features.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-28"] }
+parakeet-rs = { version = "=0.3.8", default-features = false, features = ["cpu", "load-dynamic", "api-28"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }

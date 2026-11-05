@@ -159,6 +159,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set GGML CPU baseline
+        uses: ./.github/actions/ggml-cpu-baseline
+
       - name: Select Swift 6 toolchain and configure Clang runtime
         run: |
           xcode=$(
@@ -209,6 +212,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          env-vars: GGML
           workspaces: src-tauri
 
       - name: Install dependencies

@@ -1,10 +1,18 @@
-//! Check before *any* ORT call, including session builders and link probes.
-//! ort rc.13 environment.rs requires AVX2 for its downloaded x86 binaries.
-//! MSVC /arch:AVX2 also permits FMA and BMI instructions. Conservatively require
-//! the associated Haswell instruction set, including OS-enabled AVX state.
+//! Conservative beta.8 Parakeet CPU policy, checked before lazy DLL loading.
+//! The official CPU DLL is no longer statically linked, so unsupported CPUs
+//! can reach this guard. Keep the existing Haswell policy for Parakeet; ggml
+//! shadow VAD has its own four-feature gate.
+#[cfg_attr(
+    not(any(test, all(target_os = "windows", target_arch = "x86_64"))),
+    allow(dead_code)
+)]
 pub const CPU_UNSUPPORTED: &str =
     "This CPU cannot run ONNX models. AVX2, FMA and associated CPU features are required.";
 
+#[cfg_attr(
+    not(any(test, all(target_os = "windows", target_arch = "x86_64"))),
+    allow(dead_code)
+)]
 pub fn require_cpu() -> Result<(), &'static str> {
     #[cfg(test)]
     if FORCE_UNSUPPORTED.get() {
@@ -12,6 +20,7 @@ pub fn require_cpu() -> Result<(), &'static str> {
     }
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     let supported = [
+        std::is_x86_feature_detected!("avx"),
         std::is_x86_feature_detected!("avx2"),
         std::is_x86_feature_detected!("fma"),
         std::is_x86_feature_detected!("f16c"),

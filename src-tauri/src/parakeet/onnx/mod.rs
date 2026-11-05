@@ -8,6 +8,8 @@ pub mod chunking;
 #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
 pub mod download;
 #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+mod runtime;
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
 pub mod slot;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub static LOCAL_MODEL_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -36,33 +38,5 @@ mod selection_tests {
         assert!(!matches(Some("parakeet"), Some("base"), "whisper", "base"));
         assert!(!matches(Some("whisper"), Some("large"), "whisper", "base"));
         assert!(!matches(None, None, "whisper", "base"));
-    }
-}
-
-#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-pub(crate) fn can_initialize_runtime() -> bool {
-    if crate::onnx_runtime::require_cpu().is_err() {
-        return false;
-    }
-    parakeet_rs::ExecutionConfig::default()
-        .build_session(std::path::Path::new(
-            "__voicetypr_onnx_link_probe_missing__.onnx",
-        ))
-        .is_err()
-}
-
-#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
-mod tests {
-    #[test]
-    fn links_static_ort_without_a_model() {
-        assert_eq!(
-            super::can_initialize_runtime(),
-            crate::onnx_runtime::require_cpu().is_ok()
-        );
-    }
-
-    #[test]
-    fn unsupported_cpu_does_not_enter_the_link_probe() {
-        crate::onnx_runtime::without_cpu(|| assert!(!super::can_initialize_runtime()));
     }
 }

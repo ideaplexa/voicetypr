@@ -1,24 +1,32 @@
-ONNX Runtime 1.28.0, statically linked through ort 2.0.0-rc.13.
-Unmodified upstream source: https://github.com/microsoft/onnxruntime/tree/v1.28.0
-Rust wrapper source: https://github.com/pykeio/ort/tree/v2.0.0-rc.13
+Windows uses Microsoft's official ONNX Runtime 1.28.0 CPU-only dynamic DLL.
+Source: https://github.com/microsoft/onnxruntime/releases/tag/v1.28.0
+Rust wrapper: https://github.com/pykeio/ort/tree/v2.0.0-rc.13
 
-LICENSE covers ONNX Runtime. ort-LICENSE-MIT covers the Rust wrapper.
-ThirdPartyNotices.txt contains the upstream runtime's dependency notices.
-The build uses ort-sys's checksum-pinned prebuilt archive. Windows also ships
-that archive's DirectML.dll dependency, even for CPU-only sessions.
+provenance.json pins the official Windows x64 ZIP, lib/onnxruntime.dll and
+the exact LICENSE and ThirdPartyNotices.txt bytes from that ZIP. These two
+notices must not undergo line-ending conversion. ort-LICENSE-MIT covers the
+Rust wrapper separately. The DLL is acquired at packaging time, not committed.
+No static ORT archive, import library, DirectML or GPU provider is packaged.
 
-DirectML is NOT MIT. DirectML-LICENSE.txt and DirectML-ThirdPartyNotices.txt
-are unmodified files from Microsoft.AI.DirectML 1.15.4. The x64 DLL in the
-hash-pinned ORT archive is byte-for-byte identical to NuGet's bin/x64-win DLL.
-DirectML-provenance.json pins both packages, DLLs and redistribution notices.
-Both NSIS and Store MSIX staging fail closed on a missing or different DLL.
-There is no CPU-only Windows archive in rc.13's default distribution; disabling
-the Cargo directml feature does not remove ort-sys's unconditional native link.
-Avoiding DirectML requires a separately built/reviewed CPU-only ORT, not a second
-runtime or a session provider setting. No GPU provider is selected by this app.
+scripts/stage-windows-ort.cjs downloads and verifies the pinned archive into
+CARGO_TARGET_DIR/onnxruntime (default src-tauri/target/onnxruntime). --archive
+can use an existing ZIP, with the same mandatory hashes and architecture
+checks. Missing explicit archives, corrupt caches and unsupported targets fail
+closed. Only the unmodified signed onnxruntime.dll is extracted for runtime use.
+Never re-sign this Microsoft DLL: preserve its original hash and embedded
+Authenticode signature. Sign the application/installer/package, not this DLL.
+There is no separate bundled-PE signing pass here. An executable's signature
+does not cover sibling DLLs; retain existing updater/Store package signing.
+The lazy ORT environment explicitly opts out of Microsoft's native telemetry.
+Its discard-only native logger prevents raw native diagnostics/paths on stderr.
 
-CPU checks precede every ORT entry point: x86 requires AVX2 plus the associated
-FMA/BMI/F16C/LZCNT/POPCNT/SSE4.2/MOVBE features conservatively permitted by
-MSVC /arch:AVX2. Rust's detection also checks OS-enabled AVX state.
-Sources: ort rc.13 src/environment.rs and ort-sys build/static_link/mod.rs;
-https://learn.microsoft.com/en-us/cpp/build/reference/arch-x64
+NSIS stages the DLL under windows/resources/vcredist and copies it beside the
+main executable, with required-file checks. Store MSIX explicitly stages the
+DLL at the package root and the notices under models/onnxruntime; both the
+layout and unpacked final MSIX are verified against the pins.
+
+assert-no-onnxruntime-import.ps1 requires the main executable's linker MAP.
+It rejects native onnxruntime/DirectML imports and an unmangled OrtGetApiBase
+public symbol definition (static ORT), not the dynamic loader's symbol string.
+The main image name, preferred load address and linker timestamp must match
+the supplied executable; a missing, mismatched or incomplete MAP fails closed.

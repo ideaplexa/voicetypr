@@ -515,10 +515,7 @@ async fn retry_tray_creation(app: tauri::AppHandle) -> Result<tray_status::TrayS
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     initialize_tls();
-    // Retain the ONNX/ORT link probe in the Windows x64 exe without invoking it.
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    std::hint::black_box(parakeet::onnx::can_initialize_runtime as fn() -> bool);
-
+    audio::silero_vad::initialize_logging();
     let app_start = Instant::now();
     let app_version = env!("CARGO_PKG_VERSION");
 

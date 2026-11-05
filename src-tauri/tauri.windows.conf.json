@@ -8,7 +8,11 @@
       "windows/resources/vcredist/*.dll",
       "windows/resources/voicetypr.pdb",
       "models/silero/LICENSE",
-      "models/onnxruntime/*"
+      "models/onnxruntime/LICENSE",
+      "models/onnxruntime/ThirdPartyNotices.txt",
+      "models/onnxruntime/ort-LICENSE-MIT",
+      "models/onnxruntime/README.txt",
+      "models/onnxruntime/provenance.json"
     ],
     "externalBin": [
       "../sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar"

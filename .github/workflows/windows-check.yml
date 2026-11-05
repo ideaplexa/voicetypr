@@ -1,14 +1,14 @@
 name: Windows Checks (fast)
 
-# Fast, code-only Windows verification: clippy (-D warnings) + the full Rust test
-# suite on a windows-2022 runner, WITHOUT the slow/flaky bits of the release build
+# Code-only Windows verification: clippy (-D warnings), the full Rust test suite,
+# and a main-executable Ivy Bridge CLI smoke check, WITHOUT the slow/flaky release bits
 # (Vulkan SDK install, Whisper-Vulkan sidecar compile, VC++ runtime staging, Tauri
 # bundle). Those are only needed to produce the installer, not to prove the code is
 # correct on Windows. Mirrors the known-good macOS `build-macos` check steps.
 #
 # Run it on-demand from the Actions tab ("Run workflow") for high-confidence Windows
-# feedback without the full installer build. The first run also downloads the static
-# ONNX Runtime archive; later runs restore it from cache. Runs automatically on PRs.
+# feedback without the full installer build. ORT is loaded lazily from the official
+# Microsoft CPU DLL staged by the packaging script. Runs automatically on PRs.
 
 on:
   workflow_dispatch: {}
@@ -25,9 +25,11 @@ jobs:
     env:
       # Keep Windows paths short to avoid MSBuild/FileTracker failures on deep deps.
       CARGO_TARGET_DIR: D:\cargo-target
-      ORT_CACHE_DIR: D:\b\ort-cache
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set GGML CPU baseline
+        uses: ./.github/actions/ggml-cpu-baseline
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -44,14 +46,9 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          # whisper-rs-sys does not track GGML_* as Cargo rerun triggers.
+          env-vars: GGML
           workspaces: src-tauri
-
-      - name: Cache ONNX Runtime archive
-        uses: actions/cache@v5
-        with:
-          path: D:\b\ort-cache
-          key: ort-windows-x64-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ort-windows-x64-
 
       - name: Assert Parakeet ONNX dependency is absent on Windows ARM64
         shell: pwsh
@@ -97,3 +94,24 @@ jobs:
         shell: pwsh
         working-directory: src-tauri
         run: ./run-tests.ps1
+
+      - name: Build main executable for Ivy Bridge check
+        shell: pwsh
+        run: |
+          # Keep map output out of clippy/tests and preserve any existing flags.
+          $targetRoot = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR).Replace('\', '/')
+          $env:RUSTFLAGS = "$env:RUSTFLAGS -C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB% -C link-arg=/MAP:$targetRoot/voicetypr.map".Trim()
+          cargo build --manifest-path src-tauri/Cargo.toml --release --bin voicetypr
+          if ($LASTEXITCODE -ne 0) { throw "Main executable build failed: $LASTEXITCODE" }
+
+      - name: Assert ONNX Runtime is lazy-loaded, not imported or statically linked
+        shell: pwsh
+        run: |
+          & ./src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath "$env:CARGO_TARGET_DIR/release/voicetypr.exe" -MapPath "$env:CARGO_TARGET_DIR/voicetypr.map"
+
+      # No desktop or ASR model: Ivy Bridge must reach the lazy-runtime CPU guard.
+      - name: Check CLI on Ivy Bridge (no AVX2, Intel SDE)
+        uses: ./.github/actions/ivy-bridge-smoke
+        timeout-minutes: 15
+        with:
+          executable-path: ${{ env.CARGO_TARGET_DIR }}/release/voicetypr.exe

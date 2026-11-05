@@ -63,6 +63,7 @@ fn build_model(directory: &Path) -> Result<TdtModel, String> {
             return Err("Parakeet model files are missing. Download the model again.".into());
         }
     }
+    super::runtime::initialize().map_err(str::to_owned)?;
     let threads = std::thread::available_parallelism()
         .map_or(1, |count| count.get())
         .min(4);
