@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 mod admission;
 #[path = "kept_blocking.rs"]
 mod blocking;
+#[path = "kept_completion.rs"]
+mod completion;
 #[path = "kept_durable.rs"]
 mod durable;
 #[path = "kept_persistent.rs"]
@@ -386,7 +388,8 @@ impl Store {
         }
     }
     /// Expiry/cap pressure never cancels an accepted retry or deletes its
-    /// original audio. Explicit Discard/Esc still uses discard() immediately.
+    /// original audio. Explicit Delete audio uses discard() immediately;
+    /// Escape cancels the attempt without retiring the original.
     fn retire_automatically(&mut self, id: &str, resolution: &'static str) -> bool {
         if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             if clip.busy {
@@ -550,13 +553,13 @@ pub fn cancel_generation<R: crate::commands::recording_runtime::RecordingRuntime
     generation: u64,
 ) {
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    if store
-        .clips
-        .iter()
-        .any(|clip| clip.retry_generation == Some(generation))
-    {
+    if store.clips.iter().any(|clip| {
+        clip.retry_generation == Some(generation)
+            || (clip.recovery.generation == generation && clip.recovery.retry_failed)
+    }) {
         // Escape cancels the attempt, never the retained original. Leave the
         // lease busy until its future unwinds, then restore its preceding card.
+        // A late Cancel after a failed retry must not delete that new card either.
         if store
             .active_retry
             .as_ref()
@@ -644,7 +647,8 @@ pub async fn list_kept_dictations(app: AppHandle) -> Vec<KeptSummary> {
         })
         .collect()
 }
-pub fn cancel_active_retry<R: crate::commands::recording_runtime::RecordingRuntime>(
+/// Called only inside StartRequest's publication transaction.
+pub(crate) fn cancel_active_retry_owned<R: crate::commands::recording_runtime::RecordingRuntime>(
     app: &AppHandle<R>,
 ) {
     let generation = {
@@ -653,20 +657,7 @@ pub fn cancel_active_retry<R: crate::commands::recording_runtime::RecordingRunti
         store.cancel_retry();
         generation
     };
-    finish_cancelled_retry(app, generation);
-}
-fn finish_cancelled_retry<R: crate::commands::recording_runtime::RecordingRuntime>(
-    app: &AppHandle<R>,
-    generation: Option<u64>,
-) {
-    if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
-        app.state::<crate::AppState>().request_cancellation();
-        // Retry has no capture guard or recorder to stop. Publish Idle now so
-        // the caller may start a new take before the cancelled future unwinds.
-        if crate::get_recording_state(app) == crate::RecordingState::Transcribing {
-            crate::update_recording_state(app, crate::RecordingState::Idle, None);
-        }
-    }
+    completion::cancelled_owned(app, generation);
 }
 pub fn alternative_id(id: &str) -> Option<String> {
     STORE
@@ -1027,7 +1018,10 @@ impl Store {
     }
 }
 #[tauri::command]
-pub async fn discard_kept_dictation(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn discard_kept_dictation<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: AppHandle<R>,
+    id: String,
+) -> Result<(), String> {
     blocking::discard(app, id).await
 }
 #[tauri::command]
@@ -1082,34 +1076,11 @@ async fn retry<R: crate::commands::recording_runtime::RecordingRuntime>(
     .await;
     let cancelled = matches!(&result, Err(RetryError::Cancelled))
         || audio::delivery_aborted(state.is_cancellation_requested(), generation);
-    let result = if cancelled {
+    let mut result = if cancelled {
         Err(RetryError::Cancelled)
     } else {
         result
     };
-    let resolution = retry_resolution(result.is_ok(), cancelled, anyway);
-    if claim_terminal(&lease.terminal) {
-        resolved(
-            lease.kind,
-            generation,
-            resolution,
-            alt_engine_kind,
-            retry_started.elapsed().as_millis() as u64,
-            lease.trace.as_ref(),
-        );
-        if resolution == "retried_failed" {
-            crate::telemetry::capture_error(
-                "retry_failed",
-                crate::telemetry::ErrorContext {
-                    generation: Some(generation),
-                    ..Default::default()
-                },
-            );
-        }
-    }
-    if !audio::recording_generation_is_stale(generation) {
-        crate::update_recording_state(&app, crate::RecordingState::Idle, None);
-    }
     // A model may have been removed or the selected engine changed since this card's offer.
     let candidates = if result.is_err() && !cancelled {
         if let Some(native) = R::native(&app) {
@@ -1122,55 +1093,103 @@ async fn retry<R: crate::commands::recording_runtime::RecordingRuntime>(
     };
     let current = current_retry_model(&app, &candidates);
     let probes = probe_store_availability(Some(&id));
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    let discarded = audio::delivery_aborted(state.is_cancellation_requested(), generation);
-    let mut missing = false;
-    if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
-        if let Some(probe) = probes.iter().find(|probe| probe.matches(clip)) {
-            clip.recovery.retry_ready = probe.ready;
-            missing = probe.missing;
+    let resolve = |result: &Result<(), RetryError>| {
+        let resolution = retry_resolution(
+            result.is_ok(),
+            matches!(result, Err(RetryError::Cancelled)),
+            anyway,
+        );
+        if claim_terminal(&lease.terminal) {
+            resolved(
+                lease.kind,
+                generation,
+                resolution,
+                alt_engine_kind,
+                retry_started.elapsed().as_millis() as u64,
+                lease.trace.as_ref(),
+            );
+            if resolution == "retried_failed" {
+                crate::telemetry::capture_error(
+                    "retry_failed",
+                    crate::telemetry::ErrorContext {
+                        generation: Some(generation),
+                        ..Default::default()
+                    },
+                );
+            }
         }
-    }
-    store.complete_retry(&id, result.is_ok());
-    store.apply_availability(probes);
-    if missing {
-        drop(store.take(&id));
-    }
-    let retained = store.clips.iter().any(|c| c.recovery.id == id);
-    let mut publication = None;
-    if cancelled && !audio::recording_generation_is_stale(generation) && !store.closed {
-        if let Some(clip) = store.clips.iter().find(|clip| clip.recovery.id == id) {
-            let mut recovery = clip.recovery.clone();
-            recovery.expires_in_ms = clip.remaining_ms(Instant::now());
-            publication = Some(recovery);
+    };
+    let retained = completion::publish(&app, generation, |store| {
+        // Cancel may have arrived while refreshing model availability. Recheck
+        // inside the same transaction that commits success/deletes the clip.
+        if audio::delivery_aborted(state.is_cancellation_requested(), generation)
+            || *lease.cancelled.borrow()
+        {
+            result = Err(RetryError::Cancelled);
         }
-    }
-    if result.is_err() && !cancelled && !discarded {
+        resolve(&result);
+        let owns_clip = store.clips.iter().any(|clip| {
+            clip.recovery.id == id
+                && clip.retry_generation == Some(generation)
+                && std::sync::Arc::ptr_eq(&clip.terminal, &lease.terminal)
+        });
+        if !owns_clip {
+            return store.clips.iter().any(|clip| clip.recovery.id == id);
+        }
+        let mut missing = false;
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
-            if matches!(&result, Err(RetryError::Failed)) {
-                // Only a completed failure owns the failed-model label. A
-                // cancelled/new-take retry keeps the preceding recovery intact.
-                if let Some(selection) = attempted {
-                    clip.recovery.engine_short = selection.short_name();
-                    clip.retry_selection = Some(selection);
-                }
-                clip.recovery.retry_failed = true;
-                clip._retry_trace_lease = crate::observability::pin(generation);
-                clip.recovery.generation = generation;
-                clip.recovery.expires_in_ms = clip.remaining_ms(Instant::now());
-            }
-            let alternative = alternative_for(clip, &candidates, current.as_deref());
-            clip.recovery.set_alternative(alternative);
-            if matches!(&result, Err(RetryError::Failed)) {
-                publication = Some(clip.recovery.clone());
+            if let Some(probe) = probes.iter().find(|probe| probe.matches(clip)) {
+                clip.recovery.retry_ready = probe.ready;
+                missing = probe.missing;
             }
         }
-    }
-    store.persist(&id);
-    drop(store);
-    if let Some(recovery) = publication {
-        emit_recovery(&app, &recovery);
-    }
+        store.complete_retry(&id, result.is_ok());
+        store.apply_availability(probes);
+        if missing {
+            drop(store.take(&id));
+        }
+        let mut publication = None;
+        if matches!(result, Err(RetryError::Cancelled)) {
+            if let Some(clip) = store.clips.iter().find(|clip| clip.recovery.id == id) {
+                let mut recovery = clip.recovery.clone();
+                recovery.expires_in_ms = clip.remaining_ms(Instant::now());
+                publication = Some(recovery);
+            }
+        } else if result.is_err() {
+            if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
+                if matches!(result, Err(RetryError::Failed)) {
+                    if let Some(selection) = attempted {
+                        clip.recovery.engine_short = selection.short_name();
+                        clip.retry_selection = Some(selection);
+                    }
+                    clip.recovery.retry_failed = true;
+                    clip._retry_trace_lease = crate::observability::pin(generation);
+                    clip.recovery.generation = generation;
+                    clip.recovery.expires_in_ms = clip.remaining_ms(Instant::now());
+                }
+                let alternative = alternative_for(clip, &candidates, current.as_deref());
+                clip.recovery.set_alternative(alternative);
+                if matches!(result, Err(RetryError::Failed)) {
+                    publication = Some(clip.recovery.clone());
+                }
+            }
+        }
+        store.persist(&id);
+        if let Some(recovery) = publication {
+            emit_recovery(&app, &recovery);
+        }
+        store.clips.iter().any(|c| c.recovery.id == id)
+    })
+    .unwrap_or_else(|| {
+        result = Err(RetryError::Cancelled);
+        resolve(&result);
+        STORE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clips
+            .iter()
+            .any(|clip| clip.recovery.id == id)
+    });
     if let Some(native) = R::native(&app) {
         crate::menu::runtime::refresh(native);
     }
@@ -1970,7 +1989,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_discards_only_its_own_generation_even_during_retry() {
+    fn explicit_generation_discard_is_scoped_even_for_retry_audio() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::default();
         let mut older = clip(dir.path(), RecoveryKind::CloudFailed);

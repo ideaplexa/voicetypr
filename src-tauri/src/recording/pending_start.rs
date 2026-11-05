@@ -200,7 +200,7 @@ impl StartRequest<'_> {
             if state.get_current_state() == RecordingState::Error {
                 crate::update_recording_state(app, RecordingState::Idle, Some("recover".into()));
             }
-            super::kept::cancel_active_retry(app);
+            super::kept::cancel_active_retry_owned(app);
             state
                 .pointer_recording
                 .store(source.is_toggle(), std::sync::atomic::Ordering::SeqCst);

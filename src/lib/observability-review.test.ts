@@ -87,7 +87,7 @@ describe('O1 review integration contracts', () => {
   });
   it('claims one retry terminal and distinguishes cancellation from failure', () => {
     const source = rust('recording/kept');
-    const retry = section(source, 'async fn retry(', 'fn retry_setup');
+    const retry = section(source, 'async fn retry<', 'fn retry_setup');
     expect(retry).toContain('Err(RetryError::Cancelled)');
     expect(retry).toContain('if claim_terminal(&lease.terminal)');
     expect(retry).toContain('if resolution == "retried_failed"');

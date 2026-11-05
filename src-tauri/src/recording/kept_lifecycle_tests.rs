@@ -1,7 +1,8 @@
 //! Real retry/Cancel/Escape command paths; only native decoding/UI are mocked.
 use super::*;
+use crate::recording::{secure_input::StartPermit, start_source::StartSource};
 use crate::{commands::audio::RecorderState, AppState, RecordingState};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use tauri::{test::MockRuntime, Listener};
 
 pub(super) struct Work {
@@ -9,6 +10,59 @@ pub(super) struct Work {
     pub(super) finish: tokio::sync::Notify,
     pub(super) result: Mutex<Option<Result<(), String>>>,
     pub(super) selection: RetrySelection,
+}
+
+pub(super) struct Pause {
+    entered: mpsc::Sender<()>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+impl Pause {
+    pub(super) fn wait(&self) {
+        self.entered.send(()).unwrap();
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+    }
+}
+pub(super) struct DeletePause(pub(super) Arc<Pause>);
+struct BeforeIdle(Mutex<Option<Arc<Pause>>>);
+pub(super) fn before_idle<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let pause = app
+        .try_state::<BeforeIdle>()
+        .and_then(|hook| hook.0.lock().unwrap().take());
+    if let Some(pause) = pause {
+        pause.wait();
+    }
+}
+fn pause() -> (Arc<Pause>, mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (entered, receiver) = mpsc::channel();
+    let (sender, release) = mpsc::channel();
+    (
+        Arc::new(Pause {
+            entered,
+            release: Mutex::new(release),
+        }),
+        receiver,
+        sender,
+    )
+}
+
+fn publish_start(app: &AppHandle<MockRuntime>) -> u64 {
+    let state = app.state::<AppState>();
+    state
+        .pending_start
+        .claim(
+            &state,
+            StartSource::Hotkey,
+            StartPermit::capture_state(&state),
+        )
+        .unwrap()
+        .publish(app)
+        .unwrap()
+        .unwrap()
+        .0
 }
 
 fn child(name: &str) -> bool {
@@ -252,4 +306,217 @@ fn double_escape_keeps_retry_audio_index_and_original_failed_card() {
         .build()
         .unwrap()
         .block_on(cancel_case(true));
+}
+
+#[test]
+fn checked_retry_completion_serializes_idle_before_replacement_start() {
+    if !child("checked_retry_completion_serializes_idle_before_replacement_start") {
+        return;
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            for succeeds in [true, false] {
+                let fixture = Fixture::new();
+                let app = fixture.app.handle();
+                *app.state::<Work>().result.lock().unwrap() = Some(if succeeds {
+                    Ok(())
+                } else {
+                    Err("engine failed".into())
+                });
+                let retry =
+                    tokio::spawn(retry_kept_dictation(app.clone(), fixture.id.clone(), None));
+                app.state::<Work>().started.notified().await;
+                let (hook, entered, release) = pause();
+                app.manage(BeforeIdle(Mutex::new(Some(hook))));
+                app.state::<Work>().finish.notify_one();
+                // A has passed its generation check, just before publishing Idle.
+                entered.recv_timeout(Duration::from_secs(3)).unwrap();
+                let replacement = app.clone();
+                let (attempted_tx, attempted_rx) = mpsc::channel();
+                let (started_tx, started_rx) = mpsc::channel();
+                let start = std::thread::spawn(move || {
+                    attempted_tx.send(()).unwrap();
+                    started_tx.send(publish_start(&replacement)).unwrap();
+                });
+                attempted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                let early = started_rx.recv_timeout(Duration::from_millis(100));
+                let blocked = matches!(early, Err(mpsc::RecvTimeoutError::Timeout));
+                // Always release and join before assertions.
+                release.send(()).unwrap();
+                let generation = early
+                    .unwrap_or_else(|_| started_rx.recv_timeout(Duration::from_secs(3)).unwrap());
+                start.join().unwrap();
+                let result = retry.await.unwrap();
+                assert_eq!(result.is_ok(), succeeds);
+                assert!(blocked, "B published between A's check and Idle write");
+                let state = app.state::<AppState>();
+                assert_eq!(audio::current_recording_generation(), generation);
+                assert_eq!(state.get_current_state(), RecordingState::Starting);
+                assert!(!state.is_cancellation_requested());
+                assert_eq!(
+                    state.pending_start.with_active(&state, generation, || true),
+                    Some(true)
+                );
+                assert_eq!(fixture.path.exists(), !succeeds);
+                assert_eq!(fixture.index.exists(), !succeeds);
+            }
+        });
+}
+
+#[test]
+fn replacement_published_before_completion_survives_cancelled_retry_unwind() {
+    if !child("replacement_published_before_completion_survives_cancelled_retry_unwind") {
+        return;
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let fixture = Fixture::new();
+            let app = fixture.app.handle();
+            let work = app.state::<Work>();
+            let retry = retry_kept_dictation(app.clone(), fixture.id.clone(), None);
+            tokio::pin!(retry);
+            tokio::select! {
+                biased;
+                result = &mut retry => panic!("retry did not wait: {result:?}"),
+                () = work.started.notified() => {}
+            }
+            let generation = publish_start(app);
+            assert_eq!((&mut retry).await, Err("Retry discarded".into()));
+            let state = app.state::<AppState>();
+            assert_eq!(state.get_current_state(), RecordingState::Starting);
+            assert_eq!(audio::current_recording_generation(), generation);
+            assert!(!state.is_cancellation_requested());
+            fixture.assert_retained();
+        });
+}
+
+#[test]
+fn delayed_delete_completion_cannot_cancel_or_idle_a_replacement() {
+    if !child("delayed_delete_completion_cannot_cancel_or_idle_a_replacement") {
+        return;
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let fixture = Fixture::new();
+            let app = fixture.app.handle();
+            let lease = admission::admit(app, &fixture.id, false, None).unwrap();
+            let (hook, entered, release) = pause();
+            app.manage(DeletePause(hook));
+            let deletion = tokio::spawn(discard_kept_dictation(app.clone(), fixture.id.clone()));
+            entered.recv_timeout(Duration::from_secs(3)).unwrap();
+            let generation = publish_start(app);
+            // Also force the pre-I/O cancellation helper to resume with an old target.
+            completion::cancelled(app, Some(lease.generation));
+            release.send(()).unwrap();
+            deletion.await.unwrap().unwrap();
+            let state = app.state::<AppState>();
+            assert_eq!(audio::current_recording_generation(), generation);
+            assert_eq!(state.get_current_state(), RecordingState::Starting);
+            assert!(!state.is_cancellation_requested());
+            assert!(
+                !fixture.path.exists(),
+                "explicit Delete audio still deletes"
+            );
+            assert!(!fixture.index.exists());
+            drop(lease);
+        });
+}
+
+#[test]
+fn shutdown_preserves_retry_audio_and_suppresses_late_state_and_card_publication() {
+    if !child("shutdown_preserves_retry_audio_and_suppresses_late_state_and_card_publication") {
+        return;
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let fixture = Fixture::new();
+            let app = fixture.app.handle();
+            let work = app.state::<Work>();
+            let retry = retry_kept_dictation(app.clone(), fixture.id.clone(), None);
+            tokio::pin!(retry);
+            tokio::select! {
+                biased;
+                result = &mut retry => panic!("retry did not wait: {result:?}"),
+                () = work.started.notified() => {}
+            }
+            crate::commands::pill_feedback::with_queue_for_test(|queued| queued.clear());
+            let states = Arc::new(Mutex::new(Vec::new()));
+            let observed = states.clone();
+            let listener = app.listen("recording-state-changed", move |event| {
+                observed.lock().unwrap().push(event.payload().to_owned());
+            });
+            cleanup();
+            assert!(STORE.lock().unwrap().closed);
+            assert_eq!((&mut retry).await, Err("Retry discarded".into()));
+            assert!(states.lock().unwrap().is_empty());
+            app.unlisten(listener);
+            crate::commands::pill_feedback::with_queue_for_test(
+                |queued| assert!(queued.is_empty()),
+            );
+            assert_eq!(std::fs::read(&fixture.path).unwrap(), fixture.wav);
+            assert_eq!(std::fs::read(&fixture.index).unwrap(), fixture.metadata);
+        });
+}
+
+#[test]
+fn late_cancel_after_retry_failure_keeps_the_new_failed_card_and_audio() {
+    if !child("late_cancel_after_retry_failure_keeps_the_new_failed_card_and_audio") {
+        return;
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let fixture = Fixture::new();
+            let app = fixture.app.handle();
+            let work = app.state::<Work>();
+            *work.result.lock().unwrap() = Some(Err("engine failed".into()));
+            work.finish.notify_one();
+            assert_eq!(
+                retry_kept_dictation(app.clone(), fixture.id.clone(), None).await,
+                Err("Retry failed; recording remains available until expiry".into())
+            );
+            assert_eq!(
+                app.state::<AppState>().get_current_state(),
+                RecordingState::Idle
+            );
+            let metadata = std::fs::read(&fixture.index).unwrap();
+            let recovery = STORE.lock().unwrap().clips[0].recovery.clone();
+            assert_eq!(recovery.generation, audio::current_recording_generation());
+            audio::cancel_recording(app.clone()).await.unwrap();
+            super::super::escape_handler::handle_escape_key_press(
+                &app.state::<AppState>(),
+                app,
+                keytrigger::KeyPhase::Pressed,
+            )
+            .await;
+            assert_eq!(std::fs::read(&fixture.path).unwrap(), fixture.wav);
+            assert_eq!(std::fs::read(&fixture.index).unwrap(), metadata);
+            assert_eq!(STORE.lock().unwrap().clips.len(), 1);
+            crate::commands::pill_feedback::with_queue_for_test(|queued| {
+                assert!(queued
+                    .iter()
+                    .any(|(event, payload)| *event == "dictation-recovery"
+                        && payload["id"] == fixture.id
+                        && payload["generation"] == recovery.generation));
+                assert!(!queued
+                    .iter()
+                    .any(|(event, _)| *event == "kept-dictation-expired"));
+            });
+        });
 }

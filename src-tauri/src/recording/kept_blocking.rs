@@ -130,7 +130,10 @@ async fn run_deletion(
     }
 }
 
-pub(super) async fn discard(app: AppHandle, id: String) -> Result<(), String> {
+pub(super) async fn discard<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: AppHandle<R>,
+    id: String,
+) -> Result<(), String> {
     let generation = {
         let owner = STORE.lock().unwrap_or_else(|e| e.into_inner());
         owner
@@ -139,12 +142,20 @@ pub(super) async fn discard(app: AppHandle, id: String) -> Result<(), String> {
             .filter(|(active, _, _)| active == &id)
             .map(|(_, g, _)| *g)
     };
-    if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
-        app.state::<crate::AppState>().request_cancellation();
-    }
+    // Retire the retry phase before disk I/O, allowing a fresh take while Delete
+    // is blocked. Its eventual completion still owns only this old generation.
+    completion::cancelled(&app, generation);
+    #[cfg(test)]
+    let pause = app
+        .try_state::<super::lifecycle_tests::DeletePause>()
+        .map(|p| p.0.clone());
     let result = match Deletion::begin(&STORE, &id) {
         Ok(DeleteStart::Ready(deletion)) => {
-            run_deletion(*deletion, |clip| {
+            run_deletion(*deletion, move |clip| {
+                #[cfg(test)]
+                if let Some(pause) = pause {
+                    pause.wait();
+                }
                 if !clip.commit_retirement() {
                     return false;
                 }
@@ -157,8 +168,10 @@ pub(super) async fn discard(app: AppHandle, id: String) -> Result<(), String> {
         Ok(DeleteStart::Waiting(result)) => wait_for_deletion(result).await,
         Err(error) => Err(error),
     };
-    finish_cancelled_retry(&app, generation);
-    crate::menu::runtime::refresh(&app);
+    completion::cancelled(&app, generation);
+    if let Some(native) = R::native(&app) {
+        crate::menu::runtime::refresh(native);
+    }
     result
 }
 

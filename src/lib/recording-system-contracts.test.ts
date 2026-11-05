@@ -24,7 +24,8 @@ describe("recording system ownership contracts", () => {
     expect(cancel).toMatch(/current_recording_path[\s\S]*?\.take\(cancel_generation\)/);
     expect(cancel).toMatch(/capture_files[\s\S]*?\.take\(cancel_generation\)/);
     expect(cancel).toContain("files.writer_stopped(");
-    expect(cancel).toContain("discard_generation(&app, cancel_generation)");
+    expect(cancel).toContain("cancel_generation(&app, cancel_generation)");
+    expect(cancel).not.toContain("discard_generation(&app, cancel_generation)");
     expect(cancel).not.toContain("stop_recording_with_post_roll");
     expect(read("commands/audio.rs")).toContain(
       "StopInFlightGuard::try_acquire(app_state.stop_in_flight.clone())",
