@@ -102,6 +102,7 @@ impl<M: Model> Slot<M> {
             if cancel.load(Ordering::SeqCst)
                 || !core.admitting.load(Ordering::SeqCst)
                 || core.generation.load(Ordering::SeqCst) != generation
+                || core.unload_epoch.load(Ordering::SeqCst) != unload_epoch
             {
                 return Err("Transcription cancelled".into());
             }
@@ -118,6 +119,7 @@ impl<M: Model> Slot<M> {
             if cancel.load(Ordering::SeqCst)
                 || !core.admitting.load(Ordering::SeqCst)
                 || core.generation.load(Ordering::SeqCst) != generation
+                || core.unload_epoch.load(Ordering::SeqCst) != unload_epoch
             {
                 return Err("Transcription cancelled".into());
             }
@@ -339,6 +341,10 @@ impl<M: Model> Slot<M> {
     }
 
     fn clear_state(core: &Core<M>) {
+        // A loader may have crossed its initial epoch check just before unload
+        // closed admission. Reassert closure after owning the lifecycle gate.
+        core.admitting.store(false, Ordering::SeqCst);
+        core.cancel_worker.store(true, Ordering::SeqCst);
         let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
         state.model = None;
         state.directory = None;
@@ -560,6 +566,37 @@ mod tests {
         };
         let (result, ()) = tokio::join!(future, cancel_task);
         assert_eq!(result.unwrap_err(), "Transcription cancelled");
+    }
+
+    #[tokio::test]
+    async fn unload_recloses_admission_after_a_loader_crosses_its_epoch_check() {
+        let slot = Arc::new(slot(
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            Duration::ZERO,
+        ));
+        // Pause a loader after its epoch check while it owns the lifecycle gate.
+        let lifecycle = slot.core.lifecycle.lock().await;
+        let unloading = Arc::clone(&slot);
+        let unload = tokio::spawn(async move { unloading.unload().await });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while slot.core.unload_epoch.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // Reproduce the stores the paused loader can make after begin_unload.
+        slot.core.admitting.store(true, Ordering::SeqCst);
+        slot.core.cancel_worker.store(false, Ordering::SeqCst);
+        drop(lifecycle);
+        unload.await.unwrap();
+        assert!(!slot.core.admitting.load(Ordering::SeqCst));
+        assert!(slot.core.cancel_worker.load(Ordering::SeqCst));
+        assert_eq!(
+            slot.transcribe(vec![0.1], token()).await.unwrap_err(),
+            "Transcription cancelled"
+        );
     }
 
     #[tokio::test]

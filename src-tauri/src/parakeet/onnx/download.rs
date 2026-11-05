@@ -391,7 +391,7 @@ async fn download_with_hook(
         cancel,
         stall,
     } = request;
-    let _operation = operation_lock.lock().await;
+    let _operation = lock_gate_with_cancel(operation_lock, &cancel).await?;
     let destination = model_directory(root);
     let total = total_size(manifest.files);
     fs::create_dir_all(root)
@@ -799,6 +799,46 @@ mod tests {
         assert!(!changed);
         assert!(destination.join(MARKER).is_dir());
         assert!(backup.is_dir());
+    }
+
+    #[tokio::test]
+    async fn queued_download_cancels_without_waiting_for_another_operation() {
+        let temp = tempfile::tempdir().unwrap();
+        let operation = tokio::sync::Mutex::new(());
+        let held = operation.lock().await;
+        let gate = tokio::sync::Mutex::new(());
+        let cancel = Arc::new(AtomicBool::new(false));
+        let client = Client::new();
+        let manifest = Manifest {
+            revision: "test-revision",
+            files: &TEST_FILES,
+        };
+        let pending = download(
+            DownloadRequest {
+                client: &client,
+                root: temp.path(),
+                manifest: &manifest,
+                operation_lock: &operation,
+                gate: &gate,
+                cancel: Arc::clone(&cancel),
+                stall: STALL,
+            },
+            |_| panic!("cancelled queued download must not start HTTP"),
+            async { panic!("cancelled queued download must not unload a model") },
+            |_, _| {},
+        );
+        let cancellation = async {
+            tokio::task::yield_now().await;
+            cancel.store(true, Ordering::SeqCst);
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(pending, cancellation)
+        })
+        .await
+        .expect("cancel must not wait for the other download/delete");
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+        drop(held);
     }
 
     async fn server(fail: Option<(&'static str, u16)>, stall: bool) -> String {

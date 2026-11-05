@@ -58,6 +58,7 @@ describe("ModelCard", () => {
     expect(screen.getByText("670 MB")).toBeInTheDocument();
     expect(screen.getByText(/2× the download size/)).toBeInTheDocument();
     expect(screen.getByText(/Language is detected automatically/)).toBeInTheDocument();
+    expect(screen.getByText(/Choose Whisper in Models/)).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
     expect(screen.queryByText(/custom vocabulary/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/GPU acceleration/i)).not.toBeInTheDocument();

@@ -130,6 +130,7 @@ export const ModelCard = function ModelCard({
           {isOnnxParakeet && (
             <p className="mt-2 text-xs text-muted-foreground">
               Language is detected automatically. About 2× the download size in free disk space is needed temporarily.
+              {" "}CPU only, without live preview or vocabulary boosting. Choose Whisper in Models if you need these features or Parakeet cannot load.
             </p>
           )}
           {isOnnxParakeet && warming && (
