@@ -126,7 +126,7 @@ Polish skip_used measures the existing conservative zero-wait skip decision.
 start_to_first_audio_ms is absent when the recorder has no first-audio measurement.
 
 Blocked kinds and actions match src/types/island-events.ts.
-Recovery kinds: cloud_failed, network_offline, model_missing, remote_offline,
+Recovery kinds: unknown, cloud_failed, network_offline, model_missing, remote_offline,
 no_speech, integrity, mic_dropped_empty.
 Resolutions: retried_ok, retried_failed, transcribed_anyway, discarded, expired.
 Island states are the fixed native note/notice vocabulary, recording_too_short,

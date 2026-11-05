@@ -2,7 +2,7 @@ import { FeedbackStack, type StackItem } from '@/pill/stack';
 import { Spring, clamp } from '@/pill/spring';
 import { icon } from '@/pill/icons';
 import { OutlineClock } from '@/pill/outline-clock';
-import { retryErrorCard, type CardCommand, type FeedbackCard } from '@/pill/feedback';
+import { deleteErrorCard, retryErrorCard, type CardCommand, type FeedbackCard } from '@/pill/feedback';
 import type { PillGeometry } from '@/pill-geometry';
 type Rect = {x:number;y:number;width:number;height:number};
 interface View { el: HTMLElement; w: Spring; h: Spring; y: Spring; scale: Spring; alpha: number; targetAlpha: number; key: string; clock?: OutlineClock; pending?: object }
@@ -61,6 +61,7 @@ export class StackView {
       button.onclick=()=>{
         const view=this.views.get(item.key);
         if(!view || view.pending)return;
+        const recoveryGeneration=item.recoveryGeneration;
         const request={};view.pending=request;
         for(const action of view.el.querySelectorAll<HTMLButtonElement>('.act')) action.disabled=true;
         this.deps.wake(); // Withdraw the native cursor target even with settled geometry.
@@ -73,7 +74,14 @@ export class StackView {
             for(const action of view.el.querySelectorAll<HTMLButtonElement>('.act')) action.disabled=false;
             this.deps.wake();
           }
-          if(a.call.command==='retry_kept_dictation' || a.call.command==='transcribe_anyway') this.push(retryErrorCard(error));
+          const updated=this.stack.items.find(i=>i.key===item.key);
+          if(updated && (error==='Requested local engine is not ready' || error==='Requested engine is not ready') && a.call.command==='retry_kept_dictation' && a.call.engine) {
+            const unavailable=a.call.engine;
+            this.push({...updated,actions:updated.actions.filter(action=>action.call.command!=='retry_kept_dictation' || action.call.engine!==unavailable)});
+          }
+          const actionableFailure=updated?.retryFailed && updated.recoveryGeneration!==recoveryGeneration;
+          if((a.call.command==='retry_kept_dictation' || a.call.command==='transcribe_anyway') && !actionableFailure) this.push(retryErrorCard(error));
+          if(a.call.command==='discard_kept_dictation') this.push(deleteErrorCard());
         });
       };actions.append(button);
     }

@@ -1,8 +1,16 @@
-//! Bounded, ephemeral recovery ownership. Paths remain private to this module.
+//! Bounded recovery ownership, durable for failed-only saving. Paths remain private to this module.
 use super::island::RecoveryKind;
 use crate::commands::audio;
 use once_cell::sync::Lazy;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+#[path = "kept_blocking.rs"]
+mod blocking;
+#[path = "kept_durable.rs"]
+mod durable;
+#[path = "kept_persistent.rs"]
+mod persistent;
+#[path = "kept_selection.rs"]
+mod selection;
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -12,7 +20,7 @@ use std::{
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Recovery {
     generation: u64,
     pub(crate) id: String,
@@ -22,6 +30,8 @@ pub struct Recovery {
     alt_engine_id: Option<String>,
     expires_in_ms: u64,
     retry_ready: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    retry_failed: bool,
 }
 impl Recovery {
     fn set_alternative(&mut self, alternative: Option<(String, String)>) {
@@ -49,6 +59,11 @@ fn emit_recovery<R: tauri::Runtime>(app: &AppHandle<R>, recovery: &Recovery) {
         serde_json::to_value(recovery).unwrap(),
     );
 }
+#[derive(Clone, Serialize, Deserialize)]
+struct RetrySelection {
+    model: String,
+    engine: Option<String>,
+}
 struct Clip {
     _capture_files: Option<super::storage::CaptureFiles>,
     trace: Option<crate::observability::Trace>,
@@ -63,12 +78,88 @@ struct Clip {
     terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     target: PathBuf,
     retry_generation: Option<u64>,
+    disk: Option<persistent::DiskClip>,
+    retry_selection: Option<RetrySelection>,
+}
+impl Clip {
+    fn commit_retirement(&mut self) -> bool {
+        if let Some(disk) = &self.disk {
+            if disk.retire(self).is_err() {
+                let missing = std::fs::symlink_metadata(&self.path)
+                    .err()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+                if !(missing || finalized_wav(&self.path))
+                    || !durable::unlink_without_intent(&self.path)
+                {
+                    self.retire_after_retry = true;
+                    log::warn!("Could not delete failed recording");
+                    return false;
+                }
+            }
+        }
+        true
+    }
+    fn remove_audio(&self) {
+        super::storage::remove_finished_audio(&self.path);
+        if let Some(disk) = &self.disk {
+            if std::fs::symlink_metadata(&self.path)
+                .err()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                disk.delete(&self.path);
+            }
+        }
+    }
+    fn remaining_ms(&self, now: Instant) -> u64 {
+        self.disk.as_ref().map_or_else(
+            || self.expires.saturating_duration_since(now).as_millis() as u64,
+            persistent::DiskClip::remaining_ms,
+        )
+    }
+}
+fn current_retry_model(app: &AppHandle, candidates: &[(String, String)]) -> Option<String> {
+    let store = app.store("settings").ok()?;
+    let model = store
+        .get("current_model")
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    if !model.is_empty() {
+        return Some(model);
+    }
+    let engine = store
+        .get("current_model_engine")
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "whisper".into());
+    candidates
+        .iter()
+        .find(|(_, e)| e == &engine)
+        .map(|(m, _)| m.clone())
+}
+fn alternative_for(
+    clip: &Clip,
+    candidates: &[(String, String)],
+    current: Option<&str>,
+) -> Option<(String, String)> {
+    candidates
+        .iter()
+        .find(|(model, engine)| {
+            if let Some(selection) = &clip.retry_selection {
+                selection.model != *model || selection.engine.as_ref() != Some(engine)
+            } else {
+                (clip.recovery.kind == RecoveryKind::RemoteOffline
+                    || Some(model.as_str()) != current)
+                    && crate::pill::context::engine_short_name(model, engine)
+                        != clip.recovery.engine_short
+            }
+        })
+        .cloned()
 }
 #[derive(Default)]
 struct Store {
     // Installed before the first clip; every permanent deletion retires its UI id.
     app: Option<AppHandle>,
     clips: VecDeque<Clip>,
+    deleting: HashMap<String, blocking::PendingDelete>,
     closed: bool,
     leases: Vec<PathBuf>,
     borrowed_paths: HashMap<PathBuf, usize>,
@@ -162,11 +253,10 @@ impl Store {
     fn live_recoveries(&self, now: Instant) -> Vec<serde_json::Value> {
         self.clips
             .iter()
-            .filter(|clip| !self.closed && !clip.busy && clip.expires > now)
+            .filter(|clip| !self.closed && !clip.busy && clip.remaining_ms(now) > 0)
             .filter_map(|clip| {
                 let mut recovery = clip.recovery.clone();
-                recovery.expires_in_ms =
-                    clip.expires.saturating_duration_since(now).as_millis() as u64;
+                recovery.expires_in_ms = clip.remaining_ms(now);
                 (recovery.expires_in_ms > 0).then(|| serde_json::to_value(recovery).unwrap())
             })
             .collect()
@@ -189,22 +279,18 @@ impl Store {
             return Err("Recording expired or discarded".into());
         }
         let id = uuid::Uuid::new_v4().to_string();
-        let expires_in_ms = kind.ttl_ms();
+        let durable = dir.file_name().is_some_and(|n| n == persistent::DIRECTORY);
+        let expires_in_ms = if durable {
+            persistent::TTL_MS
+        } else {
+            kind.ttl_ms()
+        };
         std::fs::create_dir_all(dir).map_err(|_| "Recovery storage unavailable")?;
         let target = dir.join(format!("{id}.wav"));
         let capture_files = super::storage::CaptureFiles::for_path(path);
         // Finalized clips move to opaque names; pending writers retain their source
         // until the header is finalized, then the expiry task promotes them.
         let finalized = finalized_wav(path);
-        let owned_path = if finalized {
-            if move_finalized(path, &target) {
-                target.clone()
-            } else {
-                path.to_owned()
-            }
-        } else {
-            path.to_owned()
-        };
         let recovery = Recovery {
             generation,
             id: id.clone(),
@@ -214,14 +300,16 @@ impl Store {
             alt_engine_id: None,
             expires_in_ms,
             retry_ready: finalized,
+            retry_failed: false,
         };
+        let disk = durable.then(|| persistent::DiskClip::new(dir, &id));
         self.insert(Clip {
             _capture_files: capture_files,
             trace: crate::observability::snapshot(generation),
             _trace_lease: crate::observability::pin(generation),
             _retry_trace_lease: None,
             recovery: recovery.clone(),
-            path: owned_path,
+            path: path.to_owned(),
             expires: Instant::now() + Duration::from_millis(expires_in_ms),
             busy: false,
             retire_after_retry: false,
@@ -229,7 +317,12 @@ impl Store {
             terminal: Default::default(),
             target,
             retry_generation: None,
+            disk,
+            retry_selection: None,
         })?;
+        // Capacity/deletion failures must leave the incoming source untouched.
+        self.promote(&id);
+        self.persist(&id);
         Ok(recovery)
     }
     fn cancel_retry(&mut self) {
@@ -237,13 +330,18 @@ impl Store {
             let _ = cancel.send(true);
         }
     }
-    fn discard(&mut self, id: &str) {
-        if let Some(clip) = self.take(id) {
-            super::storage::remove_finished_audio(&clip.path);
-        }
+    fn discard(&mut self, id: &str) -> bool {
+        self.discard_resolved(id, "discarded")
     }
-    /// Retire ownership/UI without touching the filesystem. Missing-file
-    /// reconciliation already probed outside STORE and needs no second probe.
+    fn discard_resolved(&mut self, id: &str, resolution: &str) -> bool {
+        if let Some(clip) = self.take(id) {
+            resolve_clip(&clip, resolution);
+            clip.remove_audio();
+        }
+        !self.clips.iter().any(|c| c.recovery.id == id)
+    }
+    /// Retire ownership/UI and commit deletion intent before removing audio.
+    /// Missing-file reconciliation already probed the WAV outside STORE.
     fn take(&mut self, id: &str) -> Option<Clip> {
         if self
             .active_retry
@@ -253,13 +351,19 @@ impl Store {
             self.cancel_retry();
         }
         let index = self.clips.iter().position(|c| c.recovery.id == id)?;
+        if !self.clips[index].commit_retirement() {
+            return None;
+        }
         let clip = self.clips.remove(index)?;
+        self.retire_ui_id(id);
+        Some(clip)
+    }
+    fn retire_ui_id(&self, id: &str) {
         if let Some(app) = &self.app {
             crate::commands::pill_feedback::expire_kept_id(app, id);
         } else {
             crate::commands::pill_feedback::retire_kept_id(id);
         }
-        Some(clip)
     }
     fn discard_generation(&mut self, generation: u64) {
         let ids: Vec<_> = self
@@ -271,29 +375,25 @@ impl Store {
             .map(|c| c.recovery.id.clone())
             .collect();
         for id in ids {
-            if let Some(clip) = self.clips.iter().find(|c| c.recovery.id == id) {
-                resolve_clip(clip, "discarded");
-            }
             self.discard(&id);
         }
     }
     /// Expiry/cap pressure never cancels an accepted retry or deletes its
     /// original audio. Explicit Discard/Esc still uses discard() immediately.
-    fn retire_automatically(&mut self, id: &str, resolution: &'static str) {
+    fn retire_automatically(&mut self, id: &str, resolution: &'static str) -> bool {
         if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             if clip.busy {
                 clip.retire_after_retry = true;
-                return;
+                return false;
             }
-            resolve_clip(clip, resolution);
         }
-        self.discard(id);
+        self.discard_resolved(id, resolution)
     }
     fn expire(&mut self, now: Instant) {
         let ids: Vec<_> = self
             .clips
             .iter()
-            .filter(|c| c.expires <= now)
+            .filter(|c| c.remaining_ms(now) == 0)
             .map(|c| c.recovery.id.clone())
             .collect();
         for id in ids {
@@ -325,20 +425,31 @@ impl Store {
         if self.closed {
             return Err("Recovery is shutting down".into());
         }
-        while self.clips.len() >= 3 {
-            // Busy originals remain protected; retire them after completion
-            // and evict the oldest idle candidate to keep the physical cap.
-            let mut candidate = None;
-            for old in &mut self.clips {
-                if old.busy {
-                    old.retire_after_retry = true;
-                } else {
-                    candidate = Some(old.recovery.id.clone());
-                    break;
-                }
+        let durable = clip.disk.is_some();
+        let cap = if durable { persistent::CAP } else { 3 };
+        while self
+            .clips
+            .iter()
+            .filter(|c| c.disk.is_some() == durable)
+            .count()
+            + self
+                .deleting
+                .values()
+                .filter(|d| d.durable == durable)
+                .count()
+            >= cap
+        {
+            // Evict only the oldest idle original. Once this satisfies the
+            // cap, a busy original needs no deferred retirement.
+            let id = self
+                .clips
+                .iter()
+                .find(|old| old.disk.is_some() == durable && !old.busy)
+                .map(|old| old.recovery.id.clone())
+                .ok_or("Recovery is busy")?;
+            if !self.retire_automatically(&id, "discarded") {
+                return Err("Could not delete failed recording".into());
             }
-            let id = candidate.ok_or("Recovery is busy")?;
-            self.retire_automatically(&id, "discarded");
         }
         self.clips.push_back(clip);
         Ok(())
@@ -353,11 +464,12 @@ impl Store {
         }
         if succeeded
             || self.clips.iter().any(|c| {
-                c.recovery.id == id && (c.retire_after_retry || c.expires <= Instant::now())
+                c.recovery.id == id && (c.retire_after_retry || c.remaining_ms(Instant::now()) == 0)
             })
         {
             self.discard(id);
-        } else if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
+        }
+        if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             clip.busy = false;
             clip.retry_generation = None;
             clip.terminal = Default::default();
@@ -367,7 +479,7 @@ impl Store {
         if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
             if clip.path != clip.target
                 && clip.recovery.retry_ready
-                && move_finalized(&clip.path, &clip.target)
+                && move_finalized(&clip.path, &clip.target, clip.disk.is_some())
             {
                 clip.path = clip.target.clone();
             }
@@ -377,16 +489,26 @@ impl Store {
         }
     }
     fn poll_finalization(&mut self, id: &str, now: Instant) -> Option<(bool, Option<Recovery>)> {
+        if self.deleting.contains_key(id) {
+            return Some((false, None)); // A failed delete may restore this pending writer.
+        }
         if !self.promote(id) {
             return None;
         }
+        if self
+            .clips
+            .iter()
+            .any(|c| c.recovery.id == id && c.recovery.retry_ready)
+        {
+            self.persist(id);
+        }
         let clip = self.clips.iter_mut().find(|c| c.recovery.id == id)?;
+        // A finalized capture-backed original is also leaseable and indexed.
         let ready = clip.recovery.retry_ready;
         // A hydration/Home probe may have refreshed the cache first. That
         // must not suppress the notification to an already-rendered card.
-        let publication = if ready && clip.announced && !clip.busy && clip.expires > now {
-            clip.recovery.expires_in_ms =
-                clip.expires.saturating_duration_since(now).as_millis() as u64;
+        let publication = if ready && clip.announced && !clip.busy && clip.remaining_ms(now) > 0 {
+            clip.recovery.expires_in_ms = clip.remaining_ms(now);
             Some(clip.recovery.clone())
         } else {
             None
@@ -401,10 +523,19 @@ impl Store {
         for path in self.leases.drain(..) {
             let _ = std::fs::remove_file(path);
         }
-        while let Some(clip) = self.clips.front() {
-            let id = clip.recovery.id.clone();
+        let ids: Vec<_> = self.clips.iter().map(|c| c.recovery.id.clone()).collect();
+        for id in ids {
             self.discard(&id);
         }
+    }
+    fn clear_for_reset(&mut self) -> Result<(), String> {
+        // Do not race a detached deletion that could restore an owner after the
+        // storage reset. The user can retry Reset when its Delete has completed.
+        if !self.deleting.is_empty() {
+            return Err("Could not clear audio storage".into());
+        }
+        self.clear();
+        Ok(())
     }
 }
 pub fn discard_generation(app: &AppHandle, generation: u64) {
@@ -420,7 +551,7 @@ pub fn has_generation(generation: u64) -> bool {
         .unwrap_or_else(|e| e.into_inner())
         .clips
         .iter()
-        .any(|c| c.recovery.generation == generation && c.expires > Instant::now())
+        .any(|c| c.recovery.generation == generation && c.remaining_ms(Instant::now()) > 0)
 }
 /// Opaque recovery ID and display name only; never expose the private audio path.
 pub fn tray_recovery() -> Option<(String, Option<String>, Option<String>, bool)> {
@@ -430,7 +561,7 @@ pub fn tray_recovery() -> Option<(String, Option<String>, Option<String>, bool)>
         .clips
         .iter()
         .rev()
-        .find(|c| c.expires > Instant::now())
+        .find(|c| c.remaining_ms(Instant::now()) > 0)
         .map(|c| {
             (
                 c.recovery.id.clone(),
@@ -451,27 +582,38 @@ pub struct KeptSummary {
     busy: bool,
     retry_ready: bool,
     kind: RecoveryKind,
+    retry_failed: bool,
 }
 /// Failed dictations still waiting for a retry, even after the island card is closed.
 #[tauri::command]
-pub fn list_kept_dictations() -> Vec<KeptSummary> {
+pub async fn list_kept_dictations(app: AppHandle) -> Vec<KeptSummary> {
+    let candidates = local_candidates(&app).await;
+    let current = current_retry_model(&app, &candidates);
     let probes = probe_store_availability(None);
     let now = Instant::now();
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     store.apply_availability(probes);
+    store.expire(now);
+    for clip in &mut store.clips {
+        let alternative = alternative_for(clip, &candidates, current.as_deref());
+        clip.recovery.set_alternative(alternative);
+    }
     store
         .clips
         .iter()
-        .filter(|c| c.expires > now && !matches!(c.recovery.kind, RecoveryKind::MicDroppedEmpty))
+        .filter(|c| {
+            c.remaining_ms(now) > 0 && !matches!(c.recovery.kind, RecoveryKind::MicDroppedEmpty)
+        })
         .map(|c| KeptSummary {
             id: c.recovery.id.clone(),
             engine_short: c.recovery.engine_short.clone(),
             alt_engine_short: c.recovery.alt_engine_short.clone(),
             alt_engine_id: c.recovery.alt_engine_id.clone(),
-            remaining_ms: c.expires.saturating_duration_since(now).as_millis() as u64,
+            remaining_ms: c.remaining_ms(now),
             busy: c.busy,
             retry_ready: c.recovery.retry_ready,
             kind: c.recovery.kind,
+            retry_failed: c.recovery.retry_failed,
         })
         .collect()
 }
@@ -500,7 +642,7 @@ pub fn alternative_id(id: &str) -> Option<String> {
         .unwrap_or_else(|e| e.into_inner())
         .clips
         .iter()
-        .find(|c| c.recovery.id == id && c.expires > Instant::now())
+        .find(|c| c.recovery.id == id && c.remaining_ms(Instant::now()) > 0)
         .and_then(|c| c.recovery.alt_engine_id.clone())
 }
 /// A fallback owner is installed before any fallible storage operation or await.
@@ -561,14 +703,20 @@ pub async fn handoff(app: &AppHandle, generation: u64, path: &Path, kind: Recove
         }
     }
 }
-pub fn cleanup() {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    store.closed = true;
-    store.clear();
-    store.app = None;
+pub fn initialize(app: &AppHandle) {
+    persistent::initialize(app);
 }
-pub fn clear() {
-    STORE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+pub fn expire() {
+    persistent::expire();
+}
+pub fn cleanup() {
+    blocking::cleanup();
+}
+pub fn clear() -> Result<(), String> {
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear_for_reset()
 }
 pub fn with_protected_paths<T>(work: impl FnOnce(&std::collections::HashSet<PathBuf>) -> T) -> T {
     let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
@@ -576,6 +724,7 @@ pub fn with_protected_paths<T>(work: impl FnOnce(&std::collections::HashSet<Path
         .clips
         .iter()
         .map(|c| c.path.clone())
+        .chain(store.deleting.values().map(|d| d.path.clone()))
         .chain(store.leases.iter().cloned())
         .chain(store.borrowed_paths.keys().cloned())
         .chain(store.fallback.iter().map(|(p, _)| p.clone()))
@@ -602,7 +751,15 @@ async fn local_candidates(app: &AppHandle) -> Vec<(String, String)> {
     models
 }
 pub async fn local_alternative(app: &AppHandle) -> Option<(String, String)> {
-    local_candidates(app).await.into_iter().next()
+    let selected = app
+        .store("settings")
+        .ok()
+        .and_then(|s| s.get("current_model"))
+        .and_then(|v| v.as_str().map(str::to_owned));
+    local_candidates(app)
+        .await
+        .into_iter()
+        .find(|(m, _)| Some(m) != selected.as_ref())
 }
 /// Move ownership away from normal finalization before any await. A detached
 /// writer retains its original path until its header is finalized; retry checks
@@ -619,11 +776,22 @@ pub async fn keep(
     ) {
         return Err("Dictation discarded".into());
     }
+    let settings = crate::commands::settings::get_settings(app.clone()).await?;
+    let durable = !settings.save_recordings
+        && settings.save_failed_recordings
+        && kind != RecoveryKind::MicDroppedEmpty;
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|_| "Recovery storage unavailable")?
-        .join("recovery");
+        .join(if durable {
+            persistent::DIRECTORY
+        } else {
+            "recovery"
+        });
+    if std::fs::symlink_metadata(&dir).is_ok_and(|m| !m.is_dir() || persistent::alias(&m)) {
+        return Err("Recovery storage unavailable".into());
+    }
     let recovery = {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
         store.app.get_or_insert_with(|| app.clone());
@@ -673,10 +841,16 @@ pub async fn keep(
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| default.into())
     };
-    let engine_short = crate::pill::context::engine_short_name(
-        &setting("current_model", ""),
-        &setting("current_model_engine", "whisper"),
-    );
+    let engine_short = if kind == RecoveryKind::RemoteOffline
+        || selection::active_remote_model(app).await.is_some()
+    {
+        "Your other computer".into()
+    } else {
+        crate::pill::context::engine_short_name(
+            &setting("current_model", ""),
+            &setting("current_model_engine", "whisper"),
+        )
+    };
     let probes = probe_store_availability(None);
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     if audio::delivery_aborted(
@@ -689,21 +863,15 @@ pub async fn keep(
     store.apply_availability(probes);
     let mut publication = None;
     if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
-        clip.recovery.engine_short = if kind == RecoveryKind::RemoteOffline {
-            "Network".into()
-        } else {
-            engine_short
-        };
+        clip.recovery.engine_short = engine_short;
         clip.recovery.set_alternative(alternative);
         clip.announced = true;
-        clip.recovery.expires_in_ms = clip
-            .expires
-            .saturating_duration_since(Instant::now())
-            .as_millis() as u64;
+        clip.recovery.expires_in_ms = clip.remaining_ms(Instant::now());
         if !audio::recording_generation_is_stale(generation) {
             publication = Some(clip.recovery.clone());
         }
     }
+    store.persist(&id);
     drop(store);
     if let Some(recovery) = publication {
         emit_recovery(app, &recovery);
@@ -711,7 +879,10 @@ pub async fn keep(
     crate::menu::runtime::refresh(app);
     Ok(())
 }
-fn move_finalized(source: &Path, target: &Path) -> bool {
+fn move_finalized(source: &Path, target: &Path, persistent: bool) -> bool {
+    if persistent {
+        return durable::move_audio(source, target);
+    }
     if std::fs::rename(source, target).is_ok() {
         return true;
     }
@@ -739,6 +910,7 @@ pub(super) fn finalized_wav(path: &Path) -> bool {
 }
 struct Lease {
     id: String,
+    selection: Option<RetrySelection>,
     kind: RecoveryKind,
     file: tempfile::NamedTempFile,
     terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -811,6 +983,7 @@ impl Store {
         self.leases.push(file.path().to_owned());
         Ok(Lease {
             id: id.into(),
+            selection: clip.retry_selection.clone(),
             kind,
             file,
             terminal,
@@ -822,22 +995,8 @@ impl Store {
     }
 }
 #[tauri::command]
-pub fn discard_kept_dictation(app: AppHandle, id: String) {
-    let generation = {
-        let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        store
-            .active_retry
-            .as_ref()
-            .filter(|(active, _, _)| active == &id)
-            .map(|(_, g, _)| *g)
-    };
-    if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
-        app.state::<crate::AppState>().request_cancellation();
-    }
-    resolve_id(&id, "discarded");
-    STORE.lock().unwrap_or_else(|e| e.into_inner()).discard(&id);
-    finish_cancelled_retry(&app, generation);
-    crate::menu::runtime::refresh(&app);
+pub async fn discard_kept_dictation(app: AppHandle, id: String) -> Result<(), String> {
+    blocking::discard(app, id).await
 }
 #[tauri::command]
 pub async fn retry_kept_dictation(
@@ -905,9 +1064,10 @@ async fn retry(
             }
         })
         .unwrap_or("none");
+    let mut attempted = None;
     let result = cancellable_retry(
         lease.cancelled.clone(),
-        retry_inner(&app, &lease, generation, engine),
+        retry_inner(&app, &lease, generation, engine, &mut attempted),
     )
     .await;
     let cancelled = matches!(&result, Err(RetryError::Cancelled))
@@ -941,11 +1101,12 @@ async fn retry(
         crate::update_recording_state(&app, crate::RecordingState::Idle, None);
     }
     // A model may have been removed or the selected engine changed since this card's offer.
-    let alternative = if result.is_err() && !cancelled {
-        local_alternative(&app).await
+    let candidates = if result.is_err() && !cancelled {
+        local_candidates(&app).await
     } else {
-        None
+        Vec::new()
     };
+    let current = current_retry_model(&app, &candidates);
     let probes = probe_store_availability(Some(&id));
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     let discarded = audio::delivery_aborted(state.is_cancellation_requested(), generation);
@@ -963,18 +1124,28 @@ async fn retry(
     }
     let retained = store.clips.iter().any(|c| c.recovery.id == id);
     let mut publication = None;
-    if result.is_err() && !discarded {
+    if result.is_err() && !cancelled && !discarded {
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
+            if matches!(&result, Err(RetryError::Failed)) {
+                // Only a completed failure owns the failed-model label. A
+                // cancelled/new-take retry keeps the preceding recovery intact.
+                if let Some(selection) = attempted {
+                    clip.recovery.engine_short = selection.short_name();
+                    clip.retry_selection = Some(selection);
+                }
+                clip.recovery.retry_failed = true;
+                clip._retry_trace_lease = crate::observability::pin(generation);
+                clip.recovery.generation = generation;
+                clip.recovery.expires_in_ms = clip.remaining_ms(Instant::now());
+            }
+            let alternative = alternative_for(clip, &candidates, current.as_deref());
             clip.recovery.set_alternative(alternative);
-            clip._retry_trace_lease = crate::observability::pin(generation);
-            clip.recovery.generation = generation;
-            clip.recovery.expires_in_ms = clip
-                .expires
-                .saturating_duration_since(Instant::now())
-                .as_millis() as u64;
-            publication = Some(clip.recovery.clone());
+            if matches!(&result, Err(RetryError::Failed)) {
+                publication = Some(clip.recovery.clone());
+            }
         }
     }
+    store.persist(&id);
     drop(store);
     if let Some(recovery) = publication {
         emit_recovery(&app, &recovery);
@@ -999,7 +1170,7 @@ fn retry_error_message(error: RetryError, retained: bool) -> &'static str {
     match error {
         RetryError::Cancelled => "Retry discarded",
         _ if !retained => "Retry failed; recording is no longer available",
-        RetryError::EngineUnavailable => "Requested local engine is not ready",
+        RetryError::EngineUnavailable => "Requested engine is not ready",
         RetryError::Failed => "Retry failed; recording remains available until expiry",
     }
 }
@@ -1030,7 +1201,7 @@ async fn cancellable_retry<T>(
         biased;
         _ = cancelled.changed() => Err(RetryError::Cancelled),
         result = work => result.map_err(|error| {
-            if error == "Requested local engine is not ready" {
+            if error == "Requested local engine is not ready" || error == "Requested engine is not ready" {
                 RetryError::EngineUnavailable
             } else {
                 RetryError::Failed
@@ -1043,36 +1214,30 @@ async fn retry_inner(
     lease: &Lease,
     generation: u64,
     engine: Option<String>,
+    attempted: &mut Option<RetrySelection>,
 ) -> Result<(), String> {
     let settings = crate::commands::settings::get_settings(app.clone()).await?;
-    let (model, engine) = if let Some(engine) = engine {
-        // Accept stable model IDs, never display labels, paths or provider errors.
-        let alternatives = local_candidates(app).await;
-        if let Some((model, kind)) = alternatives.into_iter().find(|(m, _)| engine == *m) {
-            (model, Some(kind))
-        } else {
-            return Err("Requested local engine is not ready".into());
-        }
-    } else {
-        let model = if settings.current_model.is_empty() {
-            local_candidates(app)
-                .await
-                .into_iter()
-                .find(|(_, e)| e == &settings.current_model_engine)
-                .map(|(m, _)| m)
-                .unwrap_or_default()
-        } else {
-            settings.current_model.clone()
-        };
-        (
-            model,
-            if lease.kind == RecoveryKind::RemoteOffline {
-                None
-            } else {
-                Some(settings.current_model_engine.clone())
-            },
-        )
-    };
+    let remote_model = selection::active_remote_model(app).await;
+    let mut selected = RetrySelection::resolve(
+        &settings,
+        lease.kind,
+        lease.selection.as_ref(),
+        engine.as_deref(),
+        &local_candidates(app).await,
+        remote_model.is_some(),
+    )?;
+    if selected.engine.is_none() {
+        // An unresolved remote is an empty model hint, never a display label.
+        selected.model = remote_model.unwrap_or_default();
+    }
+    selected.pin_cloud_model(app);
+    let model = selected.model.clone();
+    let engine = selected.engine.clone();
+    let history_model = engine
+        .as_deref()
+        .and_then(crate::cloud_stt::CloudProvider::from_id)
+        .map_or_else(|| model.clone(), |provider| provider.id().to_owned());
+    *attempted = Some(selected);
     super::island::validate_recording_license(app).await?;
     let output = audio::transcribe_audio_file_impl(
         app.clone(),
@@ -1104,7 +1269,7 @@ async fn retry_inner(
         app.clone(),
         generation,
         output.text.clone(),
-        model,
+        history_model,
         None,
         output.metadata,
     )
@@ -1173,21 +1338,16 @@ fn resolved(
         trace,
     );
 }
-fn resolve_id(id: &str, resolution: &str) {
-    let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(clip) = store.clips.iter().find(|c| c.recovery.id == id) {
-        resolve_clip(clip, resolution);
-    }
-}
 fn resolve_clip(clip: &Clip, resolution: &str) {
     if !claim_terminal(&clip.terminal) {
         return;
     }
-    let latency = clip.recovery.kind.ttl_ms().saturating_sub(
-        clip.expires
-            .saturating_duration_since(Instant::now())
-            .as_millis() as u64,
-    );
+    let ttl = if clip.disk.is_some() {
+        persistent::TTL_MS
+    } else {
+        clip.recovery.kind.ttl_ms()
+    };
+    let latency = ttl.saturating_sub(clip.remaining_ms(Instant::now()));
     resolved(
         clip.recovery.kind,
         clip.retry_generation.unwrap_or(clip.recovery.generation),
@@ -1302,10 +1462,13 @@ mod tests {
                 alt_engine_id: None,
                 expires_in_ms: kind.ttl_ms(),
                 retry_ready: true,
+                retry_failed: false,
             },
             target: path.clone(),
             path,
             retry_generation: None,
+            disk: None,
+            retry_selection: None,
             expires: Instant::now() + Duration::from_millis(kind.ttl_ms()),
             busy: false,
             retire_after_retry: false,
@@ -1426,7 +1589,7 @@ mod tests {
         }
     }
     #[test]
-    fn cap_eviction_defers_busy_original_until_retry_completion() {
+    fn cap_eviction_preserves_busy_original_unless_retry_succeeds() {
         for succeeds in [true, false] {
             let dir = tempfile::tempdir().unwrap();
             let mut store = Store::default();
@@ -1443,10 +1606,10 @@ mod tests {
             assert_eq!(store.clips.len(), 3);
             assert!(path.exists());
             assert!(!*lease.cancelled.borrow());
-            assert!(store.clips[0].retire_after_retry);
+            assert!(!store.clips[0].retire_after_retry);
             store.complete_retry(&id, succeeds);
-            assert!(!path.exists());
-            assert_eq!(store.clips.len(), 2);
+            assert_eq!(path.exists(), !succeeds);
+            assert_eq!(store.clips.len(), if succeeds { 2 } else { 3 });
             store.clear();
         }
     }

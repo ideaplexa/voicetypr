@@ -24,7 +24,7 @@ function Group({ id, title, children }: { id: string; title: string; children: R
 
 function Row({ icon: Icon, title, description, button, disabled, onClick, secondary }: { icon: ComponentType<{ className?: string }>; title: string; description: string; button: string; disabled?: boolean; onClick: () => void; secondary?: React.ReactNode }) {
   return (
-    <li className="flex items-center gap-3.5 px-4 py-3">
+    <li className="flex flex-wrap items-center gap-3.5 px-4 py-3">
       <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p className="text-[13px] leading-[normal] font-medium text-foreground">{title}</p>
@@ -40,7 +40,10 @@ export function NeedsYou({ rows, onAct }: { rows: NeedRow[]; onAct: (row: NeedRo
   if (rows.length === 0) return null;
   return (
     <Group id="needs-you-title" title="Needs you">
-      {rows.map((row) => <Row key={row.id} icon={needIcons[row.icon]} title={row.title} description={row.description} button={row.button} disabled={row.disabled} onClick={() => onAct(row)} secondary={row.discard && <Button variant="ghost" size="sm" aria-label={`Discard: ${row.title}`} onClick={() => { if(row.discard) onAct({...row,action:row.discard}); }}>Discard</Button>} />)}
+      {rows.map((row) => <Row key={row.id} icon={needIcons[row.icon]} title={row.title} description={row.description} button={row.button} disabled={row.disabled} onClick={() => onAct(row)} secondary={<>
+        {row.alternative && <Button variant="outline" size="sm" disabled={row.disabled} aria-label={`Try another model: ${row.title}`} onClick={() => { if (row.alternative) onAct({...row,action:row.alternative}); }}>Try another model</Button>}
+        {row.discard && <Button variant="ghost" size="sm" aria-label={`${row.discardLabel ?? "Discard"}: ${row.title}`} onClick={() => { if(row.discard) onAct({...row,action:row.discard}); }}>{row.discardLabel ?? "Discard"}</Button>}
+      </>} />)}
     </Group>
   );
 }

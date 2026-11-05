@@ -4,6 +4,22 @@ import { pillHarness } from '@/pill/test-harness';
 let h: ReturnType<typeof pillHarness>;
 afterEach(() => h?.destroy());
 
+it('keeps the failed card and visibly reports a rejected Delete without private errors', async () => {
+  h = pillHarness(); await h.settle(0);
+  const base = h.invoke.getMockImplementation()!;
+  h.invoke.mockImplementation(async command => {
+    if (command === 'discard_kept_dictation') throw '/private/unwritable';
+    return base(command);
+  });
+  h.emit('dictation-recovery', {generation:1,id:'clip',kind:'cloud_failed',engine_short:'Soniox',alt_engine_short:null,alt_engine_id:null,expires_in_ms:600000,retry_ready:true,retry_failed:true});
+  await h.settle(1500);
+  h.get('[data-key="recovery:clip"] .act:nth-child(2)').click();
+  await h.settle(1000);
+  expect(h.get('[data-key="delete-error"]').textContent).toContain("Couldn't delete audio");
+  expect(h.get('[data-key="recovery:clip"] .act:nth-child(2)')).not.toBeDisabled();
+  expect(h.root.textContent).not.toContain('/private/unwritable');
+});
+
 it.each([
   ['Recording expired or discarded', 'That recording is no longer available.'],
   ['Recording is still finalizing', 'Audio is still finishing. Try again shortly.'],

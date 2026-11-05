@@ -1,9 +1,9 @@
 import type { DictationBlocked, DictationNote, DictationRecovery, IslandAction, IslandNotice, RecordingTooShort } from '@/types/island-events';
 import type { IslandIcon } from '@/pill/icons';
 import { elapsed } from '@/pill/copy';
-export type CardCommand = { command: 'island_action'; action: IslandAction } | { command: 'retry_kept_dictation'; id: string; engine: string } | { command: 'transcribe_anyway' | 'discard_kept_dictation'; id: string };
+export type CardCommand = { command: 'island_action'; action: IslandAction } | { command: 'retry_kept_dictation'; id: string; engine: string | null } | { command: 'transcribe_anyway' | 'discard_kept_dictation'; id: string };
 export interface CardAction { label: string; call: CardCommand }
-export interface FeedbackCard { key: string; title: string; sub: string; tone: 'neutral' | 'amber' | 'red'; duration: number | null; expiresAt?: number; liveGeneration?: number; micStatus?: { generation: number; resolves: 'new_take' | 'recording' }; glyph?: IslandIcon; closeLabel?: string; actions: CardAction[] }
+export interface FeedbackCard { key: string; title: string; sub: string; tone: 'neutral' | 'amber' | 'red'; duration: number | null; expiresAt?: number; liveGeneration?: number; recoveryGeneration?: number; retryFailed?: boolean; micStatus?: { generation: number; resolves: 'new_take' | 'recording' }; glyph?: IslandIcon; closeLabel?: string; actions: CardAction[] }
 const action = (label: string, value: IslandAction): CardAction => ({label, call: {command:'island_action',action:value}});
 const card = (key: string, title: string, sub = '', duration: number | null = 3500, tone: FeedbackCard['tone'] = 'neutral', actions: CardAction[] = []): FeedbackCard => ({key,title,sub,duration,tone,actions});
 export function blockedCard(e: DictationBlocked, mac: boolean): FeedbackCard {
@@ -27,14 +27,24 @@ export function blockedCard(e: DictationBlocked, mac: boolean): FeedbackCard {
 }
 export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
   if (e.kind === 'mic_dropped_empty') return {...card(`recovery:${e.id}`,'Mic disconnected · no audio captured'),micStatus:{generation:e.generation,resolves:'new_take'},glyph:'mic-off',expiresAt:now+e.expires_in_ms};
+  if (e.retry_failed) {
+    const actions: CardAction[] = [];
+    if (e.retry_ready !== false) {
+      // A null engine asks the backend to reuse this clip's last failed selection.
+      actions.push({label:'Retry again',call:e.kind === 'no_speech' ? {command:'transcribe_anyway',id:e.id} : {command:'retry_kept_dictation',id:e.id,engine:null}});
+      if (e.alt_engine_short && e.alt_engine_id) actions.push({label:'Try another model',call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}});
+    }
+    actions.push({label:'Delete audio',call:{command:'discard_kept_dictation',id:e.id}});
+    return {...card(`recovery:${e.id}`,`${e.engine_short} couldn't transcribe this`,'Recording kept',null,'amber',actions),recoveryGeneration:e.generation,retryFailed:true,closeLabel:'Close, recording kept',glyph:'bang',expiresAt:now+e.expires_in_ms};
+  }
   const titles = {
     cloud_failed: `${e.engine_short} unreachable`, network_offline: 'Network offline',
     model_missing: `${e.engine_short} isn't downloaded`, remote_offline: `${e.engine_short} is offline`,
-    integrity: 'Recording interrupted', no_speech: 'No speech heard',
+    unknown: 'Recording recovered', integrity: 'Recording interrupted', no_speech: 'No speech heard',
   };
-  const actions: CardAction[] = e.retry_ready === false ? [] : e.kind === 'no_speech' ? [{label:'Transcribe anyway',call:{command:'transcribe_anyway',id:e.id}}] : e.alt_engine_short && e.alt_engine_id ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}}] : [];
-  const sub = e.retry_ready === false ? 'Audio is still finishing…' : e.kind === 'no_speech' ? 'Audio kept for 30 s' : 'Temporary audio · Manage in Home';
-  return {...card(`recovery:${e.id}`,e.kind==='no_speech' ? titles[e.kind] : `${titles[e.kind]} · Recording kept`,sub,null,e.kind === 'no_speech' ? 'neutral' : 'amber',actions),closeLabel:'Close, recording kept',glyph:e.kind==='no_speech' ? 'quiet' : 'bang',expiresAt:now+e.expires_in_ms};
+  const actions: CardAction[] = e.retry_ready === false ? [] : e.kind === 'unknown' ? [{label:'Retry',call:{command:'retry_kept_dictation',id:e.id,engine:null}}] : e.kind === 'no_speech' ? [{label:'Transcribe anyway',call:{command:'transcribe_anyway',id:e.id}}] : e.alt_engine_short && e.alt_engine_id ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}}] : [];
+  const sub = e.retry_ready === false ? 'Audio is still finishing…' : e.expires_in_ms > 600_000 ? 'Audio kept up to 7 days · Manage in Home' : e.kind === 'no_speech' ? 'Audio kept for 30 s' : 'Temporary audio · Manage in Home';
+  return {...card(`recovery:${e.id}`,e.kind==='no_speech' ? titles[e.kind] : `${titles[e.kind]} · Recording kept`,sub,null,e.kind === 'no_speech' ? 'neutral' : 'amber',actions),recoveryGeneration:e.generation,retryFailed:false,closeLabel:'Close, recording kept',glyph:e.kind==='no_speech' ? 'quiet' : 'bang',expiresAt:now+e.expires_in_ms};
 }
 /** Never surface native/provider errors: they may contain paths or other private data. */
 export function retryErrorCard(error: unknown): FeedbackCard {
@@ -43,12 +53,16 @@ export function retryErrorCard(error: unknown): FeedbackCard {
     'Recording is still finalizing':'Audio is still finishing. Try again shortly.',
     'Dictation is busy':'Finish the current dictation, then retry.',
     'Recording is already being retried':'This recording is already being retried.',
+    'Requested engine is not ready':'That engine is no longer ready. Check your engine in Home.',
     'Requested local engine is not ready':'That engine is no longer ready. Check your engine in Home.',
     'Retry failed; recording remains available until expiry':'Retry failed. Audio is still kept temporarily in Home → Needs you.',
     'Retry failed; recording is no longer available':'Retry failed. The temporary recording is no longer available.',
     'Retry discarded':'Retry was cancelled.',
   };
   return card('retry-error',"Couldn't retry",typeof error === 'string' && Object.prototype.hasOwnProperty.call(messages,error) ? messages[error] : 'Open Home → Needs you to check the recording and retry.',null,'amber');
+}
+export function deleteErrorCard(): FeedbackCard {
+  return card('delete-error',"Couldn't delete audio",'Recording is still kept. Try Delete audio again in Home.',6000,'amber');
 }
 export function noteCard(e: DictationNote): FeedbackCard {
   const reasons = {timeout:'Polish timed out',rate_limited:'Polish rate limited',network:'Polish unavailable offline',guard:'Polish kept the original',error:'Polish failed'};

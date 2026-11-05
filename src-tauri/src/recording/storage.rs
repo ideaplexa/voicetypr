@@ -17,34 +17,45 @@ const ORPHAN_AGE: Duration = Duration::from_secs(10 * 60);
 const FILE_JOB_ORPHAN_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 static ACTIVE: Lazy<Mutex<HashMap<PathBuf, Weak<CaptureDirectory>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+const CAPTURE_AUDIO_FILE: &str = "recording.wav";
+
+pub(super) fn capture_audio_path(app_data: &Path, id: &str) -> PathBuf {
+    app_data.join("captures").join(id).join(CAPTURE_AUDIO_FILE)
+}
 
 #[derive(Clone)]
 pub(crate) struct CaptureFiles(Arc<CaptureDirectory>);
 struct CaptureDirectory {
     path: PathBuf,
     writer_pending: AtomicBool,
+    preserve_on_exit: AtomicBool,
 }
 
 impl CaptureFiles {
     pub fn create(app_data: &Path) -> Result<Self, String> {
-        let path = app_data
-            .join("captures")
-            .join(uuid::Uuid::new_v4().to_string());
+        let path = capture_audio_path(app_data, &uuid::Uuid::new_v4().to_string())
+            .parent()
+            .unwrap()
+            .to_owned();
         // Register before creating any files. The sweep holds this same lock.
         let mut active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
         std::fs::create_dir_all(&path).map_err(|_| "Capture storage unavailable")?;
         let files = Self(Arc::new(CaptureDirectory {
             path: path.clone(),
             writer_pending: AtomicBool::new(true),
+            preserve_on_exit: AtomicBool::new(false),
         }));
         active.insert(path, Arc::downgrade(&files.0));
         Ok(files)
     }
     pub fn audio_path(&self) -> PathBuf {
-        self.0.path.join("recording.wav")
+        self.0.path.join(CAPTURE_AUDIO_FILE)
     }
     pub fn writer_stopped(&self, pending: bool) {
         self.0.writer_pending.store(pending, Ordering::Release);
+    }
+    pub(super) fn preserve_on_exit(&self) {
+        self.0.preserve_on_exit.store(true, Ordering::Release);
     }
     pub fn for_path(path: &Path) -> Option<Self> {
         ACTIVE
@@ -64,6 +75,9 @@ pub fn writer_may_be_running(error: &str) -> bool {
 
 impl Drop for CaptureDirectory {
     fn drop(&mut self) {
+        if self.preserve_on_exit.load(Ordering::Acquire) {
+            return; // Recovery's private index now owns this capture, not cleanup.
+        }
         let path = self.path.clone();
         let pending = self.writer_pending.load(Ordering::Acquire);
         // Aborted async tasks still release their take. A timed-out writer must
@@ -290,6 +304,7 @@ fn sweep(
 }
 
 fn maintenance(app: &AppHandle) {
+    super::kept::expire();
     let Ok(data) = app.path().app_data_dir() else {
         return;
     };
@@ -339,6 +354,7 @@ fn maintenance(app: &AppHandle) {
 }
 
 pub fn start_maintenance(app: AppHandle) {
+    super::kept::initialize(&app);
     tauri::async_runtime::spawn(async move {
         loop {
             maintain(app.clone()).await;
@@ -382,7 +398,7 @@ pub(crate) async fn clear_audio(app: &AppHandle, plan: AudioResetPlan) -> Result
     // Continue clearing even if stop timed out; its detached writer remains
     // owned by the capture finalizer and is removed once it is safe.
     let _ = crate::commands::audio::cancel_recording(app.clone()).await;
-    super::kept::clear();
+    super::kept::clear()?;
     let AudioResetPlan { data, legacy, temp } = plan;
     let identifier = app.config().identifier.clone();
     let base = data
@@ -409,7 +425,13 @@ fn capture_directory_candidate(metadata: &std::fs::Metadata) -> bool {
 
 fn validate_audio_roots(data: &Path, identifier: &str, base: &Path) -> Result<(), &'static str> {
     use crate::utils::reset_directory;
-    for name in ["recordings", "recovery", "captures", "cli-recordings"] {
+    for name in [
+        "recordings",
+        "recovery",
+        "failed-recordings",
+        "captures",
+        "cli-recordings",
+    ] {
         reset_directory::validate(&data.join(name), identifier, base)?;
     }
     // Capture take directories are separate deletion targets. Fail before
@@ -446,7 +468,11 @@ fn clear_storage(
         super::file_jobs::sweep(data, temp, protected, SystemTime::now(), true).is_err()
     });
     let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
-    for dir in [data.join("recordings"), data.join("recovery")] {
+    for dir in [
+        data.join("recordings"),
+        data.join("recovery"),
+        data.join("failed-recordings"),
+    ] {
         failed |= reset_directory::remove(&dir, identifier, base).is_err();
     }
     // Legacy OS temp is not identifier-scoped (and dev/prod share it).

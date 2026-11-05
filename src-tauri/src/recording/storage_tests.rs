@@ -872,3 +872,24 @@ fn sweep_does_not_follow_symlinks_outside_capture_storage() {
     assert!(source.exists());
     assert!(link.exists());
 }
+
+#[test]
+fn normal_retention_never_sweeps_durable_failures_even_when_unprotected() {
+    let data = tempfile::tempdir().unwrap();
+    let now = SystemTime::now();
+    let failure = data
+        .path()
+        .join("failed-recordings")
+        .join(format!("{}.wav", uuid::Uuid::new_v4()));
+    write_aged(&failure, now, Duration::from_secs(6 * 86400));
+    sweep(
+        data.path(),
+        None,
+        Some(&HashSet::new()),
+        &HashSet::new(),
+        &HashSet::new(),
+        Some(1),
+        now,
+    );
+    assert!(failure.exists());
+}

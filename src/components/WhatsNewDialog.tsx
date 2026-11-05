@@ -63,6 +63,7 @@ export function WhatsNewDialog({ version, onClose }: { version: string | null; o
           tabIndex={0}
           className="max-h-[45vh] min-h-0 min-w-0 overflow-x-hidden overflow-y-auto break-words text-sm leading-relaxed outline-offset-4 focus-visible:outline-2 focus-visible:outline-ring [&_h1]:text-lg [&_h2]:text-base [&_h3]:font-semibold [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-sage [&_a]:underline [&_pre]:overflow-x-auto"
         >
+          {version?.replace(/^v/, "") === "2.1.0-beta.8" && <p>Recording audio now defaults to Only failed. Failed takes stay on this device for up to 7 days, even after restarting. A successful retry or Delete audio removes them. You can choose Don&apos;t save in Recording settings.</p>}
           {!loaded ? (
             <p role="status">Loading highlights…</p>
           ) : highlights ? (

@@ -308,7 +308,7 @@ async fn route_once(
                 )),
             }
         }
-        ActiveEngineSelection::Cloud { provider, .. } => {
+        ActiveEngineSelection::Cloud { provider, model_name } => {
             ensure_cloud_task_supported(*provider, translate, source)?;
 
             let key = match secure_get(app, provider.key_name()) {
@@ -321,8 +321,11 @@ async fn route_once(
                     ))
                 }
             };
-            let model = provider.selected_model(app).id;
-            match provider.transcribe_typed(app, &key, model, input_path, language).await {
+            let outcome = execute_cloud_attempt(*provider, model_name,
+                || provider.selected_model(app).id,
+                |model| provider.transcribe_typed(app, &key, model, input_path, language),
+            ).await;
+            match outcome {
                 Ok(transcript) => Ok(cloud_transcription_result(job, transcript)),
                 Err(e) => Err(from_stt_error(&e, source)),
             }
@@ -334,6 +337,16 @@ async fn route_once(
             "Remote (send-to-peer) transcription via the executor is wired by the remote-client port (Stage 5).",
         )),
     }
+}
+
+/// Keep model resolution and provider dispatch at one testable boundary.
+pub(crate) fn execute_cloud_attempt<T>(
+    provider: crate::cloud_stt::CloudProvider,
+    requested: &str,
+    selected: impl FnOnce() -> &'static str,
+    execute: impl FnOnce(&'static str) -> T,
+) -> T {
+    execute(provider.execution_model_id(requested, selected))
 }
 
 fn cloud_transcription_result(
