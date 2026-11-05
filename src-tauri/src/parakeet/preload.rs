@@ -148,13 +148,14 @@ pub(crate) fn selected_parakeet_preload_candidate<'a>(
     selected_model: &'a str,
     downloaded: bool,
 ) -> Option<&'a str> {
-    // Windows ORT must stay unloaded at startup, even when Parakeet is selected.
-    // Explicit selection/download preloads still count as user-initiated use.
-    (!cfg!(all(target_os = "windows", target_arch = "x86_64"))
-        && engine == "parakeet"
-        && !selected_model.is_empty()
-        && downloaded)
-        .then_some(selected_model)
+    if engine != "parakeet" || selected_model.is_empty() || !downloaded {
+        return None;
+    }
+    // A saved explicit selection may warm the lazy DLL, but only after admission.
+    // Exercise Windows' portable admission branch in host tests too.
+    #[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+    crate::onnx_runtime::require_cpu().ok()?;
+    Some(selected_model)
 }
 
 pub(crate) async fn recover_downloads(app: &AppHandle) {
@@ -209,7 +210,7 @@ mod startup_model_decision_tests {
         let model = "parakeet-tdt-0.6b-v3";
         assert_eq!(
             selected_parakeet_preload_candidate("parakeet", model, true),
-            (!cfg!(all(target_os = "windows", target_arch = "x86_64"))).then_some(model)
+            crate::onnx_runtime::require_cpu().ok().map(|()| model)
         );
         assert_eq!(
             selected_parakeet_preload_candidate("parakeet", model, false),
@@ -223,5 +224,15 @@ mod startup_model_decision_tests {
             selected_parakeet_preload_candidate("parakeet", "", true),
             None
         );
+    }
+
+    #[test]
+    fn unsupported_cpu_never_admits_selected_parakeet_startup_preload() {
+        crate::onnx_runtime::without_cpu(|| {
+            assert_eq!(
+                selected_parakeet_preload_candidate("parakeet", "parakeet-tdt-0.6b-v3", true),
+                None
+            );
+        });
     }
 }

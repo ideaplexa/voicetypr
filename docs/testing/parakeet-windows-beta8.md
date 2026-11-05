@@ -73,9 +73,10 @@ then-static packaging and frontend compatibility (superseded below). Fixes beyon
   NSIS artifact to native CI for installed-app hardware checks.
 
 The Silero branch rebased onto `fad6b8a5` replaces the static-ORT/DirectML
-packaging blockers with the official lazy Microsoft CPU DLL. Startup does not
-preload Windows Parakeet, even if selected. Explicit selection/download or first
-transcription may initialize it, after the existing CPU gate and SHA256 check.
+packaging blockers with the official lazy Microsoft CPU DLL. Startup preloads
+Windows Parakeet only when saved as the selected engine/model and CPU admission
+passes. Explicit selection/download or first transcription may initialize it too,
+after the existing CPU gate and SHA256 check. Unselected engines never load it.
 The only runtime path is absolute `current_exe().parent()/onnxruntime.dll`.
 Missing, altered or wrong-version bytes produce a content-free unavailable error.
 There is no PATH/System32 fallback. No ORT exists in either Mac dependency graph.
@@ -246,8 +247,9 @@ MSIX. Use disposable accounts/VMs and operator-owned model storage only.
   SHA256. NSIS installs beside the executable, MSIX at package root; verify both.
   Keep existing installer/package signing flows; do not re-sign this DLL.
 - [ ] Ivy Bridge: `--version` and shadow VAD silence/real-WAV return without
-  illegal instruction (VAD `runtime_unsupported`), no ORT loaded at startup.
-  On supported x64, first Parakeet use loads only the installed official DLL.
+  illegal instruction (VAD `runtime_unsupported`), no ORT loaded on unsupported CPUs.
+  On supported x64, selected startup preload or first Parakeet use loads only
+  the installed official DLL; unselected engines never load it.
 - [ ] Missing, corrupt or wrong-version installed DLL: first Parakeet use gives
   a clear unavailable error; app, Whisper and cloud engines remain alive.
 - [ ] Offline installation with required WebView2 prerequisites present.

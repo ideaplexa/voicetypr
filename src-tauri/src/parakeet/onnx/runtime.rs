@@ -1,4 +1,5 @@
-//! The only native ORT entry point. Never invoked by startup or availability checks.
+//! The only native ORT entry point. Selected startup preload is CPU-admitted;
+//! availability checks and unselected engines never invoke it.
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
