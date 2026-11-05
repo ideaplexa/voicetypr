@@ -5315,7 +5315,11 @@ pub(crate) async fn start_recording_with_permit(
         })
     };
 
-    if !start_permit.is_current(&app) || recording_generation_is_stale(recording_generation) {
+    if !start_permit.is_current(&app)
+        || recording_generation_is_stale(recording_generation)
+        || capture_interrupt.is_interrupted()
+        || app_state.is_cancellation_requested()
+    {
         capture_interrupt.interrupt();
         start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
         return Ok(false);
@@ -8454,7 +8458,7 @@ pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let cancel_generation = current_recording_generation();
-    app_state.request_cancellation();
+    app_state.cancel_capture(cancel_generation);
     super::ai_lifecycle::cancel_recording();
     crate::recording::kept::discard_generation(&app, cancel_generation);
     log::info!("Cancellation requested in app state");

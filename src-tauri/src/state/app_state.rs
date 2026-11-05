@@ -156,6 +156,13 @@ impl AppState {
         log::info!("Recording cancellation requested");
     }
 
+    pub(crate) fn cancel_capture(&self, generation: u64) {
+        self.request_cancellation();
+        // Publication retired the pending request, but settings/native readiness
+        // may still be awaiting. Unlike the shared flag, this latch never resets.
+        self.capture_interrupts.interrupt(generation);
+    }
+
     pub fn clear_cancellation(&self) {
         self.should_cancel_recording.store(false, Ordering::SeqCst);
     }

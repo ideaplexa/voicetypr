@@ -30,7 +30,6 @@ impl CaptureInterrupts {
             .is_some_and(|(owned, signal)| *owned == generation && signal.is_interrupted())
     }
 
-    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn interrupt(&self, generation: u64) -> bool {
         let interrupt = self
             .0
@@ -75,6 +74,7 @@ impl StartPermit {
     ) -> Result<Option<T>, E> {
         if !self.is_current(app)
             || interrupt.is_interrupted()
+            || app.state::<crate::AppState>().is_cancellation_requested()
             || crate::commands::audio::recording_generation_is_stale(generation)
         {
             interrupt.interrupt();
@@ -213,6 +213,10 @@ fn clear_holds(app_state: &crate::AppState) -> bool {
         .clear();
     held
 }
+
+#[cfg(test)]
+#[path = "secure_input/cancel_tests.rs"]
+mod cancel_tests;
 
 #[cfg(test)]
 mod tests {
