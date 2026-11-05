@@ -94,7 +94,6 @@ These changes require release/packaging review, even though no workflow was run.
 | `.github/workflows/release.yml` | Stage the official CPU DLL, assert no native/static ORT linkage and run pinned Intel SDE Ivy Bridge CLI checks before upload, so a runtime-linkage change cannot silently produce a broken release package. Existing publishing behavior is unchanged; do not dispatch it for branch validation. |
 | `.github/workflows/store-msix.yml` | Stage and verify the official DLL/notices in both layout and final MSIX; assert no native/static ORT linkage and run pinned Ivy Bridge SDE before upload. Preserve the immutable-SHA and reviewed-main ancestry trust gates. |
 | `.github/workflows/windows-check.yml` | Run clippy/tests plus main-exe build and pinned SDE `-ivb` version/VAD checks; assert that `parakeet-rs` is absent from the Windows ARM64 dependency graph. Bundle placeholders remain code-check-only, not packaging evidence. |
-| `.github/workflows/parakeet-onnx-spike.yml` | Add the legacy standalone research workflow as manual-only, pin the three model files to the app's exact revision and SHA256 values, and use a locked build. This is optional export research, not integrated-app or Windows RSS acceptance. Its cache-key false positive was resolved before commit `bf0a64b2`. |
 
 ## Exact CI entry points, only after approval and a push
 
@@ -120,11 +119,8 @@ Match the run's head SHA to the reviewed full commit SHA. Retain run URL,
 artifact hashes and results; never infer runtime quality from CI being green.
 
 The fast lane uses resource placeholders. It proves neither packaging nor GPU
-resources. No `model-bench.yml` exists. `parakeet-onnx-spike.yml` is an optional
-standalone research benchmark, not the integrated app, cancellation or installed
-app evaluation. It has no inputs; if available on the default branch it can be
-dispatched at the feature ref. Its Windows RSS field is unavailable, so do not
-use it to accept the RAM target.
+resources. Standalone export benchmarks belong on the research branch, not the
+release workflow set, and cannot establish integrated-app RAM or runtime acceptance.
 
 Store MSIX is a separate workflow with the sole required input `commit_sha`
 (full, lowercase, 40-character SHA). Its trust gate requires that commit to be an
