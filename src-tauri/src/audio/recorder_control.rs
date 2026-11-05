@@ -231,4 +231,71 @@ mod tests {
         assert!(matches!(readiness, Some(RecordingReadiness::Failed(_))));
         drop(ready_tx);
     }
+
+    #[test]
+    fn secure_input_entry_cuts_in_progress_post_roll_without_discarding_or_retargeting() {
+        use crate::recording::secure_input::{interrupt_capture, post_roll};
+        let state = crate::AppState::new();
+        for phase in [
+            crate::RecordingState::Starting,
+            crate::RecordingState::Recording,
+            crate::RecordingState::Stopping,
+        ] {
+            state.transition_recording_state(phase).unwrap();
+        }
+        let generation = 7;
+        let interrupt = state.capture_interrupts.begin(generation);
+        let (tx, rx) = mpsc::channel();
+        interrupt.attach(tx);
+        let metrics = Arc::new(CaptureMetricsAccumulator::new(48_000, 1));
+        let worker_metrics = metrics.clone();
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop_requested.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let user_stop = RecorderCommand::Stop {
+                post_roll: Duration::from_secs(5),
+            };
+            stop_after_post_roll(Some(&user_stop), &rx, &worker_metrics, &worker_stop);
+            done_tx.send(()).unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !metrics.post_roll_active.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "post-roll worker did not enter its wait"
+            );
+            std::thread::yield_now();
+        }
+        let signalled = interrupt_capture(&state, generation, true, false);
+        let cut_promptly = done_rx.recv_timeout(Duration::from_secs(1)).is_ok();
+        // Always release our test worker, including on a regressed state filter.
+        if !cut_promptly {
+            interrupt.interrupt();
+        }
+        worker.join().unwrap();
+        assert!(signalled);
+        assert!(
+            cut_promptly,
+            "Secure Input must cut the active post-roll wait"
+        );
+        assert!(stop_requested.load(Ordering::SeqCst));
+        assert!(metrics.post_roll_interrupted.load(Ordering::SeqCst));
+        assert_eq!(state.get_current_state(), crate::RecordingState::Stopping);
+        assert!(
+            !state.is_cancellation_requested(),
+            "keep the captured prefix for its existing transcription"
+        );
+        assert!(!state.pending_stop_after_start.load(Ordering::SeqCst));
+        let next = state.capture_interrupts.begin(generation + 1);
+        let (next_tx, next_rx) = mpsc::channel();
+        next.attach(next_tx);
+        interrupt_capture(&state, generation, true, false);
+        assert!(!next.is_interrupted());
+        assert!(matches!(next_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert_eq!(
+            post_roll(&state, generation + 1, Duration::from_millis(250)),
+            Duration::from_millis(250)
+        );
+    }
 }

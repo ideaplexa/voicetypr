@@ -146,6 +146,8 @@ pub(crate) fn changed(app: &tauri::AppHandle, state: keytrigger::SecureInputStat
     if interrupt_capture(&app_state, generation, state.enabled, held) {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
+            // Stopping already owns finalization and transcription of the
+            // captured prefix. Its latch cuts the tail without a second stop.
             // Never stop a later pointer/tray take if this task was delayed.
             if crate::commands::audio::current_recording_generation() != generation
                 || !matches!(
@@ -181,7 +183,11 @@ pub(crate) fn interrupt_capture(
 ) -> bool {
     let live = app_state.get_current_state();
     if live == crate::RecordingState::Starting
-        || ((enabled || held) && live == crate::RecordingState::Recording)
+        || ((enabled || held)
+            && matches!(
+                live,
+                crate::RecordingState::Recording | crate::RecordingState::Stopping
+            ))
     {
         app_state.capture_interrupts.interrupt(generation);
         true
