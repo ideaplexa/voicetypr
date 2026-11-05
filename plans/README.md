@@ -68,7 +68,7 @@ Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified 
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 087 | [2.1.0-beta.8, beta.9 and stable](087-2.1-beta8-beta9.md): release map and "Only failed" audio | P0 | XL | beta.7 baseline | TODO — scope approved 2026-11-05; not claimed |
+| 087 | [2.1.0-beta.8, beta.9 and stable](087-2.1-beta8-beta9.md): release map and "Only failed" audio | P0 | XL | beta.7 baseline | beta.8 IMPLEMENTED / MERGED on `release/2.1.0-beta.8`; hardware smoke and Windows CI pending; beta.9 OPEN |
 | 085 | [Spoken punctuation commands](085-spoken-punctuation-commands.md), opt-in for 2.1 | P1 | L | Beta.5 baseline; quote and spacing decisions | TODO — scope and trigger approved; not claimed for execution |
 | 086 | [Multilingual text correctness](086-multilingual-text-correctness.md), beta.6 | P0 | XL | Beta.5 baseline; security review for bidi changes | TODO — beta.6 scope approved; not claimed for execution |
 | 013  | *(reserved: close 004/008 smoke blockers — checklist, no plan file yet)* | P1 | S | 004, 008 | RESERVED — no executable plan file yet |
