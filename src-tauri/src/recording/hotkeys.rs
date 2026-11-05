@@ -186,7 +186,13 @@ fn handle_ptt_mode(
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let recorder_state = app_handle.state::<RecorderState>();
-                    match start_recording(app_handle.clone(), recorder_state, None).await {
+                    match start_recording(
+                        app_handle.clone(),
+                        recorder_state,
+                        Some(crate::recording::start_source::StartSource::HoldHotkey),
+                    )
+                    .await
+                    {
                         Ok(_) => log::info!("PTT: Recording started successfully"),
                         Err(e) if e == PTT_START_ABORTED_AFTER_RELEASE => {
                             log::info!("PTT: Recording start cancelled after key release");

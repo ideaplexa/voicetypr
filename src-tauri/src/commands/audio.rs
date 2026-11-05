@@ -5173,11 +5173,7 @@ pub async fn start_recording(
         crate::observability::update(
             generation,
             "start_source",
-            serde_json::json!(match source {
-                crate::recording::start_source::StartSource::Hotkey => "hotkey",
-                crate::recording::start_source::StartSource::Pointer => "pointer",
-                crate::recording::start_source::StartSource::Tray => "tray",
-            }),
+            serde_json::json!(source.telemetry_label()),
         );
         app_state.clear_cancellation();
         clear_pending_stop_after_start(&app_state);
