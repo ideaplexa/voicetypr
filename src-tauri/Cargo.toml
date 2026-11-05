@@ -90,6 +90,12 @@ genai = "=0.6.0"
 tokio-util = "0.7"
 which = "4.4.2"
 posthog-rs = { version = "0.22.0", default-features = false, features = ["error-tracking"] }
+
+# Match Windows Parakeet's single static ORT. rc.13 publishes no Intel macOS
+# archive: that target reports runtime_unsupported, never breaks dictation.
+[target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-27"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }

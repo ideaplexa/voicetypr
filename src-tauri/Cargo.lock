@@ -8633,6 +8633,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "once_cell",
+ "ort",
  "parakeet-rs",
  "parking_lot",
  "pbkdf2",

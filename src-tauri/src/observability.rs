@@ -258,6 +258,39 @@ pub fn schema(name: &str) -> Option<Schema> {
             ("source", SOURCE),
         ],
         "pill_native_error" => &[("code", NATIVE_CODES)],
+        "vad_shadow" => &[
+            (
+                "status",
+                &[
+                    "complete",
+                    "budget",
+                    "busy",
+                    "unavailable",
+                    "unsupported",
+                    "runtime_unsupported",
+                    "empty",
+                    "too_long",
+                    "model_invalid",
+                ],
+            ),
+            (
+                "current_gate",
+                &[
+                    "speech_positive",
+                    "high_confidence_no_input",
+                    "high_confidence_no_speech",
+                    "uncertain",
+                ],
+            ),
+            ("gate_skipped", &[]),
+            ("agreement", &["agree", "disagree", "unknown"]),
+            ("runtime_ms", &[]),
+            ("frames", &[]),
+            ("analyzed_ms", &[]),
+            ("speech_ms", &[]),
+            ("probability_mean_milli", &[]),
+            ("probability_max_milli", &[]),
+        ],
         _ => return None,
     })
 }
@@ -279,7 +312,18 @@ pub fn validated(event: &Event) -> Option<Vec<(&'static str, Value)>> {
                     return None;
                 }
             } else if vocabulary.is_empty() {
-                value.as_u64().filter(|n| *n <= 86_400_000)?;
+                let max = if event.event_name() == "vad_shadow" {
+                    match *key {
+                        "gate_skipped" => 1,
+                        "probability_mean_milli" | "probability_max_milli" => 1000,
+                        "frames" => 3750,
+                        "analyzed_ms" | "speech_ms" => 120_000,
+                        _ => 86_400_000,
+                    }
+                } else {
+                    86_400_000
+                };
+                value.as_u64().filter(|n| *n <= max)?;
             } else if !vocabulary.contains(&value.as_str()?) {
                 return None;
             }
@@ -464,6 +508,7 @@ mod tests {
             "share_card_action",
             "settings_opened",
             "pill_native_error",
+            "vad_shadow",
         ] {
             let mut event = Event::new(String::from(name), String::from("id"));
             for (key, vocabulary) in schema(name).unwrap() {
@@ -493,6 +538,32 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn vad_probabilities_are_numbers_and_unknown_fields_are_removed() {
+        let mut event = Event::new("vad_shadow".to_string(), "id".to_string());
+        for (key, vocabulary) in schema("vad_shadow").unwrap() {
+            event
+                .insert_prop(
+                    *key,
+                    if vocabulary.is_empty() {
+                        Value::from(1)
+                    } else {
+                        Value::from(vocabulary[0])
+                    },
+                )
+                .unwrap();
+        }
+        event.insert_prop("audio", "/private/capture.wav").unwrap();
+        let safe = validated(&event).unwrap();
+        assert!(!safe.iter().any(|(key, _)| *key == "audio"));
+        event.insert_prop("probability_max_milli", 1001).unwrap();
+        assert!(validated(&event).is_none());
+        event
+            .insert_prop("probability_max_milli", "private words")
+            .unwrap();
+        assert!(validated(&event).is_none());
+    }
+
     #[test]
     fn trace_is_random_and_threads_by_generation() {
         let mut traces = VecDeque::new();

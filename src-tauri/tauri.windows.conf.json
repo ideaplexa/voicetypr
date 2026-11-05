@@ -1,12 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "build": {
-    "beforeBundleCommand": "node scripts/stage-windows-pdb.cjs"
+    "beforeBundleCommand": "node scripts/stage-windows-pdb.cjs && node scripts/stage-windows-ort.cjs"
   },
   "bundle": {
     "resources": [
       "windows/resources/vcredist/*.dll",
-      "windows/resources/voicetypr.pdb"
+      "windows/resources/voicetypr.pdb",
+      "models/silero/LICENSE",
+      "models/onnxruntime/*"
     ],
     "externalBin": [
       "../sidecar/whisper-vulkan/dist/whisper-vulkan-sidecar"
