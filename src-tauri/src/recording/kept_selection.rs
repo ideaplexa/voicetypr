@@ -14,6 +14,18 @@ pub(super) async fn active_remote_model(app: &AppHandle) -> Option<String> {
 }
 
 impl RetrySelection {
+    pub(super) fn pin_cloud_model(&mut self, app: &AppHandle) {
+        if let Some(provider) = self
+            .engine
+            .as_deref()
+            .and_then(crate::cloud_stt::CloudProvider::from_id)
+        {
+            self.model = provider
+                .execution_model_id(&self.model, || provider.selected_model(app).id)
+                .into();
+        }
+    }
+
     pub(super) fn short_name(&self) -> String {
         match self.engine.as_deref() {
             Some(engine) => crate::pill::context::engine_short_name(&self.model, engine),
@@ -86,6 +98,57 @@ impl RetrySelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn saved_cloud_retry_reaches_executor_with_the_original_api_model() {
+        use crate::cloud_stt::CloudProvider;
+        use crate::transcription::executor::execute_cloud_attempt;
+        let provider = CloudProvider::Openai;
+        let original = provider.available_models()[0].id;
+        let changed = provider.available_models()[1].id;
+        let previous = RetrySelection {
+            model: provider.execution_model_id("openai", || original).into(),
+            engine: Some("openai".into()),
+        };
+        // Cross the same durable metadata boundary used by a restart.
+        let previous: RetrySelection =
+            serde_json::from_slice(&serde_json::to_vec(&previous).unwrap()).unwrap();
+        let selected = RetrySelection::resolve(
+            &Settings {
+                current_model: "openai".into(),
+                current_model_engine: "openai".into(),
+                ..Default::default()
+            },
+            RecoveryKind::CloudFailed,
+            Some(&previous),
+            None,
+            &[],
+            false,
+        )
+        .unwrap();
+        // Exercise the executor's actual provider-dispatch boundary, returning
+        // the attempted API model as a transport failure without network/key I/O.
+        let failed = execute_cloud_attempt(
+            provider,
+            &selected.model,
+            || changed,
+            |sent_model| async move { Err::<(), _>(sent_model) },
+        )
+        .await;
+        assert_eq!(failed.unwrap_err(), original);
+        let ordinary = execute_cloud_attempt(
+            provider,
+            "openai",
+            || changed,
+            |sent_model| async move { Err::<(), _>(sent_model) },
+        )
+        .await;
+        assert_eq!(
+            ordinary.unwrap_err(),
+            changed,
+            "Ordinary provider-alias requests must still follow Settings"
+        );
+    }
 
     #[test]
     fn retry_again_reuses_failed_whisper_instead_of_current_soniox() {

@@ -193,6 +193,15 @@ impl CloudProvider {
             .unwrap_or_else(|| self.default_model().id)
     }
 
+    /// A concrete API model is pinned. Provider aliases still follow Settings.
+    pub(crate) fn execution_model_id(
+        self,
+        requested: &str,
+        selected: impl FnOnce() -> &'static str,
+    ) -> &'static str {
+        self.model_by_id(requested).map_or_else(selected, |m| m.id)
+    }
+
     /// Soniox has one API model. Report its executed id, not the caller's
     /// provider shorthand or retired alias; other providers retain their ids.
     pub fn canonical_model_id(self, requested: &str) -> &str {

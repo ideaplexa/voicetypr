@@ -1192,8 +1192,13 @@ async fn retry_inner(
         // An unresolved remote is an empty model hint, never a display label.
         selected.model = remote_model.unwrap_or_default();
     }
+    selected.pin_cloud_model(app);
     let model = selected.model.clone();
     let engine = selected.engine.clone();
+    let history_model = engine
+        .as_deref()
+        .and_then(crate::cloud_stt::CloudProvider::from_id)
+        .map_or_else(|| model.clone(), |provider| provider.id().to_owned());
     *attempted = Some(selected);
     super::island::validate_recording_license(app).await?;
     let output = audio::transcribe_audio_file_impl(
@@ -1226,7 +1231,7 @@ async fn retry_inner(
         app.clone(),
         generation,
         output.text.clone(),
-        model,
+        history_model,
         None,
         output.metadata,
     )
