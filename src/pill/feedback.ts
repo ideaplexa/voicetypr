@@ -71,6 +71,6 @@ export const noticeCopy = {
   recording_failed:'Recording failed', copy_failed:'Copy failed',
   transcription_failed:'Transcription failed · try again', history_retry:'Transcription failed · retry from History',
   shortcut_throttled:'Hold on…', no_speech:'No speech heard',
-  secure_input:'Secure Input is on. If your shortcut is unavailable, start from the tray or mic. Use the island to stop or cancel.',
+  secure_input:'Secure Input is on',
 } satisfies Record<IslandNotice['kind'],string>;
-export function noticeCard(e: IslandNotice) { return card(`notice:${e.kind}`,noticeCopy[e.kind],'',e.kind === 'finishing' ? 600 : e.kind === 'long_silence' ? null : 3500); }
+export function noticeCard(e: IslandNotice) { return card(`notice:${e.kind}`,noticeCopy[e.kind],e.kind === 'secure_input' ? 'If your shortcut is unavailable, start from the tray or mic. Use the island to stop or cancel.' : '',e.kind === 'finishing' ? 600 : e.kind === 'long_silence' ? null : 3500); }
