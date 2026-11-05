@@ -1,8 +1,8 @@
 # Windows Parakeet beta.8 review and evaluation checklist
 
-This is a handoff, not a claim of Windows runtime acceptance. Worktree:
-`/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-parakeet-win-b8`,
-branch `feat/parakeet-windows-v3`, base `release/2.1.0-beta.8` (`29e7717e`).
+This is a handoff, not a claim of Windows runtime acceptance. Paths are relative
+to the repository root (`.`), branch `feat/parakeet-windows-v3`,
+base `release/2.1.0-beta.8` (`29e7717e`).
 Source: cumulative `3975a232..6711e881` from `feat/parakeet-windows-spike`.
 No push, merge, CI dispatch, app launch, microphone use or model download was
 performed for this handoff. Windows and installed-app checks below are

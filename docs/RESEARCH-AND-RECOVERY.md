@@ -32,7 +32,8 @@ the application is not release-validated. Main integration and push remain on ho
 
 The 15 documents under `handy-teardown/` and `voicetypr-perf/` were copied
 unchanged from the research worktree on 2026-09-22. They describe an earlier
-source snapshot, not today's integration branch. Their old line numbers,
+source snapshot, not today's integration branch. Machine-specific paths were
+later normalized to repository-relative references. Their old line numbers,
 external API/model claims, operational instructions, and implementation status
 need revalidation before use. The referenced Handy source checkout is not part
 of this import.
@@ -44,8 +45,8 @@ Streaming is already implemented here, and later native Parakeet model routing
 supersedes parts of the earlier decode-ahead handoff.
 
 The [source manifest](research-source-manifest.json) records the original
-worktree, source baseline, size, and SHA-256 of every imported document.
-The source worktree and existing local benchmark artifacts were retained.
+source branch/baseline, size, and SHA-256 of every imported document's original
+bytes, before path normalization.
 
 This consolidation changes documentation only. It does not establish a current
 build, runtime pass, merge into main, or release.

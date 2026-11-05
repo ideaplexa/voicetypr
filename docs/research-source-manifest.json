@@ -1,9 +1,9 @@
 {
   "imported_on": "2026-09-22",
-  "source_worktree": "/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-handy-teardown",
+  "source_worktree": ".",
   "source_branch": "research/handy-teardown",
   "source_head": "af63ab13ad92cf954f206b7a1f8a4efde1061e6f",
-  "source_status": "15 previously untracked historical research documents; copied without edits",
+  "source_status": "15 historical documents imported without edits; sizes and hashes describe original bytes before later repository-relative path normalization",
   "integration_application_baseline": "58ec176adc34e4e03ac9b3930dade68f13acd43f",
   "main_baseline": "c47e1465f7ef34ac2ca31b5b5b226981b41b17ab",
   "files": [

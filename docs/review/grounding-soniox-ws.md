@@ -1,6 +1,6 @@
 # Grounding report — Soniox WebSocket streaming (plan 043)
 
-All paths relative to `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-integration/`.
+All paths relative to the repository root (`.`).
 
 ## 1. How Soniox REST works today (current code, not diff)
 

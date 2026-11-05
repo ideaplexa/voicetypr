@@ -12,7 +12,7 @@ Windows ARM builds and broad redesigns are deferred. No scheduled polling.
 
 ## Environment and limits
 
-VM workspace: `/Volumes/1tb-drive/qa/voicetypr-vm`.
+VM workspace: isolated QA clone; paths relative to its repository root (`.`).
 Guest-only CuaDriver/VNC control, virtual audio input, synthetic speech and
 disposable settings. Candidate is an ad hoc signed release build, not a notarized
 public installer. VM results do not establish physical microphone/GPU parity or

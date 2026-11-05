@@ -7,7 +7,7 @@ checkpoint is not a packaged-app, insertion, CI, or release pass.
 
 ## Source and environment
 
-- Worktree: `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-integration`.
+- Worktree paths are relative to the repository root (`.`).
 - Branch: `feat/049-pure-rust-audio`; starting HEAD:
   `c286411603e4e3fe283f22bd4bd728e206e19fa6`.
 - Tested source includes the uncommitted startup guard and build-path fixes below.

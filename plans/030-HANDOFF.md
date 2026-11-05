@@ -15,7 +15,7 @@ Every design decision on this branch was made through that lens. Keep it.
 
 ## 2. Where the work lives
 
-- **Worktree:** `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-ai-polish-personalization`
+- **Worktree paths:** relative to the repository root (`.`)
 - **Branch:** `feat/ai-polish-personalization` (pushed to origin)
 - **Plan docs:** `plans/030-ai-polish-personalization.md` (master), `plans/030-phase4b-app-context-spec.md`, `plans/030-phase4c-agent-cli-spec.md` (has EMPIRICAL FINDINGS — read before touching agent-CLI code)
 

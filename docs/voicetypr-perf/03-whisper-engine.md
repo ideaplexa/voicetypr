@@ -2,7 +2,7 @@
 
 > **Scope:** the decode-bound engine (`whisper-rs` 0.16). READ-ONLY analysis; no code
 > changed. Every claim cites `path:line` relative to the VT repo root
-> (`/Volumes/1tb-drive/developer/oss/voicetypr`, HEAD `af63ab1`). whisper-rs 0.16.0 API
+> (`.`, HEAD `af63ab1`). whisper-rs 0.16.0 API
 > facts are source-verified against the vendored copy in
 > `~/.cargo/registry/src/.../whisper-rs-0.16.0/src/`. Anything not directly observed is
 > marked `[INFERENCE]` or `NEEDS MEASUREMENT`.

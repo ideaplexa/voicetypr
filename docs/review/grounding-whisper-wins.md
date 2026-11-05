@@ -1,4 +1,4 @@
-# Plan 044 grounding — Whisper WER-gated wins (worktree: /Volumes/1tb-drive/developer/oss/worktrees/voicetypr-integration)
+# Plan 044 grounding — Whisper WER-gated wins (paths relative to repository root)
 
 ## 0. Key discovery that reshapes the slice
 

@@ -49,7 +49,7 @@ Confidence: high (code; states verified absent in `RecentRecordings.tsx` and `Ov
 ### P1 — Comprehension defects
 
 **F3. Model path truncation crowds the toggle.**
-Evidence: `.design/ev-polish.png` and `.design/ev-sources.png` — truncated path `/Volumes/1tb-drive/lm-studio/models/mlx…` runs to the switch's left edge with no breathing room in provider cards.
+Evidence: `.design/ev-polish.png` and `.design/ev-sources.png` — the truncated external model-directory label runs to the switch's left edge with no breathing room in provider cards.
 Impact: settings row looks broken in its highest-traffic variant (custom provider path).
 Cause: flex row without `min-w-0`/`truncate` discipline between the path text and the trailing Switch.
 Prescription: constrain the path span with `min-w-0 truncate` and `mr-3` before the control.

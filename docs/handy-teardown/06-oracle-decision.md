@@ -381,11 +381,11 @@ Because current live code already appears to have landed some Phase 0 pieces, th
 
 - Brief / decision inputs:
   - `local://oracle-brief-handy-vt-streaming.md`
-  - `/Volumes/1tb-drive/developer/oss/voicetypr/plans/028-transcription-latency-streaming.md`
+  - `plans/028-transcription-latency-streaming.md`
   - `local://oracle-round1-slowmodel.md`
-  - `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-handy-teardown/docs/handy-teardown/00-README.md`
-  - `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-handy-teardown/docs/handy-teardown/01-streaming-engine.md`
-  - `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-handy-teardown/docs/handy-teardown/02-overlay-ux.md`
+  - `docs/handy-teardown/00-README.md`
+  - `docs/handy-teardown/01-streaming-engine.md`
+  - `docs/handy-teardown/02-overlay-ux.md`
 - VT stop/paste/current Phase 0:
   - `src-tauri/src/commands/audio.rs` — generation gating, normalization, delivery chokepoint, pre-insert path.
   - `src-tauri/src/commands/text.rs` — clipboard/paste/restore timing and guard.

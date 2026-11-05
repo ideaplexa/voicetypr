@@ -7,16 +7,16 @@ application or release pass. The original consolidation was documentation only.
 
 ## Working home and provenance
 
-- Worktree: `/Volumes/1tb-drive/developer/oss/worktrees/voicetypr-integration`.
+- Worktree paths are relative to the repository root (`.`).
 - Branch: `feat/049-pure-rust-audio`.
 - Integration application baseline: `58ec176adc34e4e03ac9b3930dade68f13acd43f`.
 - Main baseline: `c47e1465f7ef34ac2ca31b5b5b226981b41b17ab`.
 - Source: `research/handy-teardown` at `af63ab13`, plus 15 previously untracked
-  Markdown documents. All 15 are preserved byte-for-byte under
+  Markdown documents. All 15 were imported byte-for-byte under
   [Handy research](../docs/handy-teardown/00-README.md) and
   [performance research](../docs/voicetypr-perf/00-MASTER-ROADMAP.md).
-- [Import manifest](../docs/research-source-manifest.json): source paths,
-  document sizes, and SHA-256 hashes. Originals remain in the research worktree.
+- [Import manifest](../docs/research-source-manifest.json): original import
+  sizes and SHA-256 hashes, before later repository-relative path normalization.
 
 The user's direction on 2026-09-22 is to combine these two lines of work:
 learn from Handy and continue building in the integration worktree. This is
