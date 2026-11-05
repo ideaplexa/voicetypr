@@ -3,6 +3,8 @@ use super::island::RecoveryKind;
 use crate::commands::audio;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+#[path = "kept_blocking.rs"]
+mod blocking;
 #[path = "kept_durable.rs"]
 mod durable;
 #[path = "kept_persistent.rs"]
@@ -80,6 +82,34 @@ struct Clip {
     retry_selection: Option<RetrySelection>,
 }
 impl Clip {
+    fn commit_retirement(&mut self) -> bool {
+        if let Some(disk) = &self.disk {
+            if disk.retire(self).is_err() {
+                let missing = std::fs::symlink_metadata(&self.path)
+                    .err()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+                if !(missing || finalized_wav(&self.path))
+                    || !durable::unlink_without_intent(&self.path)
+                {
+                    self.retire_after_retry = true;
+                    log::warn!("Could not delete failed recording");
+                    return false;
+                }
+            }
+        }
+        true
+    }
+    fn remove_audio(&self) {
+        super::storage::remove_finished_audio(&self.path);
+        if let Some(disk) = &self.disk {
+            if std::fs::symlink_metadata(&self.path)
+                .err()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                disk.delete(&self.path);
+            }
+        }
+    }
     fn remaining_ms(&self, now: Instant) -> u64 {
         self.disk.as_ref().map_or_else(
             || self.expires.saturating_duration_since(now).as_millis() as u64,
@@ -129,6 +159,7 @@ struct Store {
     // Installed before the first clip; every permanent deletion retires its UI id.
     app: Option<AppHandle>,
     clips: VecDeque<Clip>,
+    deleting: HashMap<String, blocking::PendingDelete>,
     closed: bool,
     leases: Vec<PathBuf>,
     borrowed_paths: HashMap<PathBuf, usize>,
@@ -305,15 +336,7 @@ impl Store {
     fn discard_resolved(&mut self, id: &str, resolution: &str) -> bool {
         if let Some(clip) = self.take(id) {
             resolve_clip(&clip, resolution);
-            super::storage::remove_finished_audio(&clip.path);
-            if let Some(disk) = &clip.disk {
-                if std::fs::symlink_metadata(&clip.path)
-                    .err()
-                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-                {
-                    disk.delete(&clip.path);
-                }
-            }
+            clip.remove_audio();
         }
         !self.clips.iter().any(|c| c.recovery.id == id)
     }
@@ -328,30 +351,19 @@ impl Store {
             self.cancel_retry();
         }
         let index = self.clips.iter().position(|c| c.recovery.id == id)?;
-        let clip = &self.clips[index];
-        if let Some(disk) = &clip.disk {
-            if disk.retire(clip).is_err() {
-                // An intent write failure is tolerable only if unlink itself
-                // durably succeeds. Otherwise retain the owner and report failure.
-                let missing = std::fs::symlink_metadata(&clip.path)
-                    .err()
-                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
-                if !(missing || finalized_wav(&clip.path))
-                    || !durable::unlink_without_intent(&clip.path)
-                {
-                    self.clips[index].retire_after_retry = true;
-                    log::warn!("Could not delete failed recording");
-                    return None;
-                }
-            }
+        if !self.clips[index].commit_retirement() {
+            return None;
         }
         let clip = self.clips.remove(index)?;
+        self.retire_ui_id(id);
+        Some(clip)
+    }
+    fn retire_ui_id(&self, id: &str) {
         if let Some(app) = &self.app {
             crate::commands::pill_feedback::expire_kept_id(app, id);
         } else {
             crate::commands::pill_feedback::retire_kept_id(id);
         }
-        Some(clip)
     }
     fn discard_generation(&mut self, generation: u64) {
         let ids: Vec<_> = self
@@ -420,6 +432,11 @@ impl Store {
             .iter()
             .filter(|c| c.disk.is_some() == durable)
             .count()
+            + self
+                .deleting
+                .values()
+                .filter(|d| d.durable == durable)
+                .count()
             >= cap
         {
             // Evict only the oldest idle original. Once this satisfies the
@@ -472,6 +489,9 @@ impl Store {
         }
     }
     fn poll_finalization(&mut self, id: &str, now: Instant) -> Option<(bool, Option<Recovery>)> {
+        if self.deleting.contains_key(id) {
+            return Some((false, None)); // A failed delete may restore this pending writer.
+        }
         if !self.promote(id) {
             return None;
         }
@@ -507,6 +527,15 @@ impl Store {
         for id in ids {
             self.discard(&id);
         }
+    }
+    fn clear_for_reset(&mut self) -> Result<(), String> {
+        // Do not race a detached deletion that could restore an owner after the
+        // storage reset. The user can retry Reset when its Delete has completed.
+        if !self.deleting.is_empty() {
+            return Err("Could not clear audio storage".into());
+        }
+        self.clear();
+        Ok(())
     }
 }
 pub fn discard_generation(app: &AppHandle, generation: u64) {
@@ -681,14 +710,13 @@ pub fn expire() {
     persistent::expire();
 }
 pub fn cleanup() {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-    store.closed = true;
-    store.preserve_on_exit();
-    store.clear();
-    store.app = None;
+    blocking::cleanup();
 }
-pub fn clear() {
-    STORE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+pub fn clear() -> Result<(), String> {
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear_for_reset()
 }
 pub fn with_protected_paths<T>(work: impl FnOnce(&std::collections::HashSet<PathBuf>) -> T) -> T {
     let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
@@ -696,6 +724,7 @@ pub fn with_protected_paths<T>(work: impl FnOnce(&std::collections::HashSet<Path
         .clips
         .iter()
         .map(|c| c.path.clone())
+        .chain(store.deleting.values().map(|d| d.path.clone()))
         .chain(store.leases.iter().cloned())
         .chain(store.borrowed_paths.keys().cloned())
         .chain(store.fallback.iter().map(|(p, _)| p.clone()))
@@ -966,26 +995,8 @@ impl Store {
     }
 }
 #[tauri::command]
-pub fn discard_kept_dictation(app: AppHandle, id: String) -> Result<(), String> {
-    let generation = {
-        let store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        store
-            .active_retry
-            .as_ref()
-            .filter(|(active, _, _)| active == &id)
-            .map(|(_, g, _)| *g)
-    };
-    if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
-        app.state::<crate::AppState>().request_cancellation();
-    }
-    let deleted = STORE.lock().unwrap_or_else(|e| e.into_inner()).discard(&id);
-    finish_cancelled_retry(&app, generation);
-    crate::menu::runtime::refresh(&app);
-    if deleted {
-        Ok(())
-    } else {
-        Err("Could not delete failed recording".into())
-    }
+pub async fn discard_kept_dictation(app: AppHandle, id: String) -> Result<(), String> {
+    blocking::discard(app, id).await
 }
 #[tauri::command]
 pub async fn retry_kept_dictation(

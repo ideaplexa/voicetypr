@@ -398,7 +398,7 @@ pub(crate) async fn clear_audio(app: &AppHandle, plan: AudioResetPlan) -> Result
     // Continue clearing even if stop timed out; its detached writer remains
     // owned by the capture finalizer and is removed once it is safe.
     let _ = crate::commands::audio::cancel_recording(app.clone()).await;
-    super::kept::clear();
+    super::kept::clear()?;
     let AudioResetPlan { data, legacy, temp } = plan;
     let identifier = app.config().identifier.clone();
     let base = data

@@ -178,7 +178,7 @@ async fn run_inner(app: AppHandle, id: &str, source: &str) -> Result<(), String>
         return crate::recording::kept::retry_kept_dictation(app, id, engine).await;
     }
     if let Some(id) = id.strip_prefix("discard_") {
-        return crate::recording::kept::discard_kept_dictation(app, id.into());
+        return crate::recording::kept::discard_kept_dictation(app, id.into()).await;
     }
     if let Some(model) = id.strip_prefix("model_") {
         return crate::commands::settings::set_model_from_tray(app, model.into()).await;

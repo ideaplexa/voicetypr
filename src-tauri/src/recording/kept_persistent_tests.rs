@@ -1,5 +1,54 @@
 use super::*;
 
+impl Store {
+    fn preserve_on_exit(&mut self) {
+        self.preserve_on_exit_until(Instant::now() + blocking::EXIT_BUDGET);
+    }
+}
+
+#[test]
+fn expired_exit_budget_preserves_indexed_captures_and_unindexed_wav_orphans() {
+    for pending in [false, true] {
+        let data = tempfile::tempdir().unwrap();
+        let files = super::super::super::storage::CaptureFiles::create(data.path()).unwrap();
+        let source = files.audio_path();
+        let writer = super::super::availability_tests::writer(&source);
+        let mut store = Store::default();
+        let recovery = store
+            .retain(
+                &data.path().join(DIRECTORY),
+                &source,
+                7,
+                RecoveryKind::Integrity,
+            )
+            .unwrap();
+        let writer = if pending {
+            Some(writer)
+        } else {
+            writer.finalize().unwrap();
+            None
+        };
+        if !pending {
+            store.apply_availability(probe_availability(store.availability_paths(None)));
+            store.poll_finalization(&recovery.id, Instant::now());
+            std::fs::remove_file(store.clips[0].target.with_extension("json")).unwrap();
+        }
+        store.fallback.push((source.clone(), Some(files.clone())));
+        store.preserve_on_exit_until(Instant::now());
+        store.clear();
+        drop(files);
+        if let Some(writer) = writer {
+            writer.finalize().unwrap();
+        }
+        let mut restarted = Store::default();
+        restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
+        assert_eq!(restarted.clips.len(), 1);
+        assert_eq!(restarted.clips[0].recovery.id, recovery.id);
+        assert!(restarted.clips[0].recovery.retry_ready);
+        restarted.clear();
+    }
+}
+
 #[test]
 fn finalization_after_the_last_poll_is_promoted_at_quit() {
     let data = tempfile::tempdir().unwrap();

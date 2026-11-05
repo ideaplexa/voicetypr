@@ -151,7 +151,16 @@ impl Store {
         }
     }
 
-    pub(super) fn preserve_on_exit(&mut self) {
+    pub(super) fn preserve_on_exit_until(&mut self, deadline: Instant) {
+        // Disarm capture cleanup before the first possibly blocking file call.
+        // A timed-out exit worker must never drop an unpromoted only copy.
+        for clip in &self.clips {
+            if clip.disk.is_some() {
+                if let Some(files) = &clip._capture_files {
+                    files.preserve_on_exit();
+                }
+            }
+        }
         // The last availability poll is not a shutdown barrier. Probe again.
         let ids: Vec<_> = self
             .clips
@@ -160,6 +169,9 @@ impl Store {
             .map(|c| c.recovery.id.clone())
             .collect();
         for id in ids {
+            if Instant::now() >= deadline {
+                break;
+            }
             if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
                 clip.recovery.retry_ready = finalized_wav(&clip.path);
             }
@@ -170,6 +182,12 @@ impl Store {
             .iter()
             .filter(|c| c.disk.is_some())
             .map(|c| c.path.clone())
+            .chain(
+                self.deleting
+                    .values()
+                    .filter(|d| d.durable)
+                    .map(|d| d.path.clone()),
+            )
             .collect();
         self.fallback.retain(|(path, files)| {
             if !preserved.contains(path) {
@@ -184,7 +202,9 @@ impl Store {
         // index refresh failed. Never delete the only copy as a quit side effect.
         self.clips.retain(|clip| {
             !clip.disk.as_ref().is_some_and(|disk| {
-                let _ = disk.write(clip);
+                if Instant::now() < deadline {
+                    let _ = disk.write(clip);
+                }
                 if clip.path != clip.target {
                     if let Some(files) = &clip._capture_files {
                         files.preserve_on_exit();
