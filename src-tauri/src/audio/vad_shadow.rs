@@ -4,12 +4,16 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use super::silero_vad::{self, Summary};
 use super::speech_evidence::SpeechEvidenceClass;
 
 static BUSY: AtomicBool = AtomicBool::new(false);
 static WORKERS: Workers = Workers::new();
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+// Match the recording stop budget; includes the earlier/later exit stages.
+const EXIT_TIMEOUT: Duration = Duration::from_secs(8);
 
 struct WorkerState {
     stopping: bool,
@@ -38,13 +42,34 @@ impl Workers {
         state.active += 1;
         Some(WorkerLease(self))
     }
-    fn shutdown(&self) {
+    fn stopping(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stopping
+    }
+    fn close_admission(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.stopping = true;
+        self.changed.notify_all();
+        state.active != 0
+    }
+    fn shutdown(&self, budget: Duration) -> bool {
+        let deadline = Instant::now() + budget;
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.stopping = true;
         self.changed.notify_all();
         while state.active != 0 {
-            state = self.changed.wait(state).unwrap_or_else(|e| e.into_inner());
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            let (next, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|e| e.into_inner());
+            state = next;
         }
+        true
     }
 }
 impl Drop for WorkerLease<'_> {
@@ -55,11 +80,80 @@ impl Drop for WorkerLease<'_> {
     }
 }
 
-/// Exit only: prevent new native work/reports and drain any existing session
-/// before analytics/runtime teardown. Never called on a recording path.
-/// A native call cannot be killed safely, so quit waits for it to unwind.
-pub fn shutdown() {
-    WORKERS.shutdown();
+/// Arm before any exit teardown, so native VAD cannot stall an earlier stage
+/// through a shared native lock. Drain is still performed in the required order.
+pub fn begin_shutdown() -> QuitDrain {
+    // This is admission closure, not resource teardown. With no admitted work
+    // there is no native VAD hazard, so normal app teardown needs no watchdog.
+    if !WORKERS.close_admission() {
+        return QuitDrain { watchdog: None };
+    }
+    QuitDrain {
+        watchdog: Some(arm_watchdog(Instant::now() + EXIT_TIMEOUT)),
+    }
+}
+
+fn arm_watchdog(deadline: Instant) -> std::sync::mpsc::Sender<()> {
+    let (cancel, finished) = std::sync::mpsc::channel();
+    if std::thread::Builder::new()
+        .name("vad-exit-deadline".into())
+        .spawn(move || {
+            if finished
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .is_err()
+            {
+                exit_without_native_teardown();
+            }
+        })
+        .is_err()
+    {
+        // Without the fallback we cannot safely promise a bounded native exit.
+        exit_without_native_teardown();
+    }
+    cancel
+}
+
+#[must_use]
+pub struct QuitDrain {
+    watchdog: Option<std::sync::mpsc::Sender<()>>,
+}
+impl QuitDrain {
+    pub fn drain(&mut self) {
+        if WORKERS.shutdown(DRAIN_TIMEOUT) {
+            if let Some(cancel) = self.watchdog.take() {
+                let _ = cancel.send(());
+            }
+        }
+    }
+    /// After remote/media/analytics cleanup, bypass C++ static destructors if a
+    /// native worker may still be running. Never kill a single native thread.
+    pub fn finish(self) {
+        drop(self);
+    }
+}
+impl Drop for QuitDrain {
+    fn drop(&mut self) {
+        if self.watchdog.is_some() {
+            exit_without_native_teardown();
+        }
+    }
+}
+
+fn exit_without_native_teardown() -> ! {
+    // SAFETY: terminal process exit only. No user buffer or foreign context is
+    // freed underneath an in-flight native call; the OS reclaims the process.
+    #[cfg(unix)]
+    unsafe {
+        libc::_exit(0)
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        let _ = TerminateProcess(GetCurrentProcess(), 0);
+        // Current-process termination should not fail. Do not run C++ destructors
+        // even in that exceptional case.
+        std::process::abort();
+    }
 }
 
 struct Slot(&'static AtomicBool);
@@ -119,6 +213,9 @@ impl Observation {
         let epoch = self.epoch;
         let gate_skipped = self.gate_skipped;
         let report = std::sync::Arc::new(move |summary: Summary| {
+            if WORKERS.stopping() {
+                return;
+            }
             let agreement = match summary.speech_detected() {
                 Some(speech) if speech != gate_skipped => "agree",
                 Some(_) => "disagree",
@@ -175,6 +272,9 @@ impl Observation {
             .spawn(move || {
                 let _worker = worker;
                 let _slot = slot;
+                if WORKERS.stopping() {
+                    return;
+                }
                 let summary = std::panic::catch_unwind(|| {
                     silero_vad::analyze(BufReader::new(file), silero_vad::BUDGET)
                 })
@@ -202,7 +302,7 @@ mod tests {
         let (done, finished) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             scope.spawn(|| {
-                workers.shutdown();
+                assert!(workers.shutdown(Duration::from_secs(2)));
                 done.send(()).unwrap();
             });
             let mut state = workers.state.lock().unwrap();
@@ -217,6 +317,73 @@ mod tests {
             finished.recv().unwrap();
             assert!(workers.enter().is_none());
         });
+    }
+
+    #[test]
+    fn quit_deadline_does_not_wait_for_a_stuck_native_lease_or_allow_late_reports() {
+        let workers = Workers::new();
+        let lease = workers.enter().unwrap();
+        let start = Instant::now();
+        assert!(!workers.shutdown(Duration::from_millis(20)));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(workers.stopping());
+        assert!(workers.enter().is_none());
+        assert_eq!(workers.state.lock().unwrap().active, 1);
+        drop(lease);
+        assert!(workers.shutdown(Duration::ZERO));
+        assert!(workers.enter().is_none());
+    }
+
+    #[test]
+    fn terminal_exit_skips_c_exit_handlers() {
+        const CHILD: &str = "VOICETYPR_TEST_VAD_FAST_EXIT";
+        if let Ok(mode) = std::env::var(CHILD) {
+            extern "C" fn on_exit() {
+                // Ordinary CRT exit would run this; a safe terminal exit must not.
+                unsafe { libc::_exit(73) };
+            }
+            // SAFETY: static C callback, installed only in this isolated child.
+            assert_eq!(unsafe { libc::atexit(on_exit) }, 0);
+            if mode == "direct" {
+                exit_without_native_teardown();
+            }
+            let cancel = arm_watchdog(Instant::now() + Duration::from_millis(20));
+            if mode == "cancel" {
+                cancel.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(60));
+                // SAFETY: normal C exit must run the same CRT's registered handler.
+                unsafe { libc::exit(0) };
+            }
+            loop {
+                std::thread::park(); // simulate a permanently blocked native call
+            }
+        }
+        let home = tempfile::tempdir().unwrap();
+        for (mode, expected) in [("direct", 0), ("watchdog", 0), ("cancel", 73)] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "audio::vad_shadow::tests::terminal_exit_skips_c_exit_handlers",
+                ])
+                .env(CHILD, mode)
+                .env("HOME", home.path())
+                .env("USERPROFILE", home.path())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("terminal exit exceeded the test deadline");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            assert_eq!(status.code(), Some(expected));
+        }
     }
 
     #[test]

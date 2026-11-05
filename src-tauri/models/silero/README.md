@@ -24,7 +24,10 @@ The 250 ms result budget is cooperative. Decode, initialization and inference
 are checked before/after native work; whisper.cpp's VAD API processes the
 whole bounded take without a per-frame cancellation callback. Over-budget
 results are unknown, never silence. One worker retains its slot until native
-work and context destruction finish, and quit drains that worker.
+work and context destruction finish. Quit closes admission/reports and waits at
+most 250 ms at the VAD drain stage. If still active, ordered teardown continues,
+then the process exits without C++ static destruction. An 8 s watchdog from
+exit entry bounds earlier/later teardown while admitted VAD work exists.
 Bootstrap installs a content-discarding native logger once, before workers.
 Caller-thread native errors make the result unavailable, including the pinned
 backend's otherwise-successful partial-compute path. No native text is emitted.

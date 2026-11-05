@@ -132,6 +132,7 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
+    "Win32_System_Threading",
 ] }
 winreg = "0.52"
 [dev-dependencies]

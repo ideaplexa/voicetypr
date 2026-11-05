@@ -1500,11 +1500,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // asserts at exit if a model's residency set is still live, aborting the process
             // (SIGABRT) on quit — after transcription already succeeded. Two owners must be
             // emptied: the local dictation cache (managed `TranscriberCache`), and the
-            // strong-host remote server's OWN cache (inside `RealTranscriptionContext`) —
-            // stopping the server joins its tasks and drops that context. Both harmless on
-            // non-Apple platforms: they just release resources a moment early.
+            // strong-host remote server's cache, dropped by stopping/joining its tasks.
             tauri::RunEvent::Exit => {
-                tauri::async_runtime::block_on(async move {
+                let mut vad_quit = audio::vad_shadow::begin_shutdown();
+                tauri::async_runtime::block_on(async {
                     if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {
                         cache.lock().await.clear();
                     }
@@ -1512,7 +1511,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(parakeet) = app_handle.try_state::<parakeet::ParakeetManager>() {
                         parakeet.shutdown().await;
                     }
-                    audio::vad_shadow::shutdown();
+                    vad_quit.drain();
                     if let Some(remote) = app_handle
                         .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()
                     {
@@ -1524,6 +1523,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 recording::kept::cleanup();
                 crate::commands::ai_lifecycle::cancel_recording();
                 product_analytics::shutdown();
+                vad_quit.finish();
             }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { has_visible_windows, .. } => {
