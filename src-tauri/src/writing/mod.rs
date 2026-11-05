@@ -5,6 +5,7 @@ mod library_rules;
 mod multilingual_tests;
 mod pipeline;
 mod settings;
+mod snippets;
 mod vocabulary;
 
 #[allow(unused_imports)]
