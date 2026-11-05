@@ -1512,7 +1512,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
                     if let Some(parakeet) = app_handle.try_state::<parakeet::ParakeetManager>() {
-                        parakeet.unload_onnx().await;
+                        parakeet.shutdown().await;
                     }
                     if let Some(remote) = app_handle
                         .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()

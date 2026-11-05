@@ -289,7 +289,7 @@ pub fn maybe_run_from_env_with_context(
         }
         #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         if let Some(manager) = app_handle.try_state::<ParakeetManager>() {
-            manager.unload_onnx().await;
+            manager.shutdown().await;
         }
 
         outcome

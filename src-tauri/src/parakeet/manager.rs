@@ -723,6 +723,11 @@ impl ParakeetManager {
         cancel: Arc<AtomicBool>,
         remote_cache: Option<Arc<std::sync::Mutex<crate::whisper::cache::TranscriberCache>>>,
     ) -> Result<(), ParakeetError> {
+        // Callers hold LOCAL_MODEL_GATE. Recheck terminal exit admission after
+        // that wait, before evicting caches or constructing a native model.
+        self.onnx
+            .ensure_not_shutdown()
+            .map_err(ParakeetError::Unavailable)?;
         if cancel.load(Ordering::SeqCst) {
             return Err(ParakeetError::Unavailable("Transcription cancelled".into()));
         }
@@ -1162,6 +1167,8 @@ impl ParakeetManager {
 
     #[allow(dead_code)]
     pub async fn shutdown(&self) {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        self.onnx.shutdown().await;
         self.client.shutdown().await;
     }
 

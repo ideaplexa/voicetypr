@@ -37,6 +37,7 @@ struct Core<M> {
     lifecycle: AsyncMutex<()>,
     generation: AtomicU64,
     unload_epoch: AtomicU64,
+    shutdown_started: AtomicBool,
     admitting: AtomicBool,
     cancel_worker: AtomicBool,
     factory: Arc<Factory<M>>,
@@ -58,6 +59,7 @@ impl<M: Model> Slot<M> {
                 lifecycle: AsyncMutex::new(()),
                 generation: AtomicU64::new(0),
                 unload_epoch: AtomicU64::new(0),
+                shutdown_started: AtomicBool::new(false),
                 admitting: AtomicBool::new(false),
                 cancel_worker: AtomicBool::new(false),
                 factory: Arc::new(factory),
@@ -65,9 +67,18 @@ impl<M: Model> Slot<M> {
         }
     }
 
+    pub fn ensure_not_shutdown(&self) -> Result<(), String> {
+        if self.core.shutdown_started.load(Ordering::SeqCst) {
+            Err("Parakeet is shutting down".into())
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn load(&self, directory: PathBuf, cancel: Arc<AtomicBool>) -> Result<(), String> {
         let unload_epoch = self.core.unload_epoch.load(Ordering::SeqCst);
         let _lifecycle = self.core.lifecycle.lock().await;
+        self.ensure_not_shutdown()?;
         if cancel.load(Ordering::SeqCst)
             || self.core.unload_epoch.load(Ordering::SeqCst) != unload_epoch
         {
@@ -100,6 +111,7 @@ impl<M: Model> Slot<M> {
         tokio::task::spawn_blocking(move || {
             let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
             if cancel.load(Ordering::SeqCst)
+                || core.shutdown_started.load(Ordering::SeqCst)
                 || !core.admitting.load(Ordering::SeqCst)
                 || core.generation.load(Ordering::SeqCst) != generation
                 || core.unload_epoch.load(Ordering::SeqCst) != unload_epoch
@@ -117,6 +129,7 @@ impl<M: Model> Slot<M> {
                 .unwrap_or_else(|error| error.into_inner()) = None;
             let model = (core.factory)(&directory)?;
             if cancel.load(Ordering::SeqCst)
+                || core.shutdown_started.load(Ordering::SeqCst)
                 || !core.admitting.load(Ordering::SeqCst)
                 || core.generation.load(Ordering::SeqCst) != generation
                 || core.unload_epoch.load(Ordering::SeqCst) != unload_epoch
@@ -143,13 +156,17 @@ impl<M: Model> Slot<M> {
     ) -> Result<Output, String> {
         let core = Arc::clone(&self.core);
         let generation = core.generation.load(Ordering::SeqCst);
-        if !core.admitting.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst) {
+        if core.shutdown_started.load(Ordering::SeqCst)
+            || !core.admitting.load(Ordering::SeqCst)
+            || cancel.load(Ordering::SeqCst)
+        {
             return Err("Transcription cancelled".into());
         }
         tokio::task::spawn_blocking(move || {
             let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
             let cancelled = || {
                 cancel.load(Ordering::SeqCst)
+                    || core.shutdown_started.load(Ordering::SeqCst)
                     || core.cancel_worker.load(Ordering::SeqCst)
                     || !core.admitting.load(Ordering::SeqCst)
                     || core.generation.load(Ordering::SeqCst) != generation
@@ -206,7 +223,10 @@ impl<M: Model> Slot<M> {
     ) -> Result<(Output, f32), String> {
         let core = Arc::clone(&self.core);
         let generation = core.generation.load(Ordering::SeqCst);
-        if !core.admitting.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst) {
+        if core.shutdown_started.load(Ordering::SeqCst)
+            || !core.admitting.load(Ordering::SeqCst)
+            || cancel.load(Ordering::SeqCst)
+        {
             return Err("Transcription cancelled".into());
         }
         tokio::task::spawn_blocking(move || {
@@ -223,6 +243,7 @@ impl<M: Model> Slot<M> {
             let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
             let cancelled = || {
                 cancel.load(Ordering::SeqCst)
+                    || core.shutdown_started.load(Ordering::SeqCst)
                     || core.cancel_worker.load(Ordering::SeqCst)
                     || !core.admitting.load(Ordering::SeqCst)
                     || core.generation.load(Ordering::SeqCst) != generation
@@ -314,6 +335,13 @@ impl<M: Model> Slot<M> {
         })
         .await
         .map_err(|_| "Parakeet worker stopped unexpectedly".to_string())?
+    }
+
+    /// Permanently close admission before draining native ownership.
+    /// Unlike model-switch unload, no later load may reopen this slot.
+    pub async fn shutdown(&self) {
+        self.core.shutdown_started.store(true, Ordering::SeqCst);
+        self.unload().await;
     }
 
     pub async fn unload(&self) {
@@ -566,6 +594,93 @@ mod tests {
         };
         let (result, ()) = tokio::join!(future, cancel_task);
         assert_eq!(result.unwrap_err(), "Transcription cancelled");
+    }
+
+    #[tokio::test]
+    async fn queued_preload_after_shutdown_never_runs_its_factory() {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let slot = slot(
+            Arc::clone(&loads),
+            Arc::new(AtomicUsize::new(0)),
+            Duration::ZERO,
+        );
+        let local_model_gate = AsyncMutex::new(());
+        let whisper_worker = local_model_gate.lock().await;
+        let (queued_tx, queued_rx) = tokio::sync::oneshot::channel();
+        let preload = async {
+            queued_tx.send(()).unwrap();
+            let _gate = local_model_gate.lock().await;
+            slot.load("model".into(), token()).await
+        };
+        let exit = async {
+            queued_rx.await.unwrap();
+            // Exit must not wait for the Whisper-owned local-model gate.
+            slot.shutdown().await;
+            drop(whisper_worker);
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(preload, exit)
+        })
+        .await
+        .expect("shutdown must finish before releasing the queued preload");
+        assert_eq!(result.unwrap_err(), "Parakeet is shutting down");
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
+
+        // Neither reusable unload nor repeated shutdown can reopen admission.
+        slot.unload().await;
+        slot.shutdown().await;
+        assert_eq!(
+            slot.load("another-model".into(), token())
+                .await
+                .unwrap_err(),
+            "Parakeet is shutting down"
+        );
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn load_queued_on_lifecycle_cannot_reopen_after_shutdown_starts() {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let slot = Arc::new(slot(
+            Arc::clone(&loads),
+            Arc::new(AtomicUsize::new(0)),
+            Duration::ZERO,
+        ));
+        let lifecycle = slot.core.lifecycle.lock().await;
+        let load = slot.load("model".into(), token());
+        let exit = async {
+            let closing = Arc::clone(&slot);
+            let shutdown = tokio::spawn(async move { closing.shutdown().await });
+            while slot.ensure_not_shutdown().is_ok() {
+                tokio::task::yield_now().await;
+            }
+            drop(lifecycle);
+            shutdown.await.unwrap();
+        };
+        let (result, ()) =
+            tokio::time::timeout(Duration::from_secs(2), async { tokio::join!(load, exit) })
+                .await
+                .expect("shutdown and the queued load must drain");
+        assert_eq!(result.unwrap_err(), "Parakeet is shutting down");
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn ordinary_unload_still_allows_model_switching() {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let slot = slot(
+            Arc::clone(&loads),
+            Arc::new(AtomicUsize::new(0)),
+            Duration::ZERO,
+        );
+        slot.load("first-model".into(), token()).await.unwrap();
+        slot.unload().await;
+        slot.load("second-model".into(), token()).await.unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            slot.transcribe(vec![0.1], token()).await.unwrap().text,
+            "word"
+        );
     }
 
     #[tokio::test]

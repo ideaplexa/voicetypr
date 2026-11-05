@@ -85,6 +85,10 @@ impl OnnxSession {
         }
     }
 
+    pub fn ensure_not_shutdown(&self) -> Result<(), String> {
+        self.slot.ensure_not_shutdown()
+    }
+
     pub async fn load(&self, directory: PathBuf, cancel: Arc<AtomicBool>) -> Result<(), String> {
         self.slot.load(directory, cancel).await
     }
@@ -99,6 +103,10 @@ impl OnnxSession {
 
     pub async fn unload(&self) {
         self.slot.unload().await;
+    }
+
+    pub async fn shutdown(&self) {
+        self.slot.shutdown().await;
     }
 
     /// Call only from a blocking thread, never from an async task.
