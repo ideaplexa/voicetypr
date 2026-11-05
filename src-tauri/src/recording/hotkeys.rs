@@ -12,12 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 
 /// Handle toggle mode recording (click to start/stop)
-fn handle_toggle_mode(
-    app: &tauri::AppHandle,
-    app_state: &AppState,
-    current_state: RecordingState,
-    event_state: KeyPhase,
-) {
+fn handle_toggle_mode(app: &tauri::AppHandle, app_state: &AppState, event_state: KeyPhase) {
     match event_state {
         KeyPhase::Released => {
             app_state.toggle_key_held.store(false, Ordering::SeqCst);
@@ -63,6 +58,12 @@ fn handle_toggle_mode(
         return;
     }
 
+    if app_state.pending_start.cancel() {
+        return;
+    }
+    // Commit and cancellation are serialized; a just-committed request is now
+    // Starting and must receive the normal queued stop, not another start.
+    let current_state = app_state.get_current_state();
     match current_state {
         RecordingState::Idle | RecordingState::Error => {
             crate::perf::hotkey_pressed();
@@ -178,7 +179,7 @@ fn handle_ptt_mode(
             RecordingState::Starting | RecordingState::Recording
         )
     {
-        handle_toggle_mode(app, app_state, current_state, event_state);
+        handle_toggle_mode(app, app_state, event_state);
         return;
     }
     match event_state {
@@ -199,7 +200,7 @@ fn handle_ptt_mode(
                     match start_recording_with_permit(
                         app_handle.clone(),
                         recorder_state,
-                        None,
+                        Some(crate::recording::start_source::StartSource::HoldHotkey),
                         permit,
                     )
                     .await
@@ -227,6 +228,10 @@ fn handle_ptt_mode(
                 return;
             }
 
+            if app_state.pending_start.cancel_released_hold(app_state) {
+                return;
+            }
+            let current_state = app_state.get_current_state();
             match current_state {
                 RecordingState::Starting | RecordingState::Recording
                     if hotkey_stop_needs_dispatch(
@@ -299,8 +304,7 @@ pub(crate) fn dispatch_action(
 
     match action {
         ShortcutAction::ToggleRecording => {
-            let current_state = get_recording_state(app);
-            handle_toggle_mode(app, app_state, current_state, event_state);
+            handle_toggle_mode(app, app_state, event_state);
         }
         ShortcutAction::HoldToRecord => {
             if trigger != ShortcutTrigger::Hold {

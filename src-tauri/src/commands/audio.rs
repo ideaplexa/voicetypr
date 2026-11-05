@@ -5073,13 +5073,26 @@ pub(crate) async fn start_recording_with_permit(
         recording_start.elapsed().as_millis()
     );
 
-    // Validate all requirements upfront
+    // Own the pending request before any validation await.
+    let app_state = app.state::<AppState>();
+    let Some(request) = app_state
+        .pending_start
+        .claim(&app_state, source, start_permit)
+    else {
+        return Ok(false);
+    };
     let validation_start = Instant::now();
     log::debug!(
         "⏱️ [REC TIMING] starting validation (+{}ms)",
         recording_start.elapsed().as_millis()
     );
-    match validate_recording_requirements(&app).await {
+    let Some(validation) = request
+        .validate(validate_recording_requirements(&app))
+        .await
+    else {
+        return Ok(false);
+    };
+    match validation {
         Ok(_) => {
             log::debug!(
                 "⚡ PERF: RECORDING_VALIDATION took {}ms validation_passed",
@@ -5115,81 +5128,9 @@ pub(crate) async fn start_recording_with_permit(
         }
     }
 
-    // A redundant start returns false before any generation or state side effects.
-    {
-        let live_state = crate::get_recording_state(&app);
-        if matches!(
-            live_state,
-            crate::RecordingState::Starting | crate::RecordingState::Recording
-        ) {
-            log::debug!(
-                "start_recording: already {:?}; treating redundant start as no-op",
-                live_state
-            );
-            return Ok(false);
-        }
-    }
-
-    crate::recording::kept::cancel_active_retry(&app);
-    app.state::<AppState>()
-        .pointer_recording
-        .store(source.is_toggle(), AtomicOrdering::SeqCst);
-
-    // All validation passed, update state to starting
-    log::debug!(
-        "⏱️ [REC TIMING] validation complete (+{}ms)",
-        recording_start.elapsed().as_millis()
-    );
-    log_state_transition("RECORDING", "idle", "starting", true, None);
-    // Open a new recording generation and clear stale flags from a previous
-    // attempt BEFORE publishing `Starting`. Clearing `pending_stop_after_start`
-    // after `Starting` is published would erase a stop that arrived during the
-    // Starting window (PTT key-up while Starting sets the flag) — so the clear
-    // must happen first. From this point on, any stop/cancel observed after
-    // `Starting` targets THIS attempt and must win.
-    let recording_generation = {
-        let app_state = app.state::<AppState>();
-        let generation = begin_recording_generation();
-        crate::perf::begin_take(generation);
-        let hold = !source.is_toggle()
-            && app_state
-                .recording_mode
-                .lock()
-                .map(|m| *m == crate::RecordingMode::PushToTalk)
-                .unwrap_or(false);
-        crate::observability::update(
-            generation,
-            "mode",
-            serde_json::json!(if hold { "hold" } else { "toggle" }),
-        );
-        crate::observability::update(
-            generation,
-            "start_source",
-            serde_json::json!(match source {
-                crate::recording::start_source::StartSource::Hotkey => "hotkey",
-                crate::recording::start_source::StartSource::Pointer => "pointer",
-                crate::recording::start_source::StartSource::Tray => "tray",
-            }),
-        );
-        app_state.clear_cancellation();
-        clear_pending_stop_after_start(&app_state);
-        generation
+    let Some((recording_generation, capture_interrupt)) = request.publish(&app)? else {
+        return Ok(false);
     };
-    let capture_interrupt = app
-        .state::<AppState>()
-        .capture_interrupts
-        .begin(recording_generation);
-    if let Some(app_state) = app.try_state::<AppState>() {
-        app_state.capture_recording_app_context(crate::writing::capture_active_app_context);
-    }
-    update_recording_state(&app, RecordingState::Starting, None);
-    // Ensure transition actually happened; if blocked, abort early
-    if !matches!(
-        crate::get_recording_state(&app),
-        crate::RecordingState::Starting
-    ) {
-        return Err("Cannot start recording in current state".to_string());
-    }
 
     // Arm Escape as soon as Starting is published, before device initialization.
     let app_state = app.state::<AppState>();
@@ -5279,8 +5220,7 @@ pub(crate) async fn start_recording_with_permit(
     );
     // Show the island now (non-blocking); the mic opening below must not delay it.
     let should_show_pill = config.show_pill_widget && config.pill_indicator_mode != "never";
-    let early_pill =
-        should_show_pill.then(|| EarlyPillShow::spawn(&app, current_recording_generation()));
+    let early_pill = should_show_pill.then(|| EarlyPillShow::spawn(&app, recording_generation));
     // Warm the active cloud provider's connection so the first transcription skips the handshake (skipped when a remote handles dispatch).
     if let Some(provider) = crate::cloud_stt::CloudProvider::from_id(&config.current_engine) {
         let app = app.clone();
@@ -5302,7 +5242,7 @@ pub(crate) async fn start_recording_with_permit(
     if config.ai_enabled && !config.ai_provider.is_empty() {
         let app = app.clone();
         let provider_id = config.ai_provider.clone();
-        let generation = current_recording_generation();
+        let generation = recording_generation;
         tokio::spawn(async move {
             crate::commands::ai::prefetch_ai_provider(app, provider_id, generation).await;
         });
@@ -5853,6 +5793,9 @@ async fn stop_recording_with_mode_at(
     );
 
     let app_state = app.state::<AppState>();
+    if expected_generation.is_none() && app_state.pending_start.cancel() {
+        return Ok(String::new());
+    }
     let state_before_queue = app_state.get_current_state();
     if crate::recording::secure_input::system_stop_must_yield(
         expected_generation,
@@ -8503,11 +8446,14 @@ pub async fn diarize_audio_file(
 
 #[tauri::command]
 pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
-    let cancel_generation = current_recording_generation();
     log::info!("=== CANCEL RECORDING CALLED ===");
 
     // Request cancellation FIRST
     let app_state = app.state::<AppState>();
+    if app_state.pending_start.cancel_before_recording(&app_state) {
+        return Ok(());
+    }
+    let cancel_generation = current_recording_generation();
     app_state.request_cancellation();
     super::ai_lifecycle::cancel_recording();
     crate::recording::kept::discard_generation(&app, cancel_generation);

@@ -1,7 +1,6 @@
 //! Island problem events and recovery policies. Never serialize provider errors.
 use crate::commands::audio::{
-    current_recording_generation, recording_license_state, RecordingLicenseState,
-    TranscriptionFailure,
+    current_recording_generation, RecordingLicenseState, TranscriptionFailure,
 };
 use crate::transcription::{engines::ActiveEngineSelection, error::TranscriptionErrorCode};
 use crate::AppState;
@@ -347,9 +346,11 @@ pub fn recovery_for_failure(
 }
 
 pub async fn validate_recording_license(app: &AppHandle) -> Result<(), String> {
-    // Check cached license status (warmed during startup/license transitions - no network call)
+    // Wait only while startup is checking. Never bypass invalid/expired licenses.
     let app_state = app.state::<AppState>();
-    let license_state = recording_license_state(&*app_state.license_cache.read().await);
+    let license_state =
+        crate::license::recording_readiness::wait_for_recording_license(&app_state.license_cache)
+            .await;
 
     match license_state {
         RecordingLicenseState::CheckFailed => {

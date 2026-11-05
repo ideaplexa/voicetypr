@@ -4,15 +4,25 @@
 pub enum StartSource {
     #[default]
     Hotkey,
+    // Native hold bindings are hold-to-talk even when the primary is a toggle.
+    #[serde(skip)]
+    HoldHotkey,
     Pointer,
     Tray,
 }
 impl StartSource {
     pub fn blocked_after_release(self, push_to_talk: bool, key_held: bool) -> bool {
-        self == Self::Hotkey && push_to_talk && !key_held
+        !self.is_toggle() && (push_to_talk || self == Self::HoldHotkey) && !key_held
     }
     pub fn is_toggle(self) -> bool {
-        self != Self::Hotkey
+        matches!(self, Self::Pointer | Self::Tray)
+    }
+    pub fn telemetry_label(self) -> &'static str {
+        match self {
+            Self::Hotkey | Self::HoldHotkey => "hotkey",
+            Self::Pointer => "pointer",
+            Self::Tray => "tray",
+        }
     }
 }
 
@@ -44,6 +54,9 @@ mod tests {
             }
             assert_eq!(StartSource::Hotkey.blocked_after_release(ptt, false), ptt);
             assert!(!StartSource::Hotkey.blocked_after_release(ptt, true));
+            assert!(StartSource::HoldHotkey.blocked_after_release(ptt, false));
+            assert!(!StartSource::HoldHotkey.blocked_after_release(ptt, true));
+            assert!(!StartSource::HoldHotkey.is_toggle());
         }
     }
 }

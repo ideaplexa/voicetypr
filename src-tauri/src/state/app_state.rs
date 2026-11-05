@@ -38,6 +38,7 @@ pub struct QueuedPillEvent {
 /// Application state - managed by Tauri (runtime state only)
 pub struct AppState {
     pub recording_state: UnifiedRecordingState,
+    pub(crate) pending_start: crate::recording::pending_start::StartRequests,
     pub current_recording_path: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) capture_files: Mutex<Option<crate::recording::storage::CaptureFiles>>,
     pub transcription_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -77,6 +78,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             recording_state: UnifiedRecordingState::new(),
+            pending_start: Default::default(),
             current_recording_path: Arc::new(Mutex::new(None)),
             capture_files: Mutex::new(None),
             transcription_task: Arc::new(Mutex::new(None)),

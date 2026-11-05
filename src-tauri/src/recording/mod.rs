@@ -3,6 +3,7 @@ pub(crate) mod file_jobs;
 pub(crate) mod hotkeys;
 pub(crate) mod island;
 pub(crate) mod kept;
+pub(crate) mod pending_start;
 pub(crate) mod secure_input;
 pub(crate) mod start_source;
 pub(crate) mod storage;

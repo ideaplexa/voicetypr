@@ -565,48 +565,55 @@ fn insert_via_clipboard(
             return PasteOutcome::NoPermission;
         }
 
-        // Try to paste using Cmd+V (macOS) with panic protection
-        // Add delay since pill was just hidden
+        crate::insertion::menu_tracking::dispatch_if_ready(
+            || {
+                !keytrigger::backend::secure_input_enabled()
+                    && crate::insertion::menu_tracking::paste_ready(app_handle.as_ref())
+            },
+            || match try_paste_with_rdev(&paste_current) {
+                Ok(_) => {
+                    log::info!("Paste shortcut posted");
+                    PasteOutcome::Pasted
+                }
+                Err(e) => {
+                    log::warn!("rdev paste failed: {}, trying AppleScript fallback", e);
 
-        // First try with rdev, fallback to AppleScript if it fails
-        let rdev_result = try_paste_with_rdev(&paste_current);
+                    // Fallback to AppleScript
+                    let paste_result = panic::catch_unwind(AssertUnwindSafe(|| {
+                        try_paste_with_applescript(&paste_current)
+                    }));
 
-        match rdev_result {
-            Ok(_) => {
-                log::info!("Successfully pasted with rdev");
-                PasteOutcome::Pasted
-            }
-            Err(e) => {
-                log::warn!("rdev paste failed: {}, trying AppleScript fallback", e);
-
-                // Fallback to AppleScript
-                let paste_result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    try_paste_with_applescript(&paste_current)
-                }));
-
-                match paste_result {
-                    Ok(Ok(_)) => {
-                        log::info!("Successfully pasted with AppleScript");
-                        PasteOutcome::Pasted
-                    }
-                    Ok(Err(e)) => {
-                        log::warn!("AppleScript paste failed: {}, text remains in clipboard", e);
-                        // Notify user through island feedback that paste failed but text is in clipboard
-                        // Don't fail - text is still in clipboard for manual paste
-                        PasteOutcome::LeftInClipboard
-                    }
-                    Err(panic_err) => {
-                        log::error!(
-                            "PANIC during paste: {:?}, text remains in clipboard",
-                            panic_err
-                        );
-                        // Notify user through island feedback about the failure
-                        // Don't fail - text is still in clipboard for manual paste
-                        PasteOutcome::LeftInClipboard
+                    match paste_result {
+                        Ok(Ok(_)) => {
+                            log::info!("Paste shortcut posted with AppleScript");
+                            PasteOutcome::Pasted
+                        }
+                        Ok(Err(e)) => {
+                            log::warn!(
+                                "AppleScript paste failed: {}, text remains in clipboard",
+                                e
+                            );
+                            // Notify user through island feedback that paste failed but text is in clipboard
+                            // Don't fail - text is still in clipboard for manual paste
+                            PasteOutcome::LeftInClipboard
+                        }
+                        Err(panic_err) => {
+                            log::error!(
+                                "PANIC during paste: {:?}, text remains in clipboard",
+                                panic_err
+                            );
+                            // Notify user through island feedback about the failure
+                            // Don't fail - text is still in clipboard for manual paste
+                            PasteOutcome::LeftInClipboard
+                        }
                     }
                 }
-            }
-        }
+            },
+        )
+        .unwrap_or_else(|| {
+            log::info!("Paste deferred: native menu or focus unavailable; text kept on clipboard");
+            PasteOutcome::LeftInClipboard
+        })
     };
 
     let mut sleep = thread::sleep;
@@ -827,7 +834,10 @@ fn try_paste_with_rdev(current: &dyn Fn() -> Result<(), String>) -> Result<(), S
     let paste_duration = paste_start.elapsed();
     match &result {
         Ok(_) => {
-            log::info!("=== PASTE SUCCESS in {}ms ===", paste_duration.as_millis());
+            log::info!(
+                "=== PASTE SHORTCUT SENT in {}ms ===",
+                paste_duration.as_millis()
+            );
         }
         Err(e) => {
             log::warn!(
@@ -1157,6 +1167,33 @@ mod clipboard_insertion {
 
         assert_eq!(outcome, PasteOutcome::LeftInClipboard);
         assert_eq!(clipboard.current, "transcription");
+    }
+
+    #[test]
+    fn menu_interception_keeps_text_and_reports_copied_without_completed_cue() {
+        for probes in [[false, false], [true, false]] {
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let mut clipboard = MockClipboard::new("original", events);
+            let mut probes = probes.into_iter();
+            let mut paste = || {
+                crate::insertion::menu_tracking::dispatch_if_ready(
+                    || probes.next().unwrap(),
+                    || PasteOutcome::Pasted,
+                )
+                .unwrap_or(PasteOutcome::LeftInClipboard)
+            };
+            let outcome = run_clipboard_insertion(
+                &mut clipboard,
+                &mut paste,
+                &mut |_| {},
+                "transcription",
+                &|| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(clipboard.current, "transcription");
+            assert_eq!(paste_outcome_payload(&outcome, 1, false).outcome, "copied");
+            assert!(!paste_completed_cue_eligible(&outcome));
+        }
     }
 
     #[test]

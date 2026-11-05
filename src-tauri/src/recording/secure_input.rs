@@ -49,21 +49,20 @@ impl CaptureInterrupts {
 }
 
 /// A start validating across a hotkey-route change must not open the mic later.
+#[derive(Clone, Copy)]
 pub(crate) struct StartPermit(keytrigger::SecureInputState);
 impl StartPermit {
     pub(crate) fn capture<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Self {
-        Self(
-            app.state::<crate::AppState>()
-                .trigger_engine
-                .secure_input_state(),
-        )
+        Self::capture_state(&app.state::<crate::AppState>())
+    }
+    pub(crate) fn capture_state(state: &crate::AppState) -> Self {
+        Self(state.trigger_engine.secure_input_state())
     }
     pub(crate) fn is_current<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>) -> bool {
-        self.0
-            == app
-                .state::<crate::AppState>()
-                .trigger_engine
-                .secure_input_state()
+        self.is_current_state(&app.state::<crate::AppState>())
+    }
+    pub(crate) fn is_current_state(&self, state: &crate::AppState) -> bool {
+        self.0 == state.trigger_engine.secure_input_state()
     }
 
     /// The final construction boundary, after asynchronous settings/remote work.
@@ -181,6 +180,7 @@ pub(crate) fn interrupt_capture(
     enabled: bool,
     held: bool,
 ) -> bool {
+    app_state.pending_start.cancel_invalidated_input(app_state);
     let live = app_state.get_current_state();
     if live == crate::RecordingState::Starting
         || ((enabled || held)
