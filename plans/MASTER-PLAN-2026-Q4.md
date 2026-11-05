@@ -80,6 +80,10 @@ released without the founder's OK.
 
 ## Release cadence (founder, 2026-09-27)
 
+**Founder update (2026-11-05):** beta.6 and beta.7 shipped fixes, island cards and Soniox v6; the
+083 work moves to beta.8 and beta.9 and 2.1 stable ships before Jan 15, 2027. See
+[plan 087](087-2.1-beta8-beta9.md), which supersedes older beta placement below.
+
 **Founder update (2026-10-31):** beta.5 grows to finish the 2.0.10 fold-in, private stdin agent input,
 recordings privacy, four formatting fixes, Windows downloader hardening and three minor bugs (082 addendum).
 beta.6 is Windows Parakeet v3, default-on context when Polish is on, selected-CLI warming, shadow-first
