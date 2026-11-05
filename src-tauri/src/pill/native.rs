@@ -112,6 +112,8 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
         // prevents-activation tag, so a click can still activate the app even
         // though this panel can never become key/main (AppKit FB16484811).
         // The pinned plugin predates its upstream activation-state fix (#139).
+        // Both are private SPI: if a macOS release drops them, keep the panel
+        // fully configured and lose only the extra protection.
         unsafe {
             let native = &*window
                 .ns_window()
@@ -119,12 +121,15 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
                 .cast::<objc2_app_kit::NSWindow>();
             let selector = objc2::sel!(_setPreventsActivation:);
             use objc2::runtime::NSObjectProtocol;
-            if !native.respondsToSelector(selector) {
-                return Err("Nonactivating panel activation protection unavailable".into());
+            if native.respondsToSelector(selector) {
+                let _: () = objc2::msg_send![native, _setPreventsActivation: true];
+            } else {
+                log::warn!("Island activation protection unavailable on this macOS");
             }
-            let _: () = objc2::msg_send![native, _setPreventsActivation: true];
         }
-        super::hit_test::configure_cursor()?;
+        if let Err(error) = super::hit_test::configure_cursor() {
+            log::warn!("{error}");
+        }
         panel.set_becomes_key_only_if_needed(true);
         panel.set_floating_panel(true);
         panel.set_level(objc2_app_kit::NSStatusWindowLevel as i32);
