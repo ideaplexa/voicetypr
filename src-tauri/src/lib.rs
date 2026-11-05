@@ -625,7 +625,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
     }
 
-    builder
+    let exit_code = builder
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
             app.manage(commands::usage_stats::UsageStatsCache::default());
@@ -1494,7 +1494,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Voicetypr failed to start: {}", e);
             Box::new(e)
         })?
-        .run(|app_handle, event| match event {
+        .run_return(|app_handle, event| match event {
+            #[cfg(windows)]
+            tauri::RunEvent::ExitRequested { code, .. } => audio::vad_shadow::note_exit_request(code),
             // #28: unload every in-process Whisper model (and its Metal GPU buffers) before
             // the process tears down. On Apple Silicon the ggml-metal device destructor
             // asserts at exit if a model's residency set is still live, aborting the process
@@ -1523,6 +1525,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 recording::kept::cleanup();
                 crate::commands::ai_lifecycle::cancel_recording();
                 product_analytics::shutdown();
+                #[cfg(windows)]
+                vad_quit.finish_restart(app_handle);
                 vad_quit.finish();
             }
             #[cfg(target_os = "macos")]
@@ -1533,11 +1537,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {}
         });
-
-    // Log successful application startup
-    log_lifecycle_event("APPLICATION_READY", Some(app_version), None);
-
-    Ok(())
+    audio::vad_shadow::finish_event_loop(exit_code);
 }
 
 /// Perform essential startup checks

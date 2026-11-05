@@ -32,9 +32,13 @@ are checked before/after native work; whisper.cpp's VAD API processes the
 whole bounded take without a per-frame cancellation callback. Over-budget
 results are unknown, never silence. One worker retains its slot until native
 work and context destruction finish. Quit closes admission/reports and waits at
-most 250 ms at the VAD drain stage. If still active, ordered teardown continues,
-then the process exits without C++ static destruction. An 8 s watchdog from
-exit entry bounds earlier/later teardown while admitted VAD work exists.
+most 250 ms at the VAD drain stage. If still active, ordered teardown continues
+and normal quit returns through Tauri's run_return before waiting for the watchdog.
+Unix restart returns to Tauri's launcher, then a late C-exit barrier holds native
+destruction. Windows restart launches first using Tauri's binary/argument rules,
+then waits without entering ExitProcess (which would kill the watchdog thread).
+Its 8 s deadline remains absolute from exit entry, not from callback completion.
+The watchdog is prepared before admitting native work; spawn failure admits none.
 Bootstrap installs a content-discarding native logger once, before workers.
 Caller-thread native errors make the result unavailable, including the pinned
 backend's otherwise-successful partial-compute path. No native text is emitted.
