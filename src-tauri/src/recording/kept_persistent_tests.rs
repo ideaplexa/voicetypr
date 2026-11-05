@@ -80,15 +80,46 @@ fn restart_preserves_audio_and_success_or_discard_deletes_audio_and_index() {
             ),
             Some(("small".into(), "whisper".into()))
         );
-        assert!(
+        assert_eq!(
             alternative_for(
                 &reloaded.clips[0],
                 &[("small".into(), "whisper".into())],
-                Some("small"),
-            )
-            .is_none(),
-            "Another model must differ from Retry again's current model"
+                Some("small")
+            ),
+            Some(("small".into(), "whisper".into())),
+            "Alternatives are relative to the failed model, not current Settings"
         );
+        {
+            let lease = reloaded
+                .lease(&recovery.id, false, || {
+                    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                    RetryRegistration {
+                        generation: 77,
+                        cancel,
+                        cancelled,
+                    }
+                })
+                .unwrap();
+            let settings = crate::commands::settings::Settings {
+                current_model: "soniox".into(),
+                current_model_engine: "soniox".into(),
+                ..Default::default()
+            };
+            let selected = RetrySelection::resolve(
+                &settings,
+                lease.kind,
+                lease.selection.as_ref(),
+                None,
+                &[("small.en".into(), "whisper".into())],
+            )
+            .unwrap();
+            assert_eq!(
+                selected.model, "small.en",
+                "Home and pill Retry again must retain the model after restart"
+            );
+            assert_eq!(selected.engine.as_deref(), Some("whisper"));
+            reloaded.complete_retry(&recovery.id, false);
+        }
         if success {
             reloaded.complete_retry(&recovery.id, false);
             assert!(path.exists());

@@ -30,6 +30,7 @@ export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
   if (e.retry_failed) {
     const actions: CardAction[] = [];
     if (e.retry_ready !== false) {
+      // A null engine asks the backend to reuse this clip's last failed selection.
       actions.push({label:'Retry again',call:e.kind === 'no_speech' ? {command:'transcribe_anyway',id:e.id} : {command:'retry_kept_dictation',id:e.id,engine:null}});
       if (e.alt_engine_short && e.alt_engine_id) actions.push({label:'Try another model',call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}});
     }

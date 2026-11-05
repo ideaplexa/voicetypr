@@ -5,6 +5,8 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 #[path = "kept_persistent.rs"]
 mod persistent;
+#[path = "kept_selection.rs"]
+mod selection;
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -109,14 +111,13 @@ fn alternative_for(
     candidates
         .iter()
         .find(|(model, engine)| {
-            if clip.recovery.kind != RecoveryKind::RemoteOffline && Some(model.as_str()) == current
-            {
-                return false;
-            }
             if let Some(selection) = &clip.retry_selection {
                 selection.model != *model || selection.engine.as_ref() != Some(engine)
             } else {
-                crate::pill::context::engine_short_name(model, engine) != clip.recovery.engine_short
+                (clip.recovery.kind == RecoveryKind::RemoteOffline
+                    || Some(model.as_str()) != current)
+                    && crate::pill::context::engine_short_name(model, engine)
+                        != clip.recovery.engine_short
             }
         })
         .cloned()
@@ -847,6 +848,7 @@ pub(super) fn finalized_wav(path: &Path) -> bool {
 }
 struct Lease {
     id: String,
+    selection: Option<RetrySelection>,
     kind: RecoveryKind,
     file: tempfile::NamedTempFile,
     terminal: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -919,6 +921,7 @@ impl Store {
         self.leases.push(file.path().to_owned());
         Ok(Lease {
             id: id.into(),
+            selection: clip.retry_selection.clone(),
             kind,
             file,
             terminal,
@@ -1169,38 +1172,16 @@ async fn retry_inner(
     attempted: &mut Option<RetrySelection>,
 ) -> Result<(), String> {
     let settings = crate::commands::settings::get_settings(app.clone()).await?;
-    let (model, engine) = if let Some(engine) = engine {
-        // Accept stable model IDs, never display labels, paths or provider errors.
-        let alternatives = local_candidates(app).await;
-        if let Some((model, kind)) = alternatives.into_iter().find(|(m, _)| engine == *m) {
-            (model, Some(kind))
-        } else {
-            return Err("Requested local engine is not ready".into());
-        }
-    } else {
-        let model = if settings.current_model.is_empty() {
-            local_candidates(app)
-                .await
-                .into_iter()
-                .find(|(_, e)| e == &settings.current_model_engine)
-                .map(|(m, _)| m)
-                .unwrap_or_default()
-        } else {
-            settings.current_model.clone()
-        };
-        (
-            model,
-            if lease.kind == RecoveryKind::RemoteOffline {
-                None
-            } else {
-                Some(settings.current_model_engine.clone())
-            },
-        )
-    };
-    *attempted = Some(RetrySelection {
-        model: model.clone(),
-        engine: engine.clone(),
-    });
+    let selected = RetrySelection::resolve(
+        &settings,
+        lease.kind,
+        lease.selection.as_ref(),
+        engine.as_deref(),
+        &local_candidates(app).await,
+    )?;
+    let model = selected.model.clone();
+    let engine = selected.engine.clone();
+    *attempted = Some(selected);
     super::island::validate_recording_license(app).await?;
     let output = audio::transcribe_audio_file_impl(
         app.clone(),
