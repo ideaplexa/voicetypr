@@ -111,6 +111,7 @@ fn restart_preserves_audio_and_success_or_discard_deletes_audio_and_index() {
                 lease.selection.as_ref(),
                 None,
                 &[("small.en".into(), "whisper".into())],
+                false,
             )
             .unwrap();
             assert_eq!(

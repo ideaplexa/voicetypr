@@ -53,6 +53,7 @@ export function retryErrorCard(error: unknown): FeedbackCard {
     'Recording is still finalizing':'Audio is still finishing. Try again shortly.',
     'Dictation is busy':'Finish the current dictation, then retry.',
     'Recording is already being retried':'This recording is already being retried.',
+    'Requested engine is not ready':'That engine is no longer ready. Check your engine in Home.',
     'Requested local engine is not ready':'That engine is no longer ready. Check your engine in Home.',
     'Retry failed; recording remains available until expiry':'Retry failed. Audio is still kept temporarily in Home → Needs you.',
     'Retry failed; recording is no longer available':'Retry failed. The temporary recording is no longer available.',

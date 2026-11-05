@@ -58,6 +58,7 @@ it.each([true, false])("keeps actionable recovery on top regardless of event ver
 it.each([
   ["Dictation is busy", "Finish the current dictation, then retry."],
   ["Requested local engine is not ready", "That engine is no longer ready."],
+  ["Requested engine is not ready", "That engine is no longer ready."],
 ])("still explains an unaccepted Retry again when the old failed card has not changed: %s", async (error, copy) => {
   h = pillHarness(); await h.settle(0);
   const base = h.invoke.getMockImplementation()!;
@@ -70,11 +71,11 @@ it.each([
   expect(h.get('[data-key="retry-error"]').textContent).toContain(copy);
 });
 
-it("withdraws an unavailable alternative without hiding its explanation", async () => {
+it.each(["Requested local engine is not ready", "Requested engine is not ready"])("withdraws an unavailable alternative without hiding its explanation: %s", async error => {
   h = pillHarness(); await h.settle(0);
   const base = h.invoke.getMockImplementation()!;
   h.invoke.mockImplementation(async command => {
-    if (command === "retry_kept_dictation") throw "Requested local engine is not ready";
+    if (command === "retry_kept_dictation") throw error;
     return base(command);
   });
   h.emit("dictation-recovery", failed); await h.settle(1500);

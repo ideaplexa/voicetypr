@@ -75,7 +75,7 @@ export class StackView {
             this.deps.wake();
           }
           const updated=this.stack.items.find(i=>i.key===item.key);
-          if(updated && error==='Requested local engine is not ready' && a.call.command==='retry_kept_dictation' && a.call.engine) {
+          if(updated && (error==='Requested local engine is not ready' || error==='Requested engine is not ready') && a.call.command==='retry_kept_dictation' && a.call.engine) {
             const unavailable=a.call.engine;
             this.push({...updated,actions:updated.actions.filter(action=>action.call.command!=='retry_kept_dictation' || action.call.engine!==unavailable)});
           }

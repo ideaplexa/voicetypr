@@ -792,10 +792,16 @@ pub async fn keep(
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| default.into())
     };
-    let engine_short = crate::pill::context::engine_short_name(
-        &setting("current_model", ""),
-        &setting("current_model_engine", "whisper"),
-    );
+    let engine_short = if kind == RecoveryKind::RemoteOffline
+        || selection::active_remote_model(app).await.is_some()
+    {
+        "Your other computer".into()
+    } else {
+        crate::pill::context::engine_short_name(
+            &setting("current_model", ""),
+            &setting("current_model_engine", "whisper"),
+        )
+    };
     let probes = probe_store_availability(None);
     let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
     if audio::delivery_aborted(
@@ -808,11 +814,7 @@ pub async fn keep(
     store.apply_availability(probes);
     let mut publication = None;
     if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
-        clip.recovery.engine_short = if kind == RecoveryKind::RemoteOffline {
-            "Network".into()
-        } else {
-            engine_short
-        };
+        clip.recovery.engine_short = engine_short;
         clip.recovery.set_alternative(alternative);
         clip.announced = true;
         clip.recovery.expires_in_ms = clip.remaining_ms(Instant::now());
@@ -1130,7 +1132,7 @@ fn retry_error_message(error: RetryError, retained: bool) -> &'static str {
     match error {
         RetryError::Cancelled => "Retry discarded",
         _ if !retained => "Retry failed; recording is no longer available",
-        RetryError::EngineUnavailable => "Requested local engine is not ready",
+        RetryError::EngineUnavailable => "Requested engine is not ready",
         RetryError::Failed => "Retry failed; recording remains available until expiry",
     }
 }
@@ -1161,7 +1163,7 @@ async fn cancellable_retry<T>(
         biased;
         _ = cancelled.changed() => Err(RetryError::Cancelled),
         result = work => result.map_err(|error| {
-            if error == "Requested local engine is not ready" {
+            if error == "Requested local engine is not ready" || error == "Requested engine is not ready" {
                 RetryError::EngineUnavailable
             } else {
                 RetryError::Failed
@@ -1177,13 +1179,19 @@ async fn retry_inner(
     attempted: &mut Option<RetrySelection>,
 ) -> Result<(), String> {
     let settings = crate::commands::settings::get_settings(app.clone()).await?;
-    let selected = RetrySelection::resolve(
+    let remote_model = selection::active_remote_model(app).await;
+    let mut selected = RetrySelection::resolve(
         &settings,
         lease.kind,
         lease.selection.as_ref(),
         engine.as_deref(),
         &local_candidates(app).await,
+        remote_model.is_some(),
     )?;
+    if selected.engine.is_none() {
+        // An unresolved remote is an empty model hint, never a display label.
+        selected.model = remote_model.unwrap_or_default();
+    }
     let model = selected.model.clone();
     let engine = selected.engine.clone();
     *attempted = Some(selected);

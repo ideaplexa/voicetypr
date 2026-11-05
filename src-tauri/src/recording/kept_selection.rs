@@ -1,6 +1,17 @@
 //! Retry again is bound to the last failed attempt, not today's Settings.
 use super::{RecoveryKind, RetrySelection};
 use crate::commands::settings::Settings;
+use tauri::{AppHandle, Manager};
+
+/// Some("") means a selected remote whose model has not been reported yet.
+/// Never copy connection names, addresses or credentials into recovery metadata.
+pub(super) async fn active_remote_model(app: &AppHandle) -> Option<String> {
+    let settings = app.state::<tokio::sync::Mutex<crate::remote::settings::RemoteSettings>>();
+    let settings = settings.lock().await;
+    settings
+        .get_active_connection()
+        .map(|c| c.model.clone().unwrap_or_default())
+}
 
 impl RetrySelection {
     pub(super) fn short_name(&self) -> String {
@@ -16,6 +27,7 @@ impl RetrySelection {
         previous: Option<&Self>,
         requested: Option<&str>,
         candidates: &[(String, String)],
+        remote_active: bool,
     ) -> Result<Self, String> {
         if let Some(requested) = requested {
             return candidates
@@ -25,12 +37,15 @@ impl RetrySelection {
                     model: m.clone(),
                     engine: Some(e.clone()),
                 })
-                .ok_or_else(|| "Requested local engine is not ready".into());
+                .ok_or_else(|| "Requested engine is not ready".into());
         }
         if let Some(previous) = previous {
             if previous.engine.is_none() {
+                if !remote_active {
+                    return Err("Requested engine is not ready".into());
+                }
                 return Ok(Self {
-                    model: "Network".into(),
+                    model: String::new(),
                     engine: None,
                 });
             }
@@ -39,13 +54,16 @@ impl RetrySelection {
                     .iter()
                     .any(|(m, e)| *m == previous.model && Some(e) == previous.engine.as_ref())
             {
-                return Err("Requested local engine is not ready".into());
+                return Err("Requested engine is not ready".into());
             }
             return Ok(previous.clone());
         }
-        if kind == RecoveryKind::RemoteOffline {
+        if kind == RecoveryKind::RemoteOffline || remote_active {
+            if !remote_active {
+                return Err("Requested engine is not ready".into());
+            }
             return Ok(Self {
-                model: "Network".into(),
+                model: String::new(),
                 engine: None,
             });
         }
@@ -90,6 +108,7 @@ mod tests {
             Some(&previous),
             None,
             &candidates,
+            false,
         )
         .unwrap();
         assert_eq!(selected.model, "small.en");
@@ -100,6 +119,7 @@ mod tests {
             Some(&previous),
             Some("parakeet-v3"),
             &candidates,
+            false,
         )
         .unwrap();
         assert_eq!(alternative.model, "parakeet-v3");
@@ -109,7 +129,8 @@ mod tests {
                 RecoveryKind::CloudFailed,
                 Some(&previous),
                 None,
-                &[]
+                &[],
+                false,
             )
             .is_err(),
             "An unavailable previous model must not silently switch to Settings"
@@ -123,10 +144,16 @@ mod tests {
             current_model_engine: "soniox".into(),
             ..Default::default()
         };
-        let remote =
-            RetrySelection::resolve(&settings, RecoveryKind::RemoteOffline, None, None, &[])
-                .unwrap();
-        assert_eq!(remote.model, "Network");
+        let remote = RetrySelection::resolve(
+            &settings,
+            RecoveryKind::RemoteOffline,
+            None,
+            None,
+            &[],
+            true,
+        )
+        .unwrap();
+        assert!(remote.model.is_empty());
         assert!(remote.engine.is_none());
         assert_eq!(remote.short_name(), "Your other computer");
         let legacy = RetrySelection {
@@ -139,9 +166,10 @@ mod tests {
             Some(&legacy),
             None,
             &[],
+            true,
         )
         .unwrap();
-        assert_eq!(again.model, "Network");
+        assert!(again.model.is_empty());
         assert_eq!(again.short_name(), "Your other computer");
         let local = RetrySelection::resolve(
             &settings,
@@ -149,9 +177,57 @@ mod tests {
             Some(&remote),
             Some("small.en"),
             &[("small.en".into(), "whisper".into())],
+            true,
         )
         .unwrap();
         assert_eq!(local.short_name(), "Whisper Small");
         assert_eq!(local.engine.as_deref(), Some("whisper"));
+    }
+
+    #[test]
+    fn active_remote_is_used_for_unattempted_audio_but_never_overrides_a_failed_model() {
+        let settings = Settings {
+            current_model: "soniox".into(),
+            current_model_engine: "soniox".into(),
+            ..Default::default()
+        };
+        let candidates = vec![("small.en".into(), "whisper".into())];
+        for kind in [
+            RecoveryKind::NoSpeech,
+            RecoveryKind::Unknown,
+            RecoveryKind::Integrity,
+        ] {
+            let selected =
+                RetrySelection::resolve(&settings, kind, None, None, &candidates, true).unwrap();
+            assert!(selected.engine.is_none());
+            assert!(
+                selected.model.is_empty(),
+                "Unknown remote model must not become a fake model ID"
+            );
+        }
+        assert!(RetrySelection::resolve(
+            &settings,
+            RecoveryKind::RemoteOffline,
+            None,
+            None,
+            &candidates,
+            false
+        )
+        .is_err());
+        let previous = RetrySelection {
+            model: "small.en".into(),
+            engine: Some("whisper".into()),
+        };
+        let selected = RetrySelection::resolve(
+            &settings,
+            RecoveryKind::CloudFailed,
+            Some(&previous),
+            None,
+            &candidates,
+            true,
+        )
+        .unwrap();
+        assert_eq!(selected.model, "small.en");
+        assert_eq!(selected.engine.as_deref(), Some("whisper"));
     }
 }
