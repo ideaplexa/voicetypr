@@ -4,6 +4,8 @@ mod library_rules;
 #[cfg(test)]
 mod multilingual_tests;
 mod pipeline;
+#[cfg(test)]
+mod protected_terms_tests;
 mod settings;
 mod snippets;
 mod vocabulary;

@@ -732,7 +732,7 @@ pub async fn process_transcription_at(
                 paragraphs: crate::commands::settings::read_transcript_paragraphs(&app),
                 remove_fillers: crate::commands::settings::read_transcript_remove_fillers(&app),
             },
-            &protected_terms(&settings),
+            &protected_terms(&settings, transcript_language.as_deref()),
         );
         log::info!(
             "transcription_stage_timing stage=format duration_ms={} changed={}",
@@ -956,7 +956,7 @@ mod tests {
                 paragraphs: true,
                 remove_fillers: true,
             },
-            &protected_terms(&settings),
+            &protected_terms(&settings, transcription.transcript_language.as_deref()),
         );
         let text = formatted.unwrap_or(library.text);
         apply_final_restoration_guard(&text, &library.provenance, library.literal_locked, false).0

@@ -201,16 +201,25 @@ pub(crate) fn should_run_format_stage(literal_locked: bool, polish_runs: bool) -
 }
 
 /// Spellings the user chose (custom words, replacement targets) that casing rules must keep.
-pub(crate) fn protected_terms(settings: &WritingSettings) -> Vec<String> {
+pub(crate) fn protected_terms(
+    settings: &WritingSettings,
+    transcript_language: Option<&str>,
+) -> Vec<String> {
     let replacements = settings
         .replacements
         .iter()
-        .filter(|rule| rule.enabled)
+        .filter(|rule| {
+            rule.enabled
+                && super::language_scope_matches(rule.language.as_deref(), transcript_language)
+        })
         .map(|rule| rule.to.clone());
     let words = settings
         .custom_words
         .iter()
-        .filter(|word| word.enabled)
+        .filter(|word| {
+            word.enabled
+                && super::language_scope_matches(word.language.as_deref(), transcript_language)
+        })
         .map(|word| word.phrase.clone());
     replacements
         .chain(words)
@@ -2123,7 +2132,7 @@ mod tests {
             }],
             ..WritingSettings::default()
         };
-        assert_eq!(protected_terms(&settings), vec!["kubectl", "pnpm"]);
+        assert_eq!(protected_terms(&settings, None), vec!["kubectl", "pnpm"]);
     }
 
     // --- idempotence and edge cases ---
