@@ -48,12 +48,26 @@ pub fn secure_input_enabled() -> bool {
     unsafe { IsSecureEventInputEnabled() != 0 }
 }
 
-fn sample_secure_input(state: &Cell<bool>, tx: &Sender<Msg>) -> bool {
-    let enabled = secure_input_enabled();
-    if state.replace(enabled) != enabled {
-        let _ = tx.send(Msg::Control(Control::SecureInput(enabled)));
+#[derive(Default)]
+struct TapState {
+    secure: Cell<bool>,
+    consumed: RefCell<super::ConsumedKeys>,
+}
+
+impl TapState {
+    fn observe_secure_input(&self, enabled: bool, tx: &Sender<Msg>) -> bool {
+        if self.secure.replace(enabled) != enabled {
+            let _ = tx.send(Msg::Control(Control::SecureInput(enabled)));
+        }
+        // Keep only previously swallowed keys quarantined across either edge.
+        // Protected events are never inspected. A later key-up or fresh native
+        // key-down retires the quarantine, even if the protected key-up was lost.
+        enabled
     }
-    enabled
+}
+
+fn sample_secure_input(state: &TapState, tx: &Sender<Msg>) -> bool {
+    state.observe_secure_input(secure_input_enabled(), tx)
 }
 
 pub struct MacEventTap {
@@ -81,9 +95,7 @@ impl KeyEventSource for MacEventTap {
         let tx_cb = tx.clone();
         let own_pid = std::process::id() as i64;
         let consume_cb = Arc::clone(&consume);
-        let consumed_keys = Rc::new(RefCell::new(super::ConsumedKeys::default()));
-        let consumed_cb = Rc::clone(&consumed_keys);
-        let secure = Rc::new(Cell::new(false));
+        let secure = Rc::new(TapState::default());
         let secure_cb = Rc::clone(&secure);
         sample_secure_input(&secure, &tx);
 
@@ -117,7 +129,6 @@ impl KeyEventSource for MacEventTap {
                 // change ahead of the first post-transition raw event.
                 let protected = sample_secure_input(&secure_cb, &tx_cb);
                 if is_key_event && protected {
-                    *consumed_cb.borrow_mut() = super::ConsumedKeys::default();
                     return Some(event.clone());
                 }
                 if is_key_event
@@ -167,7 +178,7 @@ impl KeyEventSource for MacEventTap {
                             && consume_cb
                                 .load()
                                 .consumes(key, flags_to_modset(event.get_flags()));
-                        if consumed_cb.borrow_mut().decide(
+                        if secure_cb.consumed.borrow_mut().decide(
                             u32::from(code),
                             down,
                             is_repeat,
@@ -248,11 +259,8 @@ impl KeyEventSource for MacEventTap {
         // Secure Input can silence the tap without a disabled callback. Poll
         // even while idle, without adding another thread or retaining key data.
         while !self.stopped.load(Ordering::SeqCst) {
-            let was_secure = secure.get();
+            let was_secure = secure.secure.get();
             let enabled = sample_secure_input(&secure, &tx);
-            if enabled || was_secure {
-                *consumed_keys.borrow_mut() = super::ConsumedKeys::default();
-            }
             if was_secure && !enabled {
                 // Reconcile the existing tap and reset the matcher on exit.
                 tap.enable();
@@ -447,6 +455,42 @@ mod tests {
     use super::map_keycode;
     use crate::types::Side;
     use core_graphics::event::KeyCode;
+
+    #[test]
+    fn secure_input_round_trip_quarantines_swallowed_repeats_until_up_or_fresh_down() {
+        let state = super::TapState::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let space = u32::from(KeyCode::SPACE);
+        assert!(state.consumed.borrow_mut().decide(space, true, false, true));
+        assert!(state.observe_secure_input(true, &tx));
+        // No key fields are read while protected, including a possibly lost up.
+        assert!(state.observe_secure_input(true, &tx));
+        assert!(!state.observe_secure_input(false, &tx));
+        for expected in [true, false] {
+            assert!(matches!(
+                rx.recv().unwrap(),
+                crate::engine::Msg::Control(crate::engine::Control::SecureInput(value))
+                    if value == expected
+            ));
+        }
+        assert!(rx.try_recv().is_err());
+        assert!(state.consumed.borrow_mut().decide(space, true, true, false));
+        assert!(!state
+            .consumed
+            .borrow_mut()
+            .decide(space, false, false, false));
+        assert!(!state.consumed.borrow_mut().decide(space, true, true, false));
+        assert!(state.consumed.borrow_mut().decide(space, true, false, true));
+        state.observe_secure_input(true, &tx);
+        state.observe_secure_input(false, &tx);
+        // A fresh physical press must pass if it is no longer bound, even when
+        // the original release disappeared entirely during protected input.
+        assert!(!state
+            .consumed
+            .borrow_mut()
+            .decide(space, true, false, false));
+        assert!(!state.consumed.borrow_mut().decide(space, true, true, false));
+    }
 
     #[test]
     fn side_specific_modifiers_carry_a_side() {
