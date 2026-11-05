@@ -88,6 +88,30 @@ impl StartRequests {
         (generation, pending_only, phase)
     }
 
+    /// Retry is the latest action, but retires validation only after setup
+    /// succeeds. Lease registration, generation advancement and state publication
+    /// must all run inside `setup`, serialized with start/cancel publication.
+    /// Lock order: publication -> kept Store -> feedback hide. Never await or
+    /// synchronously hop to the UI thread in this critical section.
+    pub(crate) fn admit_retry<T>(
+        &self,
+        state: &AppState,
+        setup: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut requests = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if !matches!(
+            state.get_current_state(),
+            RecordingState::Idle | RecordingState::Error
+        ) {
+            return Err("Dictation is busy".into());
+        }
+        let retry = setup()?;
+        if let Some(pending) = requests.take() {
+            pending.cancellation.cancel();
+        }
+        Ok(retry)
+    }
+
     /// Synchronous start effects and replacement publication share this lock.
     /// Never await or synchronously hop to the UI thread inside `work`.
     pub(crate) fn with_active<T>(
@@ -176,9 +200,7 @@ impl StartRequest<'_> {
             if state.get_current_state() == RecordingState::Error {
                 crate::update_recording_state(app, RecordingState::Idle, Some("recover".into()));
             }
-            if let Some(native) = R::native(app) {
-                super::kept::cancel_active_retry(native);
-            }
+            super::kept::cancel_active_retry(app);
             state
                 .pointer_recording
                 .store(source.is_toggle(), std::sync::atomic::Ordering::SeqCst);

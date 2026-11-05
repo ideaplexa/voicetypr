@@ -3,6 +3,8 @@ use super::island::RecoveryKind;
 use crate::commands::audio;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+#[path = "kept_admission.rs"]
+mod admission;
 #[path = "kept_blocking.rs"]
 mod blocking;
 #[path = "kept_durable.rs"]
@@ -617,7 +619,9 @@ pub async fn list_kept_dictations(app: AppHandle) -> Vec<KeptSummary> {
         })
         .collect()
 }
-pub fn cancel_active_retry(app: &AppHandle) {
+pub fn cancel_active_retry<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: &AppHandle<R>,
+) {
     let generation = {
         let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
         let generation = store.active_retry.as_ref().map(|(_, g, _)| *g);
@@ -626,7 +630,10 @@ pub fn cancel_active_retry(app: &AppHandle) {
     };
     finish_cancelled_retry(app, generation);
 }
-fn finish_cancelled_retry(app: &AppHandle, generation: Option<u64>) {
+fn finish_cancelled_retry<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: &AppHandle<R>,
+    generation: Option<u64>,
+) {
     if generation.is_some_and(|g| !audio::recording_generation_is_stale(g)) {
         app.state::<crate::AppState>().request_cancellation();
         // Retry has no capture guard or recorder to stop. Publish Idle now so
@@ -1017,42 +1024,15 @@ async fn retry(
     anyway: bool,
 ) -> Result<(), String> {
     let state = app.state::<crate::AppState>();
-    if !matches!(
-        crate::get_recording_state(&app),
-        crate::RecordingState::Idle | crate::RecordingState::Error
-    ) {
-        return Err("Dictation is busy".into());
-    }
-    let lease = retry_setup(state.stop_in_flight.clone(), || {
-        let probes = probe_store_availability(None);
-        let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
-        store.apply_availability(probes);
-        store.lease(&id, anyway, || {
-            state.clear_cancellation();
-            let generation = audio::begin_recording_generation();
-            let (cancel, cancelled) = tokio::sync::watch::channel(false);
-            RetryRegistration {
-                generation,
-                cancel,
-                cancelled,
-            }
-        })
-    })?;
+    // Capture native context outside the publication lock; only an accepted
+    // retry may install it, together with its generation and phase.
+    let context = crate::writing::capture_active_app_context();
+    let lease = admission::admit(&app, &id, anyway, context)?;
     let generation = lease.generation;
     crate::observability::inherit(lease.original_generation, generation, lease.trace.clone());
     let _trace_lease = crate::observability::pin(generation);
     let retry_started = Instant::now();
-    if let Some(context) = crate::writing::capture_active_app_context() {
-        state.set_recording_app_context(context);
-    }
     // Retry never owns the capture-stop lock while awaiting decoding/network I/O.
-    if crate::get_recording_state(&app) == crate::RecordingState::Error {
-        crate::update_recording_state(&app, crate::RecordingState::Idle, None);
-    }
-    crate::update_recording_state(&app, crate::RecordingState::Starting, None);
-    crate::update_recording_state(&app, crate::RecordingState::Recording, None);
-    crate::update_recording_state(&app, crate::RecordingState::Stopping, None);
-    crate::update_recording_state(&app, crate::RecordingState::Transcribing, None);
     crate::menu::runtime::refresh(&app);
     let alt_engine_kind = engine
         .as_deref()
