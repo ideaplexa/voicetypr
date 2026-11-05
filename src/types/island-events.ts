@@ -1,7 +1,7 @@
 /** Pill-only recovery contracts. No transcript, audio, path, title or key. */
 export type RecoveryKind =
   | "cloud_failed" | "network_offline" | "model_missing" | "remote_offline"
-  | "no_speech" | "integrity" | "mic_dropped_empty";
+  | "unknown" | "no_speech" | "integrity" | "mic_dropped_empty";
 export type IslandAction =
   | "open_settings" | "recheck_license" | "open_license" | "open_models" | "open_cloud_keys"
   | "open_storage" | "open_mic_settings" | "choose_mic" | "open_accessibility";

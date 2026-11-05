@@ -28,7 +28,6 @@ fn now_ms() -> u64 {
 pub(super) struct DiskClip {
     index: PathBuf,
     expires_at_ms: u64,
-    committed: std::cell::Cell<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,7 +44,6 @@ impl DiskClip {
         Self {
             index: dir.join(format!("{id}.json")),
             expires_at_ms: now_ms() + TTL_MS,
-            committed: std::cell::Cell::new(false),
         }
     }
 
@@ -76,7 +74,6 @@ impl DiskClip {
         file.flush()?;
         file.as_file().sync_all()?;
         file.persist(&self.index).map_err(|e| e.error)?;
-        self.committed.set(true);
         Ok(())
     }
 }
@@ -105,9 +102,12 @@ impl Store {
         // Persist before detaching ownership. Explicit Reset still calls clear().
         self.clips.retain(|clip| {
             !clip.disk.as_ref().is_some_and(|disk| {
-                clip.path == clip.target
-                    && clip.recovery.retry_ready
-                    && (disk.write(clip).is_ok() || disk.committed.get())
+                clip.path == clip.target && clip.recovery.retry_ready && {
+                    // A failed index save leaves a recoverable UUID WAV.
+                    // Never turn a temporary disk error into deletion on quit.
+                    let _ = disk.write(clip);
+                    true
+                }
             })
         });
     }
@@ -142,6 +142,9 @@ impl Store {
             } else {
                 None
             };
+            let expired = item.as_ref().is_some_and(|item| {
+                item.version == 1 && item.recovery.id == id && item.expires_at_ms <= now
+            });
             let Some(mut item) = item.filter(|item| {
                 item.version == 1
                     && item.recovery.id == id
@@ -150,7 +153,10 @@ impl Store {
                     && finalized_wav(&wav)
             }) else {
                 let _ = std::fs::remove_file(&path);
-                let _ = std::fs::remove_file(&wav);
+                if expired {
+                    let _ = std::fs::remove_file(&wav);
+                }
+                // Missing/corrupt metadata is not consent to delete the only audio.
                 continue;
             };
             // Restored takes belong to no live capture. Idle Cancel must not discard them.
@@ -160,6 +166,34 @@ impl Store {
             // Alternatives are installed models, not durable promises.
             item.recovery.set_alternative(None);
             entries.push((item, path, wav));
+        }
+        // A crash can happen after moving the only WAV and before committing its
+        // index. Recover finalized UUID files using their original file time.
+        // Never follow aliases or infer ownership from arbitrary filenames.
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if path.extension().is_some_and(|e| e == "wav")
+                && uuid::Uuid::parse_str(stem).is_ok()
+                && !entries.iter().any(|(_, _, wav)| *wav == path)
+                && std::fs::symlink_metadata(path.with_extension("json"))
+                    .err()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                if let Some(item) = recover_orphan(&path, stem, now) {
+                    entries.push((item, path.with_extension("json"), path));
+                }
+            } else if stem.starts_with(".tmp")
+                || path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(".index-"))
+            {
+                // Disposable retry copies and incomplete index writes, not originals.
+                let _ = std::fs::remove_file(path);
+            }
         }
         entries.sort_by_key(|(item, _, _)| item.expires_at_ms);
         for (item, index, path) in entries {
@@ -182,33 +216,53 @@ impl Store {
                 disk: Some(DiskClip {
                     index,
                     expires_at_ms: item.expires_at_ms,
-                    committed: std::cell::Cell::new(true),
                 }),
             };
-            let _ = self.insert(clip);
-        }
-        // Crash leftovers and lease copies have no valid index. Do not touch
-        // unrelated files, and never follow symlinks during cleanup.
-        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            let orphan_audio = path.extension().is_some_and(|e| e == "wav")
-                && path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|s| uuid::Uuid::parse_str(s).is_ok() || s.starts_with(".tmp"))
-                && !self.clips.iter().any(|c| c.path == path)
-                && std::fs::symlink_metadata(path.with_extension("json"))
-                    .err()
-                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
-            let orphan_index = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s.starts_with(".index-"));
-            if orphan_audio || orphan_index {
-                let _ = std::fs::remove_file(path);
+            let id = clip.recovery.id.clone();
+            if self.insert(clip).is_ok() {
+                self.persist(&id);
             }
         }
     }
+}
+
+fn recover_orphan(path: &Path, id: &str, now: u64) -> Option<Entry> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || alias(&metadata) {
+        return None;
+    }
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
+    let expires_at_ms = modified
+        .saturating_add(TTL_MS)
+        .min(now.saturating_add(TTL_MS));
+    if expires_at_ms <= now {
+        let _ = std::fs::remove_file(path);
+        return None;
+    }
+    if !finalized_wav(path) {
+        return None;
+    }
+    Some(Entry {
+        version: 1,
+        expires_at_ms,
+        selection: None,
+        recovery: Recovery {
+            generation: u64::MAX,
+            id: id.into(),
+            kind: RecoveryKind::Unknown,
+            engine_short: "Unknown".into(),
+            alt_engine_short: None,
+            alt_engine_id: None,
+            expires_in_ms: expires_at_ms - now,
+            retry_ready: true,
+            retry_failed: false,
+        },
+    })
 }
 
 pub(super) fn initialize(app: &AppHandle) {

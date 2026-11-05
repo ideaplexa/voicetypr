@@ -209,3 +209,70 @@ fn cap_evicts_oldest_and_reset_deletes_durable_audio() {
     reload.load_disk(&data.path().join(DIRECTORY), now_ms());
     assert!(reload.clips.is_empty());
 }
+
+#[test]
+fn crash_between_wav_move_and_index_commit_recovers_without_extending_expiry() {
+    for corrupt in [false, true] {
+        let data = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let recovery = retain(&mut store, data.path());
+        let path = store.clips[0].path.clone();
+        let index = path.with_extension("json");
+        let modified = now_ms() - 86_400_000;
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_millis(modified))
+            .unwrap();
+        if corrupt {
+            std::fs::write(&index, b"{").unwrap();
+        } else {
+            std::fs::remove_file(&index).unwrap();
+        }
+        drop(store); // Simulate process death after the only WAV has moved.
+        let mut reload = Store::default();
+        reload.load_disk(&data.path().join(DIRECTORY), now_ms());
+        assert!(path.exists());
+        assert_eq!(reload.clips.len(), 1);
+        assert_eq!(reload.clips[0].recovery.id, recovery.id);
+        assert_eq!(reload.clips[0].recovery.kind, RecoveryKind::Unknown);
+        assert_eq!(
+            reload.clips[0].disk.as_ref().unwrap().expires_at_ms,
+            modified + TTL_MS
+        );
+        assert!(serde_json::from_slice::<Entry>(&std::fs::read(index).unwrap()).is_ok());
+        reload.preserve_on_exit();
+        reload.load_disk(&data.path().join(DIRECTORY), modified + TTL_MS);
+        assert!(!path.exists());
+    }
+}
+
+#[test]
+fn recovered_orphans_share_the_twenty_take_cap_and_oldest_first_order() {
+    let data = tempfile::tempdir().unwrap();
+    let dir = data.path().join(DIRECTORY);
+    std::fs::create_dir(&dir).unwrap();
+    let now = now_ms();
+    let mut paths = Vec::new();
+    for age in (0..CAP + 2).rev() {
+        let path = dir.join(format!("{}.wav", uuid::Uuid::new_v4()));
+        super::super::availability_tests::writer(&path)
+            .finalize()
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_millis(now - age as u64 * 60_000))
+            .unwrap();
+        paths.push(path);
+    }
+    let mut store = Store::default();
+    store.load_disk(&dir, now);
+    assert_eq!(store.clips.len(), CAP);
+    assert!(!paths[0].exists());
+    assert!(!paths[1].exists());
+    assert!(paths[2..].iter().all(|path| path.exists()));
+    store.clear();
+}

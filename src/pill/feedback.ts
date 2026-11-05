@@ -39,7 +39,7 @@ export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
   const titles = {
     cloud_failed: `${e.engine_short} unreachable`, network_offline: 'Network offline',
     model_missing: `${e.engine_short} isn't downloaded`, remote_offline: `${e.engine_short} is offline`,
-    integrity: 'Recording interrupted', no_speech: 'No speech heard',
+    unknown: 'Recording recovered', integrity: 'Recording interrupted', no_speech: 'No speech heard',
   };
   const actions: CardAction[] = e.retry_ready === false ? [] : e.kind === 'no_speech' ? [{label:'Transcribe anyway',call:{command:'transcribe_anyway',id:e.id}}] : e.alt_engine_short && e.alt_engine_id ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}}] : [];
   const sub = e.retry_ready === false ? 'Audio is still finishing…' : e.expires_in_ms > 600_000 ? 'Audio kept up to 7 days · Manage in Home' : e.kind === 'no_speech' ? 'Audio kept for 30 s' : 'Temporary audio · Manage in Home';
