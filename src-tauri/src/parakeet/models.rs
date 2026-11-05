@@ -66,6 +66,19 @@ pub fn get_available_models() -> Vec<&'static ParakeetModelDefinition> {
 
 /// Catalog policy kept independent of cfg so every target can test Windows exposure.
 pub fn catalog_for_platform(os: &str, arch: &str) -> Vec<&'static ParakeetModelDefinition> {
+    catalog_with_cpu(os, arch, crate::onnx_runtime::require_cpu)
+}
+
+/// Use the execution admission policy before exposing Windows models, even for
+/// download or saved-selection lookup. Other platforms never run this check.
+pub(crate) fn catalog_with_cpu(
+    os: &str,
+    arch: &str,
+    require_cpu: impl FnOnce() -> Result<(), &'static str>,
+) -> Vec<&'static ParakeetModelDefinition> {
+    if os == "windows" && arch == "x86_64" && require_cpu().is_err() {
+        return vec![];
+    }
     match (os, arch) {
         ("macos", "aarch64") => AVAILABLE_MODELS.iter().collect(),
         ("windows", "x86_64") => vec![&ONNX_V3],
@@ -230,11 +243,11 @@ pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog_for_platform, ParakeetModelKind, AVAILABLE_MODELS};
+    use super::{catalog_for_platform, catalog_with_cpu, ParakeetModelKind, AVAILABLE_MODELS};
 
     #[test]
     fn windows_catalog_is_only_onnx_v3() {
-        let models = catalog_for_platform("windows", "x86_64");
+        let models = catalog_with_cpu("windows", "x86_64", || Ok(()));
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "parakeet-tdt-0.6b-v3");
         assert_eq!(models[0].kind, ParakeetModelKind::TdtV3);
@@ -249,6 +262,27 @@ mod tests {
         assert!(catalog_for_platform("linux", "x86_64").is_empty());
         assert_eq!(
             catalog_for_platform("macos", "aarch64").len(),
+            AVAILABLE_MODELS.len()
+        );
+    }
+
+    #[test]
+    fn windows_catalog_and_saved_selection_exclude_cpu_ineligible_models() {
+        let denied = catalog_with_cpu("windows", "x86_64", || {
+            Err(crate::onnx_runtime::CPU_UNSUPPORTED)
+        });
+        assert!(denied.is_empty());
+        assert!(!denied.iter().any(|m| m.id == "parakeet-tdt-0.6b-v3"));
+        // Verify the production entry point uses the existing detector too.
+        crate::onnx_runtime::without_cpu(|| {
+            assert!(catalog_for_platform("windows", "x86_64").is_empty());
+        });
+    }
+
+    #[test]
+    fn mac_catalog_does_not_use_windows_cpu_admission() {
+        assert_eq!(
+            catalog_with_cpu("macos", "aarch64", || panic!("Windows-only CPU check")).len(),
             AVAILABLE_MODELS.len()
         );
     }

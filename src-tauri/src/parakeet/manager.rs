@@ -234,7 +234,7 @@ impl ParakeetManager {
     /// # Platform Behavior
     /// - **macOS (Apple Silicon)**: Returns all Parakeet models
     /// - **macOS (Intel)**: Returns an empty list (Parakeet requires Apple Silicon)
-    /// - **Windows x64**: Returns ONNX TDT v3 only
+    /// - **Windows x64**: Returns ONNX TDT v3 only after CPU admission
     /// - **Windows ARM64/Linux**: Returns empty vector
     #[allow(clippy::needless_return)]
     pub fn list_models(&self) -> Vec<ParakeetModelStatus> {

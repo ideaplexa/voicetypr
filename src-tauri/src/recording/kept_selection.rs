@@ -109,10 +109,11 @@ mod tests {
         };
         // The same platform catalog used by Windows list_models; assume the
         // listed bundle passed its downloaded/completeness check.
-        let candidates: Vec<_> = crate::parakeet::models::catalog_for_platform("windows", "x86_64")
-            .into_iter()
-            .map(|m| (m.id.to_string(), "parakeet".to_string()))
-            .collect();
+        let candidates: Vec<_> =
+            crate::parakeet::models::catalog_with_cpu("windows", "x86_64", || Ok(()))
+                .into_iter()
+                .map(|m| (m.id.to_string(), "parakeet".to_string()))
+                .collect();
         let selected = RetrySelection::resolve(
             &settings,
             RecoveryKind::CloudFailed,
@@ -157,6 +158,51 @@ mod tests {
             false,
         )
         .is_err());
+    }
+
+    #[test]
+    fn windows_retry_alternative_requires_cpu_admission_even_with_downloaded_files() {
+        let settings = Settings {
+            current_model: "small.en".into(),
+            current_model_engine: "whisper".into(),
+            ..Default::default()
+        };
+        let previous = RetrySelection {
+            model: "small.en".into(),
+            engine: Some("whisper".into()),
+        };
+        for admitted in [false, true] {
+            // Windows list_models feeds this catalog to the downloaded-only
+            // retry candidates. Assume all exposed files are complete.
+            let mut candidates: Vec<_> =
+                crate::parakeet::models::catalog_with_cpu("windows", "x86_64", || {
+                    admitted
+                        .then_some(())
+                        .ok_or(crate::onnx_runtime::CPU_UNSUPPORTED)
+                })
+                .into_iter()
+                .map(|m| (m.id.to_owned(), "parakeet".into()))
+                .collect();
+            candidates.push(("small.en".into(), "whisper".into()));
+            let result = RetrySelection::resolve(
+                &settings,
+                RecoveryKind::CloudFailed,
+                Some(&previous),
+                Some("parakeet-tdt-0.6b-v3"),
+                &candidates,
+                false,
+            );
+            assert_eq!(result.is_ok(), admitted);
+            assert!(RetrySelection::resolve(
+                &settings,
+                RecoveryKind::CloudFailed,
+                Some(&previous),
+                None,
+                &candidates,
+                false,
+            )
+            .is_ok());
+        }
     }
 
     #[tokio::test]
