@@ -74,6 +74,12 @@ $MainExe = Join-Path $TargetDir "release\voicetypr.exe"
 if (-not (Test-Path $MainExe)) { throw "Voicetypr release binary not found: $MainExe" }
 Copy-Item $MainExe (Join-Path $StageDir "voicetypr.exe") -Force
 
+# --no-bundle and Store's empty resources list bypass Tauri's bundle hook.
+# Stage the same pinned dependency and notices explicitly, then verify them.
+node scripts/stage-windows-ort.cjs --msix-layout $StageDir --target-dir $TargetDir --triple $TargetTriple
+if ($LASTEXITCODE -ne 0) { throw "ORT MSIX layout validation failed." }
+& (Join-Path $RepoRoot "src-tauri/windows/assert-no-onnxruntime-import.ps1") -ExePath (Join-Path $StageDir "voicetypr.exe")
+
 $Sidecars = @(
     "sidecar\whisper-vulkan\dist\whisper-vulkan-sidecar.exe",
     "sidecar\whisper-vulkan\dist\whisper-vulkan-sidecar-$TargetTriple.exe"
@@ -194,5 +200,15 @@ if ([string]::IsNullOrWhiteSpace($CertPath)) {
 
 & winapp @PackArgs
 if ($LASTEXITCODE -ne 0) { throw "winapp pack failed with exit code $LASTEXITCODE" }
+
+# Check the actual archive too, not only the pre-pack directory.
+$PackageCheckDir = Join-Path ([System.IO.Path]::GetTempPath()) ("voicetypr-msix-check-" + [guid]::NewGuid())
+try {
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($OutputPath, $PackageCheckDir)
+    node scripts/stage-windows-ort.cjs --check-layout $PackageCheckDir --triple $TargetTriple
+    if ($LASTEXITCODE -ne 0) { throw "Packed MSIX is missing an ORT dependency or notice." }
+} finally {
+    Remove-Item $PackageCheckDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Write-Success "MSIX package created: $OutputPath"

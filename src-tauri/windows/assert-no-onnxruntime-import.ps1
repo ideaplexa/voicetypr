@@ -31,3 +31,16 @@ if (@($imports | Where-Object { $_ -match '(?i)^\s*onnxruntime\.dll\s*$' }).Coun
 }
 
 Write-Host "OK: $ExePath does not import onnxruntime.dll"
+
+# CPU-only sessions still use the pinned DirectML-enabled static prebuilt.
+# This check covers both users: Parakeet TDT and Silero VAD.
+if (@($imports | Where-Object { $_ -match '(?i)^\s*DirectML\.dll\s*$' }).Count -eq 0) {
+    throw 'Pinned ORT unexpectedly has no DirectML import. Review and remove staging if a CPU-only build replaced it.'
+}
+$dll = Join-Path (Split-Path -Parent $ExePath) 'DirectML.dll'
+$manifest = Get-Content (Join-Path $PSScriptRoot '../models/onnxruntime/DirectML-provenance.json') -Raw | ConvertFrom-Json
+if (-not (Test-Path -LiteralPath $dll)) { throw 'App-local DirectML.dll is missing.' }
+if ((Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.dll_sha256.'x86_64-pc-windows-msvc') {
+    throw 'App-local DirectML.dll does not match Microsoft.AI.DirectML 1.15.4.'
+}
+Write-Host 'OK: static ORT imports the pinned app-local Microsoft DirectML redistributable.'

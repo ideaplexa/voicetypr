@@ -1,0 +1,3 @@
+# Preserve upstream redistribution terms byte-for-byte, including CRLF.
+src-tauri/models/onnxruntime/DirectML-LICENSE.txt -text -diff
+src-tauri/models/onnxruntime/DirectML-ThirdPartyNotices.txt -text -diff

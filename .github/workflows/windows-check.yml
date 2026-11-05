@@ -86,6 +86,9 @@ jobs:
       - name: Clippy (-D warnings, all targets)
         run: cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: ORT NSIS and MSIX dependency/notice staging regressions
+        run: node --test scripts/stage-windows-ort.test.cjs
+
       # Match the repo's Windows test contract: run-tests.ps1 builds tests
       # (--no-run) then runs the exes with a Common-Controls manifest, working
       # around the TaskDialogIndirect entry-point error (tauri-apps/tauri#13419).
