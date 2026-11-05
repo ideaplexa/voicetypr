@@ -82,6 +82,27 @@ fn use_whisper_vulkan(mode: &str, audio_ctx: Option<i32>) -> bool {
     mode != "cpu" && audio_ctx.is_none()
 }
 
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+async fn lock_local_model_gate<'a>(
+    gate: &'a tokio::sync::Mutex<()>,
+    should_cancel: impl Fn() -> bool,
+) -> Result<tokio::sync::MutexGuard<'a, ()>, String> {
+    loop {
+        if should_cancel() {
+            return Err("Transcription cancelled".into());
+        }
+        tokio::select! {
+            guard = gate.lock() => {
+                if should_cancel() {
+                    return Err("Transcription cancelled".into());
+                }
+                return Ok(guard);
+            }
+            () = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
+    }
+}
+
 // TODO(arch-review): collapse into a request struct when the whisper dispatch
 // seam is restructured (audio_ctx/speed-mode params pushed this over 8 args).
 #[allow(clippy::too_many_arguments)]
@@ -101,6 +122,12 @@ where
 {
     #[cfg(target_os = "windows")]
     let generation = crate::commands::audio::current_recording_generation();
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let local_model_gate =
+        lock_local_model_gate(&crate::parakeet::onnx::LOCAL_MODEL_GATE, &should_cancel).await?;
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    app.state::<ParakeetManager>().unload_onnx().await;
+
     let speed_mode = speed_mode_override.unwrap_or_else(|| read_whisper_speed_mode(app));
 
     #[cfg(target_os = "windows")]
@@ -192,6 +219,8 @@ where
     let initial_prompt = initial_prompt.map(str::to_owned);
     let should_cancel_for_decode = should_cancel.clone();
     let result = tokio::task::spawn_blocking(move || {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        let _local_model_gate = local_model_gate;
         transcriber.transcribe_with_metadata_with_prompt(
             &audio_path,
             language.as_deref(),
@@ -410,12 +439,36 @@ pub(crate) async fn resolve_engine_for_model<R: tauri::Runtime>(
     }
 }
 
+/// Best-effort warm of the Windows Vulkan sidecar when a Whisper model is preloaded.
+/// No-op on non-Windows platforms and when CPU acceleration is selected.
+pub(crate) async fn warm_whisper_gpu_sidecar_on_model_preload(
+    app: &AppHandle,
+    model_path: &Path,
+) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let mode = transcription_acceleration_mode(app).await;
+        let gpu_client = app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>();
+        let gpu_available = gpu_client.status().await.gpu_available;
+        gpu_client
+            .warm_on_preload(app, model_path, &mode, gpu_available)
+            .await
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, model_path);
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         parakeet_segments_to_transcription_segments, should_use_active_remote,
         transcription_watchdog_budget, use_whisper_vulkan, ActiveEngineSelection,
     };
+    use std::time::Duration;
 
     #[test]
     fn vulkan_uses_default_context_and_override_uses_in_process_decoder() {
@@ -453,6 +506,58 @@ mod tests {
         assert_eq!(converted[0].end_ms, Some(1_200));
         assert_eq!(converted[1].start_ms, Some(3_500));
         assert_eq!(converted[2].start_ms, None);
+    }
+
+    #[tokio::test]
+    async fn cancelled_whisper_does_not_wait_for_or_evict_another_model() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let gate = tokio::sync::Mutex::new(());
+        let held = gate.lock().await;
+        let cancelled = AtomicBool::new(false);
+        let wait = super::lock_local_model_gate(&gate, || cancelled.load(Ordering::SeqCst));
+        let cancel = async {
+            tokio::task::yield_now().await;
+            cancelled.store(true, Ordering::SeqCst);
+        };
+        let (result, ()) =
+            tokio::time::timeout(Duration::from_secs(1), async { tokio::join!(wait, cancel) })
+                .await
+                .expect("cancellation must not await the active native model");
+        assert_eq!(result.unwrap_err(), "Transcription cancelled");
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn blocking_worker_keeps_gate_after_waiting_future_is_dropped() {
+        static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let guard = GATE.lock().await;
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        let waiting = tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                let _guard = guard;
+                started_tx.send(()).unwrap();
+                finish_rx.recv().unwrap();
+            })
+            .await
+            .unwrap();
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv().unwrap())
+            .await
+            .unwrap();
+        waiting.abort();
+        assert!(GATE.try_lock().is_err());
+        finish_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(_guard) = GATE.try_lock() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[test]

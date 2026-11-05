@@ -3,7 +3,6 @@ import { SettingsPaneCard } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/settings/SettingsSwitch";
-import { isWindows } from "@/lib/platform";
 import type { ModelInfo, TranscriptionAcceleration } from "@/types";
 
 export interface ReadinessLocalPanelProps {
@@ -141,7 +140,7 @@ export function ReadinessLocalPanel({
           </div>
         )}
       </SettingsPaneCard>
-      {isWindows && (
+      {models[currentModel ?? ""]?.gpu_controls_available === true && (
         <SettingsPaneCard className="!p-[18px]">
           <div className="flex items-center justify-between gap-3">
             <div>

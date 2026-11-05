@@ -301,6 +301,10 @@ pub fn maybe_run_from_env_with_context(
         if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {
             cache.lock().await.clear();
         }
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if let Some(manager) = app_handle.try_state::<ParakeetManager>() {
+            manager.shutdown().await;
+        }
 
         outcome
     });
@@ -685,6 +689,10 @@ async fn run_stream_bench(
     } else {
         ParakeetStreamConfig::streaming()
     };
+
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Err("Parakeet CLI streaming is unavailable on Windows.".into());
+    }
 
     let parakeet_manager = app.state::<ParakeetManager>();
     parakeet_manager

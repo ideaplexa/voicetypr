@@ -514,6 +514,10 @@ async fn retry_tray_creation(app: tauri::AppHandle) -> Result<tray_status::TrayS
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     initialize_tls();
+    // Retain the ONNX/ORT link probe in the Windows x64 exe without invoking it.
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    std::hint::black_box(parakeet::onnx::can_initialize_runtime as fn() -> bool);
+
     let app_start = Instant::now();
     let app_version = env!("CARGO_PKG_VERSION");
 
@@ -788,7 +792,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let parakeet_manager = parakeet::ParakeetManager::new(parakeet_dir);
             app.manage(parakeet_manager);
             log::info!("🦜 Parakeet manager initialized");
-
             // Manage active downloads for cancellation
             app.manage(Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new())));
 
@@ -1177,47 +1180,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let app_handle = app.app_handle().clone();
                     // Use tauri::async_runtime instead of tokio directly
                     tauri::async_runtime::spawn(async move {
-                        log::info!("Attempting to preload model on startup: {}", current_model);
-
-                        // Get model path from WhisperManager
-                        let whisper_state = app_handle.state::<AsyncRwLock<whisper::manager::WhisperManager>>();
-                        let model_path = {
-                            let manager = whisper_state.read().await;
-                            manager.get_model_path(&current_model)
-                        };
-
-                        if let Some(model_path) = model_path {
-                            if crate::commands::audio::warm_whisper_gpu_sidecar_on_model_preload(
-                                &app_handle,
-                                &model_path,
-                            )
-                            .await
-                            {
-                                log::info!(
-                                    "Successfully preloaded model '{}' in Vulkan sidecar",
-                                    current_model
-                                );
-                            } else {
-                                let preload_result = {
-                                    let cache_state = app_handle.state::<AsyncMutex<TranscriberCache>>();
-                                    let mut cache = cache_state.lock().await;
-                                    let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app_handle);
-                                    cache.get_or_create(&model_path, speed_mode).map(|_| ())
-                                };
-
-                                match preload_result {
-                                    Ok(()) => {
-                                        log::info!("Successfully preloaded model '{}' into cache", current_model);
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Failed to preload model '{}': {}. App will continue without preloading.",
-                                                 current_model, e);
-                                    }
-                                }
-                            }
-                        } else {
-                            log::warn!("Model '{}' not found in models directory, skipping preload", current_model);
-                        }
+                        parakeet::preload::startup_whisper(app_handle, current_model).await;
                     });
                 } else if current_model_engine == "whisper" {
                     log::info!("No Whisper model configured for preloading");
@@ -1548,6 +1511,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {
                         cache.lock().await.clear();
                     }
+                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                    if let Some(parakeet) = app_handle.try_state::<parakeet::ParakeetManager>() {
+                        parakeet.shutdown().await;
+                    }
                     if let Some(remote) = app_handle
                         .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()
                     {
@@ -1607,6 +1574,8 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
             );
         }
     }
+
+    parakeet::preload::recover_downloads(&app).await;
 
     let availability = crate::recognition::emit_recognition_availability(&app).await;
 
@@ -1763,7 +1732,13 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                         let model_known = models.iter().any(|m| m.name == current_model);
                         if let Some(status) = models.iter().find(|m| m.name == current_model) {
                             _model_available = status.downloaded;
-                            if status.downloaded {
+                            if parakeet::preload::selected_parakeet_preload_candidate(
+                                &engine,
+                                &current_model,
+                                status.downloaded,
+                            )
+                            .is_some()
+                            {
                                 autoload_parakeet_model = Some(current_model.clone());
                             }
                         }
@@ -1847,8 +1822,17 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
 
     if let Some(model_name) = autoload_parakeet_model {
         if let Some(parakeet_manager) = app.try_state::<parakeet::ParakeetManager>() {
-            match parakeet_manager.load_model(&app, &model_name).await {
-                Ok(_) => {
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            let load_result = parakeet_manager
+                .preload_selected_onnx(&app, &model_name)
+                .await;
+            #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+            let load_result = parakeet_manager
+                .load_model(&app, &model_name)
+                .await
+                .map(|()| parakeet::manager::PreloadOutcome::Loaded);
+            match load_result {
+                Ok(parakeet::manager::PreloadOutcome::Loaded) => {
                     log::info!("✅ Parakeet model '{}' autoloaded from cache", model_name);
                     match parakeet_manager.warmup(&app).await {
                         Ok(Some(ms)) => {
@@ -1860,6 +1844,7 @@ async fn perform_startup_checks(app: tauri::AppHandle) {
                         }
                     }
                 }
+                Ok(parakeet::manager::PreloadOutcome::Superseded) => {}
                 Err(err) => {
                     log::warn!(
                         "Failed to autoload Parakeet model '{}': {}",

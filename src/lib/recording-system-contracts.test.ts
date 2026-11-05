@@ -6,6 +6,47 @@ const section = (source: string, start: string, end: string) =>
   source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
 
 describe("recording system ownership contracts", () => {
+  it("keeps terminal ONNX shutdown and bounded recovery in exit teardown order", () => {
+    const exit = section(
+      read("lib.rs"),
+      "tauri::RunEvent::Exit =>",
+      'tauri::RunEvent::Reopen',
+    );
+    const steps = [
+      "cache.lock().await.clear()",
+      "parakeet.shutdown().await",
+      "remote.lock().await.stop().await",
+      "cleanup_media_pause_on_exit()",
+      "recording::kept::cleanup()",
+      "ai_lifecycle::cancel_recording()",
+      "product_analytics::shutdown()",
+    ];
+    let previous = -1;
+    for (const step of steps) {
+      const position = exit.indexOf(step);
+      expect(position, step).toBeGreaterThan(previous);
+      previous = position;
+    }
+    expect(read("recording/kept_blocking.rs")).toContain(
+      "const EXIT_BUDGET: Duration = Duration::from_secs(2)",
+    );
+    expect(read("parakeet/manager.rs")).toContain("self.onnx.shutdown().await");
+  });
+
+  it("uses platform stream capabilities inside generation-owned capture construction", () => {
+    const construct = section(
+      read("commands/audio_start.rs"),
+      "pub(super) fn construct(",
+      "fn stop_owned",
+    );
+    const owned = construct.indexOf(".with_active(");
+    expect(owned).toBeGreaterThan(-1);
+    expect(construct.indexOf("EngineStreamCapabilities::for_engine(")).toBeGreaterThan(owned);
+    expect(construct).toContain(".supports_streaming");
+    expect(construct).toContain("(setup.preview.tap || realtime) && supported");
+    expect(construct).toContain("(setup.preview.engine || realtime) && supported");
+  });
+
   it("switches microphones through cancellation, not a bare recorder stop", () => {
     const source = section(
       read("commands/settings.rs"),

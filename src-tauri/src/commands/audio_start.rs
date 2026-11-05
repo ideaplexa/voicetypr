@@ -109,10 +109,11 @@ pub(super) fn construct(
             let realtime = config.current_engine == "soniox"
                 && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
                 && !setup.remote_online;
-            let supported = matches!(
-                config.current_engine.as_str(),
-                "parakeet" | "whisper" | "soniox" | "deepgram"
-            );
+            let supported = crate::transcription::stream::EngineStreamCapabilities::for_engine(
+                ProviderEngine::from_engine_str(&config.current_engine)
+                    .unwrap_or(ProviderEngine::Remote),
+            )
+            .supports_streaming;
             let tap = (setup.preview.tap || realtime) && supported;
             let engine = (setup.preview.engine || realtime) && supported;
             let factory = match config.current_engine.as_str() {

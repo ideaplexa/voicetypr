@@ -99,6 +99,66 @@ impl RetrySelection {
 mod tests {
     use super::*;
 
+    #[test]
+    fn windows_parakeet_retry_stays_pinned_and_requires_an_available_model() {
+        let model = "parakeet-tdt-0.6b-v3";
+        let settings = Settings {
+            current_model: "soniox".into(),
+            current_model_engine: "soniox".into(),
+            ..Default::default()
+        };
+        // The same platform catalog used by Windows list_models; assume the
+        // listed bundle passed its downloaded/completeness check.
+        let candidates: Vec<_> = crate::parakeet::models::catalog_for_platform("windows", "x86_64")
+            .into_iter()
+            .map(|m| (m.id.to_string(), "parakeet".to_string()))
+            .collect();
+        let selected = RetrySelection::resolve(
+            &settings,
+            RecoveryKind::CloudFailed,
+            None,
+            Some(model),
+            &candidates,
+            false,
+        )
+        .unwrap();
+        let saved: RetrySelection =
+            serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
+        let again = RetrySelection::resolve(
+            &settings,
+            RecoveryKind::CloudFailed,
+            Some(&saved),
+            None,
+            &candidates,
+            false,
+        )
+        .unwrap();
+        assert_eq!(again.model, model);
+        assert_eq!(again.engine.as_deref(), Some("parakeet"));
+        // A deleted/incomplete bundle (or unsupported platform) is excluded
+        // from local_candidates. Neither retry path may switch to Settings.
+        for requested in [None, Some(model)] {
+            assert!(RetrySelection::resolve(
+                &settings,
+                RecoveryKind::CloudFailed,
+                Some(&saved),
+                requested,
+                &[],
+                false,
+            )
+            .is_err());
+        }
+        assert!(RetrySelection::resolve(
+            &settings,
+            RecoveryKind::CloudFailed,
+            None,
+            Some("parakeet-tdt-0.6b-v2"),
+            &candidates,
+            false,
+        )
+        .is_err());
+    }
+
     #[tokio::test]
     async fn saved_cloud_retry_reaches_executor_with_the_original_api_model() {
         use crate::cloud_stt::CloudProvider;

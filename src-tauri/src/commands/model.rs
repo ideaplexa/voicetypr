@@ -77,7 +77,7 @@ pub async fn get_active_stream_capabilities(
     let provider_engine = provider_engine_from_settings(&active_engine);
     let capabilities = EngineStreamCapabilities::for_engine(provider_engine);
     let settings = crate::commands::settings::get_settings(app.clone()).await?;
-    let eou_status = if provider_engine == ProviderEngine::Parakeet {
+    let eou_status = if provider_engine == ProviderEngine::Parakeet && cfg!(target_os = "macos") {
         parakeet_manager
             .eou_model_status(&app, DEFAULT_EOU_CHUNK_MS)
             .await
@@ -96,7 +96,13 @@ pub async fn get_active_stream_capabilities(
         eou_model_downloaded: eou_status.downloaded,
         eou_model_path: eou_status.path,
         eou_chunk_ms: eou_status.chunk_ms,
-        transcription_mode: settings.transcription_mode,
+        transcription_mode: if cfg!(all(target_os = "windows", target_arch = "x86_64"))
+            && provider_engine == ProviderEngine::Parakeet
+        {
+            TRANSCRIPTION_MODE_REGULAR.to_string()
+        } else {
+            settings.transcription_mode
+        },
     })
 }
 
@@ -476,6 +482,9 @@ pub async fn download_model(
                 }
                 ModelEngine::Parakeet => {
                     // Verify Parakeet reports the requested model as downloaded
+                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                    let verified = parakeet_manager.is_onnx_downloaded(&model_name);
+                    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
                     let verified = parakeet_manager
                         .list_models()
                         .into_iter()
@@ -483,7 +492,7 @@ pub async fn download_model(
 
                     if !verified {
                         let msg = format!(
-                            "Parakeet sidecar did not confirm '{}' as downloaded. Please try again.",
+                            "Parakeet did not confirm '{}' as downloaded. Please try again.",
                             model_name
                         );
                         log::warn!("{}", msg);
@@ -580,6 +589,8 @@ pub struct UnifiedModelInfo {
     pub available_models: Option<Vec<crate::cloud_stt::CloudSttModel>>,
     pub underlying_model: Option<String>,
     pub supported_languages: Option<Vec<String>>,
+    pub runtime: Option<String>,
+    pub gpu_controls_available: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -644,6 +655,12 @@ pub async fn get_parakeet_vocabulary_status(
     app: AppHandle,
     parakeet_manager: State<'_, ParakeetManager>,
 ) -> Result<ParakeetVocabularyStatusResponse, String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(ParakeetVocabularyStatusResponse {
+            supported: false,
+            ready: false,
+        });
+    }
     match parakeet_manager.status(&app).await {
         Ok(response) => {
             let Some(status) = ParakeetManager::vocabulary_status_from_response(&response) else {
@@ -664,6 +681,9 @@ pub async fn download_parakeet_vocabulary_model(
     parakeet_manager: State<'_, ParakeetManager>,
     active_downloads: ActiveDownloadsState<'_>,
 ) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Parakeet CTC vocabulary is available only on macOS.".into());
+    }
     const MODEL_ID: &str = "parakeet-vocabulary-ctc-110m";
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -868,6 +888,15 @@ async fn identify_download_target(
             }
         }
         ModelEngine::Parakeet => {
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            if model_name == crate::parakeet::onnx::download::MODEL_ID {
+                return Ok(DownloadTarget {
+                    engine,
+                    size_bytes: crate::parakeet::onnx::download::total_size(
+                        &crate::parakeet::onnx::download::FILES,
+                    ),
+                });
+            }
             if let Some(definition) = parakeet_manager.get_model_definition(model_name) {
                 Ok(DownloadTarget {
                     engine,
@@ -898,6 +927,10 @@ async fn determine_model_engine(
     if parakeet_manager.get_model_definition(model_name).is_some() {
         return Ok(ModelEngine::Parakeet);
     }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if model_name == crate::parakeet::onnx::download::MODEL_ID {
+        return Ok(ModelEngine::Parakeet);
+    }
 
     Err(format!("Invalid model name: {}", model_name))
 }
@@ -918,6 +951,8 @@ fn convert_whisper_model(name: String, info: ModelInfo) -> UnifiedModelInfo {
         requires_setup: false,
         underlying_model: None,
         supported_languages: None,
+        runtime: None,
+        gpu_controls_available: cfg!(target_os = "windows"),
         available_models: None,
     }
 }
@@ -938,6 +973,8 @@ fn convert_parakeet_model(status: ParakeetModelStatus) -> UnifiedModelInfo {
         requires_setup: false,
         underlying_model: None,
         supported_languages: Some(status.supported_languages),
+        runtime: Some(status.runtime),
+        gpu_controls_available: false,
         available_models: None,
     }
 }
@@ -970,6 +1007,8 @@ fn collect_cloud_models(app: &AppHandle) -> Vec<UnifiedModelInfo> {
                 requires_setup: !has_key,
                 underlying_model: Some(provider.selected_model(app).id.to_string()),
                 supported_languages: None,
+                runtime: None,
+                gpu_controls_available: false,
                 available_models: Some(provider.available_models().to_vec()),
             }
         })
@@ -1156,10 +1195,47 @@ pub async fn preload_model(
             .ok_or(format!("Model '{}' not found", model_name))?
     };
 
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let _local_model_gate = crate::parakeet::onnx::LOCAL_MODEL_GATE.lock().await;
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let still_selected = || {
+        app.store("settings").ok().is_some_and(|store| {
+            let engine = store
+                .get("current_model_engine")
+                .and_then(|v| v.as_str().map(str::to_owned));
+            let model = store
+                .get("current_model")
+                .and_then(|v| v.as_str().map(str::to_owned));
+            crate::parakeet::onnx::selected_model_matches(
+                engine.as_deref(),
+                model.as_deref(),
+                "whisper",
+                &model_name,
+            )
+        })
+    };
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if !still_selected() {
+        return Err("Whisper preload was superseded by another model selection".into());
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    app.state::<crate::parakeet::ParakeetManager>()
+        .unload_onnx()
+        .await;
+
     // On Windows with GPU acceleration, warm the Vulkan sidecar so the first transcription
     // after a manual preload isn't slow. No-op on non-Windows / CPU mode; when it does not
     // warm, fall through to loading the CPU transcriber cache.
-    if crate::commands::audio::warm_whisper_gpu_sidecar_on_model_preload(&app, &model_path).await {
+    if crate::transcription::engines::warm_whisper_gpu_sidecar_on_model_preload(&app, &model_path)
+        .await
+    {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if !still_selected() {
+            app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
+                .abort_active_process()
+                .await;
+            return Err("Whisper preload was superseded by another model selection".into());
+        }
         log::info!(
             "Model '{}' preloaded successfully in Vulkan sidecar",
             model_name
@@ -1173,6 +1249,11 @@ pub async fn preload_model(
         let mut cache = cache_state.lock().await;
         let speed_mode = crate::commands::settings::read_whisper_speed_mode(&app);
         cache.get_or_create(&model_path, speed_mode)?;
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if !still_selected() {
+            cache.clear();
+            return Err("Whisper preload was superseded by another model selection".into());
+        }
     }
 
     log::info!("Model '{}' preloaded successfully", model_name);

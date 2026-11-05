@@ -123,9 +123,14 @@ impl EngineStreamCapabilities {
     pub const REMOTE: Self = Self::FINAL_ONLY;
 
     pub fn for_engine(engine: ProviderEngine) -> Self {
+        Self::for_platform(engine, std::env::consts::OS)
+    }
+
+    pub fn for_platform(engine: ProviderEngine, os: &str) -> Self {
         match engine {
             ProviderEngine::Whisper => Self::WHISPER,
-            ProviderEngine::Parakeet => Self::PARAKEET,
+            ProviderEngine::Parakeet if os == "macos" => Self::PARAKEET,
+            ProviderEngine::Parakeet => Self::FINAL_ONLY,
             // Soniox realtime streaming is result-authoritative (plan 043b): the WS
             // final is the pasted text; REST-on-WAV runs only as fallback.
             ProviderEngine::Soniox => Self::SONIOX,
@@ -357,12 +362,23 @@ mod tests {
 
     #[test]
     fn capability_shape_for_every_current_engine() {
+        assert_eq!(
+            EngineStreamCapabilities::for_platform(ProviderEngine::Parakeet, "windows"),
+            EngineStreamCapabilities::FINAL_ONLY,
+        );
+        assert_eq!(
+            EngineStreamCapabilities::for_platform(ProviderEngine::Parakeet, "macos"),
+            EngineStreamCapabilities::PARAKEET,
+        );
         // Whisper streams via decode-ahead (plan 032, no endpointing); Parakeet via
         // the sidecar decode-ahead engine (plan 051, same shape). Soniox realtime
         // streaming (plan 043) is result-authoritative (plan 043b): WS-final is the
         // pasted text; REST-on-WAV runs only as fallback. Deepgram realtime streaming
         // (plan 044) mirrors Soniox's stance. The rest are final-only.
         for local_decode_ahead in [ProviderEngine::Whisper, ProviderEngine::Parakeet] {
+            if local_decode_ahead == ProviderEngine::Parakeet && !cfg!(target_os = "macos") {
+                continue;
+            }
             assert_eq!(
                 EngineStreamCapabilities::for_engine(local_decode_ahead),
                 EngineStreamCapabilities {

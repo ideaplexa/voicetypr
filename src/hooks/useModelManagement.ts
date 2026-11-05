@@ -477,7 +477,12 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
         model: string;
         engine?: string;
         requestId?: string;
+        refreshOnly?: boolean;
       }>("model-downloaded", async (event) => {
+        if (event.refreshOnly) {
+          await loadModels();
+          return;
+        }
         const modelName = event.model;
         const requestId = event.requestId;
         const isCancelledCompletion = requestId
@@ -490,11 +495,11 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
           }
           cancelledDownloads.current.delete(modelName);
           if (!requestId || activeDownloadRequests.current.get(modelName) === requestId) {
-            activeDownloads.current.delete(modelName);
-            activeDownloadRequests.current.delete(modelName);
+            clearDownloadState(modelName);
+            clearDownloadError(modelName);
           }
-          clearDownloadState(modelName);
-          clearDownloadError(modelName);
+          // Completion is post-commit even when cancellation was requested.
+          await loadModels();
           return;
         }
 
