@@ -1,6 +1,7 @@
 //! The one toggle route for tray, Pointer and in-app hotkey toggles. Explicit
 //! `start_recording` stays idempotent; only a toggle may cancel a pending start.
 use super::start_source::StartSource;
+use crate::commands::recording_runtime::RecordingRuntime;
 use crate::{AppState, RecordingState};
 use tauri::{AppHandle, Manager};
 
@@ -38,8 +39,8 @@ pub(crate) fn route(state: &AppState) -> ToggleRoute {
     }
 }
 
-pub(crate) async fn toggle_recording(
-    app: AppHandle,
+pub(crate) async fn toggle_recording<R: RecordingRuntime>(
+    app: AppHandle<R>,
     source: StartSource,
 ) -> Result<ToggleRoute, String> {
     let route = route(&app.state::<AppState>());
@@ -55,6 +56,7 @@ pub(crate) async fn toggle_recording(
         }
         // stop_recording queues the stop while Starting and owns StopInFlightGuard.
         ToggleRoute::Stop => {
+            let app = R::native(&app).ok_or("Native capture unavailable")?;
             crate::commands::audio::stop_recording(
                 app.clone(),
                 app.state::<crate::commands::audio::RecorderState>(),

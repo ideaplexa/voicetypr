@@ -1,4 +1,5 @@
 //! Tray actions share the app's command paths; never log menu IDs or content.
+use crate::commands::recording_runtime::RecordingRuntime;
 use crate::{
     ai::prompts::{EnhancementOptions, EnhancementPreset},
     commands::settings::{get_settings, save_settings, Settings},
@@ -81,10 +82,14 @@ pub fn handle(app: &AppHandle, id: &str) {
         }
     });
 }
-pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
+pub(crate) async fn run<R: RecordingRuntime>(app: AppHandle<R>, id: &str) -> Result<(), String> {
     run_from(app, id, "tray").await
 }
-pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(), String> {
+pub(crate) async fn run_from<R: RecordingRuntime>(
+    app: AppHandle<R>,
+    id: &str,
+    source: &str,
+) -> Result<(), String> {
     let (result, toggle_route) = if id == "dictate" {
         match crate::recording::toggle::toggle_recording(
             app,
@@ -96,7 +101,8 @@ pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(
             Err(error) => (Err(error), None),
         }
     } else {
-        (run_inner(app, id, source).await, None)
+        let native = R::native(&app).ok_or("Native menu action unavailable")?;
+        (run_inner(native.clone(), id, source).await, None)
     };
     if result.is_ok() {
         let setting = if id.starts_with("style_") {
@@ -233,6 +239,7 @@ mod tests {
     use crate::recording::{
         secure_input::StartPermit, start_source::StartSource, toggle::ToggleRoute,
     };
+    use tauri::Manager;
     #[test]
     fn a_retired_start_does_not_emit_a_late_tray_dictate_action() {
         assert_eq!(toggle_action(ToggleRoute::NoChange), None);
@@ -257,7 +264,12 @@ mod tests {
     }
     #[tokio::test]
     async fn tray_dictate_cancels_a_pending_license_wait_instead_of_starting_again() {
-        let state = crate::AppState::new();
+        let app = tauri::test::mock_app();
+        app.manage(crate::AppState::new());
+        app.manage(crate::commands::audio::RecorderState(
+            std::sync::Mutex::new(crate::audio::recorder::AudioRecorder::new()),
+        ));
+        let state = app.state::<crate::AppState>();
         let request = state
             .pending_start
             .claim(
@@ -266,19 +278,23 @@ mod tests {
                 StartPermit::capture_state(&state),
             )
             .unwrap();
-        let (validation, route) = tokio::join!(
+        let (validation, result) = tokio::join!(
             request.validate(wait_for_recording_license(&state.license_cache)),
             async {
                 tokio::task::yield_now().await;
                 // Still Idle: the old Idle => start branch issued a duplicate start.
                 assert_eq!(state.get_current_state(), crate::RecordingState::Idle);
-                let route = crate::recording::toggle::route(&state);
+                // Exercise the actual menu adapter (including the "dictate"
+                // mapping), not just the shared routing helper. Replacing this
+                // adapter with an explicit start must leave validation alive
+                // and fail the assertion below.
+                let result = run(app.handle().clone(), "dictate").await;
                 // Without the cancel, a ready license would let the first start publish.
                 *state.license_cache.write().await = ready();
-                route
+                result
             }
         );
-        assert_eq!(route, ToggleRoute::CancelledPendingStart);
+        assert_eq!(result, Ok(()));
         assert!(validation.is_none(), "the pending start must never publish");
         drop(request);
         assert_eq!(state.get_current_state(), crate::RecordingState::Idle);
