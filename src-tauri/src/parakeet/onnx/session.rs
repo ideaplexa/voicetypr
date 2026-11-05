@@ -53,6 +53,7 @@ fn classify_model_error(error: &str) -> String {
 }
 
 fn build_model(directory: &Path) -> Result<TdtModel, String> {
+    crate::onnx_runtime::require_cpu().map_err(str::to_owned)?;
     for filename in [
         "encoder-model.int8.onnx",
         "decoder_joint-model.int8.onnx",
@@ -118,9 +119,23 @@ impl OnnxSession {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn unsupported_cpu_never_enters_model_initialization() {
+        crate::onnx_runtime::without_cpu(|| {
+            let error = super::build_model(std::path::Path::new("unused"))
+                .err()
+                .expect("unsupported CPU");
+            assert_eq!(error, crate::onnx_runtime::CPU_UNSUPPORTED);
+        });
+    }
+
+    #[test]
     fn builder_reports_missing_files_without_path_or_ort_detail() {
         let missing = std::env::temp_dir().join("voicetypr-onnx-model-does-not-exist");
         let error = super::build_model(&missing).err().expect("missing model");
+        if let Err(reason) = crate::onnx_runtime::require_cpu() {
+            assert_eq!(error, reason);
+            return;
+        }
         assert_eq!(
             error,
             "Parakeet model files are missing. Download the model again."

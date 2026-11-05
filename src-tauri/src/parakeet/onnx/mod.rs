@@ -41,6 +41,9 @@ mod selection_tests {
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub(crate) fn can_initialize_runtime() -> bool {
+    if crate::onnx_runtime::require_cpu().is_err() {
+        return false;
+    }
     parakeet_rs::ExecutionConfig::default()
         .build_session(std::path::Path::new(
             "__voicetypr_onnx_link_probe_missing__.onnx",
@@ -52,6 +55,14 @@ pub(crate) fn can_initialize_runtime() -> bool {
 mod tests {
     #[test]
     fn links_static_ort_without_a_model() {
-        assert!(super::can_initialize_runtime());
+        assert_eq!(
+            super::can_initialize_runtime(),
+            crate::onnx_runtime::require_cpu().is_ok()
+        );
+    }
+
+    #[test]
+    fn unsupported_cpu_does_not_enter_the_link_probe() {
+        crate::onnx_runtime::without_cpu(|| assert!(!super::can_initialize_runtime()));
     }
 }

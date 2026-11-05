@@ -94,7 +94,7 @@ posthog-rs = { version = "0.22.0", default-features = false, features = ["error-
 # Match Windows Parakeet's single static ORT. rc.13 publishes no Intel macOS
 # archive: that target reports runtime_unsupported, never breaks dictation.
 [target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dependencies]
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-27"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-28"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16.0", features = ["metal"] }
@@ -110,7 +110,8 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
-parakeet-rs = "=0.3.8"
+# Runtime/link/TLS policy is owned by the one direct ort declaration above.
+parakeet-rs = { version = "=0.3.8", default-features = false, features = ["cpu", "api-28"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }

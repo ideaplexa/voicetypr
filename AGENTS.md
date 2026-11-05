@@ -50,7 +50,7 @@ Windows run Rust tests with `src-tauri/run-tests.ps1`.
 4. Thread the recording generation through async recording work; keep
    `StopInFlightGuard`.
 5. Exit teardown order in `lib.rs`: clear `TranscriberCache` → unload ONNX
-   Parakeet → stop remote server → media-pause cleanup → analytics shutdown
+   Parakeet → drain shadow VAD → stop remote server → media-pause cleanup → analytics shutdown
    (else Metal SIGABRT).
 6. `STOP_JOIN_TIMEOUT` (8 s) must cover post-roll + drain + stream drop + finalize.
 7. Parakeet sidecar stdout is the JSON protocol: write only via

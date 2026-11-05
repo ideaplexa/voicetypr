@@ -48,16 +48,43 @@ fn expired(start: Instant, budget: Duration) -> Result<(), &'static str> {
     }
 }
 
-#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
-pub use runtime::analyze;
+pub fn analyze(input: impl Read + Seek, budget: Duration) -> Summary {
+    if budget.is_zero() {
+        return Summary::skipped("budget");
+    }
+    if crate::onnx_runtime::require_cpu().is_err() {
+        return Summary::skipped("runtime_unsupported");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        let _ = input;
+        Summary::skipped("runtime_unsupported")
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+    runtime::analyze(input, budget)
+}
 
-#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-pub fn analyze(_input: impl Read + Seek, budget: Duration) -> Summary {
-    Summary::skipped(if budget.is_zero() {
-        "budget"
-    } else {
-        "runtime_unsupported"
-    })
+#[cfg(test)]
+mod cpu_tests {
+    #[test]
+    fn unsupported_cpu_skips_before_io_or_any_ort_call() {
+        struct NoIo;
+        impl std::io::Read for NoIo {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("read");
+            }
+        }
+        impl std::io::Seek for NoIo {
+            fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
+                panic!("seek");
+            }
+        }
+        crate::onnx_runtime::without_cpu(|| {
+            let summary = super::analyze(NoIo, super::BUDGET);
+            assert_eq!(summary.status, "runtime_unsupported");
+            assert_eq!(summary.speech_detected(), None);
+        });
+    }
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
@@ -295,6 +322,10 @@ mod tests {
     fn bundled_model_loads_and_recurrent_state_is_reset_between_takes() {
         let silence = vec![0_i16; 16_001];
         let first = analyze(wav(&silence, 16_000, 1), Duration::from_secs(10));
+        if crate::onnx_runtime::require_cpu().is_err() {
+            assert_eq!(first.status, "runtime_unsupported");
+            return;
+        }
         let noise = (0..16_000)
             .map(|i| ((i * 7919 % 2000) - 1000) as i16)
             .collect::<Vec<_>>();

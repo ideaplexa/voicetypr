@@ -23,6 +23,7 @@ mod license;
 mod media;
 mod menu;
 mod observability;
+mod onnx_runtime;
 mod parakeet;
 mod perf;
 mod pill;
@@ -1514,6 +1515,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(parakeet) = app_handle.try_state::<parakeet::ParakeetManager>() {
                         parakeet.shutdown().await;
                     }
+                    audio::vad_shadow::shutdown();
                     if let Some(remote) = app_handle
                         .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()
                     {

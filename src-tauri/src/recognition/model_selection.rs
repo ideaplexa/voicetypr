@@ -37,6 +37,12 @@ fn selection_error(
     if availability.remote_selected {
         return None;
     }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if engine == "parakeet" {
+        if let Err(reason) = crate::onnx_runtime::require_cpu() {
+            return Some(reason);
+        }
+    }
     if engine == "parakeet" && !model.is_empty() && !downloaded {
         Some("The selected Parakeet model is missing or incomplete. Download it in Models before recording.")
     } else {
@@ -107,6 +113,23 @@ mod selected_model_tests {
     use crate::remote::settings::ConnectionStatus;
 
     #[test]
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    fn unsupported_cpu_reports_parakeet_unavailable_but_preserves_other_engines() {
+        crate::onnx_runtime::without_cpu(|| {
+            let mut availability = available_whisper();
+            assert_eq!(
+                selection_error("parakeet", "parakeet-tdt-0.6b-v3", true, &availability),
+                Some(crate::onnx_runtime::CPU_UNSUPPORTED)
+            );
+            assert!(selection_error("whisper", "base", true, &availability).is_none());
+            availability.remote_selected = true;
+            assert!(
+                selection_error("parakeet", "parakeet-tdt-0.6b-v3", true, &availability).is_none()
+            );
+        });
+    }
+
+    #[test]
     fn missing_selected_parakeet_fails_even_with_whisper_available() {
         let availability = RecognitionAvailabilitySnapshot {
             whisper_available: true,
@@ -119,6 +142,14 @@ mod selected_model_tests {
             remote_available: false,
         };
         assert!(availability.any_available());
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        if let Err(reason) = crate::onnx_runtime::require_cpu() {
+            assert_eq!(
+                selection_error("parakeet", "parakeet-tdt-0.6b-v3", true, &availability),
+                Some(reason)
+            );
+            return;
+        }
         assert!(
             selection_error("parakeet", "parakeet-tdt-0.6b-v3", false, &availability)
                 .unwrap()
@@ -205,6 +236,8 @@ pub async fn recognition_availability_snapshot(
         } else {
             false
         };
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let parakeet_available = parakeet_available && crate::onnx_runtime::require_cpu().is_ok();
 
     let (cloud_selected, cloud_ready) = match app.store("settings") {
         Ok(store) => {
