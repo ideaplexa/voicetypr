@@ -85,6 +85,9 @@ jobs:
       - name: Test workflow helper contracts
         run: node --test .github/scripts/*.node-test.mjs
 
+      - name: Test packaging script contracts
+        run: node --test scripts/*.test.cjs
+
       - name: Validate GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
@@ -122,7 +125,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
-        run: pnpm exec vitest run src
+        run: ./node_modules/.bin/vitest run
 
       - name: Build frontend
         run: pnpm build
