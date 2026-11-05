@@ -1,5 +1,98 @@
 use super::*;
 
+#[test]
+fn failed_intent_and_unlink_retain_the_owner_and_report_delete_failure() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    let recovery = retain(&mut store, data.path());
+    let path = store.clips[0].path.clone();
+    let index = path.with_extension("json");
+    let saved_index = std::fs::read(&index).unwrap();
+    let terminal = store.clips[0].terminal.clone();
+    // Deterministic failures also work when tests run with elevated permissions.
+    std::fs::remove_file(&index).unwrap();
+    std::fs::create_dir(&index).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert!(!store.discard(&recovery.id));
+    assert!(!terminal.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(store.clips.len(), 1);
+    assert!(store.clips[0].retire_after_retry);
+    store.clear(); // Must return rather than looping forever on the same owner.
+    assert_eq!(store.clips.len(), 1);
+    std::fs::remove_dir(&index).unwrap();
+    std::fs::write(&index, saved_index).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    super::super::availability_tests::writer(&path)
+        .finalize()
+        .unwrap();
+    assert!(store.discard(&recovery.id));
+    assert!(terminal.load(std::sync::atomic::Ordering::SeqCst));
+    let mut restarted = Store::default();
+    restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert!(restarted.clips.is_empty());
+}
+
+#[test]
+fn cap_deletion_failure_leaves_the_incoming_source_in_place() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    for _ in 0..CAP {
+        retain(&mut store, data.path());
+    }
+    let path = store.clips[0].path.clone();
+    let index = path.with_extension("json");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    std::fs::remove_file(&index).unwrap();
+    std::fs::create_dir(&index).unwrap();
+    let source = data.path().join("incoming.wav");
+    super::super::availability_tests::writer(&source)
+        .finalize()
+        .unwrap();
+    assert!(store
+        .retain(
+            &data.path().join(DIRECTORY),
+            &source,
+            8,
+            RecoveryKind::Integrity
+        )
+        .is_err());
+    assert!(finalized_wav(&source));
+    assert_eq!(store.clips.len(), CAP);
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::remove_dir(&index).unwrap();
+    super::super::availability_tests::writer(&path)
+        .finalize()
+        .unwrap();
+    store.clear();
+}
+
+#[cfg(unix)]
+#[test]
+fn unwritable_directory_never_reports_delete_success_or_drops_audio_ownership() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    } // Root bypasses permission checks.
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    let recovery = retain(&mut store, data.path());
+    let dir = data.path().join(DIRECTORY);
+    let path = store.clips[0].path.clone();
+    let permissions = std::fs::metadata(&dir).unwrap().permissions();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let deleted = store.discard(&recovery.id);
+    std::fs::set_permissions(&dir, permissions).unwrap();
+    assert!(!deleted);
+    assert!(finalized_wav(&path));
+    assert_eq!(store.clips.len(), 1);
+    assert!(store.discard(&recovery.id));
+    let mut restarted = Store::default();
+    restarted.load_disk(&dir, now_ms());
+    assert!(restarted.clips.is_empty());
+}
+
 fn retain(store: &mut Store, data: &Path) -> Recovery {
     let source = data.join("capture.wav");
     super::super::availability_tests::writer(&source)

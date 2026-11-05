@@ -2,7 +2,7 @@ import { FeedbackStack, type StackItem } from '@/pill/stack';
 import { Spring, clamp } from '@/pill/spring';
 import { icon } from '@/pill/icons';
 import { OutlineClock } from '@/pill/outline-clock';
-import { retryErrorCard, type CardCommand, type FeedbackCard } from '@/pill/feedback';
+import { deleteErrorCard, retryErrorCard, type CardCommand, type FeedbackCard } from '@/pill/feedback';
 import type { PillGeometry } from '@/pill-geometry';
 type Rect = {x:number;y:number;width:number;height:number};
 interface View { el: HTMLElement; w: Spring; h: Spring; y: Spring; scale: Spring; alpha: number; targetAlpha: number; key: string; clock?: OutlineClock; pending?: object }
@@ -81,6 +81,7 @@ export class StackView {
           }
           const actionableFailure=updated?.retryFailed && updated.recoveryGeneration!==recoveryGeneration;
           if((a.call.command==='retry_kept_dictation' || a.call.command==='transcribe_anyway') && !actionableFailure) this.push(retryErrorCard(error));
+          if(a.call.command==='discard_kept_dictation') this.push(deleteErrorCard());
         });
       };actions.append(button);
     }

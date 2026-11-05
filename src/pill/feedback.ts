@@ -61,6 +61,9 @@ export function retryErrorCard(error: unknown): FeedbackCard {
   };
   return card('retry-error',"Couldn't retry",typeof error === 'string' && Object.prototype.hasOwnProperty.call(messages,error) ? messages[error] : 'Open Home → Needs you to check the recording and retry.',null,'amber');
 }
+export function deleteErrorCard(): FeedbackCard {
+  return card('delete-error',"Couldn't delete audio",'Recording is still kept. Try Delete audio again in Home.',6000,'amber');
+}
 export function noteCard(e: DictationNote): FeedbackCard {
   const reasons = {timeout:'Polish timed out',rate_limited:'Polish rate limited',network:'Polish unavailable offline',guard:'Polish kept the original',error:'Polish failed'};
   switch(e.kind) {

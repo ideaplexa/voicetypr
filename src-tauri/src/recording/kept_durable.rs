@@ -55,6 +55,14 @@ pub(super) fn replace_index(file: tempfile::NamedTempFile, target: &Path) -> io:
     sync_parent(target)
 }
 
+pub(super) fn unlink_committed(path: &Path) -> bool {
+    (std::fs::remove_file(path).is_ok()
+        || std::fs::symlink_metadata(path)
+            .err()
+            .is_some_and(|e| e.kind() == io::ErrorKind::NotFound))
+        && sync_parent(path).is_ok()
+}
+
 pub(super) fn move_audio(source: &Path, target: &Path) -> bool {
     // Flush sample data and the finalized header before publishing ownership.
     if sync_file(source).is_err() {

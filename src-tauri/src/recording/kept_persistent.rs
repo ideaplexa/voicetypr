@@ -51,16 +51,17 @@ impl DiskClip {
         self.expires_at_ms.saturating_sub(now_ms())
     }
 
-    pub(super) fn delete(&self) {
-        let _ = std::fs::remove_file(&self.index);
+    pub(super) fn delete(&self, audio: &Path) {
+        // Commit the unlink before removing its tombstone, not the reverse.
+        if durable::sync_parent(audio).is_ok() && std::fs::remove_file(&self.index).is_ok() {
+            let _ = durable::sync_parent(&self.index);
+        }
     }
 
-    pub(super) fn retire(&self, clip: &Clip) {
+    pub(super) fn retire(&self, clip: &Clip) -> std::io::Result<()> {
         // Commit deletion intent before unlinking. A crash or sharing violation
         // must not turn deliberately retired audio into a recovered orphan.
-        if self.write_deadline(clip, 0).is_err() {
-            log::warn!("Could not persist recording deletion intent");
-        }
+        self.write_deadline(clip, 0)
     }
 
     fn write(&self, clip: &Clip) -> std::io::Result<()> {
@@ -70,7 +71,14 @@ impl DiskClip {
         durable::sync_parent(&clip.path)?;
         let dir = self.index.parent().unwrap();
         durable::sync_parent(dir)?;
-        self.write_deadline(clip, self.expires_at_ms)
+        self.write_deadline(
+            clip,
+            if clip.retire_after_retry {
+                0
+            } else {
+                self.expires_at_ms
+            },
+        )
     }
 
     fn write_deadline(&self, clip: &Clip, expires_at_ms: u64) -> std::io::Result<()> {
