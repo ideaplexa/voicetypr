@@ -66,3 +66,7 @@ export function useDownloadProgress<T>(select?: (progress: Record<string, number
   const { progressStore } = useModelManagementContext();
   return useDownloadProgressStore(progressStore as DownloadProgressStore, select as (p: Record<string, number>) => T);
 }
+
+export function useOptionalModelManagementContext() {
+  return useContext(ModelManagementContext);
+}

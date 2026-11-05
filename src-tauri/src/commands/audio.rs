@@ -204,6 +204,7 @@ fn parakeet_preview_sink_eligible(
     streaming_tap_enabled
         && streaming_engine_enabled
         && live_preview_mode
+        && cfg!(target_os = "macos")
         && config.current_engine == "parakeet"
         && !config.current_model.is_empty()
 }
@@ -2246,29 +2247,6 @@ fn compile_whisper_initial_prompt(app: &AppHandle, language: Option<&str>) -> Op
     )
 }
 
-/// Best-effort warm of the Windows Vulkan sidecar when a Whisper model is preloaded.
-/// No-op on non-Windows platforms and when CPU acceleration is selected.
-pub(crate) async fn warm_whisper_gpu_sidecar_on_model_preload(
-    app: &AppHandle,
-    model_path: &Path,
-) -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        let mode = transcription_acceleration_mode(app).await;
-        let gpu_client = app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>();
-        let gpu_available = gpu_client.status().await.gpu_available;
-        gpu_client
-            .warm_on_preload(app, model_path, &mode, gpu_available)
-            .await
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (app, model_path);
-        false
-    }
-}
-
 fn build_remote_upload_transcription_request(
     audio_path: &Path,
     audio_data: Vec<u8>,
@@ -4028,11 +4006,13 @@ mod tests {
             "Parakeet preview must be ineligible in regular mode even with dev flags"
         );
 
-        // Live-preview mode: same dev flags, live preview ON → eligible
-        // (decode-ahead preview path preserved).
-        assert!(
+        // Live-preview mode: same dev flags, live preview ON → eligible on macOS
+        // (decode-ahead preview path preserved); the Windows ONNX backend is
+        // final-only, so it stays ineligible there.
+        assert_eq!(
             parakeet_preview_sink_eligible(true, true, true, &config),
-            "Parakeet preview must be eligible in live-preview mode"
+            cfg!(target_os = "macos"),
+            "Parakeet preview eligibility in live-preview mode"
         );
 
         // Guard still honors the other terms regardless of live-preview mode.
@@ -4612,6 +4592,8 @@ async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> 
         "⏱️ [VALIDATE] recognition_availability_snapshot complete (+{}ms)",
         validate_start.elapsed().as_millis()
     );
+
+    crate::recognition::validate_selected_model(app, &availability).await?;
 
     if !availability.any_available()
         || (availability.remote_selected && !availability.remote_available)
@@ -5273,6 +5255,13 @@ pub async fn start_recording(
             return Err(format!("Configuration error: {}", e));
         }
     };
+    if cfg!(all(target_os = "windows", target_arch = "x86_64"))
+        && config.current_engine == "parakeet"
+    {
+        app_state
+            .recording_live_preview
+            .store(false, AtomicOrdering::SeqCst);
+    }
     log::debug!(
         "Using recording config: show_pill={} pill_indicator_mode='{}' ai_enabled={} model={}",
         config.show_pill_widget,
@@ -5433,10 +5422,12 @@ pub async fn start_recording(
         let soniox_realtime = config.current_engine == "soniox"
             && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
             && !remote_server_online;
-        let streaming_engine_supported = matches!(
-            config.current_engine.as_str(),
-            "parakeet" | "whisper" | "soniox" | "deepgram"
-        );
+        let streaming_engine_supported =
+            crate::transcription::stream::EngineStreamCapabilities::for_engine(
+                ProviderEngine::from_engine_str(&config.current_engine)
+                    .unwrap_or(ProviderEngine::Remote),
+            )
+            .supports_streaming;
         let streaming_tap_enabled =
             (streaming_tap_enabled || soniox_realtime) && streaming_engine_supported;
         let streaming_engine_enabled =

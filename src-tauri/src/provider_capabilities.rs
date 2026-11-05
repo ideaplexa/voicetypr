@@ -54,6 +54,10 @@ impl ProviderEngine {
     }
 
     pub fn capabilities(self) -> ProviderCapabilities {
+        self.capabilities_for_platform(std::env::consts::OS)
+    }
+
+    pub fn capabilities_for_platform(self, os: &str) -> ProviderCapabilities {
         match self {
             Self::Whisper => ProviderCapabilities {
                 shareable_remote: true,
@@ -66,7 +70,7 @@ impl ProviderEngine {
                 shareable_remote: true,
                 supports_initial_prompt: false,
                 supports_structured_terms: false,
-                supports_vocabulary_terms: true,
+                supports_vocabulary_terms: os == "macos",
                 supports_translate_task: false,
             },
             Self::Soniox => ProviderCapabilities {
@@ -164,6 +168,16 @@ mod tests {
 
     #[test]
     fn capabilities_match_static_truth_table() {
+        assert!(
+            !ProviderEngine::Parakeet
+                .capabilities_for_platform("windows")
+                .supports_vocabulary_terms
+        );
+        assert!(
+            ProviderEngine::Parakeet
+                .capabilities_for_platform("macos")
+                .supports_vocabulary_terms
+        );
         assert_eq!(
             ProviderEngine::Whisper.capabilities(),
             ProviderCapabilities {
@@ -180,7 +194,7 @@ mod tests {
                 shareable_remote: true,
                 supports_initial_prompt: false,
                 supports_structured_terms: false,
-                supports_vocabulary_terms: true,
+                supports_vocabulary_terms: cfg!(target_os = "macos"),
                 supports_translate_task: false,
             }
         );
@@ -295,10 +309,13 @@ mod tests {
             .copied()
             .filter(|engine| engine.capabilities().supports_vocabulary_terms)
             .collect();
-        assert_eq!(
-            vocabulary_terms_engines,
+        // Parakeet vocabulary uses the macOS sidecar's CTC boosting only.
+        let expected_vocabulary_engines = if cfg!(target_os = "macos") {
             vec![ProviderEngine::Parakeet, ProviderEngine::Deepgram]
-        );
+        } else {
+            vec![ProviderEngine::Deepgram]
+        };
+        assert_eq!(vocabulary_terms_engines, expected_vocabulary_engines);
 
         let translate_task_engines: Vec<_> = engines
             .iter()

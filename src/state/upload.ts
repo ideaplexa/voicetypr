@@ -95,7 +95,11 @@ export const useUploadStore = create<UploadState>((set, get) => ({
 
       let speakerSegments: SpeakerSegment[] = [];
       let diarizationError: string | null = null;
-      if (modelEngine === "parakeet") {
+      const parakeetUsesSidecar = modelEngine === "parakeet" &&
+        (await invoke<{ models: { name: string; runtime?: string | null }[] }>("get_model_status")
+          .catch(() => ({ models: [] })))
+          .models.some((model) => model.name === modelName && model.runtime === "coreml");
+      if (parakeetUsesSidecar) {
         try {
           speakerSegments = await invoke<SpeakerSegment[]>("diarize_audio_file", {
             filePath: selectedFile.path,

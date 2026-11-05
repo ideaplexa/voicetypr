@@ -64,6 +64,25 @@ pub fn get_available_models() -> Vec<&'static ParakeetModelDefinition> {
     AVAILABLE_MODELS.iter().collect()
 }
 
+/// Catalog policy kept independent of cfg so every target can test Windows exposure.
+pub fn catalog_for_platform(os: &str, arch: &str) -> Vec<&'static ParakeetModelDefinition> {
+    match (os, arch) {
+        ("macos", "aarch64") => AVAILABLE_MODELS.iter().collect(),
+        ("windows", "x86_64") => vec![&ONNX_V3],
+        _ => vec![],
+    }
+}
+
+pub static ONNX_V3: Lazy<ParakeetModelDefinition> = Lazy::new(|| {
+    let mut model = AVAILABLE_MODELS[0].clone();
+    model.repo_id = "istupakov/parakeet-tdt-0.6b-v3-onnx";
+    model.description = "Local CPU transcription with automatic language detection";
+    model.files = &[];
+    // Pinned ONNX manifest: encoder + decoder_joint + vocab.
+    model.estimated_size = 670_479_942;
+    model
+});
+
 // Parakeet models using Swift/FluidAudio sidecar
 // These models are macOS-only and use Apple Neural Engine for acceleration
 pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
@@ -211,7 +230,28 @@ pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
 
 #[cfg(test)]
 mod tests {
-    use super::{ParakeetModelKind, AVAILABLE_MODELS};
+    use super::{catalog_for_platform, ParakeetModelKind, AVAILABLE_MODELS};
+
+    #[test]
+    fn windows_catalog_is_only_onnx_v3() {
+        let models = catalog_for_platform("windows", "x86_64");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "parakeet-tdt-0.6b-v3");
+        assert_eq!(models[0].kind, ParakeetModelKind::TdtV3);
+        assert_eq!(models[0].languages.len(), 25);
+        assert!(models[0].recommended);
+        assert_eq!(models[0].estimated_size, 670_479_942);
+        assert_eq!(
+            models[0].estimated_size,
+            super::super::onnx::download::total_size(&super::super::onnx::download::FILES)
+        );
+        assert!(catalog_for_platform("windows", "aarch64").is_empty());
+        assert!(catalog_for_platform("linux", "x86_64").is_empty());
+        assert_eq!(
+            catalog_for_platform("macos", "aarch64").len(),
+            AVAILABLE_MODELS.len()
+        );
+    }
 
     #[test]
     fn native_streaming_models_are_in_the_catalog() {

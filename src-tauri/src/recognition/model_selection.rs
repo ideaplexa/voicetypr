@@ -28,6 +28,133 @@ impl RecognitionAvailabilitySnapshot {
     }
 }
 
+fn selection_error(
+    engine: &str,
+    model: &str,
+    downloaded: bool,
+    availability: &RecognitionAvailabilitySnapshot,
+) -> Option<&'static str> {
+    if availability.remote_selected {
+        return None;
+    }
+    if engine == "parakeet" && !model.is_empty() && !downloaded {
+        Some("The selected Parakeet model is missing or incomplete. Download it in Models before recording.")
+    } else {
+        None
+    }
+}
+
+/// Only a selected, missing Parakeet model needs an early capture guard.
+/// Other engines retain their existing stop-time selection and fallback paths.
+pub async fn selected_model_error(
+    app: &tauri::AppHandle,
+    availability: &RecognitionAvailabilitySnapshot,
+) -> Option<&'static str> {
+    if availability.remote_selected {
+        return None;
+    }
+    let store = app.store("settings").ok()?;
+    let engine = store
+        .get("current_model_engine")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "whisper".to_string());
+    let model = store
+        .get("current_model")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    if engine != "parakeet" || model.is_empty() {
+        return None;
+    }
+    let downloaded = app
+        .try_state::<parakeet::ParakeetManager>()
+        .is_some_and(|manager| {
+            manager
+                .list_models()
+                .iter()
+                .any(|status| status.name == model && status.downloaded)
+        });
+    selection_error(&engine, &model, downloaded, availability)
+}
+
+/// Preserve the current island/focus contract when the selected local model is missing.
+pub async fn validate_selected_model(
+    app: &tauri::AppHandle,
+    availability: &RecognitionAvailabilitySnapshot,
+) -> Result<(), String> {
+    if let Some(message) = selected_model_error(app, availability).await {
+        use crate::recording::island::{self, BlockedKind, IslandAction};
+        island::blocked(
+            app,
+            crate::commands::audio::current_recording_generation(),
+            BlockedKind::NoEngine,
+            IslandAction::OpenModels,
+        );
+        let _ = island::emit_visible_main(
+            app,
+            "no-models-error",
+            serde_json::json!({
+                "title": "Selected Model Unavailable", "message": message, "action": "open-settings"
+            }),
+        );
+        return Err(message.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod selected_model_tests {
+    use super::{selection_error, RecognitionAvailabilitySnapshot};
+    use crate::remote::settings::ConnectionStatus;
+
+    #[test]
+    fn missing_selected_parakeet_fails_even_with_whisper_available() {
+        let availability = RecognitionAvailabilitySnapshot {
+            whisper_available: true,
+            parakeet_available: false,
+            cloud_selected: false,
+            cloud_ready: false,
+            remote_selected: false,
+            remote_status: ConnectionStatus::Unknown,
+            remote_last_checked: 0,
+            remote_available: false,
+        };
+        assert!(availability.any_available());
+        assert!(
+            selection_error("parakeet", "parakeet-tdt-0.6b-v3", false, &availability)
+                .unwrap()
+                .contains("Download it in Models")
+        );
+        assert!(selection_error("parakeet", "parakeet-tdt-0.6b-v3", true, &availability).is_none());
+    }
+
+    #[test]
+    fn missing_selected_whisper_allows_capture_for_stop_time_fallback() {
+        let availability = available_whisper();
+        assert!(availability.any_available());
+        assert!(selection_error("whisper", "missing-whisper", false, &availability).is_none());
+    }
+
+    #[test]
+    fn empty_whisper_selection_allows_capture_for_stop_time_auto_selection() {
+        let availability = available_whisper();
+        assert!(availability.any_available());
+        assert!(selection_error("whisper", "", false, &availability).is_none());
+    }
+
+    fn available_whisper() -> RecognitionAvailabilitySnapshot {
+        RecognitionAvailabilitySnapshot {
+            whisper_available: true,
+            parakeet_available: false,
+            cloud_selected: false,
+            cloud_ready: false,
+            remote_selected: false,
+            remote_status: ConnectionStatus::Unknown,
+            remote_last_checked: 0,
+            remote_available: false,
+        }
+    }
+}
+
 pub(crate) fn remote_availability_from_settings(
     remote_settings: Option<&RemoteSettings>,
 ) -> (bool, ConnectionStatus, u64, bool) {

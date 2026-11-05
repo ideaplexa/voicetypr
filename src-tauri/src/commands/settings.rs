@@ -1089,26 +1089,7 @@ pub async fn save_settings(
             // Warm the selected Parakeet model in the background.
             let app_clone = app.clone();
             let model_name = settings.current_model.clone();
-            tokio::spawn(async move {
-                let parakeet_manager = app_clone.state::<ParakeetManager>();
-                match parakeet_manager.load_model(&app_clone, &model_name).await {
-                    Ok(_) => {
-                        log::info!("Successfully preloaded new model: {}", model_name);
-                        match parakeet_manager.warmup(&app_clone).await {
-                            Ok(Some(ms)) => log::info!(
-                                "Successfully warmed new Parakeet model '{}' in {}ms",
-                                model_name,
-                                ms
-                            ),
-                            Ok(None) => {
-                                log::info!("Parakeet warmup skipped for '{}'", model_name)
-                            }
-                            Err(e) => log::warn!("Failed to warm new Parakeet model: {}", e),
-                        }
-                    }
-                    Err(e) => log::warn!("Failed to preload new model: {}", e),
-                }
-            });
+            crate::parakeet::preload::selected_in_background(app_clone, model_name);
         } else if !is_cloud_engine {
             // Preload the new Whisper model
             let app_clone = app.clone();

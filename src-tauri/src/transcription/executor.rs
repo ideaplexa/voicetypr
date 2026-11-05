@@ -241,7 +241,8 @@ async fn route_once(
                 return Err(cancelled(source));
             }
 
-            let custom_vocabulary = if model_name.starts_with("parakeet-tdt-") {
+            let custom_vocabulary = if cfg!(target_os = "macos")
+                && model_name.starts_with("parakeet-tdt-") {
                 crate::writing::load_writing_settings(app)
                     .map(|settings| crate::writing::compile_parakeet_custom_vocabulary(
                         &settings,

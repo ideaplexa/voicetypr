@@ -92,6 +92,30 @@ describe("useModelManagement", () => {
     vi.useRealTimers();
   });
 
+  it("refreshes recovered model status without claiming a download completed", async () => {
+    let recovered = false;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_model_status") {
+        return Promise.resolve({ models: [{ ...parakeetModel, downloaded: recovered }] });
+      }
+      return Promise.resolve(null);
+    });
+    const { result } = renderHook(() => useModelManagement());
+    await waitFor(() => expect(eventHandlers.has("model-downloaded")).toBe(true));
+
+    recovered = true;
+    await act(async () => {
+      await emitModelEvent("model-downloaded", {
+        model: parakeetModel.name,
+        engine: "parakeet",
+        refreshOnly: true,
+      });
+    });
+
+    await waitFor(() => expect(result.current.models[parakeetModel.name].downloaded).toBe(true));
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it("does not show a downloaded toast when completion arrives after cancellation", async () => {
     const { result } = renderHook(() => useModelManagement());
 
@@ -117,6 +141,26 @@ describe("useModelManagement", () => {
     expect(toast.info).toHaveBeenCalledWith("Download cancelled for Parakeet V3");
     expect(toast.success).not.toHaveBeenCalledWith("Parakeet V3 downloaded successfully");
     expect(result.current.downloadProgress).not.toHaveProperty("parakeet-tdt-0.6b-v3");
+  });
+
+  it("refreshes committed status after cancellation and late completion", async () => {
+    let committed = false;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_model_status") return Promise.resolve({ models: [{ ...parakeetModel, downloaded: committed }] });
+      if (command === "download_model") return new Promise(() => undefined);
+      return Promise.resolve(null);
+    });
+    const { result } = renderHook(() => useModelManagement());
+    await waitFor(() => expect(eventHandlers.has("model-downloaded")).toBe(true));
+    await act(async () => { await result.current.downloadModel(parakeetModel.name); });
+    const requestId = getDownloadRequestId(0);
+    await act(async () => { await result.current.cancelDownload(parakeetModel.name); });
+    committed = true;
+    await act(async () => {
+      await emitModelEvent("model-downloaded", { model: parakeetModel.name, requestId });
+    });
+    await waitFor(() => expect(result.current.models[parakeetModel.name].downloaded).toBe(true));
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it("keeps cancellation active until acknowledgement and ignores stale success", async () => {
