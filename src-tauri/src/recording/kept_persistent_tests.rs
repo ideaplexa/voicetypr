@@ -445,3 +445,59 @@ fn temporarily_unreadable_or_unfinalized_wav_keeps_retry_metadata() {
     );
     store.clear();
 }
+
+#[test]
+fn discard_and_success_preserve_deletion_intent_when_wav_unlink_fails() {
+    for success in [false, true] {
+        let data = tempfile::tempdir().unwrap();
+        let mut store = Store::default();
+        let recovery = retain(&mut store, data.path());
+        let path = store.clips[0].path.clone();
+        let index = path.with_extension("json");
+        // A directory at the owned WAV name deterministically fails remove_file.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        if success {
+            store.complete_retry(&recovery.id, true);
+        } else {
+            store.discard(&recovery.id);
+        }
+        assert!(store.clips.is_empty());
+        assert_eq!(
+            serde_json::from_slice::<Entry>(&std::fs::read(&index).unwrap())
+                .unwrap()
+                .expires_at_ms,
+            0
+        );
+        std::fs::remove_dir(&path).unwrap();
+        super::super::availability_tests::writer(&path)
+            .finalize()
+            .unwrap();
+        store.load_disk(&data.path().join(DIRECTORY), now_ms());
+        assert!(
+            store.clips.is_empty(),
+            "Discarded or successfully retried audio must never return"
+        );
+        assert!(!path.exists());
+        assert!(!index.exists());
+    }
+}
+
+#[test]
+fn recovered_unknown_resolution_passes_the_closed_telemetry_validator() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    retain(&mut store, data.path());
+    store.clips[0].recovery.kind = RecoveryKind::Unknown;
+    store.clips[0].recovery.generation = u64::MAX;
+    store.clips[0].trace = Some(crate::observability::Trace {
+        generation: u64::MAX,
+        id: uuid::Uuid::new_v4().to_string(),
+        properties: vec![],
+    });
+    crate::product_analytics::take_test_captures();
+    resolve_clip(&store.clips[0], "discarded");
+    let events = crate::product_analytics::take_test_captures();
+    assert!(events.iter().any(|event| event.0 == "recovery_resolved"));
+    store.clear();
+}
