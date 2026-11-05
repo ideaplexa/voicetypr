@@ -8150,7 +8150,7 @@ dependencies = [
 
 [[package]]
 name = "voicetypr"
-version = "2.0.11"
+version = "2.1.0-beta.7"
 dependencies = [
  "active-win-pos-rs",
  "aes-gcm",
