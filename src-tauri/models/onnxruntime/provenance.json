@@ -1,0 +1,16 @@
+{
+  "package": "Microsoft ONNX Runtime CPU",
+  "version": "1.28.0",
+  "source": "https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-win-x64-1.28.0.zip",
+  "archive_root": "onnxruntime-win-x64-1.28.0",
+  "archive_sha256": "abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc",
+  "dll_path": "lib/onnxruntime.dll",
+  "dll_size_bytes": 15809848,
+  "dll_sha256": {
+    "x86_64-pc-windows-msvc": "18370c375f07357fa5874344a9d9ac17e6b6fe1eb18b1dd209d79483b4470257"
+  },
+  "notice_sha256": {
+    "LICENSE": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+    "ThirdPartyNotices.txt": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"
+  }
+}

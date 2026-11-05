@@ -37,6 +37,19 @@ $TargetDir = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
 } else {
     $env:CARGO_TARGET_DIR
 }
+$TargetDir = [System.IO.Path]::GetFullPath($TargetDir)
+$MainMap = Join-Path $TargetDir "voicetypr.map"
+# Encoded flags preserve existing flags and paths containing spaces. Cargo
+# gives CARGO_ENCODED_RUSTFLAGS precedence over RUSTFLAGS.
+$OriginalEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
+$BuildRustFlags = if (-not [string]::IsNullOrEmpty($OriginalEncodedRustFlags)) {
+    @($OriginalEncodedRustFlags -split [char]0x1f)
+} elseif (-not [string]::IsNullOrWhiteSpace($env:RUSTFLAGS)) {
+    @($env:RUSTFLAGS -split '\s+' | Where-Object { $_ })
+} else {
+    @()
+}
+$BuildRustFlags = @($BuildRustFlags) + @("-C", "target-feature=+crt-static")
 $SidecarTargetDir = if ([string]::IsNullOrWhiteSpace($env:WHISPER_VULKAN_TARGET_DIR)) {
     $TargetDir
 } else {
@@ -44,9 +57,13 @@ $SidecarTargetDir = if ([string]::IsNullOrWhiteSpace($env:WHISPER_VULKAN_TARGET_
 }
 
 if (-not $SkipGpuSidecarBuild) {
-    $env:RUSTFLAGS = "-C target-feature=+crt-static"
-    cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release --target-dir $SidecarTargetDir
-    if ($LASTEXITCODE -ne 0) { throw "Whisper Vulkan sidecar build failed with exit code $LASTEXITCODE" }
+    try {
+        $env:CARGO_ENCODED_RUSTFLAGS = $BuildRustFlags -join [char]0x1f
+        cargo build --manifest-path sidecar/whisper-vulkan/Cargo.toml --release --target-dir $SidecarTargetDir
+        if ($LASTEXITCODE -ne 0) { throw "Whisper Vulkan sidecar build failed with exit code $LASTEXITCODE" }
+    } finally {
+        $env:CARGO_ENCODED_RUSTFLAGS = $OriginalEncodedRustFlags
+    }
 
     $SidecarOutDir = Join-Path $RepoRoot "sidecar\whisper-vulkan\dist"
     New-Item -ItemType Directory -Force -Path $SidecarOutDir | Out-Null
@@ -59,9 +76,14 @@ if (-not $SkipGpuSidecarBuild) {
 if (-not $SkipTauriBuild) {
     Write-Step "Building Tauri Store binary"
     $env:VOICETYPR_DISTRIBUTION = "store_msix"
-    $env:RUSTFLAGS = "-C target-feature=+crt-static"
-    pnpm tauri build --no-bundle --ci --config src-tauri/tauri.windows.store.conf.json
-    if ($LASTEXITCODE -ne 0) { throw "Tauri Store build failed with exit code $LASTEXITCODE" }
+    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+    try {
+        $env:CARGO_ENCODED_RUSTFLAGS = (@($BuildRustFlags) + @("-C", "link-arg=/MAP:$MainMap")) -join [char]0x1f
+        pnpm tauri build --no-bundle --ci --config src-tauri/tauri.windows.store.conf.json
+        if ($LASTEXITCODE -ne 0) { throw "Tauri Store build failed with exit code $LASTEXITCODE" }
+    } finally {
+        $env:CARGO_ENCODED_RUSTFLAGS = $OriginalEncodedRustFlags
+    }
 }
 
 Write-Step "Staging MSIX layout"
@@ -73,6 +95,12 @@ New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
 $MainExe = Join-Path $TargetDir "release\voicetypr.exe"
 if (-not (Test-Path $MainExe)) { throw "Voicetypr release binary not found: $MainExe" }
 Copy-Item $MainExe (Join-Path $StageDir "voicetypr.exe") -Force
+
+# --no-bundle and Store's empty resources list bypass Tauri's bundle hook.
+# Stage the same pinned dependency and notices explicitly, then verify them.
+node scripts/stage-windows-ort.cjs --msix-layout $StageDir --target-dir $TargetDir --triple $TargetTriple
+if ($LASTEXITCODE -ne 0) { throw "ORT MSIX layout validation failed." }
+& (Join-Path $RepoRoot "src-tauri/windows/assert-no-onnxruntime-import.ps1") -ExePath (Join-Path $StageDir "voicetypr.exe") -MapPath $MainMap
 
 $Sidecars = @(
     "sidecar\whisper-vulkan\dist\whisper-vulkan-sidecar.exe",
@@ -147,6 +175,10 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $RepoRoot $OutputPath
 }
 
+# Recheck after every other staging/copy step, including -NoPack runs.
+node scripts/stage-windows-ort.cjs --check-layout $StageDir --triple $TargetTriple
+if ($LASTEXITCODE -ne 0) { throw "Final MSIX layout is missing an ORT dependency or notice." }
+
 Write-Success "MSIX stage ready: $StageDir"
 
 if ($NoPack) {
@@ -194,5 +226,15 @@ if ([string]::IsNullOrWhiteSpace($CertPath)) {
 
 & winapp @PackArgs
 if ($LASTEXITCODE -ne 0) { throw "winapp pack failed with exit code $LASTEXITCODE" }
+
+# Check the actual archive too, not only the pre-pack directory.
+$PackageCheckDir = Join-Path ([System.IO.Path]::GetTempPath()) ("voicetypr-msix-check-" + [guid]::NewGuid())
+try {
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($OutputPath, $PackageCheckDir)
+    node scripts/stage-windows-ort.cjs --check-layout $PackageCheckDir --triple $TargetTriple
+    if ($LASTEXITCODE -ne 0) { throw "Packed MSIX is missing an ORT dependency or notice." }
+} finally {
+    Remove-Item $PackageCheckDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Write-Success "MSIX package created: $OutputPath"

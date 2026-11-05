@@ -63,6 +63,7 @@ pub struct SpeechEvidenceAttempt {
     capture: Option<CaptureAudioMetrics>,
     prepared: Option<NormalizationMetrics>,
     outcome: SpeechEvidenceOutcome,
+    shadow: Option<super::vad_shadow::Observation>,
     #[cfg(test)]
     drop_counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     #[cfg(test)]
@@ -77,6 +78,7 @@ impl SpeechEvidenceAttempt {
             capture,
             prepared: None,
             outcome: SpeechEvidenceOutcome::AbortedBeforeResult,
+            shadow: None,
             #[cfg(test)]
             drop_counter: None,
             #[cfg(test)]
@@ -86,6 +88,20 @@ impl SpeechEvidenceAttempt {
 
     pub fn set_prepared(&mut self, prepared: Option<NormalizationMetrics>) {
         self.prepared = prepared;
+    }
+
+    pub fn with_shadow_file(
+        mut self,
+        path: &std::path::Path,
+        generation: u64,
+        gate_skipped: bool,
+    ) -> Self {
+        self.shadow = Some(super::vad_shadow::Observation::new(
+            path,
+            generation,
+            gate_skipped,
+        ));
+        self
     }
 
     pub fn set_outcome(&mut self, outcome: SpeechEvidenceOutcome) {
@@ -135,6 +151,9 @@ impl Drop for SpeechEvidenceAttempt {
     fn drop(&mut self) {
         let line = self.formatted_summary();
         log::info!("{}", line);
+        if let Some(shadow) = self.shadow.take() {
+            shadow.finish(classify_speech_evidence(self.capture, self.prepared));
+        }
         #[cfg(test)]
         {
             if let Some(lines) = &self.emitted_lines {
@@ -476,6 +495,7 @@ mod tests {
             capture: Some(capture(16_000, 0.1, 0.3, true)),
             prepared: None,
             outcome: SpeechEvidenceOutcome::EngineSuccess,
+            shadow: None,
             drop_counter: None,
             emitted_lines: None,
         };
@@ -490,6 +510,30 @@ mod tests {
         assert_eq!(parsed["capture"]["rms"], 0.1);
         assert!(parsed["prepared"].is_null());
         assert_eq!(line.lines().count(), 1);
+    }
+
+    #[test]
+    fn shadow_attachment_cannot_change_authoritative_gate_or_terminal_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        for metrics in [
+            capture(16_000, 0.0, 0.0, false),
+            capture(16_000, 0.0007, 0.018, false),
+            capture(16_000, 0.0084, 0.12, false),
+            capture(16_000, 0.1, 0.4, true),
+        ] {
+            let mut attempt = SpeechEvidenceAttempt::new("whisper".into(), "local", Some(metrics));
+            attempt.set_outcome(SpeechEvidenceOutcome::EngineSuccess);
+            let original = attempt.formatted_summary();
+            let class = classify_speech_evidence(Some(metrics), None);
+            let attempt = attempt.with_shadow_file(
+                &dir.path().join("missing.wav"),
+                0,
+                class.would_skip_engine(),
+            );
+            assert_eq!(attempt.formatted_summary(), original);
+            assert_eq!(classify_speech_evidence(Some(metrics), None), class);
+            drop(attempt);
+        }
     }
 
     #[tokio::test]

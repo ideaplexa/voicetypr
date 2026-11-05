@@ -53,7 +53,7 @@ left no commits; this is a cumulative port, not the original commit sequence.
 Self-review covered native worker ownership, cancelled/stale loads and results,
 shared Whisper/ONNX admission, remote-cache lock order, transaction publication,
 startup recovery, deletion and exit order, platform capabilities, CLI teardown,
-static packaging and frontend compatibility. Fixes beyond the spike:
+then-static packaging and frontend compatibility (superseded below). Fixes beyond the spike:
 
 - Cancel queued Whisper work before it can evict Parakeet; cancel a queued
   download while waiting for the operation lock. Regression tests hold the lock
@@ -72,9 +72,15 @@ static packaging and frontend compatibility. Fixes beyond the spike:
 - Pin and hash the legacy research workflow's three model files. Add a separate
   NSIS artifact to native CI for installed-app hardware checks.
 
-Independent review identified AVX2 admission and static-ORT/DirectML packaging
-blockers, which a separate worker is addressing. This follow-up addresses
-terminal shutdown admission, not those blockers. Native Windows code has not been compiled
+The Silero branch rebased onto `fad6b8a5` replaces the static-ORT/DirectML
+packaging blockers with the official lazy Microsoft CPU DLL. Startup preloads
+Windows Parakeet only when saved as the selected engine/model and CPU admission
+passes. Explicit selection/download or first transcription may initialize it too,
+after the existing CPU gate and SHA256 check. Unselected engines never load it.
+The only runtime path is absolute `current_exe().parent()/onnxruntime.dll`.
+Missing, altered or wrong-version bytes produce a content-free unavailable error.
+There is no PATH/System32 fallback. No ORT exists in either Mac dependency graph.
+The original handoff's terminal shutdown admission fix remains intact. Native Windows code has not been compiled
 locally: the Rust MSVC target is installed, but a usable MSVC compiler/linker and
 Windows SDK are not available on this Mac. Do not install them for this slice.
 
@@ -84,10 +90,10 @@ These changes require release/packaging review, even though no workflow was run.
 
 | Workflow | Change and reason |
 | --- | --- |
-| `.github/workflows/native-ci.yml` | Cache the hash-verified static ORT archive; reject an `onnxruntime.dll` import in the built executable; upload the NSIS installer separately for installed-app hardware evaluation. Preserve Vulkan 1.3.296.0 and existing install/dependency/version/uninstall smoke. |
-| `.github/workflows/release.yml` | Cache static ORT and assert no ORT DLL import before installer signing/publication, so a runtime-linkage change cannot silently produce a broken release package. Existing publishing behavior is unchanged; do not dispatch it for branch validation. |
-| `.github/workflows/store-msix.yml` | Cache static ORT and run the same no-DLL-import assertion before uploading the Store package. Preserve the immutable-SHA and reviewed-main ancestry trust gates. |
-| `.github/workflows/windows-check.yml` | Cache ORT for the fast clippy/test lane and assert that `parakeet-rs` is absent from the Windows ARM64 dependency graph. Bundle placeholders remain code-check-only, not packaging evidence. |
+| `.github/workflows/native-ci.yml` | Stage the pinned official Microsoft CPU DLL and notices; reject ORT/DirectML native imports and static ORT definitions using the main linker MAP; run pinned Ivy Bridge SDE before uploading preview/NSIS artifacts. Preserve Vulkan 1.3.296.0 and existing install/dependency/version/uninstall smoke. |
+| `.github/workflows/release.yml` | Stage the official CPU DLL, assert no native/static ORT linkage and run pinned Intel SDE Ivy Bridge CLI checks before upload, so a runtime-linkage change cannot silently produce a broken release package. Existing publishing behavior is unchanged; do not dispatch it for branch validation. |
+| `.github/workflows/store-msix.yml` | Stage and verify the official DLL/notices in both layout and final MSIX; assert no native/static ORT linkage and run pinned Ivy Bridge SDE before upload. Preserve the immutable-SHA and reviewed-main ancestry trust gates. |
+| `.github/workflows/windows-check.yml` | Run clippy/tests plus main-exe build and pinned SDE `-ivb` version/VAD checks; assert that `parakeet-rs` is absent from the Windows ARM64 dependency graph. Bundle placeholders remain code-check-only, not packaging evidence. |
 | `.github/workflows/parakeet-onnx-spike.yml` | Add the legacy standalone research workflow as manual-only, pin the three model files to the app's exact revision and SHA256 values, and use a locked build. This is optional export research, not integrated-app or Windows RSS acceptance. Its cache-key false positive was resolved before commit `bf0a64b2`. |
 
 ## Exact CI entry points, only after approval and a push
@@ -96,19 +102,20 @@ Run these later from a clone of this repository. They were not run here.
 
 ```sh
 # Full selected-ref frontend/native checks, including Windows NSIS install smoke.
-gh workflow run ci.yml --ref feat/parakeet-windows-v3 -f include_intel=false
+gh workflow run ci.yml --ref feat/silero-vad-shadow -f include_intel=false
 
-# Optional quicker Windows clippy + Rust tests, no installer.
-gh workflow run windows-check.yml --ref feat/parakeet-windows-v3
+# Optional quicker Windows clippy + Rust tests + SDE CLI checks, no installer.
+gh workflow run windows-check.yml --ref feat/silero-vad-shadow
 ```
 
 `ci.yml` has exactly one input, `include_intel` (boolean, default false).
 `native-ci.yml` is reusable (`workflow_call`), not directly dispatchable.
 The full Windows lane uses windows-2022, real Vulkan resources, static CRT,
 Rust clippy/tests, an NSIS build, install/dependency/`--version`/uninstall smoke
-and the no-ONNX-Runtime-DLL import assertion. Download the
+and the native/static-ORT import/MAP assertion. Download the
 `ci-windows-x64-nsis` artifact for hardware installation; the
-`ci-windows-x64-preview` artifact contains only the app executable.
+`ci-windows-x64-preview` artifact contains only the app executable, not its
+Parakeet DLL. Use the installer for Parakeet hardware evaluation.
 Match the run's head SHA to the reviewed full commit SHA. Retain run URL,
 artifact hashes and results; never infer runtime quality from CI being green.
 
@@ -234,7 +241,17 @@ MSIX. Use disposable accounts/VMs and operator-owned model storage only.
 
 - [ ] Clean machine without dev tools or ORT DLLs; install, `--version`, launch,
   transcribe, uninstall. Inspect installed exe with
-  `src-tauri/windows/assert-no-onnxruntime-import.ps1` in a Developer PowerShell.
+  `src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath ... -MapPath ...`
+  in a Developer PowerShell, using the matching build MAP.
+- [ ] Preserve the official Microsoft DLL's Authenticode signature and pinned
+  SHA256. NSIS installs beside the executable, MSIX at package root; verify both.
+  Keep existing installer/package signing flows; do not re-sign this DLL.
+- [ ] Ivy Bridge: `--version` and shadow VAD silence/real-WAV return without
+  illegal instruction (VAD `runtime_unsupported`), no ORT loaded on unsupported CPUs.
+  On supported x64, selected startup preload or first Parakeet use loads only
+  the installed official DLL; unselected engines never load it.
+- [ ] Missing, corrupt or wrong-version installed DLL: first Parakeet use gives
+  a clear unavailable error; app, Whisper and cloud engines remain alive.
 - [ ] Offline installation with required WebView2 prerequisites present.
   Separately test a missing prerequisite offline, first launch without a model,
   and offline transcription with an already verified model. No download
@@ -264,7 +281,12 @@ Native ORT calls are cooperative only at call/chunk boundaries, without a hard
 inference timeout; an unsupported CPU instruction can terminate the process
 rather than become a friendly Rust error. Young export/runtime compatibility,
 peak RAM, power-loss durability and Windows antivirus rename/delete behavior
-need actual hardware evidence. A previously retained Whisper preview Arc can
+need actual hardware evidence. Rust pre-call CPU guards alone cannot protect
+against static initializers before main; the official DLL is lazy and native
+imports/static definitions are rejected. GGML_NATIVE=OFF, AVX/AVX2/FMA/F16C=ON
+and AVX512=OFF also constrain in-process Whisper's CPU build. VAD itself is
+CPU-only whisper.cpp, with no ORT. SDE YAML is not a claim of a Windows run.
+A previously retained Whisper preview Arc can
 outlive cache eviction, so one-heavy-model memory residency during that preview
 is not proven by the shared gate alone (076b follow-up).
 

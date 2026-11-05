@@ -113,7 +113,7 @@ jobs:
           )
           if [ -n "$clang_runtime" ]; then
             echo "Linking compiler-rt archive: $clang_runtime"
-            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--cfg voicetypr_vad_cpu_only_v1 -C link-arg=$clang_runtime" >> "$GITHUB_ENV"
           else
             echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
           fi
@@ -148,6 +148,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          prefix-key: v0-rust-cpu-vad-v1
           workspaces: src-tauri
 
       - name: Install dependencies
@@ -270,6 +271,9 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.base_sha }}
 
+      - name: Set GGML CPU baseline
+        uses: ./.github/actions/ggml-cpu-baseline
+
       - name: Select Swift 6 toolchain and configure Clang runtime
         run: |
           xcode=$(find /Applications -maxdepth 1 \( -type d -o -type l \) \( -name 'Xcode_1[6-9]*.app' -o -name 'Xcode_[2-9][0-9]*.app' \) | sort -V | tail -1)
@@ -290,7 +294,7 @@ jobs:
           )
           if [ -n "$clang_runtime" ]; then
             echo "Linking compiler-rt archive: $clang_runtime"
-            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--cfg voicetypr_vad_cpu_only_v1 -C link-arg=$clang_runtime" >> "$GITHUB_ENV"
           else
             echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
           fi
@@ -325,6 +329,9 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          prefix-key: v0-rust-cpu-vad-v1
+          # whisper-rs-sys does not track GGML_* as Cargo rerun triggers.
+          env-vars: GGML
           workspaces: src-tauri
 
       - name: Install dependencies
@@ -436,12 +443,14 @@ jobs:
       # Short paths keep whisper.cpp/ggml and Tauri builds below Windows path limits.
       CARGO_TARGET_DIR: D:\b\app
       VULKAN_RUNTIME_VERSION: 1.3.296.0
-      ORT_CACHE_DIR: D:\b\ort-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.base_sha }}
+
+      - name: Set GGML CPU baseline
+        uses: ./.github/actions/ggml-cpu-baseline
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -461,17 +470,12 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          # whisper-rs-sys does not track GGML_* as Cargo rerun triggers.
+          env-vars: GGML
           shared-key: windows-x64-build-vk${{ env.VULKAN_RUNTIME_VERSION }}
           workspaces: |
             src-tauri -> ../../../../b/app
             sidecar/whisper-vulkan -> ../../../../../b/vulkan
-
-      - name: Cache ONNX Runtime archive
-        uses: actions/cache@v5
-        with:
-          path: D:\b\ort-cache
-          key: ort-windows-x64-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ort-windows-x64-
 
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@d17de7e2f5e50efb5d2123efed18497d3c58c533  # v1.7.0
@@ -521,9 +525,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           # /PDBALTPATH:%_PDB% records a RELATIVE pdb name in the PE so dbghelp
           # resolves voicetypr.pdb next to the installed exe (not the CI build path).
-          RUSTFLAGS: "-C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB%"
           VOICETYPR_REQUIRE_VULKAN_SIDECAR: "1"
-        run: pnpm tauri build --target x86_64-pc-windows-msvc --ci --config src-tauri/tauri.windows.conf.json
+        shell: pwsh
+        run: |
+          # Only this main-executable build writes the map, never clippy/tests.
+          $targetRoot = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR).Replace('\', '/')
+          $env:RUSTFLAGS = "$env:RUSTFLAGS -C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB% -C link-arg=/MAP:$targetRoot/voicetypr.map".Trim()
+          pnpm tauri build --target x86_64-pc-windows-msvc --ci --config src-tauri/tauri.windows.conf.json
+          if ($LASTEXITCODE -ne 0) { throw "Tauri build failed: $LASTEXITCODE" }
 
       - name: Assert CPU build does not import vulkan-1.dll
         shell: pwsh
@@ -540,11 +549,17 @@ jobs:
             throw "No NSIS installer found at $env:CARGO_TARGET_DIR\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe"
           }
           & ./scripts/check-windows-install.ps1 -Installer $installer.FullName
-      - name: Assert ONNX Runtime is not a DLL import
+      - name: Assert ONNX Runtime is lazy-loaded, not imported or statically linked
         shell: pwsh
         run: |
-          & ./src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath "$env:CARGO_TARGET_DIR\x86_64-pc-windows-msvc\release\voicetypr.exe"
+          & ./src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath "$env:CARGO_TARGET_DIR\x86_64-pc-windows-msvc\release\voicetypr.exe" -MapPath "$env:CARGO_TARGET_DIR/voicetypr.map"
 
+      # No desktop or ASR model: Ivy Bridge must reach the lazy-runtime CPU guard.
+      - name: Check CLI on Ivy Bridge (no AVX2, Intel SDE)
+        uses: ./.github/actions/ivy-bridge-smoke
+        timeout-minutes: 15
+        with:
+          executable-path: ${{ env.CARGO_TARGET_DIR }}/x86_64-pc-windows-msvc/release/voicetypr.exe
       - name: Sign installer for updates
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}

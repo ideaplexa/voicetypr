@@ -23,6 +23,7 @@ mod license;
 mod media;
 mod menu;
 mod observability;
+mod onnx_runtime;
 mod parakeet;
 mod perf;
 mod pill;
@@ -514,10 +515,7 @@ async fn retry_tray_creation(app: tauri::AppHandle) -> Result<tray_status::TrayS
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     initialize_tls();
-    // Retain the ONNX/ORT link probe in the Windows x64 exe without invoking it.
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    std::hint::black_box(parakeet::onnx::can_initialize_runtime as fn() -> bool);
-
+    audio::silero_vad::initialize_logging();
     let app_start = Instant::now();
     let app_version = env!("CARGO_PKG_VERSION");
 
@@ -627,7 +625,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
     }
 
-    builder
+    let exit_code = builder
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
             app.manage(commands::usage_stats::UsageStatsCache::default());
@@ -1497,17 +1495,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Voicetypr failed to start: {}", e);
             Box::new(e)
         })?
-        .run(|app_handle, event| match event {
+        .run_return(|app_handle, event| match event {
+            #[cfg(windows)]
+            tauri::RunEvent::ExitRequested { code, .. } => audio::vad_shadow::note_exit_request(code),
             // #28: unload every in-process Whisper model (and its Metal GPU buffers) before
             // the process tears down. On Apple Silicon the ggml-metal device destructor
             // asserts at exit if a model's residency set is still live, aborting the process
             // (SIGABRT) on quit — after transcription already succeeded. Two owners must be
             // emptied: the local dictation cache (managed `TranscriberCache`), and the
-            // strong-host remote server's OWN cache (inside `RealTranscriptionContext`) —
-            // stopping the server joins its tasks and drops that context. Both harmless on
-            // non-Apple platforms: they just release resources a moment early.
+            // strong-host remote server's cache, dropped by stopping/joining its tasks.
             tauri::RunEvent::Exit => {
-                tauri::async_runtime::block_on(async move {
+                let mut vad_quit = audio::vad_shadow::begin_shutdown();
+                tauri::async_runtime::block_on(async {
                     if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {
                         cache.lock().await.clear();
                     }
@@ -1515,6 +1514,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(parakeet) = app_handle.try_state::<parakeet::ParakeetManager>() {
                         parakeet.shutdown().await;
                     }
+                    vad_quit.drain();
                     if let Some(remote) = app_handle
                         .try_state::<AsyncMutex<crate::remote::lifecycle::RemoteServerManager>>()
                     {
@@ -1526,6 +1526,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 recording::kept::cleanup();
                 crate::commands::ai_lifecycle::cancel_recording();
                 product_analytics::shutdown();
+                #[cfg(windows)]
+                vad_quit.finish_restart(app_handle);
+                vad_quit.finish();
             }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { has_visible_windows, .. } => {
@@ -1535,11 +1538,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {}
         });
-
-    // Log successful application startup
-    log_lifecycle_event("APPLICATION_READY", Some(app_version), None);
-
-    Ok(())
+    audio::vad_shadow::finish_event_loop(exit_code);
 }
 
 /// Perform essential startup checks

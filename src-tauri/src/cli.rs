@@ -44,6 +44,8 @@ struct Cli {
 enum CliCommand {
     /// Diagnose shortcuts without opening a GUI or capturing input.
     Hotkey(crate::trigger::cli::HotkeyArgs),
+    /// Measure advisory Silero VAD without initializing the desktop app.
+    Vad(crate::audio::vad_cli::VadArgs),
     /// Polish stdin or --text using the desktop Polish pipeline.
     Polish(crate::ai::polish_cli::PolishArgs),
     #[command(hide = true, name = "polish-eval")]
@@ -69,6 +71,7 @@ impl CliCommand {
     fn wants_json(&self) -> bool {
         match self {
             CliCommand::Hotkey(a) => a.wants_json(),
+            CliCommand::Vad(a) => a.wants_json(),
             CliCommand::Polish(a) => a.json,
             CliCommand::PolishEval(_) => false,
             CliCommand::Status(a) => a.json,
@@ -180,6 +183,7 @@ pub fn maybe_run_from_env_with_context(
     context: tauri::Context<tauri::Wry>,
 ) -> Result<bool, Box<dyn Error>> {
     crate::initialize_tls();
+    crate::audio::silero_vad::initialize_logging();
     let first_arg = env::args().nth(1);
     let Some(first_arg) = first_arg.as_deref() else {
         return Ok(false);
@@ -196,6 +200,7 @@ pub fn maybe_run_from_env_with_context(
                 | "stream-bench"
                 | "polish"
                 | "polish-eval"
+                | "vad"
         )
     {
         return Ok(false);
@@ -223,11 +228,11 @@ pub fn maybe_run_from_env_with_context(
             }
             // A real usage error: in --json mode emit a parseable object so agents can read
             // why parsing failed; otherwise use clap's human-readable usage output.
-            if matches!(first_arg, "polish" | "polish-eval") {
+            if matches!(first_arg, "polish" | "polish-eval" | "vad") {
                 eprintln!(
                     "{}",
                     format_cli_error(
-                        "Invalid Polish CLI arguments; use --help",
+                        "Invalid measurement CLI arguments; use --help",
                         env::args().skip(1).any(|a| a == "--json")
                     )
                 );
@@ -243,7 +248,13 @@ pub fn maybe_run_from_env_with_context(
     let Some(command) = cli.command else {
         return Ok(false);
     };
-
+    if let CliCommand::Vad(args) = &command {
+        if let Err(error) = crate::audio::vad_cli::run(args) {
+            eprintln!("{}", format_cli_error(error, args.wants_json()));
+            std::process::exit(1);
+        }
+        return Ok(true);
+    }
     // Fixtures run before Tauri setup, secure-store reads, license checks or HTTP.
     if let CliCommand::Hotkey(args) = &command {
         if let Err(error) = crate::trigger::cli::run(args) {
@@ -281,6 +292,7 @@ pub fn maybe_run_from_env_with_context(
                 CliCommand::Hotkey(_) => {
                     unreachable!("headless hotkey route returned before setup")
                 }
+                CliCommand::Vad(_) => unreachable!("VAD runs before desktop initialization"),
                 CliCommand::Polish(args) => crate::ai::polish_cli::run(&app_handle, args).await?,
                 CliCommand::PolishEval(args) => {
                     crate::ai::polish_eval::run_live(&app_handle, args).await?

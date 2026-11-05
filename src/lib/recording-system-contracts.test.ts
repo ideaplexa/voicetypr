@@ -7,19 +7,24 @@ const section = (source: string, start: string, end: string) =>
 
 describe("recording system ownership contracts", () => {
   it("keeps terminal ONNX shutdown and bounded recovery in exit teardown order", () => {
+    const lib = read("lib.rs");
     const exit = section(
-      read("lib.rs"),
+      lib,
       "tauri::RunEvent::Exit =>",
       'tauri::RunEvent::Reopen',
     );
     const steps = [
+      "audio::vad_shadow::begin_shutdown()",
       "cache.lock().await.clear()",
       "parakeet.shutdown().await",
+      "vad_quit.drain()",
       "remote.lock().await.stop().await",
       "cleanup_media_pause_on_exit()",
       "recording::kept::cleanup()",
       "ai_lifecycle::cancel_recording()",
       "product_analytics::shutdown()",
+      "vad_quit.finish_restart(app_handle)",
+      "vad_quit.finish()",
     ];
     let previous = -1;
     for (const step of steps) {
@@ -31,6 +36,17 @@ describe("recording system ownership contracts", () => {
       "const EXIT_BUDGET: Duration = Duration::from_secs(2)",
     );
     expect(read("parakeet/manager.rs")).toContain("self.onnx.shutdown().await");
+    expect(lib).toContain(".run_return(");
+    expect(lib.indexOf("audio::vad_shadow::finish_event_loop(exit_code)")).toBeGreaterThan(
+      lib.indexOf("tauri::RunEvent::Exit =>"),
+    );
+    expect(lib).not.toContain(".run(|app_handle, event|");
+    const vad = read("audio/vad_shadow.rs");
+    expect(vad).toContain("const DRAIN_TIMEOUT: Duration = Duration::from_millis(250)");
+    expect(vad).toContain("const EXIT_TIMEOUT: Duration = Duration::from_secs(8)");
+    const recovery = read("recording/kept_blocking.rs");
+    expect(recovery).toContain('.name("recovery-exit".into())');
+    expect(recovery).toContain("owned.preserve_on_exit_until(deadline)");
   });
 
   it("uses platform stream capabilities inside generation-owned capture construction", () => {

@@ -91,6 +91,7 @@ genai = "=0.6.0"
 tokio-util = "0.7"
 which = "4.4.2"
 posthog-rs = { version = "0.22.0", default-features = false, features = ["error-tracking"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 global-hotkey = "0.9"
 whisper-rs = { version = "0.16.0", features = ["metal"] }
@@ -106,7 +107,10 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
-parakeet-rs = "=0.3.8"
+# Official Microsoft CPU DLL, loaded only on explicit Parakeet use after its
+# CPU and integrity checks. No static/download-binaries/DirectML features.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-28"] }
+parakeet-rs = { version = "=0.3.8", default-features = false, features = ["cpu", "load-dynamic", "api-28"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
 whisper-rs = { version = "0.16.0" }
@@ -130,6 +134,7 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
+    "Win32_System_Threading",
 ] }
 winreg = "0.52"
 [dev-dependencies]

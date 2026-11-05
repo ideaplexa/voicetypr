@@ -9,19 +9,22 @@ NC='\033[0m'
 
 echo -e "${YELLOW}Running checks...${NC}"
 
-echo -e "${YELLOW}[1/5] Type checking...${NC}"
+echo -e "${YELLOW}[1/6] Type checking...${NC}"
 pnpm typecheck
 
-echo -e "${YELLOW}[2/5] Linting...${NC}"
+echo -e "${YELLOW}[2/6] Linting...${NC}"
 pnpm lint
 
-echo -e "${YELLOW}[3/5] Frontend tests...${NC}"
+echo -e "${YELLOW}[3/6] Frontend tests...${NC}"
 pnpm test run
 
-echo -e "${YELLOW}[4/5] Backend tests...${NC}"
+echo -e "${YELLOW}[4/6] Node script tests...${NC}"
+pnpm test:scripts
+
+echo -e "${YELLOW}[5/6] Backend tests...${NC}"
 pnpm test:backend
 
-echo -e "${YELLOW}[5/5] Clippy...${NC}"
+echo -e "${YELLOW}[6/6] Clippy...${NC}"
 (cd src-tauri && cargo clippy -- -D warnings)
 
 echo -e "${GREEN}✓ All checks passed!${NC}"

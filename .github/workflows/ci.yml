@@ -85,6 +85,9 @@ jobs:
       - name: Test workflow helper contracts
         run: node --test .github/scripts/*.node-test.mjs
 
+      - name: Test packaging script contracts
+        run: node --test scripts/*.test.cjs
+
       - name: Validate GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
@@ -122,7 +125,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
-        run: pnpm exec vitest run src
+        run: ./node_modules/.bin/vitest run
 
       - name: Build frontend
         run: pnpm build
@@ -159,6 +162,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set GGML CPU baseline
+        uses: ./.github/actions/ggml-cpu-baseline
+
       - name: Select Swift 6 toolchain and configure Clang runtime
         run: |
           xcode=$(
@@ -184,7 +190,7 @@ jobs:
           )
           if [ -n "$clang_runtime" ]; then
             echo "Linking compiler-rt archive: $clang_runtime"
-            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--cfg voicetypr_vad_cpu_only_v1 -C link-arg=$clang_runtime" >> "$GITHUB_ENV"
           else
             echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
           fi
@@ -209,6 +215,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          prefix-key: v0-rust-cpu-vad-v1
+          env-vars: GGML
           workspaces: src-tauri
 
       - name: Install dependencies

@@ -1,0 +1,95 @@
+name: Ivy Bridge smoke
+description: Check the built CLI and shadow VAD CPU guard under pinned Intel SDE.
+
+inputs:
+  executable-path:
+    description: Path to the built Windows app executable.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check CLI on Ivy Bridge (no AVX2, Intel SDE)
+      shell: pwsh
+      env:
+        VOICETYPR_EXECUTABLE: ${{ inputs.executable-path }}
+        # Intel download 684897, verified against the published Windows SHA-256.
+        SDE_URL: https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz
+        SDE_SHA256: 74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651
+        # Public real speech from whisper.cpp's immutable initial-release commit.
+        JFK_URL: https://raw.githubusercontent.com/ggml-org/whisper.cpp/b0a11594aec50892a02cd8d129eee2dfe93a8bb8/samples/jfk.wav
+        JFK_SHA256: 59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $root = Join-Path $env:RUNNER_TEMP ("ivybridge-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root | Out-Null
+        $archive = Join-Path $root 'sde.tar.xz'
+        Invoke-WebRequest -Uri $env:SDE_URL -OutFile $archive
+        if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:SDE_SHA256) {
+          throw 'Intel SDE archive SHA-256 mismatch'
+        }
+        tar -xf $archive -C $root
+        if ($LASTEXITCODE -ne 0) { throw "SDE extraction failed: $LASTEXITCODE" }
+        # 10.13.1 ships sde.exe (not sde64.exe); keep its kit layout intact.
+        $sde = Join-Path $root 'sde-external-10.13.1-2026-07-28-win/sde.exe'
+        if (-not (Test-Path -LiteralPath $sde)) { throw 'Missing Intel SDE executable' }
+        $exe = $env:VOICETYPR_EXECUTABLE
+        if (-not (Test-Path -LiteralPath $exe)) { throw 'Missing built app executable' }
+
+        $jfk = Join-Path $root 'jfk.wav'
+        Invoke-WebRequest -Uri $env:JFK_URL -OutFile $jfk
+        if ((Get-FileHash $jfk -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:JFK_SHA256) {
+          throw 'JFK WAV SHA-256 mismatch'
+        }
+        # One second of 16 kHz mono PCM16 digital silence, not synthetic speech.
+        $silence = Join-Path $root 'silence.wav'
+        $writer = [IO.BinaryWriter]::new([IO.File]::Create($silence))
+        try {
+          $writer.Write([Text.Encoding]::ASCII.GetBytes('RIFF'))
+          $writer.Write([uint32]32036)
+          $writer.Write([Text.Encoding]::ASCII.GetBytes('WAVEfmt '))
+          $writer.Write([uint32]16)
+          $writer.Write([uint16]1)
+          $writer.Write([uint16]1)
+          $writer.Write([uint32]16000)
+          $writer.Write([uint32]32000)
+          $writer.Write([uint16]2)
+          $writer.Write([uint16]16)
+          $writer.Write([Text.Encoding]::ASCII.GetBytes('data'))
+          $writer.Write([uint32]32000)
+          $writer.Write([byte[]]::new(32000))
+        } finally {
+          $writer.Dispose()
+        }
+
+        # Never read or mutate a runner's existing app settings or model cache.
+        $env:HOME = Join-Path $root 'home'
+        $env:USERPROFILE = $env:HOME
+        $env:APPDATA = Join-Path $root 'appdata'
+        $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+        New-Item -ItemType Directory -Path $env:HOME, $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+        Push-Location $root
+        try {
+          $version = @(& $sde -ivb -chip_check_die 1 -- $exe --version)
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            throw "Ivy Bridge --version failed: $exitCode (including illegal-instruction 0xC000001D)"
+          }
+          if (($version -join "`n").Trim() -notmatch '^voicetypr \S+$') {
+            throw 'Ivy Bridge --version did not return the app version'
+          }
+          foreach ($clip in @(@{ Label = 'silence'; File = $silence }, @{ Label = 'JFK'; File = $jfk })) {
+            $output = @(& $sde -ivb -chip_check_die 1 -- $exe vad analyze --file $clip.File --shadow --json)
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -ne 0) {
+              throw "Ivy Bridge $($clip.Label) VAD failed: $exitCode (including illegal-instruction 0xC000001D)"
+            }
+            $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($result.mode -ne 'shadow' -or @($result.runs).Count -ne 1 -or $result.runs[0].status -ne 'runtime_unsupported') {
+              throw "Ivy Bridge $($clip.Label) VAD must report runtime_unsupported"
+            }
+          }
+        } finally {
+          Pop-Location
+        }
+        Write-Host 'OK: Ivy Bridge --version and both shadow VAD inputs passed.'

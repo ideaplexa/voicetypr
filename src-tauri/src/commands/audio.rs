@@ -5715,7 +5715,8 @@ async fn stop_recording_with_mode_at(
                 == crate::audio::speech_evidence::SpeechEvidenceClass::HighConfidenceNoSpeech)
     {
         let mut speech_evidence_attempt =
-            SpeechEvidenceAttempt::new("none".to_string(), "pre_engine", capture_metrics);
+            SpeechEvidenceAttempt::new("none".to_string(), "pre_engine", capture_metrics)
+                .with_shadow_file(&audio_path, task_generation, true);
         if evidence_class
             == crate::audio::speech_evidence::SpeechEvidenceClass::HighConfidenceNoSpeech
         {
@@ -6055,10 +6056,9 @@ async fn stop_recording_with_mode_at(
         engine_selection.engine_name().to_string(),
         engine_route,
         capture_metrics,
-    );
-
+    )
+    .with_shadow_file(&audio_path, task_generation, false);
     let mut prepared_metrics = None;
-    // For Whisper/Parakeet: normalize and duration gate; for Cloud/Remote: skip both
     let audio_path = match &engine_selection {
         ActiveEngineSelection::Cloud { provider, .. } => {
             log::info!(

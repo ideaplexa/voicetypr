@@ -6,8 +6,11 @@ pub mod recorder;
 pub mod recorder_watchdog;
 pub mod resampler;
 pub mod silence_detector;
+pub mod silero_vad;
 pub mod speech_evidence;
 pub mod stream_tap;
+pub mod vad_cli;
+pub mod vad_shadow;
 
 #[cfg(test)]
 mod decode_tests;
