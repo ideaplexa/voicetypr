@@ -4888,25 +4888,7 @@ fn spawn_silence_event_listener(
     });
 }
 
-pub(crate) fn ptt_key_released(
-    app_state: &AppState,
-    source: crate::recording::start_source::StartSource,
-) -> bool {
-    let mode = match app_state.recording_mode.lock() {
-        Ok(guard) => *guard,
-        Err(poisoned) => {
-            log::warn!("recording_mode mutex poisoned; recovering value for PTT guard");
-            *poisoned.into_inner()
-        }
-    };
-
-    source.blocked_after_release(
-        mode == RecordingMode::PushToTalk,
-        app_state
-            .ptt_key_held
-            .load(std::sync::atomic::Ordering::SeqCst),
-    )
-}
+pub(crate) use crate::recording::start_source::ptt_key_released;
 
 /// Pins the island's monitor and sends its dictation context (app, mic, Polish,
 /// engine) once audio flows. The device and window lookups cost 50–200 ms, so
