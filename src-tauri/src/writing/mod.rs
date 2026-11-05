@@ -1,6 +1,8 @@
 mod app_category;
 mod format;
 mod library_rules;
+#[cfg(test)]
+mod multilingual_tests;
 mod pipeline;
 mod settings;
 mod vocabulary;

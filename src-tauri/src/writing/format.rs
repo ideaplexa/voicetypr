@@ -299,7 +299,8 @@ pub fn format_transcript<'a>(
             at_sentence_start = false;
             continue;
         }
-        let normalized = transcript_text::normalize_transcript_spacing(line);
+        let normalized =
+            transcript_text::normalize_transcript_spacing_for_language(line, Some(opts.language));
         let hints = if single_line { pauses } else { &[] };
         let (formatted, next_at_start) = format_line(&normalized, at_sentence_start, hints, opts);
         out.push_str(&formatted);
@@ -316,6 +317,8 @@ pub fn format_transcript<'a>(
 #[derive(Debug, Clone)]
 struct Token {
     text: String,
+    /// Original separator, retained for French typography (no English rewrites).
+    spacing_before: String,
     /// Index of the word this token belongs to in the line, counting alphanumeric tokens.
     idx: usize,
 }
@@ -323,16 +326,27 @@ struct Token {
 fn tokenize(line: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut words = 0usize;
-    for part in line.split(' ').filter(|part| !part.is_empty()) {
+    let mut offset = 0;
+    let mut previous_end = 0;
+    for part in line.split(' ') {
+        let start = offset;
+        offset += part.len() + 1;
+        if part.is_empty() {
+            continue;
+        }
+        let spacing_before = line[previous_end..start].to_string();
+        previous_end = start + part.len();
         if has_alnum(part) {
             tokens.push(Token {
                 text: part.to_string(),
+                spacing_before,
                 idx: words,
             });
             words += 1;
         } else {
             tokens.push(Token {
                 text: part.to_string(),
+                spacing_before,
                 idx: words.saturating_sub(1),
             });
         }
@@ -384,6 +398,8 @@ fn format_line(
         if index > 0 {
             out.push_str(if breaks.contains(&(index - 1)) {
                 "\n\n"
+            } else if transcript_text::is_french(Some(opts.language)) {
+                &token.spacing_before
             } else {
                 " "
             });

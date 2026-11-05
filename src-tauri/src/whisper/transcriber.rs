@@ -788,7 +788,11 @@ impl Transcriber {
         }
 
         let trimmed = text.trim();
-        let result = transcript_text::normalize_transcript_spacing(trimmed).into_owned();
+        let result = transcript_text::normalize_transcript_spacing_for_language(
+            trimmed,
+            if translate { Some("en") } else { final_lang },
+        )
+        .into_owned();
 
         // Log text extraction performance
         let extraction_time = text_extraction_start.elapsed().as_millis() as u64;
