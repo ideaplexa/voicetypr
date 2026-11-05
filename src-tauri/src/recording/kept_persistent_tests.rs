@@ -336,7 +336,7 @@ async fn failed_or_cancelled_busy_retry_survives_cap_eviction() {
         if cancel {
             store.cancel_retry();
         }
-        let outcome =
+        let outcome: Result<(), RetryError> =
             cancellable_retry(lease.cancelled.clone(), async { Err("Failed".into()) }).await;
         assert_eq!(
             outcome,
@@ -379,6 +379,68 @@ fn remote_failed_retry_is_still_labelled_network_after_restart() {
     assert_eq!(
         alternative_for(&store.clips[0], &candidates, Some("small.en")),
         Some(candidates[0].clone())
+    );
+    store.clear();
+}
+
+#[test]
+fn crash_during_deletion_never_resurrects_retired_audio() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    let recovery = retain(&mut store, data.path());
+    let path = store.clips[0].path.clone();
+    let index = path.with_extension("json");
+    // discard() and complete_retry(true) both take ownership before unlinking.
+    let _retired = store.take(&recovery.id).unwrap();
+    assert!(path.exists());
+    assert_eq!(
+        serde_json::from_slice::<Entry>(&std::fs::read(&index).unwrap())
+            .unwrap()
+            .expires_at_ms,
+        0
+    );
+    // Simulate an unlink error, followed by process death.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    store.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert!(store.clips.is_empty());
+    assert!(
+        index.exists(),
+        "Deletion intent must survive an unlink error"
+    );
+    std::fs::remove_dir(&path).unwrap();
+    super::super::availability_tests::writer(&path)
+        .finalize()
+        .unwrap();
+    store.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert!(store.clips.is_empty());
+    assert!(!path.exists());
+    assert!(!index.exists());
+}
+
+#[test]
+fn temporarily_unreadable_or_unfinalized_wav_keeps_retry_metadata() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    let recovery = retain(&mut store, data.path());
+    let path = store.clips[0].path.clone();
+    let index = path.with_extension("json");
+    store.clips[0].retry_selection = Some(RetrySelection {
+        model: "small.en".into(),
+        engine: Some("whisper".into()),
+    });
+    store.preserve_on_exit();
+    let before = std::fs::read(&index).unwrap();
+    let pending = super::super::availability_tests::writer(&path);
+    store.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert!(store.clips.is_empty());
+    assert_eq!(std::fs::read(&index).unwrap(), before);
+    pending.finalize().unwrap();
+    store.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert_eq!(store.clips[0].recovery.id, recovery.id);
+    assert_eq!(
+        store.clips[0].retry_selection.as_ref().unwrap().model,
+        "small.en"
     );
     store.clear();
 }

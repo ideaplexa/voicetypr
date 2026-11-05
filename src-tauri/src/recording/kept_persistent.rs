@@ -55,7 +55,19 @@ impl DiskClip {
         let _ = std::fs::remove_file(&self.index);
     }
 
+    pub(super) fn retire(&self, clip: &Clip) {
+        // Commit deletion intent before unlinking. A crash or sharing violation
+        // must not turn deliberately retired audio into a recovered orphan.
+        if self.write_deadline(clip, 0).is_err() {
+            log::warn!("Could not persist recording deletion intent");
+        }
+    }
+
     fn write(&self, clip: &Clip) -> std::io::Result<()> {
+        self.write_deadline(clip, self.expires_at_ms)
+    }
+
+    fn write_deadline(&self, clip: &Clip, expires_at_ms: u64) -> std::io::Result<()> {
         if !std::fs::symlink_metadata(self.index.parent().unwrap())
             .is_ok_and(|m| m.is_dir() && !alias(&m))
         {
@@ -63,7 +75,7 @@ impl DiskClip {
         }
         let entry = Entry {
             version: 1,
-            expires_at_ms: self.expires_at_ms,
+            expires_at_ms,
             recovery: clip.recovery.clone(),
             selection: clip.retry_selection.clone(),
         };
@@ -145,20 +157,36 @@ impl Store {
             let expired = item.as_ref().is_some_and(|item| {
                 item.version == 1 && item.recovery.id == id && item.expires_at_ms <= now
             });
-            let Some(mut item) = item.filter(|item| {
-                item.version == 1
-                    && item.recovery.id == id
-                    && item.expires_at_ms > now
-                    && std::fs::symlink_metadata(&wav).is_ok_and(|m| m.is_file() && !alias(&m))
-                    && finalized_wav(&wav)
-            }) else {
-                let _ = std::fs::remove_file(&path);
-                if expired {
-                    let _ = std::fs::remove_file(&wav);
+            if expired {
+                // Keep the expired index if unlinking fails, otherwise the WAV
+                // could be resurrected as an orphan on the following launch.
+                if std::fs::remove_file(&wav).is_ok()
+                    || std::fs::symlink_metadata(&wav)
+                        .err()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                {
+                    let _ = std::fs::remove_file(&path);
                 }
-                // Missing/corrupt metadata is not consent to delete the only audio.
                 continue;
+            }
+            let Some(mut item) = item.filter(|item| item.version == 1 && item.recovery.id == id)
+            else {
+                let _ = std::fs::remove_file(&path);
+                continue; // Recover finalized audio separately, never delete it here.
             };
+            match std::fs::symlink_metadata(&wav) {
+                Ok(m) if m.is_file() && !alias(&m) => {
+                    // A transient open/read failure is not corrupt metadata.
+                    if !finalized_wav(&wav) {
+                        continue;
+                    }
+                }
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => continue,
+                _ => {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+            }
             // Restored takes belong to no live capture. Idle Cancel must not discard them.
             item.recovery.generation = u64::MAX;
             item.recovery.expires_in_ms = item.expires_at_ms - now;

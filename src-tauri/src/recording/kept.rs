@@ -307,10 +307,18 @@ impl Store {
     fn discard(&mut self, id: &str) {
         if let Some(clip) = self.take(id) {
             super::storage::remove_finished_audio(&clip.path);
+            if let Some(disk) = &clip.disk {
+                if std::fs::symlink_metadata(&clip.path)
+                    .err()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                {
+                    disk.delete();
+                }
+            }
         }
     }
-    /// Retire ownership/UI without touching the filesystem. Missing-file
-    /// reconciliation already probed outside STORE and needs no second probe.
+    /// Retire ownership/UI and commit deletion intent before removing audio.
+    /// Missing-file reconciliation already probed the WAV outside STORE.
     fn take(&mut self, id: &str) -> Option<Clip> {
         if self
             .active_retry
@@ -322,7 +330,7 @@ impl Store {
         let index = self.clips.iter().position(|c| c.recovery.id == id)?;
         let clip = self.clips.remove(index)?;
         if let Some(disk) = &clip.disk {
-            disk.delete();
+            disk.retire(&clip);
         }
         if let Some(app) = &self.app {
             crate::commands::pill_feedback::expire_kept_id(app, id);
