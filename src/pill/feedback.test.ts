@@ -125,6 +125,19 @@ describe('feedback card layout',()=>{
     expect(h.get('.feedback-card').style.width).toBe('360px');expect(h.get('.feedback-card').style.height).toBe('108px');
     expect(h.get('.card-title').title).toBe('Allow Accessibility to paste automatically');
   });
+  it.each([true,false])('puts Secure Input recovery instructions in the wrapping card body on mac=%s',async mac=>{
+    const h=await mount(mac);
+    vi.spyOn(HTMLElement.prototype,'offsetWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('feedback-card') ? 430 : 0;});
+    vi.spyOn(HTMLElement.prototype,'offsetHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('feedback-card') && this.style.width==='360px' ? 108 : 0;});
+    h.emit('island-notice',{kind:'secure_input'});await h.settle(1000);
+    const card=h.get('.feedback-card'),instructions=h.get('.card-bottom small');
+    expect(h.get('.card-title').textContent).toBe('Secure Input is on');
+    expect(card.classList.contains('single-row')).toBe(false);
+    expect(instructions.hidden).toBe(false);
+    expect(instructions.textContent).toBe('If your shortcut is unavailable, start from the tray or mic. Use the island to stop or cancel.');
+    expect(card.style.width).toBe('360px');expect(card.style.height).toBe('108px');
+    expect(h.get('.card-dismiss').closest('.card-bottom')).not.toBeNull();
+  });
   it.each([true,false])('caps the Accessibility island and measures wrapping on mac=%s',async mac=>{
     const h=await mount(mac);
     vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.dataset.layer==='notice'&&this.style.width==='360px'?102:0;});

@@ -46,5 +46,5 @@ export interface IslandNotice {
   kind: 'finishing' | 'polish_on' | 'polish_off' | 'polish_setup' | 'shortcuts_retired'
     | 'long_silence' | 'silence_stopped' | 'silence_discarded' | 'recording_failed'
     | 'copy_failed' | 'transcription_failed' | 'history_retry'
-    | 'shortcut_throttled' | 'no_speech';
+    | 'shortcut_throttled' | 'no_speech' | 'secure_input';
 }

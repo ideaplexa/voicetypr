@@ -16,6 +16,22 @@ impl StartSource {
     }
 }
 
+pub(crate) fn ptt_key_released(app_state: &crate::AppState, source: StartSource) -> bool {
+    let mode = match app_state.recording_mode.lock() {
+        Ok(guard) => *guard,
+        Err(poisoned) => {
+            log::warn!("recording_mode mutex poisoned; recovering value for PTT guard");
+            *poisoned.into_inner()
+        }
+    };
+    source.blocked_after_release(
+        mode == crate::RecordingMode::PushToTalk,
+        app_state
+            .ptt_key_held
+            .load(std::sync::atomic::Ordering::SeqCst),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

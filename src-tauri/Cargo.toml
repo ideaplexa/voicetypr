@@ -92,6 +92,7 @@ tokio-util = "0.7"
 which = "4.4.2"
 posthog-rs = { version = "0.22.0", default-features = false, features = ["error-tracking"] }
 [target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.9"
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }

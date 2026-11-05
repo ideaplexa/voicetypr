@@ -42,6 +42,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum CliCommand {
+    /// Diagnose shortcuts without opening a GUI or capturing input.
+    Hotkey(crate::trigger::cli::HotkeyArgs),
     /// Polish stdin or --text using the desktop Polish pipeline.
     Polish(crate::ai::polish_cli::PolishArgs),
     #[command(hide = true, name = "polish-eval")]
@@ -66,6 +68,7 @@ impl CliCommand {
     /// as a parseable error object too.
     fn wants_json(&self) -> bool {
         match self {
+            CliCommand::Hotkey(a) => a.wants_json(),
             CliCommand::Polish(a) => a.json,
             CliCommand::PolishEval(_) => false,
             CliCommand::Status(a) => a.json,
@@ -186,6 +189,7 @@ pub fn maybe_run_from_env_with_context(
         && !matches!(
             first_arg,
             "status"
+                | "hotkey"
                 | "models"
                 | "transcribe"
                 | "record"
@@ -241,6 +245,13 @@ pub fn maybe_run_from_env_with_context(
     };
 
     // Fixtures run before Tauri setup, secure-store reads, license checks or HTTP.
+    if let CliCommand::Hotkey(args) = &command {
+        if let Err(error) = crate::trigger::cli::run(args) {
+            emit_cli_error(&*error, args.wants_json());
+            std::process::exit(1);
+        }
+        return Ok(true);
+    }
     if let CliCommand::PolishEval(args) = &command {
         if args.fixture.is_some() {
             if let Err(error) = crate::ai::polish_eval::run_fixture(args) {
@@ -267,6 +278,9 @@ pub fn maybe_run_from_env_with_context(
 
         let outcome: Result<(), Box<dyn Error>> = async {
             match command {
+                CliCommand::Hotkey(_) => {
+                    unreachable!("headless hotkey route returned before setup")
+                }
                 CliCommand::Polish(args) => crate::ai::polish_cli::run(&app_handle, args).await?,
                 CliCommand::PolishEval(args) => {
                     crate::ai::polish_eval::run_live(&app_handle, args).await?
@@ -565,6 +579,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         settings.selected_microphone.clone(),
         false,
         0,
+        Default::default(),
         std::sync::Arc::new(|| false),
         None,
         std::time::Instant::now(),

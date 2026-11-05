@@ -7,6 +7,17 @@
 
 #[cfg(target_os = "macos")]
 mod macos;
+/// Public, content-free OS flag. Never inspect the owner or protected keys.
+pub fn secure_input_enabled() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::secure_input_enabled()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
 /// Pure, platform-neutral Windows virtual-key + consume-decision helpers.
 /// Compiled on Windows (the `cfg(windows)` hook, its sole non-test caller) and
 /// under `cfg(test)` on every target, so the consume logic unit-tests on macOS

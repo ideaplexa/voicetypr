@@ -18,6 +18,7 @@ pub enum NoticeKind {
     HistoryRetry,
     ShortcutThrottled,
     NoSpeech,
+    SecureInput,
 }
 pub fn notice<R: Runtime>(app: &AppHandle<R>, kind: NoticeKind) -> NoticeKind {
     notice_at(

@@ -534,7 +534,7 @@ fn insert_via_clipboard(
     current()?;
     // All cursor delivery (native paste and keyboard fallback) shares this
     // boundary, already on spawn_blocking. Clipboard-only commands bypass it.
-    let text = if has_accessibility_permission {
+    let text = if has_accessibility_permission && !keytrigger::backend::secure_input_enabled() {
         crate::insertion::leading_space::prepare(text)
     } else {
         text
@@ -545,6 +545,18 @@ fn insert_via_clipboard(
         Clipboard::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
 
     let mut paste = || {
+        // A registered hotkey never authorizes injection into a protected field.
+        // Keep words for deliberate manual paste, with no automatic restore.
+        if keytrigger::backend::secure_input_enabled() {
+            return PasteOutcome::LeftInClipboard;
+        }
+        let paste_current = || {
+            current()?;
+            if keytrigger::backend::secure_input_enabled() {
+                return Err("Secure Input is on".to_string());
+            }
+            Ok(())
+        };
         // Check if we have accessibility permissions before attempting to paste
         if !has_accessibility_permission {
             log::warn!(
@@ -557,7 +569,7 @@ fn insert_via_clipboard(
         // Add delay since pill was just hidden
 
         // First try with rdev, fallback to AppleScript if it fails
-        let rdev_result = try_paste_with_rdev(&current);
+        let rdev_result = try_paste_with_rdev(&paste_current);
 
         match rdev_result {
             Ok(_) => {
@@ -568,8 +580,9 @@ fn insert_via_clipboard(
                 log::warn!("rdev paste failed: {}, trying AppleScript fallback", e);
 
                 // Fallback to AppleScript
-                let paste_result =
-                    panic::catch_unwind(AssertUnwindSafe(|| try_paste_with_applescript(&current)));
+                let paste_result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    try_paste_with_applescript(&paste_current)
+                }));
 
                 match paste_result {
                     Ok(Ok(_)) => {

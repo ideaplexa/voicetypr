@@ -3,7 +3,7 @@
 //! invokes the caller's `on_event`. No lock is ever taken on the OS-callback
 //! path — backends only send on the channel.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -22,11 +22,14 @@ use crate::types::{
 /// share one channel so they are processed in order.
 pub enum Msg {
     Raw(RawKeyEvent),
+    Fallback(TriggerEvent, u64),
     Control(Control),
 }
 
 /// Out-of-band control for the dispatcher.
 pub enum Control {
+    SecureInput(bool),
+    ReconfigureFallback,
     /// Event stream had a gap (tap re-enabled / session transition): reset the
     /// matcher, synthesizing `Released` for any active trigger.
     ReEnable,
@@ -212,6 +215,7 @@ pub struct TriggerEngine {
     pending: Mutex<Vec<(TriggerId, Trigger)>>,
     running: AtomicBool,
     consume: Arc<ArcSwap<ConsumeSet>>,
+    secure_input: Arc<AtomicU64>,
 }
 
 impl Default for TriggerEngine {
@@ -227,11 +231,37 @@ impl TriggerEngine {
             pending: Mutex::new(Vec::new()),
             running: AtomicBool::new(false),
             consume: Arc::new(ArcSwap::from_pointee(ConsumeSet::default())),
+            secure_input: Arc::new(AtomicU64::new(0)),
         }
     }
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
+    }
+
+    pub fn secure_input_state(&self) -> crate::SecureInputState {
+        crate::SecureInputState::unpack(self.secure_input.load(Ordering::SeqCst))
+    }
+
+    /// Registered shortcuts enter the SAME serialized dispatcher as tap events.
+    pub fn fallback_event(&self, event: TriggerEvent, epoch: u64) {
+        if let Some(inner) = self.inner.lock().as_ref() {
+            let _ = inner.tx.send(Msg::Fallback(event, epoch));
+        }
+    }
+
+    pub fn reconfigure_fallback(&self) {
+        if let Some(inner) = self.inner.lock().as_ref() {
+            let _ = inner.tx.send(Msg::Control(Control::ReconfigureFallback));
+        }
+    }
+
+    pub fn start_with_secure_input(
+        &self,
+        on_event: impl Fn(TriggerEvent) + Send + 'static,
+        on_secure_input: impl Fn(crate::SecureInputState) + Send + 'static,
+    ) -> Result<(), EngineError> {
+        self.start_with_source_and_status(Arc::from(platform_source()), on_event, on_secure_input)
     }
 
     /// Set (or replace) the active bindings. Safe to call before `start` (stored
@@ -267,6 +297,15 @@ impl TriggerEngine {
         source: Arc<dyn KeyEventSource>,
         on_event: impl Fn(TriggerEvent) + Send + 'static,
     ) -> Result<(), EngineError> {
+        self.start_with_source_and_status(source, on_event, |_| {})
+    }
+
+    pub fn start_with_source_and_status(
+        &self,
+        source: Arc<dyn KeyEventSource>,
+        on_event: impl Fn(TriggerEvent) + Send + 'static,
+        on_secure_input: impl Fn(crate::SecureInputState) + Send + 'static,
+    ) -> Result<(), EngineError> {
         let mut guard = self.inner.lock();
         if guard.is_some() {
             return Err(EngineError::AlreadyRunning);
@@ -277,11 +316,15 @@ impl TriggerEngine {
         let initial = self.pending.lock().clone();
         let consume_for_dispatch = Arc::clone(&self.consume);
         let consume_for_source = Arc::clone(&self.consume);
+        let secure_input = Arc::clone(&self.secure_input);
 
         let dispatcher = std::thread::Builder::new()
             .name("keytrigger-dispatch".into())
             .spawn(move || {
                 let mut matcher = Matcher::new();
+                let mut gate = crate::secure_input::SecureInputGate::new(
+                    crate::SecureInputState::unpack(secure_input.load(Ordering::SeqCst)),
+                );
                 let mut emit = |te: TriggerEvent| {
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| on_event(te)));
                 };
@@ -290,7 +333,34 @@ impl TriggerEngine {
                 consume_for_dispatch.store(Arc::new(initial_consume));
                 while let Ok(msg) = rx.recv() {
                     match msg {
-                        Msg::Raw(ev) => matcher.handle(ev, Instant::now(), &mut emit),
+                        Msg::Raw(ev) => {
+                            if gate.accepts_raw() {
+                                matcher.handle(ev, Instant::now(), &mut emit);
+                            }
+                        }
+                        Msg::Fallback(ev, epoch) => {
+                            if gate.accepts_fallback(&ev, epoch) {
+                                emit(ev);
+                            }
+                        }
+                        Msg::Control(Control::SecureInput(enabled)) => {
+                            if gate.transition(enabled) {
+                                secure_input.store(gate.state.packed(), Ordering::SeqCst);
+                                // Host clears hold ownership and requests an immediate
+                                // stop BEFORE synthetic releases can queue a user post-roll.
+                                on_secure_input(gate.state);
+                                matcher.reset(&mut emit);
+                                gate.release_all(&mut emit);
+                            }
+                        }
+                        Msg::Control(Control::ReconfigureFallback) => {
+                            if gate.reconfigure() {
+                                secure_input.store(gate.state.packed(), Ordering::SeqCst);
+                                on_secure_input(gate.state);
+                                matcher.reset(&mut emit);
+                                gate.release_all(&mut emit);
+                            }
+                        }
                         Msg::Control(Control::SetBindings(b)) => {
                             let next_consume = ConsumeSet::from_bindings(&b);
                             matcher.set_bindings(b, &mut emit);
@@ -300,7 +370,12 @@ impl TriggerEngine {
                         }
                         Msg::Control(Control::ReEnable) => matcher.reset(&mut emit),
                         Msg::Control(Control::Stop) => {
+                            if gate.transition(false) {
+                                secure_input.store(gate.state.packed(), Ordering::SeqCst);
+                                on_secure_input(gate.state);
+                            }
                             matcher.reset(&mut emit);
+                            gate.release_all(&mut emit);
                             break;
                         }
                     }
