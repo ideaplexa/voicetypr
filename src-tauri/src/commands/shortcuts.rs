@@ -825,7 +825,9 @@ fn prepare_enabled_shortcut(
     Ok(())
 }
 
-pub(crate) fn load_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettings, String> {
+pub(crate) fn load_shortcut_settings<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Result<ShortcutSettings, String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
     match store.get(SHORTCUT_BINDINGS_KEY) {
         Some(value) => {
@@ -936,8 +938,8 @@ fn migrate_legacy_tap_bindings(value: &mut serde_json::Value) -> bool {
     changed
 }
 
-pub(crate) fn save_shortcut_settings(
-    app: &AppHandle,
+pub(crate) fn save_shortcut_settings<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     settings: &ShortcutSettings,
 ) -> Result<(), String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;

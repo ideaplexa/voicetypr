@@ -226,8 +226,8 @@ impl AppState {
 }
 
 /// Helper function to update recording state and emit event
-pub fn update_recording_state(
-    app: &tauri::AppHandle,
+pub fn update_recording_state<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: &tauri::AppHandle<R>,
     new_state: RecordingState,
     error: Option<String>,
 ) {
@@ -281,7 +281,9 @@ pub fn update_recording_state(
     let payload = recording_state_payload(final_state, error, generation);
 
     crate::perf::on_state(final_state);
-    crate::menu::runtime::recording_changed(app, final_state);
+    if let Some(native) = R::native(app) {
+        crate::menu::runtime::recording_changed(native, final_state);
+    }
     let _ = app.emit("recording-state-changed", payload);
 }
 
@@ -305,7 +307,7 @@ pub(crate) fn recording_state_payload(
 }
 
 /// Helper function to get current recording state
-pub fn get_recording_state(app: &tauri::AppHandle) -> RecordingState {
+pub fn get_recording_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> RecordingState {
     let app_state = app.state::<AppState>();
     app_state.get_current_state()
 }

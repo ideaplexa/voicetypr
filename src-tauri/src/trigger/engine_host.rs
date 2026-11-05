@@ -1,5 +1,6 @@
 //! Engine lifecycle + binding application for the host app.
 
+use crate::commands::recording_runtime::RecordingRuntime;
 use keytrigger::KeyPhase;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
@@ -20,7 +21,10 @@ static REBUILD_BINDINGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// HoldToRecord/PushToTalk and ToggleRecording when recording mode changes) —
 /// otherwise a mid-hold binding is never released and recording stays stuck.
 /// `dispatch_action(Released)` is idempotent, so releasing unconditionally is safe.
-pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
+pub fn apply_engine_bindings<R: RecordingRuntime>(
+    app: &AppHandle<R>,
+    bindings: &[ShortcutBinding],
+) {
     let app_state = app.state::<AppState>();
 
     let mut new_bindings: Vec<EngineBinding> = Vec::new();
@@ -65,14 +69,16 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
         }
     };
     for binding in &needs_release {
-        crate::recording::hotkeys::dispatch_action(
-            app,
-            app_state.inner(),
-            &binding.id,
-            binding.action,
-            binding.trigger,
-            KeyPhase::Released,
-        );
+        if let Some(app) = R::native(app) {
+            crate::recording::hotkeys::dispatch_action(
+                app,
+                app_state.inner(),
+                &binding.id,
+                binding.action,
+                binding.trigger,
+                KeyPhase::Released,
+            );
+        }
     }
 
     match app_state.engine_bindings.lock() {
@@ -98,7 +104,9 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
             })
             .cloned()
             .collect();
-        super::secure_input::bindings(app, &recording);
+        if let Some(app) = R::native(app) {
+            super::secure_input::bindings(app, &recording);
+        }
     }
     app_state.trigger_engine.set_bindings(triggers);
 }
@@ -139,15 +147,18 @@ fn bindings_needing_release(old: &[EngineBinding], new: &[EngineBinding]) -> Vec
 /// Decision logic lives in [`plan_engine_bindings`] (pure, unit-tested). This
 /// wrapper loads persisted state, runs the plan, performs the one-time durable
 /// bare-modifier-primary migration it requests, and applies the result.
-pub fn rebuild_engine_bindings(app: &AppHandle) {
+pub fn rebuild_engine_bindings<R: RecordingRuntime>(app: &AppHandle<R>) {
     rebuild_bindings(app, None);
 }
 
-pub(crate) fn rebuild_engine_bindings_for_generation(app: &AppHandle, generation: u64) {
+pub(crate) fn rebuild_engine_bindings_for_generation<R: RecordingRuntime>(
+    app: &AppHandle<R>,
+    generation: u64,
+) {
     rebuild_bindings(app, Some(generation));
 }
 
-fn rebuild_bindings(app: &AppHandle, generation: Option<u64>) {
+fn rebuild_bindings<R: RecordingRuntime>(app: &AppHandle<R>, generation: Option<u64>) {
     // Serialize snapshot + apply, not just individual engine-map writes.
     // A replacement's rebuild follows an already-running old rebuild; an old
     // start arriving later cannot overwrite the replacement's Escape binding.

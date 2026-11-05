@@ -157,9 +157,9 @@ impl StartRequest<'_> {
         Some(work())
     }
 
-    pub(crate) fn publish(
+    pub(crate) fn publish<R: crate::commands::recording_runtime::RecordingRuntime>(
         self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
     ) -> Result<Option<(u64, CaptureInterrupt)>, String> {
         self.commit(|| {
             let state = app.state::<AppState>();
@@ -176,7 +176,9 @@ impl StartRequest<'_> {
             if state.get_current_state() == RecordingState::Error {
                 crate::update_recording_state(app, RecordingState::Idle, Some("recover".into()));
             }
-            super::kept::cancel_active_retry(app);
+            if let Some(native) = R::native(app) {
+                super::kept::cancel_active_retry(native);
+            }
             state
                 .pointer_recording
                 .store(source.is_toggle(), std::sync::atomic::Ordering::SeqCst);
@@ -204,7 +206,9 @@ impl StartRequest<'_> {
             state.clear_cancellation();
             audio::clear_pending_stop_after_start(&state);
             let interrupt = state.capture_interrupts.begin(generation);
-            state.capture_recording_app_context(crate::writing::capture_active_app_context);
+            if R::native(app).is_some() {
+                state.capture_recording_app_context(crate::writing::capture_active_app_context);
+            }
             crate::update_recording_state(app, RecordingState::Starting, None);
             if state.get_current_state() != RecordingState::Starting {
                 return Err("Cannot start recording in current state".to_string());

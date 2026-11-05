@@ -2,7 +2,20 @@
 //! or a synchronous UI-thread hop.
 use super::*;
 use crate::audio::recorder::CaptureInterrupt;
+use crate::commands::recording_runtime::RecordingRuntime;
 use crate::recording::{secure_input::StartPermit, storage::CaptureFiles};
+
+/// Derive Escape bindings from live state on every command exit, not just success.
+pub(super) struct RebuildBindingsOnExit<R: RecordingRuntime>(
+    pub(super) AppHandle<R>,
+    pub(super) u64,
+);
+
+impl<R: RecordingRuntime> Drop for RebuildBindingsOnExit<R> {
+    fn drop(&mut self) {
+        crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&self.0, self.1);
+    }
+}
 
 pub(super) struct PreviewSettings {
     pub tap: bool,
@@ -10,7 +23,7 @@ pub(super) struct PreviewSettings {
     pub live: bool,
 }
 
-pub(super) fn prepare(app: &AppHandle, generation: u64) -> Option<PreviewSettings> {
+pub(super) fn prepare<R: Runtime>(app: &AppHandle<R>, generation: u64) -> Option<PreviewSettings> {
     let state = app.state::<AppState>();
     state.pending_start.with_active(&state, generation, || {
         state.esc_pressed_once.store(false, AtomicOrdering::SeqCst);
@@ -173,8 +186,8 @@ pub(super) fn construct(
         .unwrap_or(Ok(None))
 }
 
-fn stop_owned(
-    app: &AppHandle,
+fn stop_owned<R: Runtime>(
+    app: &AppHandle<R>,
     files: Option<&CaptureFiles>,
     generation: u64,
 ) -> Result<(), String> {
@@ -202,6 +215,12 @@ fn stop_owned(
         );
     }
     clear_pending_stop_after_start(&state);
+    state.esc_pressed_once.store(false, AtomicOrdering::SeqCst);
+    if let Ok(mut timeout) = state.esc_timeout_handle.lock() {
+        if let Some(task) = timeout.take() {
+            task.abort();
+        }
+    }
     MEDIA_CONTROLLER.resume_if_we_paused();
     if let Some(path) = state.current_recording_path.take(generation) {
         crate::recording::storage::remove_finished_audio(&path);
@@ -210,8 +229,8 @@ fn stop_owned(
 }
 
 /// Stop before publishing Idle; never stop a replacement after a late await.
-pub(crate) fn abort_start(
-    app: &AppHandle,
+pub(crate) fn abort_start<R: RecordingRuntime>(
+    app: &AppHandle<R>,
     files: Option<&CaptureFiles>,
     generation: u64,
 ) -> Result<(), String> {
@@ -228,8 +247,8 @@ pub(crate) fn abort_start(
         .unwrap_or(Ok(()))
 }
 
-pub(super) fn fail_start(
-    app: &AppHandle,
+pub(super) fn fail_start<R: RecordingRuntime>(
+    app: &AppHandle<R>,
     files: Option<&CaptureFiles>,
     generation: u64,
     error: String,
@@ -238,12 +257,29 @@ pub(super) fn fail_start(
     let state = app.state::<AppState>();
     state
         .pending_start
-        .with_active(&state, generation, || {
+        .with_current(generation, || {
+            if !matches!(
+                state.get_current_state(),
+                RecordingState::Starting | RecordingState::Recording
+            ) {
+                return Ok(false);
+            }
+            // Interruption revokes capture permission, not cleanup ownership.
+            // Check and restore under the same publication lock so a retired
+            // failure can never stop or reset a replacement.
+            let interrupted = !state.capture_interrupts.is_active(generation)
+                || state.is_cancellation_requested();
             if let Err(stop_error) = stop_owned(app, files, generation) {
                 log::warn!("Recorder cleanup after start failure: {stop_error}");
             }
+            if interrupted {
+                crate::update_recording_state(app, RecordingState::Idle, None);
+                return Ok(false);
+            }
             if microphone_error {
-                island::mic_blocked(app, generation, &error);
+                if let Some(native) = R::native(app) {
+                    island::mic_blocked(native, generation, &error);
+                }
             } else {
                 crate::commands::island_notice::notice_at(
                     app,

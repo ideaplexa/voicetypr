@@ -7,6 +7,7 @@ use crate::recording::island::{
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
+use super::recording_runtime::RecordingRuntime;
 use crate::ai::error::{user_facing_message, AiProviderError};
 use crate::audio::recorder::{AudioRecorder, RecordingReadiness, STOP_POST_ROLL};
 use crate::audio::silence_detector::SilenceDetectorEvent;
@@ -4099,7 +4100,7 @@ impl RecordingConfig {
     const MAX_CACHE_AGE: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
     /// Load all recording-relevant settings from store in one operation
-    pub async fn load_from_store(app: &AppHandle) -> Result<Self, String> {
+    pub async fn load_from_store<R: Runtime>(app: &AppHandle<R>) -> Result<Self, String> {
         let store = app.store("settings").map_err(|e| e.to_string())?;
 
         let show_pill_widget = store
@@ -4501,7 +4502,9 @@ pub async fn invalidate_recording_config_cache(app: &AppHandle) {
 }
 
 /// Helper function to get cached recording config or load from store
-pub async fn get_recording_config(app: &AppHandle) -> Result<RecordingConfig, String> {
+pub async fn get_recording_config<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<RecordingConfig, String> {
     let app_state = app.state::<AppState>();
 
     // Try to get from cache first
@@ -4604,7 +4607,7 @@ pub(crate) fn recording_license_state(
     }
 }
 /// Pre-recording validation using the readiness state
-async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> {
+pub(super) async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> {
     let validate_start = std::time::Instant::now();
     log::debug!("⏱️ [VALIDATE] starting recognition_availability_snapshot");
     let availability = crate::recognition_availability_snapshot(app).await;
@@ -4893,6 +4896,16 @@ pub(crate) use crate::recording::start_source::ptt_key_released;
 mod cancel_cleanup;
 #[path = "audio_start.rs"]
 mod start_cleanup;
+#[cfg(test)]
+#[path = "audio_start_tests.rs"]
+mod start_command_tests;
+#[path = "audio_start_pill.rs"]
+mod start_pill;
+#[path = "audio_start_prefetch.rs"]
+mod start_prefetch;
+#[cfg(test)]
+use start_pill::early_pill_unneeded;
+use start_pill::{hide_unneeded_early_pill, EarlyPillShow};
 
 /// Pins the island's monitor and sends its dictation context (app, mic, Polish,
 /// engine) once audio flows. The device and window lookups cost 50–200 ms, so
@@ -4938,111 +4951,13 @@ fn spawn_island_context(
     });
 }
 
-/// Rebuilds hotkey bindings from the current recording state when dropped.
-struct RebuildBindingsOnExit(AppHandle, u64);
-
-impl Drop for RebuildBindingsOnExit {
-    fn drop(&mut self) {
-        crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&self.0, self.1);
-    }
-}
-
-/// The island appears on keypress: it is shown as soon as `Starting` is
-/// published, in the background, so the start path never waits on the window.
-/// Dropping it unconsumed (the start failed, was cancelled or went stale before
-/// `Recording`) hides a window that no recording or card needs any more.
-struct EarlyPillShow {
-    app: AppHandle,
-    handle: Option<tauri::async_runtime::JoinHandle<Result<(), String>>>,
-}
-
-impl EarlyPillShow {
-    fn spawn(app: &AppHandle, generation: u64) -> Self {
-        crate::perf::mark(generation, crate::perf::Stage::PillShowCalled);
-        let task_app = app.clone();
-        let handle = tauri::async_runtime::spawn(async move {
-            if crate::perf::enabled() {
-                // Only a take that starts from a hidden window measures hotkey -> island.
-                let visible = task_app
-                    .get_webview_window("pill")
-                    .map(|window| crate::pill::native::is_shown(&window))
-                    .unwrap_or(false);
-                crate::perf::note_window_hidden(generation, !visible);
-            }
-            let manager = task_app
-                .state::<AppState>()
-                .get_window_manager()
-                .ok_or_else(|| "Window manager not initialized".to_string())?;
-            let result = manager.show_pill_window_for_take(generation).await;
-            let state = task_app.state::<AppState>();
-            state.pending_start.with_active(&state, generation, || {
-                crate::perf::mark(generation, crate::perf::Stage::PillShown);
-            });
-            result
-        });
-        Self {
-            app: app.clone(),
-            handle: Some(handle),
-        }
-    }
-
-    /// The take reached `Recording`: keep the window and report how the show went.
-    async fn consume(mut self) -> Result<(), String> {
-        match self.handle.take() {
-            Some(handle) => handle.await.map_err(|error| error.to_string())?,
-            None => Ok(()),
-        }
-    }
-}
-
-impl Drop for EarlyPillShow {
-    fn drop(&mut self) {
-        let Some(handle) = self.handle.take() else {
-            return;
-        };
-        let app = self.app.clone();
-        tauri::async_runtime::spawn(async move {
-            // Never hide before the show settled, or the window would stay up.
-            let _ = handle.await;
-            hide_unneeded_early_pill(&app);
-        });
-    }
-}
-
-/// A card (blocked, error, recovery) or a newer take still needs the window.
-fn early_pill_unneeded(mode: &str, state: RecordingState, feedback_owned: bool) -> bool {
-    mode == "when_recording"
-        && !feedback_owned
-        && matches!(state, RecordingState::Idle | RecordingState::Error)
-}
-
-fn hide_unneeded_early_pill(app: &AppHandle) {
-    let hide_app = app.clone();
-    // Decide on the native UI thread, where a newer take's show is also serialized.
-    let _ = app.run_on_main_thread(move || {
-        if !early_pill_unneeded(
-            &crate::commands::pill_feedback::pill_mode(&hide_app),
-            crate::get_recording_state(&hide_app),
-            crate::commands::pill_feedback::feedback_owned(),
-        ) {
-            return;
-        }
-        if let Some(window) = hide_app.get_webview_window("pill") {
-            crate::pill::hit_test::stop(&hide_app);
-            if let Err(error) = crate::pill::native::hide(&window) {
-                log::error!("Failed to hide unused early pill window: {}", error);
-            }
-        }
-    });
-}
-
 #[tauri::command]
 /// Returns `true` when THIS call started the recording, `false` when it was a
 /// redundant no-op on an already starting/active recording (idempotent
 /// fast-path). Callers that pair a later stop with their own start (the in-app
 /// bare-modifier hold) must key on this — a bare Ok never proved ownership.
-pub async fn start_recording(
-    app: AppHandle,
+pub async fn start_recording<R: RecordingRuntime>(
+    app: AppHandle<R>,
     state: State<'_, RecorderState>,
     source: Option<crate::recording::start_source::StartSource>,
 ) -> Result<bool, String> {
@@ -5050,8 +4965,8 @@ pub async fn start_recording(
     start_recording_with_permit(app, state, source, start_permit).await
 }
 
-pub(crate) async fn start_recording_with_permit(
-    app: AppHandle,
+pub(crate) async fn start_recording_with_permit<R: RecordingRuntime>(
+    app: AppHandle<R>,
     _state: State<'_, RecorderState>,
     source: Option<crate::recording::start_source::StartSource>,
     start_permit: crate::recording::secure_input::StartPermit,
@@ -5086,10 +5001,7 @@ pub(crate) async fn start_recording_with_permit(
         "⏱️ [REC TIMING] starting validation (+{}ms)",
         recording_start.elapsed().as_millis()
     );
-    let Some(validation) = request
-        .validate(validate_recording_requirements(&app))
-        .await
-    else {
+    let Some(validation) = request.validate(R::validate(&app)).await else {
         return Ok(false);
     };
     match validation {
@@ -5133,7 +5045,8 @@ pub(crate) async fn start_recording_with_permit(
     };
 
     let app_state = app.state::<AppState>();
-    let _rebuild_bindings_on_exit = RebuildBindingsOnExit(app.clone(), recording_generation);
+    let _rebuild_bindings_on_exit =
+        start_cleanup::RebuildBindingsOnExit(app.clone(), recording_generation);
     let Some(preview) = start_cleanup::prepare(&app, recording_generation) else {
         start_cleanup::abort_start(&app, None, recording_generation)?;
         return Ok(false);
@@ -5178,44 +5091,17 @@ pub(crate) async fn start_recording_with_permit(
     // Show the island now (non-blocking); the mic opening below must not delay it.
     let should_show_pill = config.show_pill_widget && config.pill_indicator_mode != "never";
     let early_pill = should_show_pill.then(|| EarlyPillShow::spawn(&app, recording_generation));
-    if let Some(provider) = crate::cloud_stt::CloudProvider::from_id(&config.current_engine) {
-        let task_app = app.clone();
-        let interrupt = capture_interrupt.clone();
-        app_state.pending_start.with_active(&app_state, recording_generation, || {
-            tokio::spawn(async move {
-                tokio::select! {
-                    biased;
-                    () = interrupt.wait() => {},
-                    () = async {
-                        let remote_active = {
-                            let remote = task_app.state::<AsyncMutex<RemoteSettings>>();
-                            let guard = remote.lock().await;
-                            guard.get_active_connection().is_some()
-                        };
-                        let state = task_app.state::<AppState>();
-                        let warm = state.pending_start.with_active(&state, recording_generation, || {
-                            !remote_active && crate::secure_store::secure_has(&task_app, provider.key_name()).unwrap_or(false)
-                        }).unwrap_or(false);
-                        if warm { provider.warm_up().await; }
-                    } => {},
-                }
-            });
-        });
+    if let Some(native_app) = R::native(&app) {
+        start_prefetch::spawn(
+            native_app,
+            &config,
+            recording_generation,
+            &capture_interrupt,
+        );
     }
-    if config.ai_enabled && !config.ai_provider.is_empty() {
-        let task_app = app.clone();
-        let provider_id = config.ai_provider.clone();
-        let interrupt = capture_interrupt.clone();
-        app_state.pending_start.with_active(&app_state, recording_generation, || {
-            tokio::spawn(async move {
-                tokio::select! {
-                    biased;
-                    () = interrupt.wait() => {},
-                    () = crate::commands::ai::prefetch_ai_provider(task_app, provider_id, recording_generation) => {},
-                }
-            });
-        });
-    } // Every take owns a disposable directory, separate from opted-in saves.
+    #[cfg(test)]
+    start_command_tests::before_capture(&app);
+    // Every take owns a disposable directory, separate from opted-in saves.
     let capture_files = match app
         .path()
         .app_data_dir()
@@ -5227,6 +5113,11 @@ pub(crate) async fn start_recording_with_permit(
             return start_cleanup::fail_start(&app, None, recording_generation, e, false);
         }
     };
+    // Everything up to storage failure is runtime-independent. Only the native
+    // runtime may proceed to settings/device construction and capture below.
+    let app = R::native(&app)
+        .expect("capture requires the native runtime")
+        .clone();
     let audio_path = capture_files.audio_path();
 
     let app_state = app.state::<AppState>();

@@ -226,7 +226,7 @@ mod tests {
         // Windows checkouts use CRLF line endings.
         let src = include_str!("../commands/audio.rs").replace("\r\n", "\n");
         let wrapper = src
-            .split("pub async fn start_recording(")
+            .split("pub async fn start_recording")
             .nth(1)
             .expect("start command exists")
             .split("\n}\n")
@@ -239,7 +239,7 @@ mod tests {
         assert!(!wrapper.contains("pill::context::capture"));
         assert!(!wrapper.contains("positioning::snapshot"));
         let start = src
-            .find("pub(crate) async fn start_recording_with_permit(")
+            .find("pub(crate) async fn start_recording_with_permit")
             .expect("guarded start operation exists");
         let body = &src[start..];
         let body = &body[..body.find("\n}\n").expect("start_recording ends")];
