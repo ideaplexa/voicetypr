@@ -336,7 +336,8 @@ impl Store {
                 let missing = std::fs::symlink_metadata(&clip.path)
                     .err()
                     .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
-                if !(missing || finalized_wav(&clip.path)) || !durable::unlink_committed(&clip.path)
+                if !(missing || finalized_wav(&clip.path))
+                    || !durable::unlink_without_intent(&clip.path)
                 {
                     self.clips[index].retire_after_retry = true;
                     log::warn!("Could not delete failed recording");

@@ -109,6 +109,16 @@ pub(super) fn unlink_committed(path: &Path) -> bool {
         && sync_parent(path).is_ok()
 }
 
+fn unlink_without_intent_allowed(windows: bool) -> bool {
+    // Windows has no directory flush here. Plain DeleteFile cannot substitute
+    // for a write-through tombstone commit, even when it reports success.
+    !windows
+}
+
+pub(super) fn unlink_without_intent(path: &Path) -> bool {
+    unlink_without_intent_allowed(cfg!(windows)) && unlink_committed(path)
+}
+
 pub(super) fn move_audio(source: &Path, target: &Path) -> bool {
     // Flush sample data and the finalized header before publishing ownership.
     if sync_file(source).is_err() {
@@ -143,6 +153,17 @@ fn copy_audio(source: &Path, target: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_requires_durable_intent_before_acknowledging_deletion() {
+        assert!(!unlink_without_intent_allowed(true));
+        assert!(unlink_without_intent_allowed(false));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("original.wav");
+        std::fs::write(&path, b"owned audio").unwrap();
+        assert_eq!(unlink_without_intent(&path), !cfg!(windows));
+        assert_eq!(path.exists(), cfg!(windows));
+    }
 
     #[test]
     fn copy_failure_keeps_the_original_and_success_publishes_all_bytes() {
