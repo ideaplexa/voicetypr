@@ -81,6 +81,23 @@ pub fn apply_engine_bindings(app: &AppHandle, bindings: &[ShortcutBinding]) {
     // Chord is an existing pass-through trigger, unlike SingleKey/ComboExact.
     // Observe Escape for the non-key island without swallowing it in the target app.
     triggers.push(("island-escape-observer".into(), island_escape_trigger()));
+    #[cfg(target_os = "macos")]
+    {
+        let recording: Vec<_> = triggers
+            .iter()
+            .filter(|(id, _)| {
+                bindings.iter().any(|b| {
+                    b.id == *id
+                        && matches!(
+                            b.action,
+                            ShortcutAction::ToggleRecording | ShortcutAction::HoldToRecord
+                        )
+                })
+            })
+            .cloned()
+            .collect();
+        super::secure_input::bindings(app, &recording);
+    }
     app_state.trigger_engine.set_bindings(triggers);
 }
 
@@ -395,10 +412,16 @@ pub fn start_engine(app: &AppHandle) {
         return;
     }
     let handle = app.clone();
-    match app_state
-        .trigger_engine
-        .start(move |ev| super::dispatch::on_engine_event(&handle, ev))
-    {
+    let status_handle = app.clone();
+    match app_state.trigger_engine.start_with_secure_input(
+        move |ev| super::dispatch::on_engine_event(&handle, ev),
+        move |state| {
+            #[cfg(target_os = "macos")]
+            crate::recording::secure_input::changed(&status_handle, state);
+            #[cfg(not(target_os = "macos"))]
+            let _ = (&status_handle, state);
+        },
+    ) {
         Ok(()) => log::info!("keytrigger: native trigger engine started"),
         // Two authorized checks can race before either observes `is_running`.
         // TriggerEngine serializes startup internally, so this is the expected

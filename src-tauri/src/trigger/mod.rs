@@ -3,9 +3,12 @@
 //! Wires the standalone `keytrigger` crate into Voicetypr so Combo/SingleKey
 //! shortcuts and modifier-only bindings drive the same shortcut actions.
 
+pub(crate) mod cli;
 pub mod dispatch;
 pub mod engine_host;
 pub mod mapping;
+#[cfg(target_os = "macos")]
+pub(crate) mod secure_input;
 
 use crate::commands::shortcuts::{ShortcutAction, ShortcutTrigger};
 

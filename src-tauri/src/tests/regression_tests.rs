@@ -225,9 +225,22 @@ mod tests {
     fn island_context_is_resolved_after_first_audio() {
         // Windows checkouts use CRLF line endings.
         let src = include_str!("../commands/audio.rs").replace("\r\n", "\n");
+        let wrapper = src
+            .split("pub async fn start_recording(")
+            .nth(1)
+            .expect("start command exists")
+            .split("\n}\n")
+            .next()
+            .unwrap();
+        assert!(
+            wrapper.contains("start_recording_with_permit(app, state, source, start_permit).await"),
+            "the public start command must delegate to the guarded start operation"
+        );
+        assert!(!wrapper.contains("pill::context::capture"));
+        assert!(!wrapper.contains("positioning::snapshot"));
         let start = src
-            .find("pub async fn start_recording(")
-            .expect("start_recording exists");
+            .find("pub(crate) async fn start_recording_with_permit(")
+            .expect("guarded start operation exists");
         let body = &src[start..];
         let body = &body[..body.find("\n}\n").expect("start_recording ends")];
         let readiness = body

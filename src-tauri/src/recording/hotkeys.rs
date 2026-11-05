@@ -1,5 +1,5 @@
 use crate::commands::audio::{
-    queue_stop_during_start, start_recording, stop_recording, RecorderState,
+    queue_stop_during_start, start_recording_with_permit, stop_recording, RecorderState,
     PTT_START_ABORTED_AFTER_RELEASE,
 };
 use crate::commands::shortcuts::{
@@ -68,9 +68,15 @@ fn handle_toggle_mode(
             crate::perf::hotkey_pressed();
             log::info!("Toggle: Starting recording via hotkey");
             let app_handle = app.clone();
+            let permit = super::secure_input::StartPermit::capture(app);
             tauri::async_runtime::spawn(async move {
+                if !permit.is_current(&app_handle) {
+                    return;
+                }
                 let recorder_state = app_handle.state::<RecorderState>();
-                match start_recording(app_handle.clone(), recorder_state, None).await {
+                match start_recording_with_permit(app_handle.clone(), recorder_state, None, permit)
+                    .await
+                {
                     Ok(_) => log::info!("Toggle: Recording started successfully"),
                     Err(e) => {
                         log::error!("Toggle: Error starting recording: {}", e);
@@ -184,9 +190,20 @@ fn handle_ptt_mode(
                 crate::perf::hotkey_pressed();
                 log::info!("PTT: Starting recording");
                 let app_handle = app.clone();
+                let permit = super::secure_input::StartPermit::capture(app);
                 tauri::async_runtime::spawn(async move {
+                    if !permit.is_current(&app_handle) {
+                        return;
+                    }
                     let recorder_state = app_handle.state::<RecorderState>();
-                    match start_recording(app_handle.clone(), recorder_state, None).await {
+                    match start_recording_with_permit(
+                        app_handle.clone(),
+                        recorder_state,
+                        None,
+                        permit,
+                    )
+                    .await
+                    {
                         Ok(_) => log::info!("PTT: Recording started successfully"),
                         Err(e) if e == PTT_START_ABORTED_AFTER_RELEASE => {
                             log::info!("PTT: Recording start cancelled after key release");

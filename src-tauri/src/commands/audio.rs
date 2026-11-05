@@ -4795,7 +4795,7 @@ async fn stop_recording_after_long_silence(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> Result<String, String> {
-    stop_recording_with_mode(app, state, Duration::ZERO).await
+    stop_recording_with_mode(app, state, Duration::ZERO, None).await
 }
 
 fn spawn_silence_event_listener(
@@ -5030,6 +5030,19 @@ pub async fn start_recording(
     state: State<'_, RecorderState>,
     source: Option<crate::recording::start_source::StartSource>,
 ) -> Result<bool, String> {
+    let start_permit = crate::recording::secure_input::StartPermit::capture(&app);
+    start_recording_with_permit(app, state, source, start_permit).await
+}
+
+pub(crate) async fn start_recording_with_permit(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+    source: Option<crate::recording::start_source::StartSource>,
+    start_permit: crate::recording::secure_input::StartPermit,
+) -> Result<bool, String> {
+    if !start_permit.is_current(&app) {
+        return Ok(false);
+    }
     let source = source.unwrap_or_default();
     let recording_start = Instant::now();
 
@@ -5088,9 +5101,10 @@ pub async fn start_recording(
         }
     }
 
-    // PTT guard: if recording mode is PushToTalk and the key was already released
-    // while validation was running, abort now. This prevents recording from starting
-    // after the user has already released the PTT key (e.g., during slow license checks).
+    // Release or a changed input route invalidates a pending start.
+    if !start_permit.is_current(&app) {
+        return Ok(false);
+    }
     {
         let app_state = app.state::<AppState>();
         if ptt_key_released(&app_state, source) {
@@ -5099,13 +5113,7 @@ pub async fn start_recording(
         }
     }
 
-    // Idempotent fast-path: if a recording is already starting or active — e.g. a
-    // redundant start from the in-app hotkey fallback racing the native hotkey
-    // path for one physical press — no-op BEFORE any side effects. This region is
-    // await-free through `update_recording_state(Starting)` below, so whichever
-    // caller publishes `Starting` first makes the other observe it here and return
-    // Ok, never bumping the generation, clobbering flags, or hitting the
-    // `Recording -> Starting` state-machine rejection.
+    // A redundant start returns false before any generation or state side effects.
     {
         let live_state = crate::get_recording_state(&app);
         if matches!(
@@ -5661,15 +5669,10 @@ pub async fn start_recording(
         return Ok(false);
     }
 
-    // Second PTT guard: check again right before committing to Recording state.
-    // Audio capture has already started; if PTT key was released between the first
-    // guard (before Starting) and now (e.g., during audio device init), stop immediately.
-    if ptt_key_released(&app_state, source) {
+    // Recheck ownership after device initialization, before publishing Recording.
+    if ptt_key_released(&app_state, source) || !start_permit.is_current(&app) {
         log::info!("PTT: Key was released during audio init; stopping recorder immediately");
-        // Stop the audio recorder synchronously before transitioning state.
-        // If this fails, do not pretend the app is idle: propagate the
-        // failure so the hotkey handler moves to Error and the recorder
-        // remains visible for recovery instead of orphaning capture.
+        // Stop before publishing Idle; propagate failures to avoid orphaning capture.
         let recorder_state_handle = app.state::<RecorderState>();
         let stop_result = recorder_state_handle
             .inner()
@@ -5710,7 +5713,11 @@ pub async fn start_recording(
         cleanup_recording_path();
 
         update_recording_state(&app, RecordingState::Idle, None);
-        return Err(PTT_START_ABORTED_AFTER_RELEASE.to_string());
+        return if start_permit.is_current(&app) {
+            Err(PTT_START_ABORTED_AFTER_RELEASE.to_string())
+        } else {
+            Ok(false)
+        };
     }
 
     spawn_island_context(&app, source, recording_generation);
@@ -5719,20 +5726,19 @@ pub async fn start_recording(
         .capture_files
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(capture_files);
-    // Update state to recording
     update_recording_state(&app, RecordingState::Recording, None);
     crate::product_analytics::capture_at(
         crate::product_analytics::ProductEvent::RecordingStarted,
         recording_generation,
     );
 
-    // If a stop was requested while starting (toggle or PTT), honor it immediately
-    // after entering Recording state. For PTT, key-up in Starting state sets this flag.
-    // The second PTT guard above handles key-up during audio init; this handles the
-    // narrow window between Starting transition and this point.
-    let pending_stop_requested = consume_pending_stop_after_start(
-        &app_state.pending_stop_after_start,
-        &app_state.pending_stop_requested,
+    // Honor stops arriving between the final start guard and publishing Recording.
+    let pending_stop_requested = start_permit.pending_stop(
+        &app,
+        consume_pending_stop_after_start(
+            &app_state.pending_stop_after_start,
+            &app_state.pending_stop_requested,
+        ),
     );
     let pending_stop_consumed = pending_stop_requested.is_some();
     if let Some(stop_requested) = pending_stop_requested {
@@ -5743,8 +5749,9 @@ pub async fn start_recording(
             if let Err(e) = stop_recording_with_mode_at(
                 app_handle.clone(),
                 recorder_state,
-                STOP_POST_ROLL,
+                start_permit.stop_post_roll(&app_handle, STOP_POST_ROLL),
                 stop_requested,
+                Some(recording_generation),
             )
             .await
             {
@@ -5809,7 +5816,6 @@ pub async fn start_recording(
         let _ = emit_to_window(&app, "pill", "recording-started", ());
     }
 
-    // Log successful recording start
     log_complete(
         "RECORDING_START",
         recording_start.elapsed().as_millis() as u64,
@@ -5832,15 +5838,16 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> Result<String, String> {
-    stop_recording_with_mode(app, state, STOP_POST_ROLL).await
+    stop_recording_with_mode(app, state, STOP_POST_ROLL, None).await
 }
 
-async fn stop_recording_with_mode(
+pub(crate) async fn stop_recording_with_mode(
     app: AppHandle,
     state: State<'_, RecorderState>,
     post_roll: Duration,
+    expected_generation: Option<u64>,
 ) -> Result<String, String> {
-    stop_recording_with_mode_at(app, state, post_roll, Instant::now()).await
+    stop_recording_with_mode_at(app, state, post_roll, Instant::now(), expected_generation).await
 }
 
 async fn stop_recording_with_mode_at(
@@ -5848,6 +5855,7 @@ async fn stop_recording_with_mode_at(
     state: State<'_, RecorderState>,
     post_roll: Duration,
     stop_requested: Instant,
+    expected_generation: Option<u64>,
 ) -> Result<String, String> {
     #[cfg(debug_assertions)]
     let stop_start = Instant::now();
@@ -5864,6 +5872,13 @@ async fn stop_recording_with_mode_at(
 
     let app_state = app.state::<AppState>();
     let state_before_queue = app_state.get_current_state();
+    if crate::recording::secure_input::system_stop_must_yield(
+        expected_generation,
+        current_recording_generation(),
+        state_before_queue,
+    ) {
+        return Ok(String::new());
+    }
     if queue_stop_during_start(
         state_before_queue,
         &app_state.pending_stop_after_start,
@@ -5880,6 +5895,9 @@ async fn stop_recording_with_mode_at(
     };
     let entry_state = app_state.get_current_state();
     let task_generation = current_recording_generation();
+    if expected_generation.is_some_and(|expected| expected != task_generation) {
+        return Ok(String::new());
+    }
 
     // Update state to stopping
     log_state_transition("RECORDING", "recording", "stopping", true, None);
@@ -5930,9 +5948,9 @@ async fn stop_recording_with_mode_at(
             return Ok(String::new());
         }
 
-        // Escape can wait up to STOP_POST_ROLL before drain begins because this
-        // command holds the recorder mutex; that bounded cancel delay is accepted.
-        let stop_message = match recorder.stop_recording_with_post_roll(post_roll) {
+        let stop_message = match recorder.stop_recording_with_post_roll(
+            crate::recording::secure_input::post_roll(task_generation, post_roll),
+        ) {
             Ok(msg) => msg,
             Err(e) => {
                 writer_pending = crate::recording::storage::writer_may_be_running(&e);

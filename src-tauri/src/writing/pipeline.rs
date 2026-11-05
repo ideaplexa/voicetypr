@@ -313,8 +313,11 @@ pub(crate) fn language_scope_matches(
 /// local history metadata and may drive explicit App Rules; AI availability only
 /// controls whether the derived coarse category is added to a Polish prompt.
 pub fn capture_active_app_context() -> Option<ContextHint> {
+    if keytrigger::backend::secure_input_enabled() {
+        return None;
+    }
     let window = get_active_window().ok()?;
-    if window.app_name.trim().is_empty() {
+    if window.app_name.trim().is_empty() || keytrigger::backend::secure_input_enabled() {
         return None;
     }
 

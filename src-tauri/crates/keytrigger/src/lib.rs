@@ -19,7 +19,9 @@
 pub mod backend;
 pub mod engine;
 pub mod matcher;
+pub mod secure_input;
 pub mod types;
+pub use secure_input::SecureInputState;
 
 pub use engine::{ConsumeSet, Control, KeyEventSource, Msg, ReadySignal, TriggerEngine};
 pub use matcher::Matcher;
