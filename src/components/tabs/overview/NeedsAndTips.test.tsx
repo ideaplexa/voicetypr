@@ -22,3 +22,13 @@ it.each([true, false])("offers retry, available alternatives, and deletion after
   await user.click(screen.getByRole("button", { name: /^Delete audio:/ }));
   expect(act.mock.lastCall?.[0].action).toEqual({ kind: "discard", id: "kept" });
 });
+
+it("does not blame or switch models for recovered audio with no attempted model", () => {
+  const [row] = homeNeeds({
+    kept: [{ id: "orphan", kind: "unknown", engine_short: "Unknown", alt_engine_short: "Whisper", alt_engine_id: "small.en", remaining_ms: 86400000, busy: false }],
+    updateVersion: null, status: { label: "Ready", ready: true }, accessibilityMissing: false,
+  });
+  expect(row.description).toContain("Recovered after an interrupted save.");
+  expect(row.description).not.toContain("Unknown couldn't finish");
+  expect(row.action).toEqual({ kind: "retry", id: "orphan", engine: null });
+});

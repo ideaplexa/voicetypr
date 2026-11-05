@@ -156,6 +156,7 @@ pub const ACTIONS: &[&str] = &[
     "paste",
 ];
 pub const RECOVERY: &[&str] = &[
+    "unknown",
     "cloud_failed",
     "network_offline",
     "model_missing",

@@ -15,6 +15,16 @@ it("names the failed model and only offers another model when available", () => 
   expect(recoveryCard({ ...failed, alt_engine_short: null, alt_engine_id: null }, 0).actions.map(a => a.label)).toEqual(["Retry again", "Delete audio"]);
 });
 
+it("retries recovered unknown audio with the selected source, not an unattempted alternative", async () => {
+  h = pillHarness(); await h.settle(0);
+  h.emit("dictation-recovery", { ...failed, kind: "unknown", engine_short: "Unknown", retry_failed: false });
+  await h.settle(1500);
+  expect(h.get('[data-key="recovery:clip"]').textContent).toContain("Recording recovered");
+  h.get('[data-key="recovery:clip"] .act').click(); await h.settle(500);
+  expect(h.invoke).toHaveBeenCalledWith("retry_kept_dictation", { id: "clip", engine: null });
+  expect(h.invoke).not.toHaveBeenCalledWith("retry_kept_dictation", { id: "clip", engine: "small.en" });
+});
+
 it.each(["retry", "alternative", "delete", "close"])("routes the failed card action without making Close delete: %s", async action => {
   h = pillHarness(); await h.settle(0);
   h.emit("dictation-recovery", failed); await h.settle(1500);

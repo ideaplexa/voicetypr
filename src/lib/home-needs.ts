@@ -64,11 +64,11 @@ export function homeNeeds({
     id: `kept:${clip.id}`,
     icon: "retry",
     title: clip.retry_failed ? `${clip.engine_short} couldn't transcribe this` : "A recording was kept",
-    description: clip.kind === "no_speech" && clip.remaining_ms <= 30_000 ? "No speech heard. Audio kept temporarily for 30 seconds." : `${clip.retry_failed ? "Recording kept." : `${clip.engine_short} couldn't finish it.`} Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
+    description: clip.kind === "no_speech" && clip.remaining_ms <= 30_000 ? "No speech heard. Audio kept temporarily for 30 seconds." : `${clip.retry_failed ? "Recording kept." : clip.kind === "unknown" ? "Recovered after an interrupted save." : `${clip.engine_short} couldn't finish it.`} Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
     button: clip.busy ? "Retrying…" : clip.retry_ready === false ? "Finishing…" : clip.retry_failed ? "Retry again" : clip.kind === "no_speech" ? "Transcribe anyway" : "Retry",
     disabled: clip.busy || clip.retry_ready === false,
     // Null reuses the last failed selection, not the current Settings model.
-    action: { kind: "retry", id: clip.id, engine: clip.retry_failed ? null : clip.alt_engine_id, ...(clip.kind === "no_speech" ? { anyway: true } : {}) },
+    action: { kind: "retry", id: clip.id, engine: clip.retry_failed || clip.kind === "unknown" ? null : clip.alt_engine_id, ...(clip.kind === "no_speech" ? { anyway: true } : {}) },
     discard: { kind: "discard", id: clip.id },
     ...(clip.retry_failed ? { discardLabel: "Delete audio" as const } : {}),
     ...(clip.retry_failed && clip.alt_engine_short && clip.alt_engine_id ? { alternative: { kind: "retry" as const, id: clip.id, engine: clip.alt_engine_id } } : {}),

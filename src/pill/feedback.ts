@@ -42,7 +42,7 @@ export function recoveryCard(e: DictationRecovery, now: number): FeedbackCard {
     model_missing: `${e.engine_short} isn't downloaded`, remote_offline: `${e.engine_short} is offline`,
     unknown: 'Recording recovered', integrity: 'Recording interrupted', no_speech: 'No speech heard',
   };
-  const actions: CardAction[] = e.retry_ready === false ? [] : e.kind === 'no_speech' ? [{label:'Transcribe anyway',call:{command:'transcribe_anyway',id:e.id}}] : e.alt_engine_short && e.alt_engine_id ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}}] : [];
+  const actions: CardAction[] = e.retry_ready === false ? [] : e.kind === 'unknown' ? [{label:'Retry',call:{command:'retry_kept_dictation',id:e.id,engine:null}}] : e.kind === 'no_speech' ? [{label:'Transcribe anyway',call:{command:'transcribe_anyway',id:e.id}}] : e.alt_engine_short && e.alt_engine_id ? [{label:`Retry with ${e.alt_engine_short}`,call:{command:'retry_kept_dictation',id:e.id,engine:e.alt_engine_id}}] : [];
   const sub = e.retry_ready === false ? 'Audio is still finishing…' : e.expires_in_ms > 600_000 ? 'Audio kept up to 7 days · Manage in Home' : e.kind === 'no_speech' ? 'Audio kept for 30 s' : 'Temporary audio · Manage in Home';
   return {...card(`recovery:${e.id}`,e.kind==='no_speech' ? titles[e.kind] : `${titles[e.kind]} · Recording kept`,sub,null,e.kind === 'no_speech' ? 'neutral' : 'amber',actions),recoveryGeneration:e.generation,retryFailed:false,closeLabel:'Close, recording kept',glyph:e.kind==='no_speech' ? 'quiet' : 'bang',expiresAt:now+e.expires_in_ms};
 }
