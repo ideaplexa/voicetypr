@@ -16,6 +16,9 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 #[path = "cursor.rs"]
 mod cursor;
 
+#[cfg(target_os = "macos")]
+pub(super) use cursor::configure as configure_cursor;
+
 #[cfg(any(target_os = "macos", test))]
 const POINTER_QUERY_MAX_AGE: Duration = Duration::from_millis(200);
 

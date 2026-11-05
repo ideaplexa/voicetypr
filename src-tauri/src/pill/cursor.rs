@@ -8,6 +8,36 @@ use objc2_app_kit::{NSCursor, NSEvent, NSWindow};
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
+/// WindowServer otherwise ignores NSCursor::set from an inactive application,
+/// even though currentCursor reports our cached hand. This opt-in affects only
+/// our own connection. update() still limits ownership to unobscured enabled
+/// buttons, and reset/exit releases it without activating the app.
+pub(crate) fn configure() -> Result<(), String> {
+    use std::ffi::c_void;
+    type Connection = unsafe extern "C" fn() -> i32;
+    type Property = unsafe extern "C" fn(i32, i32, *const c_void, *const c_void) -> i32;
+    // Private WindowServer SPI, resolved defensively rather than hard-linked.
+    // SAFETY: called on main after AppKit has created the panel/connection;
+    // NSString is toll-free bridged to CFString, kCFBooleanTrue to CFBoolean.
+    unsafe {
+        let connection = libc::dlsym(libc::RTLD_DEFAULT, c"CGSMainConnectionID".as_ptr());
+        let property = libc::dlsym(libc::RTLD_DEFAULT, c"CGSSetConnectionProperty".as_ptr());
+        let boolean = libc::dlsym(libc::RTLD_DEFAULT, c"kCFBooleanTrue".as_ptr());
+        if connection.is_null() || property.is_null() || boolean.is_null() {
+            return Err("Background cursor configuration unavailable".into());
+        }
+        let connection = std::mem::transmute::<*mut c_void, Connection>(connection)();
+        let property = std::mem::transmute::<*mut c_void, Property>(property);
+        let key = objc2_foundation::NSString::from_str("SetsCursorInBackground");
+        let enabled = *boolean.cast::<*const c_void>();
+        let key = (&*key as *const objc2_foundation::NSString).cast();
+        if property(connection, connection, key, enabled) != 0 {
+            return Err("Background cursor configuration failed".into());
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq)]
 enum Change {
     Hand,

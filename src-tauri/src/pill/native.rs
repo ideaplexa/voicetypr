@@ -107,6 +107,24 @@ fn configure_native<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String>
                 | objc2_app_kit::NSWindowStyleMask::NonactivatingPanel)
                 .bits() as i32,
         );
+        // to_panel() changes the class of an existing NSWindow, bypassing
+        // NSPanel initialization. setStyleMask: alone does not set WindowServer's
+        // prevents-activation tag, so a click can still activate the app even
+        // though this panel can never become key/main (AppKit FB16484811).
+        // The pinned plugin predates its upstream activation-state fix (#139).
+        unsafe {
+            let native = &*window
+                .ns_window()
+                .map_err(|e| e.to_string())?
+                .cast::<objc2_app_kit::NSWindow>();
+            let selector = objc2::sel!(_setPreventsActivation:);
+            use objc2::runtime::NSObjectProtocol;
+            if !native.respondsToSelector(selector) {
+                return Err("Nonactivating panel activation protection unavailable".into());
+            }
+            let _: () = objc2::msg_send![native, _setPreventsActivation: true];
+        }
+        super::hit_test::configure_cursor()?;
         panel.set_becomes_key_only_if_needed(true);
         panel.set_floating_panel(true);
         panel.set_level(objc2_app_kit::NSStatusWindowLevel as i32);
