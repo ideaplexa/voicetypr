@@ -9,24 +9,23 @@ performed for this handoff. Windows and installed-app checks below are
 **NEEDS-SMOKE**. Use only operator-approved, real speech.
 
 **Commit status:** `bc5010f2` contains the code port; `bdfb06a7` contains the
-separate lifecycle/cancellation review fixes. This documentation is the final
-committed handoff for the currently unblocked scope. The release-critical CI
-group remains uncommitted: Droid-Shield flagged
-`.github/workflows/parakeet-onnx-spike.yml:34` as a potential secret during the
-earlier combined commit attempt. That flagged workflow was not retried or
-bypassed. The founder must explicitly authorize fixing the flagged value, or
-commit the CI group outside Droid after assessing whether it is a false positive.
+separate lifecycle/cancellation review fixes. The release-critical CI group is
+committed as `bf0a64b2`. The founder renamed the model cache key that the secret
+scanner had falsely flagged, then committed that group. No CI commit or
+cache-key authorization remains outstanding.
+Terminal shutdown admission is fixed in `cc686d0a`, separately from reusable
+model-switch unload.
 
 ## Local gate evidence
 
 On macOS Apple Silicon, with no app launch or model download. All three Rust
-gates were rerun in full after the follow-up instruction and passed:
+gates were rerun in full after the terminal shutdown fix and passed:
 
 | Gate | Result |
 | --- | --- |
 | `pnpm install --frozen-lockfile` | Passed once, using the existing cache |
-| `cargo test --lib` | 2,236 passed, 25 ignored, zero failures |
-| `cargo clippy --workspace --all-targets -- -D warnings` | Passed after moving helpers before test modules |
+| `cargo test --lib` | 2,239 passed, 25 ignored, zero failures |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed, zero warnings |
 | `cargo fmt --check` | Passed |
 | `./node_modules/.bin/tsc --noEmit` | Passed |
 | `./node_modules/.bin/oxlint src --deny-warnings` | Passed, zero warnings |
@@ -61,6 +60,8 @@ static packaging and frontend compatibility. Fixes beyond the spike:
   and require cancellation to finish without waiting for its owner.
 - Recheck the unload epoch around native model construction and close admission
   again when clearing the slot.
+- Permanently close ONNX admission at desktop and CLI exit. A queued preload
+  rechecks shutdown after its gates, while model-switch unload stays reusable.
 - Unload ONNX in CLI teardown as well as desktop teardown.
 - Report a missing selected Parakeet model through the existing blocked-island
   and visible-main error paths, without stealing focus or silently using Whisper.
@@ -71,9 +72,9 @@ static packaging and frontend compatibility. Fixes beyond the spike:
 - Pin and hash the legacy research workflow's three model files. Add a separate
   NSIS artifact to native CI for installed-app hardware checks.
 
-This is self-review, **not independent adversarial approval**. Request fresh
-independent review of the native slot/gates, download recovery/publication and
-static packaging before integration. Native Windows code has not been compiled
+Independent review identified AVX2 admission and static-ORT/DirectML packaging
+blockers, which a separate worker is addressing. This follow-up addresses
+terminal shutdown admission, not those blockers. Native Windows code has not been compiled
 locally: the Rust MSVC target is installed, but a usable MSVC compiler/linker and
 Windows SDK are not available on this Mac. Do not install them for this slice.
 
@@ -87,7 +88,7 @@ These changes require release/packaging review, even though no workflow was run.
 | `.github/workflows/release.yml` | Cache static ORT and assert no ORT DLL import before installer signing/publication, so a runtime-linkage change cannot silently produce a broken release package. Existing publishing behavior is unchanged; do not dispatch it for branch validation. |
 | `.github/workflows/store-msix.yml` | Cache static ORT and run the same no-DLL-import assertion before uploading the Store package. Preserve the immutable-SHA and reviewed-main ancestry trust gates. |
 | `.github/workflows/windows-check.yml` | Cache ORT for the fast clippy/test lane and assert that `parakeet-rs` is absent from the Windows ARM64 dependency graph. Bundle placeholders remain code-check-only, not packaging evidence. |
-| `.github/workflows/parakeet-onnx-spike.yml` | Add the legacy standalone research workflow as manual-only, pin the three model files to the app's exact revision and SHA256 values, and use a locked build. This is optional export research, not integrated-app or Windows RSS acceptance. Its flagged cache key still needs explicit authorization before a commit can be retried. |
+| `.github/workflows/parakeet-onnx-spike.yml` | Add the legacy standalone research workflow as manual-only, pin the three model files to the app's exact revision and SHA256 values, and use a locked build. This is optional export research, not integrated-app or Windows RSS acceptance. Its cache-key false positive was resolved before commit `bf0a64b2`. |
 
 ## Exact CI entry points, only after approval and a push
 
