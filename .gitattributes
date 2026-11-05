@@ -1,3 +1,4 @@
 # Preserve upstream redistribution terms byte-for-byte, including CRLF.
 src-tauri/models/onnxruntime/LICENSE -text -diff
 src-tauri/models/onnxruntime/ThirdPartyNotices.txt -text -diff
+*.cmake text eol=lf

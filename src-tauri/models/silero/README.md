@@ -16,6 +16,13 @@ samples in the padded final frame. No segment filtering or chunk changes.
 
 Runtime: existing whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 whisper.cpp VAD,
 CPU only (`use_gpu=false`), one thread. No ONNX Runtime dependency on macOS.
+The macOS native build has a source-hash-pinned CPU VAD patch, installed by
+`.cargo/config.toml` through whisper-rs-sys's CMAKE_PROJECT_INCLUDE support.
+It patches only the disposable OUT_DIR copy: both VAD weight-buffer selection
+and execution use the CPU backend directly, avoiding global registry discovery
+that otherwise initializes Metal even with `use_gpu=false`. CPU extra buffer
+types and ordinary Whisper's existing Metal path are preserved. A link-time
+sentinel rejects stale/unpatched native archives; source changes fail closed.
 Intel VAD requires OS-enabled AVX, AVX2, FMA and F16C; otherwise the content-free
 reason is `runtime_unsupported`. Release/CI pin non-native ggml x86 flags,
 including AVX512 off. Those flags also pin the in-process Whisper CPU build.
@@ -31,6 +38,6 @@ exit entry bounds earlier/later teardown while admitted VAD work exists.
 Bootstrap installs a content-discarding native logger once, before workers.
 Caller-thread native errors make the result unavailable, including the pinned
 backend's otherwise-successful partial-compute path. No native text is emitted.
-Per-frame ONNX/ggml comparison and hardware gaps are recorded in plan 087.
+Per-frame ONNX/ggml comparison, cold Metal evidence and hardware gaps are in plan 087.
 That plan also records retained upstream native-OOM abort and filename-allocation
 limitations; short-run RSS is not a leak-free lifetime guarantee.

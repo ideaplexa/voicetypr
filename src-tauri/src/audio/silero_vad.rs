@@ -71,7 +71,7 @@ pub(crate) fn initialize_logging() {
     if cpu_supported() {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| {
-            // SAFETY: static, non-unwinding callback; never dereferences or emits text.
+            // SAFETY: static, non-unwinding callback; production never reads/emits text.
             unsafe { whisper_rs::set_log_callback(Some(native_log), std::ptr::null_mut()) };
         });
     }
@@ -99,8 +99,20 @@ unsafe extern "C" fn native_log(
     _text: *const std::ffi::c_char,
     _data: *mut std::ffi::c_void,
 ) {
+    #[cfg(test)]
+    if !_text.is_null() {
+        // SAFETY: whisper/ggml pass a live NUL-terminated message during this
+        // callback. Tests inspect only a static prefix and never emit the text.
+        let bytes = unsafe { std::ffi::CStr::from_ptr(_text) }.to_bytes();
+        if bytes.starts_with(b"ggml_metal_") || bytes.starts_with(b"ggml_backend_metal") {
+            METAL_LOGGED.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
     observe_native_log(level.into());
 }
+
+#[cfg(test)]
+static METAL_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 thread_local! {
@@ -162,6 +174,10 @@ mod runtime {
     const MAX_SECONDS: u32 = 120;
     const RATE: usize = 16_000;
     const WINDOW: usize = 512;
+    #[cfg(target_os = "macos")]
+    unsafe extern "C" {
+        fn voicetypr_vad_cpu_only_v1() -> i32;
+    }
 
     /// Streaming decode/downmix/resample, without normalization, trimming or timestamps
     /// rebased to a speech boundary. Memory is capped at 120 seconds of mono 16 kHz.
@@ -249,6 +265,11 @@ mod runtime {
             let mut model = tempfile::NamedTempFile::new().map_err(|_| "unavailable")?;
             model.write_all(MODEL).map_err(|_| "unavailable")?;
             let path = model.path().to_str().ok_or("unavailable")?;
+            #[cfg(target_os = "macos")]
+            // SAFETY: pinned native build sentinel, no arguments or resources.
+            if unsafe { voicetypr_vad_cpu_only_v1() } != 1 {
+                return Err("unavailable");
+            }
             let mut params = WhisperVadContextParams::new();
             params.set_use_gpu(false);
             params.set_n_threads(1);
@@ -311,6 +332,48 @@ mod runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cpu_vad_does_not_initialize_metal_in_a_fresh_process() {
+        const CHILD: &str = "VOICETYPR_TEST_CPU_VAD_NO_METAL";
+        if std::env::var_os(CHILD).is_some() {
+            initialize_logging();
+            let result = analyze(wav(&[0; 512], 16_000, 1), Duration::from_secs(10));
+            assert_eq!(
+                result.status,
+                if cpu_supported() {
+                    "complete"
+                } else {
+                    "runtime_unsupported"
+                }
+            );
+            assert!(!METAL_LOGGED.load(std::sync::atomic::Ordering::Relaxed));
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "audio::silero_vad::tests::cpu_vad_does_not_initialize_metal_in_a_fresh_process",
+            ])
+            .env(CHILD, "1")
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("CPU VAD child exceeded its deadline");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
     #[test]
     fn native_frame_errors_cannot_turn_zero_filled_probabilities_into_silence() {
         NATIVE_FAILED.set(false);

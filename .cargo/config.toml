@@ -1,0 +1,8 @@
+[env]
+# whisper-rs-sys 0.15 forwards CMAKE_* definitions to its native build.
+CMAKE_PROJECT_INCLUDE = { value = "src-tauri/cmake/vad-cpu-only-v1.cmake", relative = true }
+
+[target.'cfg(target_os = "macos")']
+# Separate pre-patch shared artifacts: upstream does not track CMAKE_* changes.
+# The native ABI sentinel also rejects stale libraries if RUSTFLAGS overrides this.
+rustflags = ["--cfg", "voicetypr_vad_cpu_only_v1"]
