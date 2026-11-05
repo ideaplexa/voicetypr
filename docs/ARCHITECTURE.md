@@ -89,13 +89,19 @@ Idle`; any → `Error`; `Error → Idle`. Transitions happen in
 | Engine | Where | Live preview | Notes |
 |---|---|---|---|
 | Whisper | in-process; Windows GPU via sidecar | decode-ahead re-decode | Metal on Apple Silicon; English default |
-| Parakeet TDT v3 | Swift sidecar | full-context decode-ahead (plan 070) | 25 European languages; optional CTC custom vocabulary |
+| Parakeet TDT v3 | macOS Swift sidecar; Windows x64 in-process ONNX | macOS decode-ahead; Windows final only | 25 European languages; CTC custom vocabulary on macOS only |
 | Parakeet Unified (EN) | Swift sidecar | native streaming | best English preview |
 | Nemotron multilingual | Swift sidecar | native streaming | |
 | Soniox | cloud | realtime WS (`stt-rt-v6`) | WS final authoritative; REST `stt-async-v6` fallback |
 | Deepgram | cloud | realtime WS | same authority model as Soniox |
 | OpenAI, Groq, Cohere | cloud | final only | |
 | Remote (LAN) | another Voicetypr (strong host, weak client) | final only | local network only |
+
+Windows Parakeet uses `parakeet/onnx/` with the official Microsoft CPU
+`onnxruntime.dll` beside the executable, lazily loaded by verified absolute
+path after CPU admission; Macs do not use ORT. `audio/vad_shadow.rs` runs
+whisper.cpp Silero CPU VAD after finalization, measuring only: it never gates
+capture, recognition or delivery.
 
 Soniox v5 selections resolve to v6 and are rewritten on settings save; history
 is untouched. Both transports use Bearer authentication (WS on the upgrade).

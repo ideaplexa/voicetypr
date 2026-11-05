@@ -63,6 +63,15 @@
 
 ## Windows runtime (direct installer)
 
+- Windows x64 Parakeet uses the official Microsoft ONNX Runtime 1.28.0 CPU
+  DLL, staged by `scripts/stage-windows-ort.cjs` using the pinned archive/DLL
+  SHA256 values in `src-tauri/models/onnxruntime/provenance.json`. NSIS and MSIX
+  put `onnxruntime.dll` beside the executable with its notices. Loading is lazy
+  and CPU-admitted; no static ORT or DirectML. CI checks native imports and the
+  main executable's linker MAP to enforce that design.
+- Windows builds use `.github/actions/ggml-cpu-baseline`; Windows artifact
+  uploaders must pass `.github/actions/ivy-bridge-smoke` (Intel SDE, no AVX2)
+  first. This CLI admission check is not real-speech or installed-app smoke.
 - No `vc_redist.x64.exe` and no Vulkan runtime installer ship or run.
   `voicetypr.exe` is built with the static CRT, but whisper-rs OpenMP imports
   `vcomp140.dll`, so the build stages the Visual C++ runtime DLLs (CRT + OpenMP)
@@ -89,6 +98,11 @@
   fresh VM without VC++ stays NEEDS-SMOKE (`plans/082`, B.2).
 - `windows-check.yml` only stubs the resources (`vcredist/placeholder.dll`,
   `voicetypr.pdb`, a sidecar) so clippy and tests compile; it builds no installer.
+
+macOS native builds apply the CPU-only whisper.cpp VAD patch through
+`.cargo/config.toml`. Preserve `--cfg voicetypr_vad_cpu_only_v1` when appending
+Rust linker flags and keep the CPU-VAD cache epoch separate from pre-patch
+artifacts; the native link sentinel rejects stale archives. No ORT ships on Mac.
 
 ## Discipline
 
