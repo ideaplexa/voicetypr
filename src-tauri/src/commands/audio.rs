@@ -4889,6 +4889,8 @@ fn spawn_silence_event_listener(
 }
 
 pub(crate) use crate::recording::start_source::ptt_key_released;
+#[path = "audio_start.rs"]
+mod start_cleanup;
 
 /// Pins the island's monitor and sends its dictation context (app, mic, Polish,
 /// engine) once audio flows. The device and window lookups cost 50–200 ms, so
@@ -5672,47 +5674,7 @@ pub(crate) async fn start_recording_with_permit(
     // Recheck ownership after device initialization, before publishing Recording.
     if ptt_key_released(&app_state, source) || !start_permit.is_current(&app) {
         log::info!("PTT: Key was released during audio init; stopping recorder immediately");
-        // Stop before publishing Idle; propagate failures to avoid orphaning capture.
-        let recorder_state_handle = app.state::<RecorderState>();
-        let stop_result = recorder_state_handle
-            .inner()
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to acquire recorder lock: {}", e))
-            .and_then(|mut recorder| {
-                if recorder.is_recording() {
-                    recorder.stop_recording()
-                } else {
-                    Ok(String::new())
-                }
-            });
-
-        clear_pending_stop_after_start(&app_state);
-        MEDIA_CONTROLLER.resume_if_we_paused();
-
-        let cleanup_recording_path = || {
-            if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
-                if let Some(path) = path_guard.take() {
-                    crate::recording::storage::remove_finished_audio(&path);
-                }
-            }
-        };
-
-        capture_files.writer_stopped(
-            stop_result
-                .as_ref()
-                .err()
-                .is_some_and(|e| crate::recording::storage::writer_may_be_running(e)),
-        );
-        if let Err(error) = stop_result {
-            cleanup_recording_path();
-            return Err(error);
-        }
-
-        // Clean up the audio file
-        cleanup_recording_path();
-
-        update_recording_state(&app, RecordingState::Idle, None);
+        start_cleanup::abort_start(&app, &capture_files)?;
         return if start_permit.is_current(&app) {
             Err(PTT_START_ABORTED_AFTER_RELEASE.to_string())
         } else {
