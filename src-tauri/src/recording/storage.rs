@@ -17,34 +17,45 @@ const ORPHAN_AGE: Duration = Duration::from_secs(10 * 60);
 const FILE_JOB_ORPHAN_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 static ACTIVE: Lazy<Mutex<HashMap<PathBuf, Weak<CaptureDirectory>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+const CAPTURE_AUDIO_FILE: &str = "recording.wav";
+
+pub(super) fn capture_audio_path(app_data: &Path, id: &str) -> PathBuf {
+    app_data.join("captures").join(id).join(CAPTURE_AUDIO_FILE)
+}
 
 #[derive(Clone)]
 pub(crate) struct CaptureFiles(Arc<CaptureDirectory>);
 struct CaptureDirectory {
     path: PathBuf,
     writer_pending: AtomicBool,
+    preserve_on_exit: AtomicBool,
 }
 
 impl CaptureFiles {
     pub fn create(app_data: &Path) -> Result<Self, String> {
-        let path = app_data
-            .join("captures")
-            .join(uuid::Uuid::new_v4().to_string());
+        let path = capture_audio_path(app_data, &uuid::Uuid::new_v4().to_string())
+            .parent()
+            .unwrap()
+            .to_owned();
         // Register before creating any files. The sweep holds this same lock.
         let mut active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
         std::fs::create_dir_all(&path).map_err(|_| "Capture storage unavailable")?;
         let files = Self(Arc::new(CaptureDirectory {
             path: path.clone(),
             writer_pending: AtomicBool::new(true),
+            preserve_on_exit: AtomicBool::new(false),
         }));
         active.insert(path, Arc::downgrade(&files.0));
         Ok(files)
     }
     pub fn audio_path(&self) -> PathBuf {
-        self.0.path.join("recording.wav")
+        self.0.path.join(CAPTURE_AUDIO_FILE)
     }
     pub fn writer_stopped(&self, pending: bool) {
         self.0.writer_pending.store(pending, Ordering::Release);
+    }
+    pub(super) fn preserve_on_exit(&self) {
+        self.0.preserve_on_exit.store(true, Ordering::Release);
     }
     pub fn for_path(path: &Path) -> Option<Self> {
         ACTIVE
@@ -64,6 +75,9 @@ pub fn writer_may_be_running(error: &str) -> bool {
 
 impl Drop for CaptureDirectory {
     fn drop(&mut self) {
+        if self.preserve_on_exit.load(Ordering::Acquire) {
+            return; // Recovery's private index now owns this capture, not cleanup.
+        }
         let path = self.path.clone();
         let pending = self.writer_pending.load(Ordering::Acquire);
         // Aborted async tasks still release their take. A timed-out writer must

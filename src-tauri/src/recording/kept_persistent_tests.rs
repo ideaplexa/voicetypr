@@ -1,6 +1,172 @@
 use super::*;
 
 #[test]
+fn finalization_after_the_last_poll_is_promoted_at_quit() {
+    let data = tempfile::tempdir().unwrap();
+    let source = data.path().join("capture.wav");
+    let writer = super::super::availability_tests::writer(&source);
+    let mut store = Store::default();
+    let recovery = store
+        .retain(
+            &data.path().join(DIRECTORY),
+            &source,
+            7,
+            RecoveryKind::Integrity,
+        )
+        .unwrap();
+    assert!(!store.clips[0].recovery.retry_ready);
+    writer.finalize().unwrap(); // No availability poll after this point.
+    store.preserve_on_exit();
+    store.clear();
+    let mut restarted = Store::default();
+    restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert_eq!(restarted.clips.len(), 1);
+    assert_eq!(restarted.clips[0].recovery.id, recovery.id);
+    assert!(restarted.clips[0].recovery.retry_ready);
+    restarted.clear();
+}
+
+#[test]
+fn pending_or_unmovable_capture_survives_quit_and_restarts_from_its_opaque_id() {
+    for finalize_before_quit in [false, true] {
+        let data = tempfile::tempdir().unwrap();
+        let files = super::super::super::storage::CaptureFiles::create(data.path()).unwrap();
+        let source = files.audio_path();
+        let writer = super::super::availability_tests::writer(&source);
+        let mut store = Store::default();
+        let recovery = store
+            .retain(
+                &data.path().join(DIRECTORY),
+                &source,
+                7,
+                RecoveryKind::Integrity,
+            )
+            .unwrap();
+        let target = store.clips[0].target.clone();
+        let index = target.with_extension("json");
+        let deadline = store.clips[0].disk.as_ref().unwrap().expires_at_ms;
+        let writer = if finalize_before_quit {
+            writer.finalize().unwrap();
+            std::fs::create_dir(&target).unwrap(); // Fails both rename and copy.
+            None
+        } else {
+            Some(writer)
+        };
+        // handoff() can still be awaiting model labels after retain().
+        store.fallback.push((source.clone(), Some(files.clone())));
+        store.preserve_on_exit();
+        store.clear();
+        drop(files); // CaptureDirectory::drop must not schedule original deletion.
+        assert!(source.exists());
+        let bytes = std::fs::read(&index).unwrap();
+        let entry: Entry = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(entry.expires_at_ms, deadline);
+        assert!(entry.capture_id.is_some());
+        assert!(!String::from_utf8(bytes)
+            .unwrap()
+            .contains(data.path().to_str().unwrap()));
+        if let Some(writer) = writer {
+            writer.finalize().unwrap();
+        }
+        if finalize_before_quit {
+            std::fs::remove_dir(&target).unwrap();
+        }
+        let mut restarted = Store::default();
+        restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
+        assert_eq!(restarted.clips.len(), 1);
+        assert_eq!(restarted.clips[0].recovery.id, recovery.id);
+        assert_eq!(restarted.clips[0].path, target);
+        assert!(finalized_wav(&target));
+        assert!(!source.exists());
+        restarted.clear();
+    }
+}
+
+#[test]
+fn interrupted_writer_header_is_repaired_on_a_copy_after_restart() {
+    use std::io::{Seek, SeekFrom, Write};
+    let data = tempfile::tempdir().unwrap();
+    let files = super::super::super::storage::CaptureFiles::create(data.path()).unwrap();
+    let source = files.audio_path();
+    let writer = super::super::availability_tests::writer(&source);
+    let mut store = Store::default();
+    let recovery = store
+        .retain(
+            &data.path().join(DIRECTORY),
+            &source,
+            7,
+            RecoveryKind::Integrity,
+        )
+        .unwrap();
+    writer.finalize().unwrap();
+    let reader = hound::WavReader::open(&source).unwrap();
+    let expected: Vec<i16> = reader.into_samples().map(Result::unwrap).collect();
+    let reader = hound::WavReader::new(std::fs::File::open(&source).unwrap()).unwrap();
+    let data_start = reader.into_inner().stream_position().unwrap();
+    // Process death leaves samples on disk but the two size fields stale.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&source)
+        .unwrap();
+    file.seek(SeekFrom::Start(4)).unwrap();
+    file.write_all(&0u32.to_le_bytes()).unwrap();
+    file.seek(SeekFrom::Start(data_start - 4)).unwrap();
+    file.write_all(&0u32.to_le_bytes()).unwrap();
+    drop(file);
+    store.preserve_on_exit();
+    store.clear();
+    drop(files);
+    let mut restarted = Store::default();
+    restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert_eq!(restarted.clips.len(), 1);
+    assert_eq!(restarted.clips[0].recovery.id, recovery.id);
+    assert!(restarted.clips[0].recovery.retry_ready);
+    let recovered: Vec<i16> = hound::WavReader::open(&restarted.clips[0].path)
+        .unwrap()
+        .into_samples()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(recovered, expected);
+    assert!(!source.exists());
+    restarted.clear();
+}
+
+#[test]
+fn interrupted_promotion_prefers_the_full_capture_over_a_partial_target() {
+    let data = tempfile::tempdir().unwrap();
+    let files = super::super::super::storage::CaptureFiles::create(data.path()).unwrap();
+    let source = files.audio_path();
+    let writer = super::super::availability_tests::writer(&source);
+    let mut store = Store::default();
+    let recovery = store
+        .retain(
+            &data.path().join(DIRECTORY),
+            &source,
+            7,
+            RecoveryKind::Integrity,
+        )
+        .unwrap();
+    let target = store.clips[0].target.clone();
+    writer.finalize().unwrap();
+    let complete = std::fs::read(&source).unwrap();
+    std::fs::write(&target, &complete[..complete.len() - 2]).unwrap();
+    let partial = std::fs::read(&target).unwrap();
+    assert!(durable::recover_interrupted_capture(&target, &target).is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), partial);
+    // Simulate process death between copy and source unlink, not a graceful quit.
+    files.preserve_on_exit();
+    store.clips.clear();
+    drop(files);
+    let mut restarted = Store::default();
+    restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
+    assert_eq!(restarted.clips.len(), 1);
+    assert_eq!(restarted.clips[0].recovery.id, recovery.id);
+    assert!(restarted.clips[0].recovery.retry_ready);
+    assert_eq!(std::fs::read(&target).unwrap(), complete);
+    restarted.clear();
+}
+
+#[test]
 fn failed_intent_and_unlink_retain_the_owner_and_report_delete_failure() {
     let data = tempfile::tempdir().unwrap();
     let mut store = Store::default();
@@ -31,6 +197,48 @@ fn failed_intent_and_unlink_retain_the_owner_and_report_delete_failure() {
     let mut restarted = Store::default();
     restarted.load_disk(&data.path().join(DIRECTORY), now_ms());
     assert!(restarted.clips.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn pending_polls_do_not_rewrite_the_capture_index() {
+    use std::os::unix::fs::MetadataExt;
+    let data = tempfile::tempdir().unwrap();
+    let files = super::super::super::storage::CaptureFiles::create(data.path()).unwrap();
+    let source = files.audio_path();
+    let writer = super::super::availability_tests::writer(&source);
+    let mut store = Store::default();
+    let recovery = store
+        .retain(
+            &data.path().join(DIRECTORY),
+            &source,
+            7,
+            RecoveryKind::Integrity,
+        )
+        .unwrap();
+    let index = store.clips[0].target.with_extension("json");
+    let inode = std::fs::metadata(&index).unwrap().ino();
+    for _ in 0..4 {
+        assert!(
+            !store
+                .poll_finalization(&recovery.id, Instant::now())
+                .unwrap()
+                .0
+        );
+    }
+    assert_eq!(std::fs::metadata(&index).unwrap().ino(), inode);
+    writer.finalize().unwrap();
+    std::fs::create_dir(&store.clips[0].target).unwrap();
+    store.apply_availability(probe_availability(store.availability_paths(None)));
+    assert!(
+        store
+            .poll_finalization(&recovery.id, Instant::now())
+            .unwrap()
+            .0,
+        "A finalized source ends polling even if promotion is blocked"
+    );
+    store.preserve_on_exit();
+    drop(files);
 }
 
 #[test]
@@ -91,6 +299,25 @@ fn unwritable_directory_never_reports_delete_success_or_drops_audio_ownership() 
     let mut restarted = Store::default();
     restarted.load_disk(&dir, now_ms());
     assert!(restarted.clips.is_empty());
+}
+
+#[test]
+fn capture_references_reject_path_components_and_substituted_directories() {
+    let data = tempfile::tempdir().unwrap();
+    let dir = data.path().join(DIRECTORY);
+    assert!(capture_source(&dir, "../capture").is_none());
+    assert!(capture_source(&dir, "/tmp/capture").is_none());
+    let files = super::super::super::storage::CaptureFiles::create(data.path()).unwrap();
+    let path = files.audio_path();
+    let id = path
+        .parent()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(capture_source(&dir, id), Some(path));
+    files.preserve_on_exit();
 }
 
 fn retain(store: &mut Store, data: &Path) -> Recovery {

@@ -55,6 +55,52 @@ pub(super) fn replace_index(file: tempfile::NamedTempFile, target: &Path) -> io:
     sync_parent(target)
 }
 
+/// Startup only, after the old process/writer is gone. Repair a separate copy
+/// of our recorder's PCM16 WAV, preserving the original on every failure.
+pub(super) fn recover_interrupted_capture(source: &Path, target: &Path) -> io::Result<()> {
+    use io::{Read, Seek, SeekFrom, Write};
+    if source == target {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let reader = hound::WavReader::new(std::fs::File::open(source)?).map_err(io::Error::other)?;
+    let spec = reader.spec();
+    if spec.bits_per_sample != 16
+        || spec.sample_format != hound::SampleFormat::Int
+        || spec.channels == 0
+    {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    let mut input = reader.into_inner();
+    let data_start = input.stream_position()?;
+    let frame_bytes = u64::from(spec.channels) * 2;
+    let available = input
+        .metadata()?
+        .len()
+        .checked_sub(data_start)
+        .ok_or(io::ErrorKind::InvalidData)?;
+    let data_len = available / frame_bytes * frame_bytes;
+    let end = data_start + data_len;
+    if data_start < 8 || data_len == 0 || end - 8 > u64::from(u32::MAX) {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    let mut file = tempfile::Builder::new()
+        .prefix(".index-")
+        .tempfile_in(target.parent().ok_or(io::ErrorKind::InvalidInput)?)?;
+    input.seek(SeekFrom::Start(0))?;
+    if io::copy(&mut input.take(end), &mut file)? != end {
+        return Err(io::ErrorKind::UnexpectedEof.into());
+    }
+    file.as_file_mut().set_len(end)?;
+    file.seek(SeekFrom::Start(data_start - 4))?;
+    file.write_all(&(data_len as u32).to_le_bytes())?;
+    file.seek(SeekFrom::Start(4))?;
+    file.write_all(&((end - 8) as u32).to_le_bytes())?;
+    file.flush()?;
+    replace_index(file, target)?;
+    let _ = unlink_committed(source);
+    Ok(())
+}
+
 pub(super) fn unlink_committed(path: &Path) -> bool {
     (std::fs::remove_file(path).is_ok()
         || std::fs::symlink_metadata(path)

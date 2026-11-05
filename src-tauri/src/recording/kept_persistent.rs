@@ -37,6 +37,26 @@ struct Entry {
     recovery: Recovery,
     #[serde(default)]
     selection: Option<RetrySelection>,
+    // Opaque app-owned capture UUID only, never an arbitrary source path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    capture_id: Option<String>,
+}
+
+fn capture_source(dir: &Path, id: &str) -> Option<PathBuf> {
+    uuid::Uuid::parse_str(id).ok()?;
+    let audio = super::super::storage::capture_audio_path(dir.parent()?, id);
+    let capture = audio.parent()?;
+    for path in [capture.parent()?, capture] {
+        if !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !alias(&m)) {
+            return None;
+        }
+    }
+    Some(audio)
+}
+
+fn capture_id(clip: &Clip, dir: &Path) -> Option<String> {
+    let id = clip.path.parent()?.file_name()?.to_str()?;
+    (capture_source(dir, id)? == clip.path).then(|| id.into())
 }
 
 impl DiskClip {
@@ -71,6 +91,11 @@ impl DiskClip {
         durable::sync_parent(&clip.path)?;
         let dir = self.index.parent().unwrap();
         durable::sync_parent(dir)?;
+        if capture_id(clip, dir).is_some() {
+            let capture_dir = clip.path.parent().unwrap();
+            durable::sync_parent(capture_dir)?;
+            durable::sync_parent(capture_dir.parent().unwrap())?;
+        }
         self.write_deadline(
             clip,
             if clip.retire_after_retry {
@@ -92,6 +117,7 @@ impl DiskClip {
             expires_at_ms,
             recovery: clip.recovery.clone(),
             selection: clip.retry_selection.clone(),
+            capture_id: capture_id(clip, self.index.parent().unwrap()),
         };
         let mut file = tempfile::Builder::new()
             .prefix(".index-")
@@ -108,8 +134,11 @@ impl Store {
             return;
         };
         if let Some(disk) = &clip.disk {
-            // Never index an unfinished writer or a source outside our directory.
-            if clip.path == clip.target && clip.recovery.retry_ready && disk.write(clip).is_err() {
+            // Pending writers keep an opaque capture reference until promotion.
+            if (clip.path == clip.target
+                || capture_id(clip, disk.index.parent().unwrap()).is_some())
+                && disk.write(clip).is_err()
+            {
                 log::warn!("Could not persist failed recording recovery");
                 if let Some(app) = &self.app {
                     super::super::island::note(
@@ -123,15 +152,45 @@ impl Store {
     }
 
     pub(super) fn preserve_on_exit(&mut self) {
-        // Persist before detaching ownership. Explicit Reset still calls clear().
+        // The last availability poll is not a shutdown barrier. Probe again.
+        let ids: Vec<_> = self
+            .clips
+            .iter()
+            .filter(|c| c.disk.is_some())
+            .map(|c| c.recovery.id.clone())
+            .collect();
+        for id in ids {
+            if let Some(clip) = self.clips.iter_mut().find(|c| c.recovery.id == id) {
+                clip.recovery.retry_ready = finalized_wav(&clip.path);
+            }
+            self.promote(&id);
+        }
+        let preserved: std::collections::HashSet<_> = self
+            .clips
+            .iter()
+            .filter(|c| c.disk.is_some())
+            .map(|c| c.path.clone())
+            .collect();
+        self.fallback.retain(|(path, files)| {
+            if !preserved.contains(path) {
+                return true;
+            }
+            if let Some(files) = files {
+                files.preserve_on_exit();
+            }
+            false // An in-flight handoff must not unlink the preserved original.
+        });
+        // Every durable owner is excluded from clear(), even if promotion or
+        // index refresh failed. Never delete the only copy as a quit side effect.
         self.clips.retain(|clip| {
             !clip.disk.as_ref().is_some_and(|disk| {
-                clip.path == clip.target && clip.recovery.retry_ready && {
-                    // A failed index save leaves a recoverable UUID WAV.
-                    // Never turn a temporary disk error into deletion on quit.
-                    let _ = disk.write(clip);
-                    true
+                let _ = disk.write(clip);
+                if clip.path != clip.target {
+                    if let Some(files) = &clip._capture_files {
+                        files.preserve_on_exit();
+                    }
                 }
+                true
             })
         });
     }
@@ -153,7 +212,7 @@ impl Store {
             if uuid::Uuid::parse_str(id).is_err() {
                 continue;
             }
-            let wav = dir.join(format!("{id}.wav"));
+            let mut wav = dir.join(format!("{id}.wav"));
             let Ok(metadata) = std::fs::symlink_metadata(&path) else {
                 continue;
             };
@@ -172,11 +231,14 @@ impl Store {
             if expired {
                 // Keep the expired index if unlinking fails, otherwise the WAV
                 // could be resurrected as an orphan on the following launch.
-                if std::fs::remove_file(&wav).is_ok()
-                    || std::fs::symlink_metadata(&wav)
-                        .err()
-                        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-                {
+                let capture = item
+                    .as_ref()
+                    .and_then(|i| i.capture_id.as_deref())
+                    .and_then(|id| capture_source(dir, id));
+                let capture_removed = capture
+                    .as_ref()
+                    .is_none_or(|p| durable::unlink_committed(p));
+                if capture_removed && durable::unlink_committed(&wav) {
                     let _ = std::fs::remove_file(&path);
                 }
                 continue;
@@ -186,10 +248,34 @@ impl Store {
                 let _ = std::fs::remove_file(&path);
                 continue; // Recover finalized audio separately, never delete it here.
             };
+            if !std::fs::symlink_metadata(&wav).is_ok_and(|m| m.is_file() && !alias(&m))
+                || !finalized_wav(&wav)
+            {
+                if let Some(source) = item
+                    .capture_id
+                    .as_deref()
+                    .and_then(|id| capture_source(dir, id))
+                    .filter(|p| {
+                        std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file() && !alias(&m))
+                    })
+                {
+                    wav = source;
+                }
+            }
             match std::fs::symlink_metadata(&wav) {
                 Ok(m) if m.is_file() && !alias(&m) => {
+                    if wav != path.with_extension("wav")
+                        && item.capture_id.is_some()
+                        && !finalized_wav(&wav)
+                        && super::super::storage::CaptureFiles::for_path(&wav).is_none()
+                    {
+                        let target = path.with_extension("wav");
+                        if durable::recover_interrupted_capture(&wav, &target).is_ok() {
+                            wav = target;
+                        }
+                    }
                     // A transient open/read failure is not corrupt metadata.
-                    if !finalized_wav(&wav) {
+                    if !finalized_wav(&wav) && item.capture_id.is_none() {
                         continue;
                     }
                 }
@@ -202,7 +288,7 @@ impl Store {
             // Restored takes belong to no live capture. Idle Cancel must not discard them.
             item.recovery.generation = u64::MAX;
             item.recovery.expires_in_ms = item.expires_at_ms - now;
-            item.recovery.retry_ready = true;
+            item.recovery.retry_ready = finalized_wav(&wav);
             if let Some(selection) = &item.selection {
                 item.recovery.engine_short = selection.short_name();
             }
@@ -248,7 +334,7 @@ impl Store {
                 _retry_trace_lease: None,
                 retry_selection: item.selection,
                 recovery: item.recovery,
-                target: path.clone(),
+                target: index.with_extension("wav"),
                 path,
                 expires,
                 busy: false,
@@ -263,6 +349,7 @@ impl Store {
             };
             let id = clip.recovery.id.clone();
             if self.insert(clip).is_ok() {
+                self.promote(&id);
                 self.persist(&id);
             }
         }
@@ -294,6 +381,7 @@ fn recover_orphan(path: &Path, id: &str, now: u64) -> Option<Entry> {
         version: 1,
         expires_at_ms,
         selection: None,
+        capture_id: None,
         recovery: Recovery {
             generation: u64::MAX,
             id: id.into(),

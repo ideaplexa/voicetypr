@@ -474,9 +474,16 @@ impl Store {
         if !self.promote(id) {
             return None;
         }
-        self.persist(id);
+        if self
+            .clips
+            .iter()
+            .any(|c| c.recovery.id == id && c.recovery.retry_ready)
+        {
+            self.persist(id);
+        }
         let clip = self.clips.iter_mut().find(|c| c.recovery.id == id)?;
-        let ready = clip.recovery.retry_ready && (clip.disk.is_none() || clip.path == clip.target);
+        // A finalized capture-backed original is also leaseable and indexed.
+        let ready = clip.recovery.retry_ready;
         // A hydration/Home probe may have refreshed the cache first. That
         // must not suppress the notification to an already-rendered card.
         let publication = if ready && clip.announced && !clip.busy && clip.remaining_ms(now) > 0 {
