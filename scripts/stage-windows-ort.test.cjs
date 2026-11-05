@@ -272,3 +272,21 @@ test("native import pattern rejects ORT and DirectML, not unrelated system impor
   }
   assert.equal(imports.test("    KERNEL32.dll"), false);
 });
+
+test("every Windows artifact uploader runs the Ivy Bridge gate first", () => {
+  let uploaders = 0;
+  const ungated = [];
+  for (const file of ["ci.yml", "native-ci.yml", "release.yml", "store-msix.yml", "windows-check.yml"]) {
+    const source = fs.readFileSync(path.join(repo, ".github/workflows", file), "utf8");
+    for (const job of source.split(/(?=^  [\w-]+:)/m)) {
+      const upload = job.indexOf("uses: actions/upload-artifact@");
+      if (!/runs-on:\s*windows-/.test(job) || upload < 0) continue;
+      uploaders += 1;
+      const smoke = job.indexOf("uses: ./.github/actions/ivy-bridge-smoke");
+      if (smoke < 0 || smoke > upload) ungated.push(file);
+      else assert.match(job.slice(smoke, upload), /timeout-minutes: 15/);
+    }
+  }
+  assert.ok(uploaders >= 3, "Expected preview, release and Store Windows uploaders");
+  assert.deepEqual(ungated, []);
+});

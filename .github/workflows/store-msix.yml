@@ -195,6 +195,12 @@ jobs:
         run: |
           & ./src-tauri/windows/assert-no-onnxruntime-import.ps1 -ExePath "$env:CARGO_TARGET_DIR\release\voicetypr.exe" -MapPath "$env:CARGO_TARGET_DIR/voicetypr.map"
 
+      - name: Check CLI on Ivy Bridge (no AVX2, Intel SDE)
+        uses: ./.github/actions/ivy-bridge-smoke
+        timeout-minutes: 15
+        with:
+          executable-path: ${{ env.CARGO_TARGET_DIR }}/release/voicetypr.exe
+
       - name: Upload Store MSIX artifact
         uses: actions/upload-artifact@v6
         with:
