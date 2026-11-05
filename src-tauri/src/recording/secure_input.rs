@@ -1,6 +1,52 @@
 //! Secure Input interrupts capture, not the user's keyboard protection.
+use crate::audio::recorder::CaptureInterrupt;
 use std::time::{Duration, Instant};
 use tauri::Manager;
+
+/// The slot only locates a generation's latch. Each worker keeps its own latch,
+/// so a retired sender or delayed system stop can never signal a replacement.
+#[derive(Default)]
+pub(crate) struct CaptureInterrupts(std::sync::Mutex<Option<(u64, CaptureInterrupt)>>);
+
+impl CaptureInterrupts {
+    pub(crate) fn begin(&self, generation: u64) -> CaptureInterrupt {
+        let interrupt = CaptureInterrupt::default();
+        let previous = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace((generation, interrupt.clone()));
+        if let Some((_, retired)) = previous {
+            retired.interrupt();
+        }
+        interrupt
+    }
+
+    fn is_interrupted(&self, generation: u64) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|(owned, signal)| *owned == generation && signal.is_interrupted())
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn interrupt(&self, generation: u64) -> bool {
+        let interrupt = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .filter(|(owned, _)| *owned == generation)
+            .map(|(_, signal)| signal.clone());
+        if let Some(interrupt) = interrupt {
+            interrupt.interrupt();
+            true
+        } else {
+            false
+        }
+    }
+}
 
 /// A start validating across a hotkey-route change must not open the mic later.
 pub(crate) struct StartPermit(keytrigger::SecureInputState);
@@ -18,6 +64,25 @@ impl StartPermit {
                 .state::<crate::AppState>()
                 .trigger_engine
                 .secure_input_state()
+    }
+
+    /// The final construction boundary, after asynchronous settings/remote work.
+    pub(crate) fn start_if_current<R: tauri::Runtime, T, E>(
+        &self,
+        app: &tauri::AppHandle<R>,
+        generation: u64,
+        interrupt: &CaptureInterrupt,
+        start: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Option<T>, E> {
+        if !self.is_current(app)
+            || interrupt.is_interrupted()
+            || crate::commands::audio::recording_generation_is_stale(generation)
+        {
+            interrupt.interrupt();
+            Ok(None)
+        } else {
+            start().map(Some)
+        }
     }
 
     /// Covers a route change between the final start guard and Recording.
@@ -59,35 +124,26 @@ pub(crate) fn system_stop_must_yield(
         .is_some_and(|generation| generation != current || state == crate::RecordingState::Starting)
 }
 
-#[cfg(target_os = "macos")]
-static INTERRUPTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
-
-pub(crate) fn post_roll(generation: u64, requested: Duration) -> Duration {
-    #[cfg(target_os = "macos")]
-    if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) == generation {
+pub(crate) fn post_roll(
+    app_state: &crate::AppState,
+    generation: u64,
+    requested: Duration,
+) -> Duration {
+    if app_state.capture_interrupts.is_interrupted(generation) {
         return Duration::ZERO;
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = generation;
     requested
 }
 
 #[cfg(target_os = "macos")]
 pub(crate) fn changed(app: &tauri::AppHandle, state: keytrigger::SecureInputState) {
-    use std::sync::atomic::Ordering;
     let app_state = app.state::<crate::AppState>();
     let held = clear_holds(&app_state);
     if state.enabled {
         app_state.take_recording_app_context();
     }
     let generation = crate::commands::audio::current_recording_generation();
-    if (state.enabled || held)
-        && matches!(
-            app_state.get_current_state(),
-            crate::RecordingState::Starting | crate::RecordingState::Recording
-        )
-    {
-        INTERRUPTED.store(generation, Ordering::SeqCst);
+    if interrupt_capture(&app_state, generation, state.enabled, held) {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             // Never stop a later pointer/tray take if this task was delayed.
@@ -114,6 +170,24 @@ pub(crate) fn changed(app: &tauri::AppHandle, state: keytrigger::SecureInputStat
         });
     }
     crate::trigger::secure_input::refresh(app);
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn interrupt_capture(
+    app_state: &crate::AppState,
+    generation: u64,
+    enabled: bool,
+    held: bool,
+) -> bool {
+    let live = app_state.get_current_state();
+    if live == crate::RecordingState::Starting
+        || ((enabled || held) && live == crate::RecordingState::Recording)
+    {
+        app_state.capture_interrupts.interrupt(generation);
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -176,6 +250,12 @@ mod tests {
         let permit = StartPermit::capture(app.handle());
         let (tx, rx) = mpsc::channel();
         let state = app.state::<crate::AppState>();
+        let generation = crate::commands::audio::current_recording_generation();
+        let capture_interrupt = state.capture_interrupts.begin(generation);
+        state
+            .transition_recording_state(crate::RecordingState::Starting)
+            .unwrap();
+        let callback_app = app.handle().clone();
         state
             .trigger_engine
             .start_with_source_and_status(
@@ -191,6 +271,12 @@ mod tests {
                 ])),
                 |_| {},
                 move |state| {
+                    interrupt_capture(
+                        &callback_app.state::<crate::AppState>(),
+                        generation,
+                        state.enabled,
+                        false,
+                    );
                     let _ = tx.send(state);
                 },
             )
@@ -201,6 +287,18 @@ mod tests {
         assert!(first.unwrap().enabled);
         assert!(!second.unwrap().enabled);
         assert!(!permit.is_current(app.handle()));
+        assert!(capture_interrupt.is_interrupted());
+        assert!(!state.pending_stop_after_start.load(Ordering::SeqCst));
+        assert!(state.pending_stop_requested.lock().unwrap().is_none());
+        // Model returning from a blocked settings/remote lookup. Even a latch
+        // not yet attached to a worker must not authorize mic construction.
+        let attempted: Result<Option<()>, ()> = permit.start_if_current(
+            app.handle(),
+            crate::commands::audio::current_recording_generation(),
+            &CaptureInterrupt::default(),
+            || panic!("an invalidated start must never construct a recorder"),
+        );
+        assert_eq!(attempted, Ok(None));
         assert!(permit.pending_stop(app.handle(), None).is_some());
         assert_eq!(
             permit.stop_post_roll(app.handle(), Duration::from_millis(250)),
@@ -222,19 +320,23 @@ mod tests {
         assert!(!system_stop_must_yield(None, 8, Starting));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn interrupted_take_has_no_post_roll_but_next_take_keeps_the_user_stop_policy() {
-        let generation = u64::MAX - 10;
-        INTERRUPTED.store(generation, Ordering::SeqCst);
+        let state = crate::AppState::new();
+        let generation = 7;
+        let retired = state.capture_interrupts.begin(generation);
+        state.capture_interrupts.interrupt(generation);
         assert_eq!(
-            post_roll(generation, Duration::from_millis(250)),
+            post_roll(&state, generation, Duration::from_millis(250)),
             Duration::ZERO
         );
+        let next = state.capture_interrupts.begin(generation + 1);
+        assert!(!state.capture_interrupts.interrupt(generation));
+        retired.interrupt();
+        assert!(!next.is_interrupted());
         assert_eq!(
-            post_roll(generation + 1, Duration::from_millis(250)),
+            post_roll(&state, generation + 1, Duration::from_millis(250)),
             Duration::from_millis(250)
         );
-        INTERRUPTED.store(u64::MAX, Ordering::SeqCst);
     }
 }

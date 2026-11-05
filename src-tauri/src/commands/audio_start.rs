@@ -7,7 +7,11 @@ use tauri::{AppHandle, Manager};
 pub(crate) fn abort_start(
     app: &AppHandle,
     capture_files: &crate::recording::storage::CaptureFiles,
+    generation: u64,
 ) -> Result<(), String> {
+    if super::recording_generation_is_stale(generation) {
+        return Ok(());
+    }
     let app_state = app.state::<AppState>();
     let recorder_state_handle = app.state::<RecorderState>();
     let stop_result = recorder_state_handle
@@ -16,13 +20,16 @@ pub(crate) fn abort_start(
         .lock()
         .map_err(|e| format!("Failed to acquire recorder lock: {}", e))
         .and_then(|mut recorder| {
-            if recorder.is_recording() {
+            if !super::recording_generation_is_stale(generation) && recorder.is_recording() {
                 recorder.stop_recording()
             } else {
                 Ok(String::new())
             }
         });
 
+    if super::recording_generation_is_stale(generation) {
+        return Ok(());
+    }
     clear_pending_stop_after_start(&app_state);
     MEDIA_CONTROLLER.resume_if_we_paused();
 

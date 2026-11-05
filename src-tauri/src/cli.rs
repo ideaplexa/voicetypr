@@ -579,6 +579,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         settings.selected_microphone.clone(),
         false,
         0,
+        Default::default(),
         std::sync::Arc::new(|| false),
         None,
         std::time::Instant::now(),

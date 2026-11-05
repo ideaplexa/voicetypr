@@ -512,11 +512,12 @@ pub struct AudioRecorder {
 
 #[path = "recorder_control.rs"]
 mod control;
-pub use control::RecordingReadiness;
+pub(crate) use control::wait_for_readiness;
 use control::{
     report_first_callback, report_start_failure, stop_after_post_roll, ReadinessReporter,
     RecorderCommand,
 };
+pub use control::{CaptureInterrupt, RecordingReadiness};
 
 impl Drop for AudioRecorder {
     fn drop(&mut self) {
@@ -573,6 +574,7 @@ impl AudioRecorder {
         device_name: Option<String>,
         streaming_tap_enabled: bool,
         recording_generation: u64,
+        capture_interrupt: CaptureInterrupt,
         stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
         stream_sink_factory: Option<StreamTapSinkFactory>,
         started_at: Instant,
@@ -607,6 +609,7 @@ impl AudioRecorder {
 
         let output_path = PathBuf::from(output_path);
         let (stop_tx, stop_rx) = mpsc::channel();
+        capture_interrupt.attach(stop_tx.clone());
         let (ready_tx, ready_rx) = oneshot::channel();
         let stop_tx_clone = stop_tx.clone();
         let last_capture_metrics = self.last_capture_metrics.clone();
@@ -617,6 +620,9 @@ impl AudioRecorder {
         // Spawn recording thread
         let thread_handle = thread::spawn(move || -> Result<String, String> {
             let mut readiness_reporter = ReadinessReporter { tx: Some(ready_tx) };
+            if capture_interrupt.is_interrupted() {
+                return Ok("Recording interrupted".to_string());
+            }
             let host = cpal::default_host();
             let device = if let Some(device_name) = device_name {
                 // Try to find the specified device
@@ -681,6 +687,9 @@ impl AudioRecorder {
                 sample_format: hound::SampleFormat::Int,
             };
 
+            if capture_interrupt.is_interrupted() {
+                return Ok("Recording interrupted".to_string());
+            }
             let writer = hound::WavWriter::create(&output_path, spec).map_err(|e| e.to_string())?;
 
             let (writer_tx, writer_rx) = mpsc::sync_channel::<WriterMsg>(WRITER_QUEUE_CAPACITY);
@@ -841,8 +850,13 @@ impl AudioRecorder {
                 let stream_tap_rt: Option<StreamTapRt> = stream_tap_rt;
                 let capture_metrics_clone = capture_metrics.clone();
                 let first_callback_clone = first_callback.clone();
+                let capture_interrupt_rt = capture_interrupt.clone();
 
                 move |f32_samples: &[f32], i16_samples: &[i16]| {
+                    if capture_interrupt_rt.is_interrupted() {
+                        callback_drained_clone.store(true, Ordering::SeqCst);
+                        return;
+                    }
                     first_callback_clone.store(true, Ordering::SeqCst);
                     // A panic in this real-time path would unwind into CPAL's
                     // `extern "C"` WASAPI callback (CPAL wraps it in no catch_unwind)
@@ -920,76 +934,83 @@ impl AudioRecorder {
             };
 
             let build_start = Instant::now();
-            let stream = match config.sample_format() {
-                cpal::SampleFormat::F32 => {
-                    let process_audio = process_audio;
-                    let mut i16_scratch: Vec<i16> = Vec::with_capacity(chunk_capacity);
-                    device
-                        .build_input_stream(
-                            &config.config(),
-                            move |data: &[f32], _: &_| {
-                                // Convert F32 to I16 with proper clamping to avoid distortion
-                                i16_scratch.clear();
-                                i16_scratch.extend(data.iter().map(|&sample| f32_to_i16(sample)));
+            let stream = capture_interrupt.run_if_active(|| {
+                let stream = match config.sample_format() {
+                    cpal::SampleFormat::F32 => {
+                        let process_audio = process_audio;
+                        let mut i16_scratch: Vec<i16> = Vec::with_capacity(chunk_capacity);
+                        device
+                            .build_input_stream(
+                                &config.config(),
+                                move |data: &[f32], _: &_| {
+                                    // Convert F32 to I16 with proper clamping to avoid distortion
+                                    i16_scratch.clear();
+                                    i16_scratch
+                                        .extend(data.iter().map(|&sample| f32_to_i16(sample)));
 
-                                // Process audio
-                                process_audio(data, &i16_scratch);
-                            },
-                            err_fn,
-                            None,
-                        )
-                        .map_err(|e| e.to_string())?
-                }
-                cpal::SampleFormat::I16 => {
-                    let process_audio = process_audio;
-                    let mut f32_scratch: Vec<f32> = Vec::with_capacity(chunk_capacity);
-                    device
-                        .build_input_stream(
-                            &config.config(),
-                            move |data: &[i16], _: &_| {
-                                // Convert I16 to F32 for processing
-                                f32_scratch.clear();
-                                f32_scratch.extend(data.iter().map(|&sample| i16_to_f32(sample)));
+                                    // Process audio
+                                    process_audio(data, &i16_scratch);
+                                },
+                                err_fn,
+                                None,
+                            )
+                            .map_err(|e| e.to_string())?
+                    }
+                    cpal::SampleFormat::I16 => {
+                        let process_audio = process_audio;
+                        let mut f32_scratch: Vec<f32> = Vec::with_capacity(chunk_capacity);
+                        device
+                            .build_input_stream(
+                                &config.config(),
+                                move |data: &[i16], _: &_| {
+                                    // Convert I16 to F32 for processing
+                                    f32_scratch.clear();
+                                    f32_scratch
+                                        .extend(data.iter().map(|&sample| i16_to_f32(sample)));
 
-                                // Process audio
-                                process_audio(&f32_scratch, data);
-                            },
-                            err_fn,
-                            None,
-                        )
-                        .map_err(|e| e.to_string())?
-                }
-                cpal::SampleFormat::U16 => {
-                    let process_audio = process_audio;
-                    let mut f32_scratch: Vec<f32> = Vec::with_capacity(chunk_capacity);
-                    let mut i16_scratch: Vec<i16> = Vec::with_capacity(chunk_capacity);
-                    device
-                        .build_input_stream(
-                            &config.config(),
-                            move |data: &[u16], _: &_| {
-                                // Convert U16 to F32 for processing
-                                f32_scratch.clear();
-                                f32_scratch.extend(data.iter().map(|&sample| u16_to_f32(sample)));
+                                    // Process audio
+                                    process_audio(&f32_scratch, data);
+                                },
+                                err_fn,
+                                None,
+                            )
+                            .map_err(|e| e.to_string())?
+                    }
+                    cpal::SampleFormat::U16 => {
+                        let process_audio = process_audio;
+                        let mut f32_scratch: Vec<f32> = Vec::with_capacity(chunk_capacity);
+                        let mut i16_scratch: Vec<i16> = Vec::with_capacity(chunk_capacity);
+                        device
+                            .build_input_stream(
+                                &config.config(),
+                                move |data: &[u16], _: &_| {
+                                    // Convert U16 to F32 for processing
+                                    f32_scratch.clear();
+                                    f32_scratch
+                                        .extend(data.iter().map(|&sample| u16_to_f32(sample)));
 
-                                // Convert U16 to I16 for writing
-                                i16_scratch.clear();
-                                i16_scratch.extend(data.iter().map(|&sample| u16_to_i16(sample)));
+                                    // Convert U16 to I16 for writing
+                                    i16_scratch.clear();
+                                    i16_scratch
+                                        .extend(data.iter().map(|&sample| u16_to_i16(sample)));
 
-                                // Process audio
-                                process_audio(&f32_scratch, &i16_scratch);
-                            },
-                            err_fn,
-                            None,
-                        )
-                        .map_err(|e| e.to_string())?
-                }
-                _ => {
-                    return Err(format!(
-                        "Unsupported sample format: {:?}",
-                        config.sample_format()
-                    ))
-                }
-            };
+                                    // Process audio
+                                    process_audio(&f32_scratch, &i16_scratch);
+                                },
+                                err_fn,
+                                None,
+                            )
+                            .map_err(|e| e.to_string())?
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Unsupported sample format: {:?}",
+                            config.sample_format()
+                        ))
+                    }
+                };
+                Ok(stream)
+            })?;
             log::debug!(
                 "⏱️ [REC TIMING] build_input_stream={}ms (+{}ms)",
                 build_start.elapsed().as_millis(),
@@ -997,21 +1018,27 @@ impl AudioRecorder {
             );
 
             let play_start = Instant::now();
-            stream.play().map_err(|e| {
-                log::error!("Failed to start audio stream: {}", e);
-                e.to_string()
-            })?;
+            if let Some(stream) = stream.as_ref() {
+                if capture_interrupt
+                    .run_if_active(|| {
+                        stream.play().map_err(|e| {
+                            log::error!("Failed to start audio stream: {}", e);
+                            e.to_string()
+                        })
+                    })?
+                    .is_some()
+                {
+                    // Create the preview sink only after play. Cold sink setup
+                    // must not delay frames reaching the WAV writer.
+                    let _ = play_tx.send(());
+                    log::info!("Audio stream started successfully");
+                }
+            }
             log::debug!(
                 "⏱️ [REC TIMING] stream.play={}ms (+{}ms)",
                 play_start.elapsed().as_millis(),
                 started_at.elapsed().as_millis()
             );
-            // The tap worker creates its sink only after play. Frames captured
-            // while a cold preview sink initializes still reach the WAV writer.
-            let _ = play_tx.send(());
-
-            log::info!("Audio stream started successfully");
-
             // Wait for stop signal
             let stop_reason = loop {
                 if let Some(first_audio_ms) =
@@ -1044,7 +1071,7 @@ impl AudioRecorder {
                 &stop_requested,
             );
             let drain_start = Instant::now();
-            while !callback_drained.load(Ordering::SeqCst) {
+            while !callback_drained.load(Ordering::SeqCst) && !capture_interrupt.is_interrupted() {
                 if drain_start.elapsed() > Duration::from_millis(200) {
                     log::warn!(
                         "Drain timeout: proceeding with finalization after {}ms",
@@ -1060,7 +1087,7 @@ impl AudioRecorder {
             }
 
             // Pause the stream to stop audio capture
-            if let Err(e) = stream.pause() {
+            if let Some(Err(e)) = stream.as_ref().map(|stream| stream.pause()) {
                 log::warn!("Failed to pause audio stream: {}", e);
             }
 

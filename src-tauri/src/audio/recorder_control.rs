@@ -3,11 +3,100 @@ use super::CaptureMetricsAccumulator;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc, Mutex,
     },
     time::{Duration, Instant},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
+
+/// One capture's monotonic stop latch. It never targets a later generation and
+/// does not need the recorder mutex, including while that mutex joins a worker.
+#[derive(Clone, Default)]
+pub struct CaptureInterrupt(Arc<InterruptState>);
+
+#[derive(Default)]
+struct InterruptState {
+    interrupted: AtomicBool,
+    stop_tx: Mutex<Option<mpsc::Sender<RecorderCommand>>>,
+    wake: Notify,
+}
+
+impl CaptureInterrupt {
+    /// Only the atomic load is used by the real-time callback.
+    pub(crate) fn is_interrupted(&self) -> bool {
+        self.0.interrupted.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn interrupt(&self) {
+        if self.0.interrupted.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.0.wake.notify_waiters();
+        if let Some(tx) = self
+            .0
+            .stop_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            let _ = tx.send(RecorderCommand::Stop {
+                post_roll: Duration::ZERO,
+            });
+        }
+    }
+
+    pub(super) fn attach(&self, tx: mpsc::Sender<RecorderCommand>) {
+        let mut sender = self.0.stop_tx.lock().unwrap_or_else(|e| e.into_inner());
+        // An interruption during settings work wins even before a worker exists.
+        if self.is_interrupted() {
+            let _ = tx.send(RecorderCommand::Stop {
+                post_roll: Duration::ZERO,
+            });
+        }
+        *sender = Some(tx);
+    }
+
+    /// Native initialization may already be in flight, but it must not proceed
+    /// to the next phase (especially play) once the capture is interrupted.
+    pub(super) fn run_if_active<T, E>(
+        &self,
+        operation: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Option<T>, E> {
+        if self.is_interrupted() {
+            Ok(None)
+        } else {
+            operation().map(Some)
+        }
+    }
+
+    async fn wait(&self) {
+        let notified = self.0.wake.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !self.is_interrupted() {
+            notified.await;
+        }
+    }
+}
+
+pub(crate) async fn wait_for_readiness(
+    readiness: oneshot::Receiver<RecordingReadiness>,
+    interrupt: &CaptureInterrupt,
+) -> Option<RecordingReadiness> {
+    tokio::select! {
+        biased;
+        _ = interrupt.wait() => Some(RecordingReadiness::Failed(
+            "Recording interrupted before microphone readiness".to_string(),
+        )),
+        result = tokio::time::timeout(Duration::from_secs(2), readiness) => match result {
+            Ok(Ok(readiness)) => Some(readiness),
+            Ok(Err(_)) => Some(RecordingReadiness::Failed(
+                "Recorder stopped before reporting microphone readiness".to_string(),
+            )),
+            Err(_) => None,
+        },
+    }
+}
 
 #[derive(Debug)]
 pub enum RecordingReadiness {
@@ -84,4 +173,62 @@ pub(super) fn stop_after_post_roll(
             .store(false, Ordering::SeqCst);
     }
     stop_requested.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interruption_before_worker_registration_is_latched_without_constructing_capture() {
+        let interrupt = CaptureInterrupt::default();
+        interrupt.interrupt();
+        let (tx, rx) = mpsc::channel();
+        interrupt.attach(tx);
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            RecorderCommand::Stop { post_roll } if post_roll.is_zero()));
+        let result: Result<Option<()>, ()> =
+            interrupt.run_if_active(|| panic!("must not construct capture"));
+        assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn interruption_during_native_build_prevents_play() {
+        let interrupt = CaptureInterrupt::default();
+        let worker_interrupt = interrupt.clone();
+        let (built_tx, built_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let built: Result<Option<()>, ()> = worker_interrupt.run_if_active(|| {
+                built_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                Ok(())
+            });
+            assert_eq!(built, Ok(Some(())));
+            let played: Result<Option<()>, ()> =
+                worker_interrupt.run_if_active(|| panic!("must not play"));
+            assert_eq!(played, Ok(None));
+        });
+        built_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        interrupt.interrupt();
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn interruption_wakes_readiness_instead_of_waiting_for_its_two_second_timeout() {
+        let interrupt = CaptureInterrupt::default();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let waiting_interrupt = interrupt.clone();
+        let waiter =
+            tokio::spawn(async move { wait_for_readiness(ready_rx, &waiting_interrupt).await });
+        tokio::task::yield_now().await;
+        interrupt.interrupt();
+        let readiness = tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(readiness, Some(RecordingReadiness::Failed(_))));
+        drop(ready_tx);
+    }
 }

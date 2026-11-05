@@ -5147,7 +5147,7 @@ pub(crate) async fn start_recording_with_permit(
     // Starting window (PTT key-up while Starting sets the flag) — so the clear
     // must happen first. From this point on, any stop/cancel observed after
     // `Starting` targets THIS attempt and must win.
-    {
+    let recording_generation = {
         let app_state = app.state::<AppState>();
         let generation = begin_recording_generation();
         crate::perf::begin_take(generation);
@@ -5173,7 +5173,12 @@ pub(crate) async fn start_recording_with_permit(
         );
         app_state.clear_cancellation();
         clear_pending_stop_after_start(&app_state);
-    }
+        generation
+    };
+    let capture_interrupt = app
+        .state::<AppState>()
+        .capture_interrupts
+        .begin(recording_generation);
     if let Some(app_state) = app.try_state::<AppState>() {
         app_state.capture_recording_app_context(crate::writing::capture_active_app_context);
     }
@@ -5370,138 +5375,197 @@ pub(crate) async fn start_recording_with_permit(
         })
     };
 
+    if !start_permit.is_current(&app) || recording_generation_is_stale(recording_generation) {
+        capture_interrupt.interrupt();
+        start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
+        return Ok(false);
+    }
+
     // Start recording (scoped to release mutex before async operations)
     log::debug!(
         "⏱️ [REC TIMING] acquiring recorder lock (+{}ms)",
         recording_start.elapsed().as_millis()
     );
-    let (audio_level_rx_to_spawn, silence_event_rx_to_spawn, readiness_rx, recording_generation) = {
-        let mut recorder = match state.inner().0.lock() {
-            Ok(recorder) => recorder,
-            Err(e) => {
+    let (audio_level_rx_to_spawn, silence_event_rx_to_spawn, readiness_rx, recording_generation) =
+        {
+            let mut recorder = match state.inner().0.lock() {
+                Ok(recorder) => recorder,
+                Err(e) => {
+                    resume_media_if_needed();
+                    return Err(format!("Failed to acquire recorder lock: {}", e));
+                }
+            };
+            log::debug!(
+                "⏱️ [REC TIMING] recorder lock acquired (+{}ms)",
+                recording_start.elapsed().as_millis()
+            );
+
+            // Check if already recording
+            if recorder.is_recording() {
+                // Reaching here means the entry idempotent guard did not catch this
+                // (backend state was not Starting/Recording) yet the recorder already
+                // has an active handle — a genuine inconsistency, so surface it.
+                log::warn!("Already recording!");
                 resume_media_if_needed();
-                return Err(format!("Failed to acquire recorder lock: {}", e));
+                return Err("Already recording".to_string());
             }
-        };
-        log::debug!(
-            "⏱️ [REC TIMING] recorder lock acquired (+{}ms)",
-            recording_start.elapsed().as_millis()
-        );
 
-        // Check if already recording
-        if recorder.is_recording() {
-            // Reaching here means the entry idempotent guard did not catch this
-            // (backend state was not Starting/Recording) yet the recorder already
-            // has an active handle — a genuine inconsistency, so surface it.
-            log::warn!("Already recording!");
-            resume_media_if_needed();
-            return Err("Already recording".to_string());
-        }
+            // Try to start recording with graceful error handling
+            log::debug!(
+                "⏱️ [REC TIMING] about to call recorder.start_recording (+{}ms)",
+                recording_start.elapsed().as_millis()
+            );
+            let recorder_init_start = Instant::now();
+            let audio_path_str = match audio_path.to_str() {
+                Some(path) => path,
+                None => {
+                    resume_media_if_needed();
+                    return Err("Invalid path encoding".to_string());
+                }
+            };
 
-        // Try to start recording with graceful error handling
-        log::debug!(
-            "⏱️ [REC TIMING] about to call recorder.start_recording (+{}ms)",
-            recording_start.elapsed().as_millis()
-        );
-        let recorder_init_start = Instant::now();
-        let audio_path_str = match audio_path.to_str() {
-            Some(path) => path,
-            None => {
-                resume_media_if_needed();
-                return Err("Invalid path encoding".to_string());
-            }
-        };
+            log::debug!("Recording file ready");
 
-        log::debug!("Recording file ready");
-
-        // Start recording and get side-channel receivers
-        let recording_generation = current_recording_generation();
-        // Streaming preview is engine-dispatched (plan 032/043 #14a). Parakeet keeps its
-        // OWN factory so its behavior is byte-identical even though its capability row is
-        // dormant-FINAL_ONLY (the reconciliation trap); Whisper adds decode-ahead. The
-        // streaming_* flags already encode live-preview mode from settings.
-        // Plan 073: Soniox streams every plain transcription over the realtime WS
-        // (faster final); live preview only decides whether the pill shows text.
-        let soniox_realtime = config.current_engine == "soniox"
-            && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
-            && !remote_server_online;
-        let streaming_engine_supported = matches!(
-            config.current_engine.as_str(),
-            "parakeet" | "whisper" | "soniox" | "deepgram"
-        );
-        let streaming_tap_enabled =
-            (streaming_tap_enabled || soniox_realtime) && streaming_engine_supported;
-        let streaming_engine_enabled =
-            (streaming_engine_enabled || soniox_realtime) && streaming_engine_supported;
-        let cancellation_flag = app_state.should_cancel_recording.clone();
-        let stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync> =
-            Arc::new(move || cancellation_flag.load(AtomicOrdering::SeqCst));
-        let stream_sink_factory = match config.current_engine.as_str() {
-            "soniox" | "deepgram" if remote_server_online => None,
-            "parakeet" => build_parakeet_stream_sink_factory(
-                &app,
-                &config,
-                streaming_tap_enabled,
-                streaming_engine_enabled,
-                live_preview_mode,
-                recording_generation,
-            ),
-            "whisper" => build_whisper_stream_sink_factory(
-                &app,
-                &config,
-                streaming_tap_enabled,
-                streaming_engine_enabled,
-                live_preview_mode,
-                recording_generation,
-            ),
-            "soniox" => build_soniox_stream_sink_factory(
-                &app,
-                &config,
-                streaming_tap_enabled,
-                streaming_engine_enabled,
-                live_preview_mode,
-                recording_generation,
-            ),
-            "deepgram" => build_deepgram_stream_sink_factory(
-                &app,
-                &config,
-                streaming_tap_enabled,
-                streaming_engine_enabled,
-                live_preview_mode,
-                recording_generation,
-            ),
-            _ => None,
-        };
-        let (audio_level_rx, silence_event_rx, readiness_rx) = match recorder.start_recording(
-            audio_path_str,
-            selected_microphone.clone(),
-            streaming_tap_enabled,
-            recording_generation,
-            stream_cancelled,
-            stream_sink_factory,
-            recording_start,
-        ) {
-            Ok(readiness_rx) => {
-                log::debug!(
-                    "⏱️ [REC TIMING] recorder.start_recording returned Ok (+{}ms)",
-                    recording_start.elapsed().as_millis()
-                );
-                // Verify recording actually started
-                let is_recording = recorder.is_recording();
-
-                // Get receivers before potentially dropping recorder
-                let level_rx = recorder.take_audio_level_receiver();
-                let silence_rx = recorder.take_silence_event_receiver();
-
-                if !is_recording {
-                    drop(recorder); // Release the lock if we're erroring out
-                    log_failed(
-                        "RECORDER_INIT",
-                        "Recording failed to start after initialization",
+            // Start recording and get side-channel receivers
+            // Streaming preview is engine-dispatched (plan 032/043 #14a). Parakeet keeps its
+            // OWN factory so its behavior is byte-identical even though its capability row is
+            // dormant-FINAL_ONLY (the reconciliation trap); Whisper adds decode-ahead. The
+            // streaming_* flags already encode live-preview mode from settings.
+            // Plan 073: Soniox streams every plain transcription over the realtime WS
+            // (faster final); live preview only decides whether the pill shows text.
+            let soniox_realtime = config.current_engine == "soniox"
+                && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
+                && !remote_server_online;
+            let streaming_engine_supported = matches!(
+                config.current_engine.as_str(),
+                "parakeet" | "whisper" | "soniox" | "deepgram"
+            );
+            let streaming_tap_enabled =
+                (streaming_tap_enabled || soniox_realtime) && streaming_engine_supported;
+            let streaming_engine_enabled =
+                (streaming_engine_enabled || soniox_realtime) && streaming_engine_supported;
+            let cancellation_flag = app_state.should_cancel_recording.clone();
+            let stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync> =
+                Arc::new(move || cancellation_flag.load(AtomicOrdering::SeqCst));
+            let stream_sink_factory = match config.current_engine.as_str() {
+                "soniox" | "deepgram" if remote_server_online => None,
+                "parakeet" => build_parakeet_stream_sink_factory(
+                    &app,
+                    &config,
+                    streaming_tap_enabled,
+                    streaming_engine_enabled,
+                    live_preview_mode,
+                    recording_generation,
+                ),
+                "whisper" => build_whisper_stream_sink_factory(
+                    &app,
+                    &config,
+                    streaming_tap_enabled,
+                    streaming_engine_enabled,
+                    live_preview_mode,
+                    recording_generation,
+                ),
+                "soniox" => build_soniox_stream_sink_factory(
+                    &app,
+                    &config,
+                    streaming_tap_enabled,
+                    streaming_engine_enabled,
+                    live_preview_mode,
+                    recording_generation,
+                ),
+                "deepgram" => build_deepgram_stream_sink_factory(
+                    &app,
+                    &config,
+                    streaming_tap_enabled,
+                    streaming_engine_enabled,
+                    live_preview_mode,
+                    recording_generation,
+                ),
+                _ => None,
+            };
+            let (audio_level_rx, silence_event_rx, readiness_rx) = match start_permit
+                .start_if_current(&app, recording_generation, &capture_interrupt, || {
+                    recorder.start_recording(
+                        audio_path_str,
+                        selected_microphone.clone(),
+                        streaming_tap_enabled,
+                        recording_generation,
+                        capture_interrupt.clone(),
+                        stream_cancelled,
+                        stream_sink_factory,
+                        recording_start,
+                    )
+                }) {
+                Ok(Some(readiness_rx)) => {
+                    log::debug!(
+                        "⏱️ [REC TIMING] recorder.start_recording returned Ok (+{}ms)",
+                        recording_start.elapsed().as_millis()
                     );
+                    // Verify recording actually started
+                    let is_recording = recorder.is_recording();
+
+                    // Get receivers before potentially dropping recorder
+                    let level_rx = recorder.take_audio_level_receiver();
+                    let silence_rx = recorder.take_silence_event_receiver();
+
+                    if !is_recording {
+                        drop(recorder); // Release the lock if we're erroring out
+                        log_failed(
+                            "RECORDER_INIT",
+                            "Recording failed to start after initialization",
+                        );
+                        log_with_context(
+                            log::Level::Debug,
+                            "Recorder initialization failed",
+                            &[(
+                                "init_time_ms",
+                                recorder_init_start
+                                    .elapsed()
+                                    .as_millis()
+                                    .to_string()
+                                    .as_str(),
+                            )],
+                        );
+
+                        update_recording_state(
+                            &app,
+                            RecordingState::Error,
+                            Some("Microphone initialization failed".to_string()),
+                        );
+
+                        crate::commands::island_notice::notice_at(
+                            &app,
+                            crate::commands::island_notice::NoticeKind::RecordingFailed,
+                            recording_generation,
+                        );
+
+                        resume_media_if_needed();
+                        return Err("Failed to start recording".to_string());
+                    } else {
+                        log_performance(
+                            "RECORDER_INIT",
+                            recorder_init_start.elapsed().as_millis() as u64,
+                            Some(&format!("file={}", audio_path_str)),
+                        );
+                        log::info!("✅ Recording started successfully");
+
+                        // Monitor system resources at recording start
+                        #[cfg(debug_assertions)]
+                        system_monitor::log_resources_before_operation("RECORDING_START");
+                    }
+
+                    (level_rx, silence_rx, readiness_rx)
+                }
+                Ok(None) => {
+                    drop(recorder);
+                    start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
+                    return Ok(false);
+                }
+                Err(e) => {
+                    log_failed("RECORDER_START", &e);
                     log_with_context(
                         log::Level::Debug,
-                        "Recorder initialization failed",
+                        "Recorder start failed",
                         &[(
                             "init_time_ms",
                             recorder_init_start
@@ -5512,77 +5576,28 @@ pub(crate) async fn start_recording_with_permit(
                         )],
                     );
 
-                    update_recording_state(
-                        &app,
-                        RecordingState::Error,
-                        Some("Microphone initialization failed".to_string()),
-                    );
+                    update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
 
-                    crate::commands::island_notice::notice_at(
-                        &app,
-                        crate::commands::island_notice::NoticeKind::RecordingFailed,
-                        recording_generation,
-                    );
+                    // Provide specific error messages for common issues
 
                     resume_media_if_needed();
-                    return Err("Failed to start recording".to_string());
-                } else {
-                    log_performance(
-                        "RECORDER_INIT",
-                        recorder_init_start.elapsed().as_millis() as u64,
-                        Some(&format!("file={}", audio_path_str)),
-                    );
-                    log::info!("✅ Recording started successfully");
-
-                    // Monitor system resources at recording start
-                    #[cfg(debug_assertions)]
-                    system_monitor::log_resources_before_operation("RECORDING_START");
+                    return Err(e);
                 }
+            };
 
-                (level_rx, silence_rx, readiness_rx)
-            }
-            Err(e) => {
-                log_failed("RECORDER_START", &e);
-                log_with_context(
-                    log::Level::Debug,
-                    "Recorder start failed",
-                    &[(
-                        "init_time_ms",
-                        recorder_init_start
-                            .elapsed()
-                            .as_millis()
-                            .to_string()
-                            .as_str(),
-                    )],
-                );
-
-                update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
-
-                // Provide specific error messages for common issues
-
-                resume_media_if_needed();
-                return Err(e);
-            }
-        };
-
-        // Release the recorder lock after successful start
-        drop(recorder);
-        (
-            audio_level_rx,
-            silence_event_rx,
-            readiness_rx,
-            recording_generation,
-        )
-    }; // MutexGuard dropped here
+            // Release the recorder lock after successful start
+            drop(recorder);
+            (
+                audio_level_rx,
+                silence_event_rx,
+                readiness_rx,
+                recording_generation,
+            )
+        }; // MutexGuard dropped here
 
     // Now perform async operations after mutex is released
-    let readiness = match tokio::time::timeout(Duration::from_secs(2), readiness_rx).await {
-        Ok(Ok(readiness)) => Some(readiness),
-        Ok(Err(_)) => Some(RecordingReadiness::Failed(
-            "Recorder stopped before reporting microphone readiness".to_string(),
-        )),
-        Err(_) => None,
-    };
+    let readiness =
+        crate::audio::recorder::wait_for_readiness(readiness_rx, &capture_interrupt).await;
     match decide_start_readiness(
         readiness,
         recording_generation_is_stale(recording_generation),
@@ -5598,7 +5613,9 @@ pub(crate) async fn start_recording_with_permit(
         StartReadinessDecision::TimedOut => {
             log::warn!("Recording readiness timed out after 2s; continuing capture");
         }
-        StartReadinessDecision::Failed(_) if app_state.is_cancellation_requested() => {
+        StartReadinessDecision::Failed(_)
+            if app_state.is_cancellation_requested() || capture_interrupt.is_interrupted() =>
+        {
             // The cancellation path below owns its Idle transition and file cleanup.
         }
         StartReadinessDecision::Failed(error) => {
@@ -5672,9 +5689,12 @@ pub(crate) async fn start_recording_with_permit(
     }
 
     // Recheck ownership after device initialization, before publishing Recording.
-    if ptt_key_released(&app_state, source) || !start_permit.is_current(&app) {
+    if ptt_key_released(&app_state, source)
+        || !start_permit.is_current(&app)
+        || capture_interrupt.is_interrupted()
+    {
         log::info!("PTT: Key was released during audio init; stopping recorder immediately");
-        start_cleanup::abort_start(&app, &capture_files)?;
+        start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
         return if start_permit.is_current(&app) {
             Err(PTT_START_ABORTED_AFTER_RELEASE.to_string())
         } else {
@@ -5911,7 +5931,7 @@ async fn stop_recording_with_mode_at(
         }
 
         let stop_message = match recorder.stop_recording_with_post_roll(
-            crate::recording::secure_input::post_roll(task_generation, post_roll),
+            crate::recording::secure_input::post_roll(&app_state, task_generation, post_roll),
         ) {
             Ok(msg) => msg,
             Err(e) => {
