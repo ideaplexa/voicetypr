@@ -163,6 +163,9 @@ impl Store {
             item.recovery.generation = u64::MAX;
             item.recovery.expires_in_ms = item.expires_at_ms - now;
             item.recovery.retry_ready = true;
+            if let Some(selection) = &item.selection {
+                item.recovery.engine_short = selection.short_name();
+            }
             // Alternatives are installed models, not durable promises.
             item.recovery.set_alternative(None);
             entries.push((item, path, wav));

@@ -1082,10 +1082,7 @@ async fn retry(
                 // Only a completed failure owns the failed-model label. A
                 // cancelled/new-take retry keeps the preceding recovery intact.
                 if let Some(selection) = attempted {
-                    clip.recovery.engine_short = crate::pill::context::engine_short_name(
-                        &selection.model,
-                        selection.engine.as_deref().unwrap_or("remote"),
-                    );
+                    clip.recovery.engine_short = selection.short_name();
                     clip.retry_selection = Some(selection);
                 }
                 clip.recovery.retry_failed = true;

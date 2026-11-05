@@ -355,3 +355,30 @@ async fn failed_or_cancelled_busy_retry_survives_cap_eviction() {
         store.clear();
     }
 }
+
+#[test]
+fn remote_failed_retry_is_still_labelled_network_after_restart() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = Store::default();
+    let recovery = retain(&mut store, data.path());
+    store.clips[0].recovery.kind = RecoveryKind::RemoteOffline;
+    store.clips[0].recovery.retry_failed = true;
+    // Older metadata may have recorded the unrelated local Settings model.
+    store.clips[0].recovery.engine_short = "Soniox".into();
+    store.clips[0].retry_selection = Some(RetrySelection {
+        model: "soniox".into(),
+        engine: None,
+    });
+    store.persist(&recovery.id);
+    store.preserve_on_exit();
+    store.load_disk(&data.path().join(DIRECTORY), now_ms());
+    let value = serde_json::to_value(&store.clips[0].recovery).unwrap();
+    assert_eq!(value["engine_short"], "Your other computer");
+    assert_eq!(value["retry_failed"], true);
+    let candidates = vec![("small.en".into(), "whisper".into())];
+    assert_eq!(
+        alternative_for(&store.clips[0], &candidates, Some("small.en")),
+        Some(candidates[0].clone())
+    );
+    store.clear();
+}
