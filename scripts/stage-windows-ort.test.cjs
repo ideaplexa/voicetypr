@@ -290,3 +290,20 @@ test("every Windows artifact uploader runs the Ivy Bridge gate first", () => {
   assert.ok(uploaders >= 3, "Expected preview, release and Store Windows uploaders");
   assert.deepEqual(ungated, []);
 });
+
+test("Mac native caches and RUSTFLAGS preserve the CPU VAD patch epoch", () => {
+  let jobs = 0;
+  for (const file of ["ci.yml", "native-ci.yml", "release.yml"]) {
+    const source = fs.readFileSync(path.join(repo, ".github/workflows", file), "utf8");
+    for (const job of source.split(/(?=^  [\w-]+:)/m)) {
+      if (!/runs-on:\s*macos-/.test(job) || !job.includes("uses: Swatinem/rust-cache@")) continue;
+      jobs += 1;
+      const cache = job.match(/uses: Swatinem\/rust-cache@[^\n]*\n\s+with:\n([\s\S]*?)(?=\n      -|$)/)?.[1];
+      assert.match(cache ?? "", /prefix-key: v0-rust-cpu-vad-v1/);
+      const overrides = job.split("\n").filter((line) => /echo "RUSTFLAGS=/.test(line));
+      assert.ok(overrides.length > 0);
+      for (const line of overrides) assert.match(line, /--cfg voicetypr_vad_cpu_only_v1/);
+    }
+  }
+  assert.equal(jobs, 4, "Expected CI Intel, native ARM, release ARM and release Intel");
+});

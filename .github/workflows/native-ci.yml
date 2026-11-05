@@ -51,7 +51,7 @@ jobs:
           )
           if [ -n "$clang_runtime" ]; then
             echo "Linking compiler-rt archive: $clang_runtime"
-            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$clang_runtime" >> "$GITHUB_ENV"
+            echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--cfg voicetypr_vad_cpu_only_v1 -C link-arg=$clang_runtime" >> "$GITHUB_ENV"
           else
             echo "No libclang_rt.osx.a in $xcode; continuing without explicit compiler-rt."
           fi
@@ -88,6 +88,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
+          prefix-key: v0-rust-cpu-vad-v1
           workspaces: src-tauri
 
       - name: Install dependencies
