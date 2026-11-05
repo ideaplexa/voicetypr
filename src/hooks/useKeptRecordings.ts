@@ -5,8 +5,8 @@ import type { KeptRecording } from "@/lib/home-needs";
 const REFRESH_MS = 5_000;
 
 /**
- * Failed dictations whose audio Voicetypr still holds. The backend keeps them in memory and only
- * tells the island, so Home asks while it is on screen.
+ * Failed dictations whose audio Voicetypr still holds. The backend owns their bounded lifetime,
+ * including restart-safe failed takes. Home refreshes while it is on screen.
  */
 export function useKeptRecordings() {
   const [kept, setKept] = useState<KeptRecording[]>([]);

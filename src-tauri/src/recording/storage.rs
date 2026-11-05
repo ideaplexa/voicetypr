@@ -290,6 +290,7 @@ fn sweep(
 }
 
 fn maintenance(app: &AppHandle) {
+    super::kept::expire();
     let Ok(data) = app.path().app_data_dir() else {
         return;
     };
@@ -339,6 +340,7 @@ fn maintenance(app: &AppHandle) {
 }
 
 pub fn start_maintenance(app: AppHandle) {
+    super::kept::initialize(&app);
     tauri::async_runtime::spawn(async move {
         loop {
             maintain(app.clone()).await;
@@ -409,7 +411,13 @@ fn capture_directory_candidate(metadata: &std::fs::Metadata) -> bool {
 
 fn validate_audio_roots(data: &Path, identifier: &str, base: &Path) -> Result<(), &'static str> {
     use crate::utils::reset_directory;
-    for name in ["recordings", "recovery", "captures", "cli-recordings"] {
+    for name in [
+        "recordings",
+        "recovery",
+        "failed-recordings",
+        "captures",
+        "cli-recordings",
+    ] {
         reset_directory::validate(&data.join(name), identifier, base)?;
     }
     // Capture take directories are separate deletion targets. Fail before
@@ -446,7 +454,11 @@ fn clear_storage(
         super::file_jobs::sweep(data, temp, protected, SystemTime::now(), true).is_err()
     });
     let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
-    for dir in [data.join("recordings"), data.join("recovery")] {
+    for dir in [
+        data.join("recordings"),
+        data.join("recovery"),
+        data.join("failed-recordings"),
+    ] {
         failed |= reset_directory::remove(&dir, identifier, base).is_err();
     }
     // Legacy OS temp is not identifier-scoped (and dev/prod share it).

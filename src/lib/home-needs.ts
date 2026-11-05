@@ -12,6 +12,7 @@ export interface KeptRecording {
   remaining_ms: number;
   busy: boolean;
   retry_ready?: boolean;
+  retry_failed?: boolean;
   kind?: RecoveryKind;
 }
 
@@ -32,9 +33,15 @@ export interface NeedRow {
   disabled?: boolean;
   action: NeedAction;
   discard?: { kind: "discard"; id: string };
+  discardLabel?: "Delete audio";
+  alternative?: { kind: "retry"; id: string; engine: string };
 }
 
 function minutesLeft(ms: number): string {
+  if (ms > 24 * 60 * 60 * 1000) {
+    const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
+    return `${days} more days`;
+  }
   const minutes = Math.max(1, Math.ceil(ms / 60_000));
   return `${minutes} more ${minutes === 1 ? "minute" : "minutes"}`;
 }
@@ -56,12 +63,14 @@ export function homeNeeds({
   const rows: NeedRow[] = kept.map((clip) => ({
     id: `kept:${clip.id}`,
     icon: "retry",
-    title: "A recording was kept",
-    description: clip.kind === "no_speech" ? "No speech heard. Audio kept temporarily for 30 seconds." : `${clip.engine_short} couldn't finish it. Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
-    button: clip.busy ? "Retrying…" : clip.retry_ready === false ? "Finishing…" : clip.kind === "no_speech" ? "Transcribe anyway" : "Retry",
+    title: clip.retry_failed ? `${clip.engine_short} couldn't transcribe this` : "A recording was kept",
+    description: clip.kind === "no_speech" && clip.remaining_ms <= 30_000 ? "No speech heard. Audio kept temporarily for 30 seconds." : `${clip.retry_failed ? "Recording kept." : `${clip.engine_short} couldn't finish it.`} Audio kept for ${minutesLeft(clip.remaining_ms)}.`,
+    button: clip.busy ? "Retrying…" : clip.retry_ready === false ? "Finishing…" : clip.retry_failed ? "Retry again" : clip.kind === "no_speech" ? "Transcribe anyway" : "Retry",
     disabled: clip.busy || clip.retry_ready === false,
-    action: { kind: "retry", id: clip.id, engine: clip.alt_engine_id, ...(clip.kind === "no_speech" ? { anyway: true } : {}) },
+    action: { kind: "retry", id: clip.id, engine: clip.retry_failed ? null : clip.alt_engine_id, ...(clip.kind === "no_speech" ? { anyway: true } : {}) },
     discard: { kind: "discard", id: clip.id },
+    ...(clip.retry_failed ? { discardLabel: "Delete audio" as const } : {}),
+    ...(clip.retry_failed && clip.alt_engine_short && clip.alt_engine_id ? { alternative: { kind: "retry" as const, id: clip.id, engine: clip.alt_engine_id } } : {}),
   }));
   if (updateVersion) {
     const busy = updateInstall === "prompting" || updateInstall === "installing";

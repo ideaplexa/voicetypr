@@ -595,6 +595,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if (!value.id || !(value.expires_in_ms > 0)) return;
       const latest = Math.max(machine.takeGeneration,machine.latestRecordingGeneration);
       if (value.kind === 'mic_dropped_empty' && value.generation < latest) return;
+      if (value.retry_failed) stack.remove("retry-error");
       this.feedback(recoveryCard(value,performance.now()),value.generation >= latest);
     },
     withdrawNote(value: { generation: number; kind: "mic_silent_live" }) { stack.remove(`${value.kind}:${value.generation}`); },

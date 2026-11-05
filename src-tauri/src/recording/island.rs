@@ -8,7 +8,7 @@ use crate::AppState;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryKind {
     CloudFailed,

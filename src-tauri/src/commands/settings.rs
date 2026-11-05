@@ -137,6 +137,8 @@ pub struct Settings {
     pub sharing_password: Option<String>,
     // Recording persistence settings
     pub save_recordings: bool,
+    #[serde(default = "recording_settings::default_save_failed")]
+    pub save_failed_recordings: bool,
     pub recording_retention_days: Option<u32>, // None = keep forever
     // Transcription hardware acceleration: "auto" | "gpu" | "cpu"
     #[serde(default = "default_transcription_acceleration")]
@@ -194,8 +196,9 @@ impl Default for Settings {
             auto_paste_transcription: true,      // Default to auto-pasting transcription
             sharing_port: Some(47842),           // Default network sharing port
             sharing_password: None,              // No password by default
-            save_recordings: false,              // Default to not saving recordings
-            recording_retention_days: Some(30),  // Default cleanup period when saving is enabled
+            save_recordings: false,              // Successful takes are not kept by default
+            save_failed_recordings: true,
+            recording_retention_days: Some(30), // Default cleanup period when saving is enabled
             transcription_acceleration: "auto".to_string(),
             whisper_speed_mode: false,
             transcription_mode: TRANSCRIPTION_MODE_REGULAR.to_string(),
@@ -675,6 +678,7 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             .get("save_recordings")
             .and_then(|v| v.as_bool())
             .unwrap_or_else(|| Settings::default().save_recordings),
+        save_failed_recordings: recording_settings::load(&store),
         recording_retention_days: recording_retention_days_from_store(&store),
         transcription_acceleration: normalize_stored_transcription_acceleration(
             store
@@ -1002,7 +1006,7 @@ pub async fn save_settings(
     }
 
     // Recording persistence settings
-    store.set("save_recordings", json!(settings.save_recordings));
+    recording_settings::save(&store, &settings);
     store.set(
         "recording_retention_days",
         recording_retention_days_to_value(settings.recording_retention_days),

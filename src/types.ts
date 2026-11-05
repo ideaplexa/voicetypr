@@ -160,6 +160,7 @@ export interface AppSettings {
   sharing_password?: string;
   // Recording persistence settings
   save_recordings?: boolean;
+  save_failed_recordings?: boolean; // default true; only failed takes, for up to 7 days
   recording_retention_days?: number | null; // null = keep forever
   // Transcription acceleration (Windows only; stored-but-ignored on other platforms)
   transcription_acceleration?: TranscriptionAcceleration;
