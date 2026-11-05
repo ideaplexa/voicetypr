@@ -1305,6 +1305,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             menu::quick::island_quick_set,
             start_recording,
             stop_recording,
+            commands::recording_toggle::toggle_recording,
             cancel_recording,
             get_current_recording_state,
             debug_transcription_flow,

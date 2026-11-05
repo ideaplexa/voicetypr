@@ -17,6 +17,7 @@ const mockRecording = vi.hoisted(() => ({
   isActive: false,
   startRecording: vi.fn(),
   stopRecording: vi.fn(),
+  toggleRecording: vi.fn(),
 }));
 vi.mock("@/hooks/useRecording", () => ({
   useRecording: () => mockRecording,
@@ -148,6 +149,7 @@ describe("useInAppRecordingHotkey", () => {
     mockRecording.state = "idle";
     mockRecording.startRecording.mockReset();
     mockRecording.stopRecording.mockReset();
+    mockRecording.toggleRecording.mockReset();
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue({ binding: null, hotkey: null, mode: "toggle" });
     eventMock.shortcutSettingsChangedHandler = null;
@@ -161,48 +163,35 @@ describe("useInAppRecordingHotkey", () => {
     nonEditable.remove();
   });
 
-  it("starts recording when the hotkey fires inside a text field", () => {
-    renderHook(() => useInAppRecordingHotkey());
+  it.each(["idle", "error", "starting", "recording", "stopping", "transcribing"])(
+    "routes the hotkey to the backend toggle in %s state, never an explicit start or stop",
+    (state) => {
+      mockRecording.state = state;
+      renderHook(() => useInAppRecordingHotkey());
 
-    fireHotkey(editable);
+      fireHotkey(editable);
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
-    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
-  });
+      expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
+      expect(mockRecording.startRecording).not.toHaveBeenCalled();
+      expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+    },
+  );
 
-  it("stops recording when it is already recording", () => {
-    mockRecording.state = "recording";
-    renderHook(() => useInAppRecordingHotkey());
-
-    fireHotkey(editable);
-
-    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
-  });
-
-  it("queues one stop when toggled during starting and still debounces repeats", () => {
+  it("sends a second press during a license wait to the toggle so the backend cancels the pending start", () => {
+    // The first start is still validating: no Starting was published, so the
+    // window still reports idle. An explicit start here would be dropped.
     const now = vi.spyOn(Date, "now");
     now.mockReturnValueOnce(1000).mockReturnValueOnce(1400).mockReturnValueOnce(1500);
     renderHook(() => useInAppRecordingHotkey());
 
     fireHotkey(editable);
-    mockRecording.state = "starting";
     fireHotkey(editable);
-    fireHotkey(editable);
+    fireHotkey(editable); // within the debounce window of the second press
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
-    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
-    now.mockRestore();
-  });
-
-  it("ignores the hotkey during transitional states (transcribing)", () => {
-    mockRecording.state = "transcribing";
-    renderHook(() => useInAppRecordingHotkey());
-
-    fireHotkey(editable);
-
+    expect(mockRecording.state).toBe("idle");
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(2);
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
-    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+    now.mockRestore();
   });
 
   it("ignores the hotkey when focus is not in an editable field", () => {
@@ -210,7 +199,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireHotkey(nonEditable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
@@ -220,7 +209,7 @@ describe("useInAppRecordingHotkey", () => {
     // Missing the Control modifier → plain Space.
     fireHotkey(editable, { ctrlKey: false });
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("debounces a rapid second press within the window", () => {
@@ -229,7 +218,7 @@ describe("useInAppRecordingHotkey", () => {
     fireHotkey(editable);
     fireHotkey(editable);
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
   });
 
   it("ignores auto-repeat keydowns", () => {
@@ -237,7 +226,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireHotkey(editable, { repeat: true });
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("ignores IME composition events", () => {
@@ -245,7 +234,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireHotkey(editable, { isComposing: true });
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("does nothing when no hotkey is configured", () => {
@@ -254,7 +243,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireHotkey(editable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("leaves a bare-key hotkey to the field so typing still works", () => {
@@ -270,7 +259,7 @@ describe("useInAppRecordingHotkey", () => {
     const preventDefault = vi.spyOn(event, "preventDefault");
     editable.dispatchEvent(event);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
@@ -280,7 +269,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireHotkey(editable, { ctrlKey: false, shiftKey: true });
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("ignores AltGr keystrokes so typing isn't stolen (Ctrl+Alt + AltGraph)", () => {
@@ -302,32 +291,22 @@ describe("useInAppRecordingHotkey", () => {
     const preventDefault = vi.spyOn(event, "preventDefault");
     editable.dispatchEvent(event);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
-  it("starts recording on a bare-modifier tap inside a text field", async () => {
+  it.each(["idle", "recording"])("toggles through the backend on a bare-modifier tap (%s)", async (state) => {
     mockSettings.hotkey = "";
+    mockRecording.state = state;
     mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await renderWithBareModifier();
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
-    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
-  });
-
-  it("stops recording on a bare-modifier tap when already recording", async () => {
-    mockSettings.hotkey = "";
-    mockRecording.state = "recording";
-    mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
-    await renderWithBareModifier();
-
-    fireModifierTap(editable);
-
-    expect(mockRecording.stopRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
   it("ignores a chord (Ctrl+C) — a key pressed during the modifier hold", async () => {
@@ -349,7 +328,7 @@ describe("useInAppRecordingHotkey", () => {
       new KeyboardEvent("keyup", { ...opts, code: "ControlLeft", key: "Control" }),
     );
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
@@ -360,7 +339,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(nonEditable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("respects the configured modifier side", async () => {
@@ -373,7 +352,7 @@ describe("useInAppRecordingHotkey", () => {
     // Right Control when only Left is configured → no toggle.
     fireModifierTap(editable, { code: "ControlRight" });
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("starts on keydown and stops on keyup for a push-to-talk modifier_hold binding", async () => {
@@ -624,7 +603,7 @@ describe("useInAppRecordingHotkey", () => {
     mockRecording.state = "recording"; // native fired in between
     editable.dispatchEvent(new KeyboardEvent("keyup", opts));
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
@@ -635,7 +614,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("clears a pending tap on blur (no toggle on a later keyup)", async () => {
@@ -648,7 +627,7 @@ describe("useInAppRecordingHotkey", () => {
     window.dispatchEvent(new Event("blur"));
     editable.dispatchEvent(new KeyboardEvent("keyup", opts));
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("debounces a rapid second bare-modifier tap", async () => {
@@ -659,7 +638,7 @@ describe("useInAppRecordingHotkey", () => {
     fireModifierTap(editable);
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
   });
 
   it("does not run the bare-modifier path on macOS (native engine handles it)", async () => {
@@ -670,7 +649,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it("reloads the bare-modifier binding when shortcut settings change in-session", async () => {
@@ -681,7 +660,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
 
     // Backend now reports a bare-Control isolated_tap binding (in-session save).
@@ -695,7 +674,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
@@ -708,9 +687,9 @@ describe("useInAppRecordingHotkey", () => {
     fireModifierDown(editable);
     fireHotkey(editable, { code: "KeyC", key: "c" });
     fireModifierUp(editable);
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     fireModifierTap(editable);
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
   });
 
   it.each([false, true])("cancels a tap on every intervening key with a stale combo cache (composing: %s)", async (isComposing) => {
@@ -720,9 +699,9 @@ describe("useInAppRecordingHotkey", () => {
     fireModifierDown(editable);
     fireHotkey(editable, { code: "KeyC", key: "c", isComposing });
     fireModifierUp(editable);
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     fireModifierTap(editable);
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
   });
 
   it("rearms from shortcut-settings-changed even when the cached hotkey is stale", async () => {
@@ -732,7 +711,7 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+    expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
 
     mockInvoke.mockResolvedValue({ binding: bareControlBinding, hotkey: null, mode: "toggle" });
     await act(async () => {
@@ -743,6 +722,6 @@ describe("useInAppRecordingHotkey", () => {
 
     fireModifierTap(editable);
 
-    expect(mockRecording.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
   });
 });

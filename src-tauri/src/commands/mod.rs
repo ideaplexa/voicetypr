@@ -17,6 +17,7 @@ pub mod model;
 mod normalized_audio;
 pub mod permissions;
 pub(crate) mod pill_feedback;
+pub mod recording_toggle;
 pub mod remote;
 pub mod reset;
 pub mod settings;

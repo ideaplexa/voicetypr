@@ -7,6 +7,7 @@ import { TRANSCRIPTION_STREAM_EVENT, type TranscriptionStreamEvent } from '@/typ
 import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import type { PillAudioLevel } from '@/types';
 import type { PillGeometry } from '@/pill-geometry';
+import type { ToggleRoute } from '@/types/recording-toggle';
 import { islandShowsLiveWords, type DictationContext, type PillPointer, type PillSettings, type RecordingStatePayload } from '@/pill/contracts';
 import { createIsland } from '@/pill/renderer';
 import '@fontsource-variable/geist';
@@ -70,7 +71,13 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   const island = createIsland(root, {
     mac: isMacOS,
     actions: {
-      start: () => { action('dictate'); return call('start_recording', { source: 'pointer' }); }, stop: () => { action('stop'); return call('stop_recording'); },
+      toggle: async () => {
+        const route = await call<ToggleRoute>('toggle_recording', { source: 'pointer' });
+        const name = route === 'start' ? 'dictate' : route === 'stop' ? 'stop' : route === 'cancelled_pending_start' ? 'cancel' : undefined;
+        if (name) action(name);
+        return route;
+      },
+      stop: () => { action('stop'); return call('stop_recording'); },
       cancel: () => { action('cancel'); return call('cancel_recording'); }, dismiss: () => call('hide_pill_widget'),
       original: () => { action('copy'); return call('copy_last_original'); },
       card: c => { if(c.command !== 'island_action') action(c.command === 'discard_kept_dictation' ? 'discard' : 'retry'); return call(c.command, c.command === 'island_action' ? {action:c.action} : c.command === 'retry_kept_dictation' ? {id:c.id,engine:c.engine} : {id:c.id}); },

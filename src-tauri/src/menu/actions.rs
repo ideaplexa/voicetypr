@@ -3,7 +3,7 @@ use crate::{
     ai::prompts::{EnhancementOptions, EnhancementPreset},
     commands::settings::{get_settings, save_settings, Settings},
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 pub fn style_label(preset: EnhancementPreset) -> &'static str {
     match preset {
         EnhancementPreset::PersonalDictation => "Off",
@@ -62,12 +62,6 @@ fn retry_arguments(
     let engine = alternative.ok_or("Local alternative unavailable")?;
     Ok((id.into(), Some(engine)))
 }
-fn dictate_should_stop(state: crate::RecordingState) -> bool {
-    matches!(
-        state,
-        crate::RecordingState::Starting | crate::RecordingState::Recording
-    )
-}
 pub fn handle(app: &AppHandle, id: &str) {
     let app = app.clone();
     let id = id.to_owned();
@@ -91,7 +85,19 @@ pub(crate) async fn run(app: AppHandle, id: &str) -> Result<(), String> {
     run_from(app, id, "tray").await
 }
 pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(), String> {
-    let result = run_inner(app, id, source).await;
+    let (result, toggle_route) = if id == "dictate" {
+        match crate::recording::toggle::toggle_recording(
+            app,
+            crate::recording::start_source::StartSource::Tray,
+        )
+        .await
+        {
+            Ok(route) => (Ok(()), Some(route)),
+            Err(error) => (Err(error), None),
+        }
+    } else {
+        (run_inner(app, id, source).await, None)
+    };
     if result.is_ok() {
         let setting = if id.starts_with("style_") {
             Some("polish")
@@ -108,7 +114,7 @@ pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(
             crate::observability::quick(setting, source);
         }
         let action = match id {
-            "dictate" => Some("dictate"),
+            "dictate" => toggle_route.and_then(toggle_action),
             "stop" => Some("stop"),
             "cancel" => Some("cancel"),
             "nav_settings" => Some("open_settings"),
@@ -128,6 +134,17 @@ pub(crate) async fn run_from(app: AppHandle, id: &str, source: &str) -> Result<(
     }
     result
 }
+
+fn toggle_action(route: crate::recording::toggle::ToggleRoute) -> Option<&'static str> {
+    use crate::recording::toggle::ToggleRoute;
+    match route {
+        ToggleRoute::Start => Some("dictate"),
+        ToggleRoute::Stop => Some("stop"),
+        ToggleRoute::CancelledPendingStart => Some("cancel"),
+        ToggleRoute::Finishing | ToggleRoute::NoChange => None,
+    }
+}
+
 async fn run_inner(app: AppHandle, id: &str, source: &str) -> Result<(), String> {
     if let Some(destination) = destination(id) {
         let mut destination = serde_json::to_value(destination).map_err(|_| "Navigation failed")?;
@@ -146,23 +163,6 @@ async fn run_inner(app: AppHandle, id: &str, source: &str) -> Result<(), String>
         return app
             .emit_to("main", "tray-check-updates", ())
             .map_err(|_| "Update check failed".into());
-    }
-    if id == "dictate" {
-        if dictate_should_stop(app.state::<crate::AppState>().get_current_state()) {
-            crate::commands::audio::stop_recording(
-                app.clone(),
-                app.state::<crate::commands::audio::RecorderState>(),
-            )
-            .await?;
-        } else {
-            crate::commands::audio::start_recording(
-                app.clone(),
-                app.state::<crate::commands::audio::RecorderState>(),
-                Some(crate::recording::start_source::StartSource::Tray),
-            )
-            .await?;
-        }
-        return Ok(());
     }
     if id == "fix" {
         if let Some(action) = super::runtime::fix_action() {
@@ -227,6 +227,22 @@ async fn run_inner(app: AppHandle, id: &str, source: &str) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
+    use crate::license::{
+        recording_readiness::wait_for_recording_license, LicenseState, LicenseStatus,
+    };
+    use crate::recording::{
+        secure_input::StartPermit, start_source::StartSource, toggle::ToggleRoute,
+    };
+    #[test]
+    fn a_retired_start_does_not_emit_a_late_tray_dictate_action() {
+        assert_eq!(toggle_action(ToggleRoute::NoChange), None);
+        assert_eq!(
+            toggle_action(ToggleRoute::CancelledPendingStart),
+            Some("cancel")
+        );
+        assert_eq!(toggle_action(ToggleRoute::Start), Some("dictate"));
+    }
     #[test]
     fn tray_recovery_passes_the_kept_alternative_id() {
         for id in ["failed-soniox", "remote-offline"] {
@@ -240,16 +256,51 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn tray_toggle_stops_active_or_starting_pointer_take_in_either_mode() {
-        for _mode in [
-            crate::RecordingMode::Toggle,
-            crate::RecordingMode::PushToTalk,
-        ] {
-            assert!(dictate_should_stop(crate::RecordingState::Starting));
-            assert!(dictate_should_stop(crate::RecordingState::Recording));
-            assert!(!dictate_should_stop(crate::RecordingState::Idle));
-        }
+    #[tokio::test]
+    async fn tray_dictate_cancels_a_pending_license_wait_instead_of_starting_again() {
+        let state = crate::AppState::new();
+        let request = state
+            .pending_start
+            .claim(
+                &state,
+                StartSource::Tray,
+                StartPermit::capture_state(&state),
+            )
+            .unwrap();
+        let (validation, route) = tokio::join!(
+            request.validate(wait_for_recording_license(&state.license_cache)),
+            async {
+                tokio::task::yield_now().await;
+                // Still Idle: the old Idle => start branch issued a duplicate start.
+                assert_eq!(state.get_current_state(), crate::RecordingState::Idle);
+                let route = crate::recording::toggle::route(&state);
+                // Without the cancel, a ready license would let the first start publish.
+                *state.license_cache.write().await = ready();
+                route
+            }
+        );
+        assert_eq!(route, ToggleRoute::CancelledPendingStart);
+        assert!(validation.is_none(), "the pending start must never publish");
+        drop(request);
+        assert_eq!(state.get_current_state(), crate::RecordingState::Idle);
+        assert!(!state.pending_start.cancel(), "nothing may stay pending");
+        // The cancel consumed that press; the next Dictate starts fresh.
+        assert_eq!(crate::recording::toggle::route(&state), ToggleRoute::Start);
+        state
+            .transition_recording_state(crate::RecordingState::Starting)
+            .unwrap();
+        assert_eq!(crate::recording::toggle::route(&state), ToggleRoute::Stop);
+    }
+    fn ready() -> RuntimeLicenseCache {
+        RuntimeLicenseCache::Ready(CachedLicense::new(LicenseStatus {
+            status: LicenseState::Licensed,
+            trial_days_left: None,
+            license_type: None,
+            license_key: None,
+            expires_at: None,
+            verification_state: None,
+            verification_expires_at: None,
+        }))
     }
     #[test]
     fn quick_settings_use_app_settings_keys() {

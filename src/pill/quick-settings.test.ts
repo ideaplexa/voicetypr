@@ -13,7 +13,7 @@ function renderer(mac = true) {
   vi.useFakeTimers(); vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(null);
   const host=document.createElement('div'); document.body.append(host);
   const start=vi.fn(async()=>true), quickSet=vi.fn(async()=>{}), regions=vi.fn<(rects: Rect[], actionRects: Rect[]) => void>();
-  const island=createIsland(host,{mac, actions:{start,quickSet,stop:async()=>{},cancel:async()=>{},dismiss:async()=>{}},icon:async()=>null,hitRegions:regions,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window)});
+  const island=createIsland(host,{mac, actions:{toggle:start,quickSet,stop:async()=>{},cancel:async()=>{},dismiss:async()=>{}},icon:async()=>null,hitRegions:regions,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window)});
   island.settings({pill_indicator_mode:'always'}); island.quickOptions(quickFixture(!mac));
   const get=<T extends HTMLElement=HTMLElement>(selector:string)=>host.querySelector<T>(selector)!;
   const settle=async(ms=800)=>{await vi.advanceTimersByTimeAsync(ms);};
@@ -40,7 +40,7 @@ describe('P5 quick settings',()=>{
     h.island.pointer({inside:true});await h.settle(50);expect(h.island.machine.state).toBe('peek');h.island.pointer({inside:false});await h.settle(400);expect(h.island.machine.state).toBe('rest');
   });
   it('empty peek and record click use the same real start action',async()=>{
-    const h=renderer();await h.peek();fireEvent.click(h.get('.record'));await h.settle(0);fireEvent.click(h.get('.peek-row'));expect(h.start).toHaveBeenCalledTimes(2);
+    const h=renderer();await h.peek();fireEvent.click(h.get('.record'));await h.settle(300);fireEvent.click(h.get('.peek-row'));expect(h.start).toHaveBeenCalledTimes(2);
   });
   it.each(['polish','engine','mic','language'] as const)('picks %s through shared IPC after the 250ms guard',async kind=>{
     const h=renderer();await h.peek();fireEvent.click(h.get(kind==='polish'?'.peek-style':`.peek-${kind}`));
@@ -103,14 +103,58 @@ describe('P5 quick settings',()=>{
     h.emit('pill-pointer',{inside:true});await h.settle(120);fireEvent.click(h.get('.pill-rest-dot'));await h.settle(0);
     h.emit('recording-started');await h.settle(500);fireEvent.click(h.get('.listening-row'));await h.settle(0);
     expect(h.invoke).toHaveBeenCalledWith('stop_recording');
-    expect(h.invoke.mock.calls.filter(([cmd])=>cmd==='start_recording')).toHaveLength(1);
+    expect(h.invoke.mock.calls.filter(([cmd])=>cmd==='toggle_recording')).toHaveLength(1);
+    expect(h.invoke.mock.calls.some(([cmd])=>cmd==='start_recording')).toBe(false);
+  });
+  it('a deliberate second click while the first start is still validating cancels it through the backend toggle',async()=>{
+    const h=pillHarness();cleanup=()=>h.destroy();await h.settle(0);
+    const invoke=h.invoke.getMockImplementation()!;
+    // The backend owns the pending start: the first toggle awaits the license
+    // wait, the second cancels it, which settles the first as not started.
+    let release:(()=>void)|undefined;const routes:string[]=[];
+    h.invoke.mockImplementation(async cmd=>{
+      if(cmd!=='toggle_recording')return invoke(cmd);
+      if(!release){await new Promise<void>(resolve=>{release=resolve;});routes.push('no_change');return 'no_change';}
+      release();routes.push('cancelled_pending_start');return 'cancelled_pending_start';
+    });
+    h.emit('pill-pointer',{inside:true});await h.settle(120);
+    fireEvent.click(h.get('.pill-rest-dot'));await h.settle(100);
+    fireEvent.click(h.get('.pill-rest-dot'));await h.settle(0);
+    expect(h.invoke.mock.calls.filter(([cmd])=>cmd==='toggle_recording')).toHaveLength(1); // double-click debounce
+    await h.settle(200);
+    // No recording-state event arrived: the island is still at rest (backend Idle).
+    expect(['idle','peek']).toContain(h.get('.pill-root').dataset.state);
+    fireEvent.click(h.get('.pill-rest-dot'));await h.settle(0);
+    const toggles=h.invoke.mock.calls.filter(([cmd])=>cmd==='toggle_recording');
+    expect(toggles).toEqual([['toggle_recording',{source:'pointer'}],['toggle_recording',{source:'pointer'}]]);
+    expect(h.invoke.mock.calls.some(([cmd])=>cmd==='start_recording'||cmd==='stop_recording')).toBe(false);
+    expect(routes).toEqual(['cancelled_pending_start','no_change']);
+    const calls=h.invoke.mock.calls as unknown as Array<[string,{properties?:{action?:string}}?]>;
+    const actions=calls.filter(([cmd])=>cmd==='record_observability_event').map(([,args])=>args?.properties?.action);
+    expect(actions).toEqual(['cancel']);
+    expect(h.root.textContent).not.toContain('Recording failed');
+  });
+  it('an older failed click cannot cover a newer click with a failure card',async()=>{
+    const h=pillHarness();cleanup=()=>h.destroy();await h.settle(0);
+    const invoke=h.invoke.getMockImplementation()!;
+    let fail:((error:Error)=>void)|undefined;
+    h.invoke.mockImplementation(async cmd=>{
+      if(cmd!=='toggle_recording')return invoke(cmd);
+      if(!fail)return new Promise((_resolve,reject)=>{fail=reject;});
+      return 'start';
+    });
+    h.emit('pill-pointer',{inside:true});await h.settle(120);
+    fireEvent.click(h.get('.pill-rest-dot'));await h.settle(300);
+    fireEvent.click(h.get('.pill-rest-dot'));await h.settle(0);
+    fail?.(new Error('late'));await h.settle(1500);
+    expect(h.root.textContent).not.toContain('Recording failed');
   });
   it.each(['toggle','push_to_talk'])('pointer start supplies its source and surfaces failures in %s mode',async recording_mode=>{
     const h=pillHarness({recording_mode});cleanup=()=>h.destroy();await h.settle(0);
     const invoke=h.invoke.getMockImplementation()!;
-    h.invoke.mockImplementation(async cmd=>{if(cmd==='start_recording')throw new Error('private provider payload');return invoke(cmd);});
+    h.invoke.mockImplementation(async cmd=>{if(cmd==='toggle_recording')throw new Error('private provider payload');return invoke(cmd);});
     h.emit('pill-pointer',{inside:true});await h.settle(120);fireEvent.click(h.get('.pill-rest-dot'));await h.settle(1500);
-    expect(h.invoke).toHaveBeenCalledWith('start_recording',{source:'pointer'});
+    expect(h.invoke).toHaveBeenCalledWith('toggle_recording',{source:'pointer'});
     expect(h.root.textContent).toContain('Recording failed');expect(h.root.textContent).not.toContain('private provider payload');
   });
   it('same Polish list opens from start without ending recording',async()=>{

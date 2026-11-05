@@ -172,21 +172,15 @@ export function useInAppRecordingHotkey(): void {
     let holdStartDispatched = false;
     let holdStartPromise: Promise<boolean> | null = null;
 
-    // Toggle recording, mirroring the native state machine (handle_toggle_mode):
-    // queue a stop during Starting, ignore other transitional states, and debounce.
+    // The backend routes the toggle like the native hotkey: it cancels a
+    // pending start (still Idle here while the license loads) before reading
+    // the state, so this must not pick start/stop from React state.
     const performToggle = (reason: string): void => {
-      const { recording: currentRecording } = latest.current;
       const now = Date.now();
       if (now - lastToggleRef.current < TOGGLE_DEBOUNCE_MS) return;
       lastToggleRef.current = now;
-      const state = currentRecording.state;
-      if (state === "idle" || state === "error") {
-        log.debug(`In-app ${reason} in editable field — starting recording`);
-        void currentRecording.startRecording();
-      } else if (state === "starting" || state === "recording") {
-        log.debug(`In-app ${reason} in editable field — stopping recording`);
-        void currentRecording.stopRecording();
-      }
+      log.debug(`In-app ${reason} in editable field — toggling recording`);
+      void latest.current.recording.toggleRecording();
     };
 
     const startHold = (): boolean => {

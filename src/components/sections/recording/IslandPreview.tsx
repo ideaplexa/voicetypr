@@ -18,7 +18,7 @@ export function IslandPreview({ position }: { position: PillIndicatorPosition })
     const noop = async () => {};
     const island = createIsland(root, {
       staticPreview: true, mac: isMacOS, icon: async () => null, hitRegions: () => {},
-      actions: { start: noop, stop: noop, cancel: noop, dismiss: noop },
+      actions: { toggle: noop, stop: noop, cancel: noop, dismiss: noop },
       setTimeout: (() => 0) as unknown as typeof window.setTimeout, clearTimeout: () => {},
     });
     island.settings({ pill_indicator_mode: "always" });

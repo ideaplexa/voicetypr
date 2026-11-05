@@ -3,16 +3,20 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { updateService } from "@/services/updateService";
 import { createLogger } from "@/lib/logger";
+import type { ToggleRoute } from "@/types/recording-toggle";
 
 const log = createLogger("recording");
 
 type RecordingState = "idle" | "starting" | "recording" | "stopping" | "transcribing" | "error";
+
 
 interface UseRecordingReturn {
   state: RecordingState;
   error: string | null;
   startRecording: () => Promise<boolean>;
   stopRecording: () => Promise<void>;
+  /** Hotkey-source toggle; the backend cancels a pending start before reading state. */
+  toggleRecording: () => Promise<ToggleRoute | null>;
   isActive: boolean;
 }
 
@@ -147,11 +151,26 @@ export function useRecording(): UseRecordingReturn {
     }
   }, []);
 
+  const toggleRecording = useCallback(async (): Promise<ToggleRoute | null> => {
+    try {
+      log.debug("[Recording Hook] Invoking toggle_recording...");
+      return await invoke<ToggleRoute>("toggle_recording", { source: "hotkey" });
+    } catch (err) {
+      log.error("[Recording Hook] Failed to toggle recording:", err);
+      setState("error");
+      setError(
+        `${getCommandErrorMessage(err, "Recording could not start or stop")}. Try again in a moment.`,
+      );
+      return null;
+    }
+  }, []);
+
   return {
     state,
     error,
     startRecording,
     stopRecording,
+    toggleRecording,
     isActive: state !== "idle" && state !== "error",
   };
 }

@@ -7,3 +7,4 @@ pub(crate) mod pending_start;
 pub(crate) mod secure_input;
 pub(crate) mod start_source;
 pub(crate) mod storage;
+pub(crate) mod toggle;

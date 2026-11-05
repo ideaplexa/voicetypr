@@ -26,6 +26,9 @@ import type { PasteOutcomePayload } from '@/types/paste-outcome';
 import type { TranscriptionStreamEvent } from '@/types/streaming';
 import { applyPillGeometry, type PillGeometry } from '@/pill-geometry';
 
+/** Same gap as the native and in-app toggle throttles: one double-click is one toggle. */
+const TOGGLE_DEBOUNCE_MS = 300;
+
 export interface RendererDeps {
   staticPreview?: boolean;
   actions: IslandActions;
@@ -40,7 +43,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let quick: QuickOptions | undefined;
   let geometry: PillGeometry = { anchor: deps.mac ? 'bottom-center' : 'bottom-right', anchorX: deps.mac ? 231 : 451, anchorY: 425 };
   let pick: { kind: QuickKind; from: 'peek' | 'start'; y: number; height: number; selected: number; width: number } | undefined;
-  let quickPending = false, clickPending = false;
+  let quickPending = false, lastToggleAt = -Infinity, toggleSeq = 0;
   const pickGuard = new PickGuard();
   let polished = false, pastedLeft = 2400, pastedSince = 0;
   const stack = new StackView(dom.root, {
@@ -553,11 +556,17 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       }
       return;
     }
-    if (clickPending || machine.state !== 'rest' && machine.state !== 'peek') return;
-    if (performance.now() - entered < 120) return;
-    clickPending = true;
-    // Backend owns generation and returns whether this call started a take. Real events drive rendering.
-    void deps.actions.start().catch(() => { if (!destroyed) stack.push(noticeCard({kind:'recording_failed'})); sync(); }).finally(() => { clickPending = false; });
+    if (machine.state !== 'rest' && machine.state !== 'peek') return;
+    const now = performance.now();
+    if (now - entered < 120 || now - lastToggleAt < TOGGLE_DEBOUNCE_MS) return;
+    lastToggleAt = now;
+    // A start waiting on validation is still Idle, so a deliberate second click
+    // must reach the backend toggle, which cancels it. Real events drive rendering.
+    const seq = ++toggleSeq;
+    void deps.actions.toggle().catch(() => {
+      // A newer click owns the island; an older failure must not cover its take.
+      if (!destroyed && seq === toggleSeq) { stack.push(noticeCard({kind:'recording_failed'})); sync(); }
+    });
   };
   const motionChanged = () => { reduced = media.matches; sync(); };
   if (!deps.staticPreview) media.addEventListener('change', motionChanged);

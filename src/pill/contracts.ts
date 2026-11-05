@@ -24,7 +24,8 @@ export interface PillSettings {
 export type { RecordingStatePayload } from '@/types';
 /** Future slice actions are capabilities, never buttons that invoke missing commands. */
 export interface IslandActions {
-  start(): Promise<unknown>;
+  /** Backend toggle with the Pointer source: it cancels a pending start before choosing start or stop. */
+  toggle(): Promise<unknown>;
   stop(): Promise<unknown>;
   cancel(): Promise<unknown>;
   dismiss(): Promise<unknown>;

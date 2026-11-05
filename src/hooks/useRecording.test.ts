@@ -148,6 +148,49 @@ describe("useRecording", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("toggles through the backend route with the hotkey source, never an explicit start", async () => {
+    const calls: Array<[string, unknown]> = [];
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "toggle_recording") return Promise.resolve("cancelled_pending_start");
+      if (cmd === "get_current_recording_state") return Promise.resolve({ state: "idle" });
+      return Promise.reject(new Error(`Unknown command: ${cmd}`));
+    });
+    const { result } = renderHook(() => useRecording());
+
+    let route: string | null = null;
+    await act(async () => {
+      route = await result.current.toggleRecording();
+    });
+
+    expect(route).toBe("cancelled_pending_start");
+    expect(calls.filter(([cmd]) => cmd === "toggle_recording")).toEqual([
+      ["toggle_recording", { source: "hotkey" }],
+    ]);
+    expect(calls.some(([cmd]) => cmd === "start_recording" || cmd === "stop_recording")).toBe(false);
+    expect(result.current.state).toBe("idle");
+  });
+
+  it("surfaces rejected toggle_recording command errors", async () => {
+    const { result } = renderHook(() => useRecording());
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockIPC((cmd) => {
+      if (cmd === "toggle_recording") return Promise.reject(new Error("Microphone unavailable"));
+      if (cmd === "get_current_recording_state") return Promise.resolve({ state: "idle" });
+      return Promise.resolve();
+    });
+
+    let route: string | null = "start";
+    await act(async () => {
+      route = await result.current.toggleRecording();
+    });
+
+    expect(route).toBeNull();
+    expect(result.current.state).toBe("error");
+    expect(result.current.error).toBe("Microphone unavailable. Try again in a moment.");
+    consoleErrorSpy.mockRestore();
+  });
+
   it("should calculate isActive correctly", async () => {
     const { result } = renderHook(() => useRecording());
 
