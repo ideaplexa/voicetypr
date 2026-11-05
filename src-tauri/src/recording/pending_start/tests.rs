@@ -63,7 +63,7 @@ async fn cancel_during_loading_cannot_be_cleared_by_a_late_start() {
         request.validate(wait_for_recording_license(&state.license_cache)),
         async {
             tokio::task::yield_now().await;
-            assert!(state.pending_start.cancel_before_recording(&state));
+            assert!(state.pending_start.begin_cancel(&state).1);
             *state.license_cache.write().await = ready();
         }
     );
@@ -115,7 +115,7 @@ async fn cancel_after_ready_validation_still_prevents_publication() {
         .validate(wait_for_recording_license(&state.license_cache))
         .await
         .is_some());
-    assert!(state.pending_start.cancel_before_recording(&state));
+    assert!(state.pending_start.begin_cancel(&state).1);
     assert!(request.commit(|| state.clear_cancellation()).is_none());
     assert!(state.is_cancellation_requested());
     assert_eq!(state.get_current_state(), RecordingState::Idle);
@@ -133,7 +133,7 @@ fn cancelling_a_pending_request_with_an_existing_take_still_requires_cleanup() {
         state.transition_recording_state(phase).unwrap();
     }
     let request = claim(&state).unwrap();
-    assert!(!state.pending_start.cancel_before_recording(&state));
+    assert!(!state.pending_start.begin_cancel(&state).1);
     assert!(state.is_cancellation_requested());
     assert!(request.commit(|| panic!("cancelled")).is_none());
 }

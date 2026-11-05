@@ -304,12 +304,24 @@ impl GpuSidecarClient {
     }
 
     pub async fn abort_active_process(&self) {
+        self.request_abort();
+        self.reap_aborted_process_if(|| true).await;
+    }
+
+    pub(crate) fn request_abort(&self) {
         self.abort_requested.store(true, Ordering::SeqCst);
         self.abort_notify.notify_waiters();
+    }
 
+    pub(crate) async fn reap_aborted_process_if(&self, is_current: impl FnOnce() -> bool) {
         if let Ok(mut guard) =
             tokio::time::timeout(Duration::from_millis(250), self.process.lock()).await
         {
+            // Check after waiting AND inside the process lock. A delayed cancel
+            // must not kill a replacement's process or clear its abort flag.
+            if !is_current() {
+                return;
+            }
             if let Some(process) = guard.as_mut() {
                 log::info!("Aborting active Whisper Vulkan sidecar process");
                 process.kill_and_wait().await;

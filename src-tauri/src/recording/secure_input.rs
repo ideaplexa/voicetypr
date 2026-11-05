@@ -30,6 +30,14 @@ impl CaptureInterrupts {
             .is_some_and(|(owned, signal)| *owned == generation && signal.is_interrupted())
     }
 
+    pub(crate) fn is_active(&self, generation: u64) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|(owned, signal)| *owned == generation && !signal.is_interrupted())
+    }
+
     pub(crate) fn interrupt(&self, generation: u64) -> bool {
         let interrupt = self
             .0

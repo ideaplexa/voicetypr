@@ -262,6 +262,40 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Startup is generation-owned, including after creation and the UI hop.
+    pub(crate) async fn show_pill_window_for_take(&self, generation: u64) -> Result<(), String> {
+        let creation = self.pill_creation.lock().await;
+        let window = match self.get_pill_window() {
+            Some(window) => window,
+            None => self.create_pill_window(false).await?,
+        };
+        drop(creation);
+        let manager = self.clone();
+        let app = self.app_handle.clone();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.app_handle
+            .run_on_main_thread(move || {
+                let state = app.state::<crate::AppState>();
+                let result = state
+                    .pending_start
+                    .with_active(&state, generation, || {
+                        let (x, y) = manager.calculate_center_position();
+                        window
+                            .set_position(tauri::LogicalPosition::new(x, y))
+                            .map_err(|e| e.to_string())?;
+                        manager.emit_pill_geometry(&window);
+                        // Already on the UI thread: native::show executes inline.
+                        crate::pill::native::show(&window)?;
+                        crate::pill::hit_test::start(&window);
+                        Ok(())
+                    })
+                    .unwrap_or(Ok(()));
+                let _ = sender.send(result);
+            })
+            .map_err(|error| error.to_string())?;
+        receiver.await.map_err(|error| error.to_string())?
+    }
+
     /// Create the hidden pill window once, shortly after startup, so the first
     /// recording only has to show it. Idempotent, and skipped for the "never" mode.
     /// Must run from an async task (the builder hops to the main thread), never

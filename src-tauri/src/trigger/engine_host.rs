@@ -10,6 +10,8 @@ use crate::{RecordingMode, RecordingState};
 
 use super::{mapping, EngineBinding};
 
+static REBUILD_BINDINGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Recompute the engine's binding set from the full binding list and apply it.
 ///
 /// Ordering matters for the core recording path. Before swapping the lookup
@@ -138,6 +140,22 @@ fn bindings_needing_release(old: &[EngineBinding], new: &[EngineBinding]) -> Vec
 /// wrapper loads persisted state, runs the plan, performs the one-time durable
 /// bare-modifier-primary migration it requests, and applies the result.
 pub fn rebuild_engine_bindings(app: &AppHandle) {
+    rebuild_bindings(app, None);
+}
+
+pub(crate) fn rebuild_engine_bindings_for_generation(app: &AppHandle, generation: u64) {
+    rebuild_bindings(app, Some(generation));
+}
+
+fn rebuild_bindings(app: &AppHandle, generation: Option<u64>) {
+    // Serialize snapshot + apply, not just individual engine-map writes.
+    // A replacement's rebuild follows an already-running old rebuild; an old
+    // start arriving later cannot overwrite the replacement's Escape binding.
+    // Do not take the start ownership lock here: synthetic releases re-enter it.
+    let _rebuild = REBUILD_BINDINGS.lock().unwrap_or_else(|e| e.into_inner());
+    if generation.is_some_and(crate::commands::audio::recording_generation_is_stale) {
+        return;
+    }
     let settings = match crate::commands::shortcuts::load_shortcut_settings(app) {
         Ok(settings) => settings,
         Err(error) => {

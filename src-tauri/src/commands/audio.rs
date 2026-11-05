@@ -4889,6 +4889,8 @@ fn spawn_silence_event_listener(
 }
 
 pub(crate) use crate::recording::start_source::ptt_key_released;
+#[path = "audio_cancel.rs"]
+mod cancel_cleanup;
 #[path = "audio_start.rs"]
 mod start_cleanup;
 
@@ -4901,22 +4903,27 @@ fn spawn_island_context(
     generation: u64,
 ) {
     // Read the pinned app now, before Recording: transcription consumes it later.
-    let hint = app
-        .state::<AppState>()
-        .recording_app_context
-        .lock()
-        .ok()
-        .and_then(|context| context.clone());
+    let state = app.state::<AppState>();
+    let Some(hint) = state.pending_start.with_active(&state, generation, || {
+        state
+            .recording_app_context
+            .lock()
+            .ok()
+            .and_then(|context| context.clone())
+    }) else {
+        return;
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let capture_app = app.clone();
         let context = tauri::async_runtime::spawn_blocking(move || {
-            if !recording_generation_is_stale(generation) {
-                crate::pill::positioning::install(
-                    generation,
-                    crate::pill::positioning::snapshot(&capture_app),
-                );
-            }
+            let state = capture_app.state::<AppState>();
+            state.pending_start.with_active(&state, generation, || ())?;
+            // Lookups may hop to the UI thread: never hold the ownership lock.
+            let monitor = crate::pill::positioning::snapshot(&capture_app);
+            state.pending_start.with_active(&state, generation, || {
+                crate::pill::positioning::install(generation, monitor);
+            })?;
             crate::pill::context::capture(&capture_app, hint)
         })
         .await
@@ -4932,11 +4939,11 @@ fn spawn_island_context(
 }
 
 /// Rebuilds hotkey bindings from the current recording state when dropped.
-struct RebuildBindingsOnExit(AppHandle);
+struct RebuildBindingsOnExit(AppHandle, u64);
 
 impl Drop for RebuildBindingsOnExit {
     fn drop(&mut self) {
-        crate::trigger::engine_host::rebuild_engine_bindings(&self.0);
+        crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&self.0, self.1);
     }
 }
 
@@ -4962,8 +4969,15 @@ impl EarlyPillShow {
                     .unwrap_or(false);
                 crate::perf::note_window_hidden(generation, !visible);
             }
-            let result = crate::commands::window::show_pill_widget(task_app).await;
-            crate::perf::mark(generation, crate::perf::Stage::PillShown);
+            let manager = task_app
+                .state::<AppState>()
+                .get_window_manager()
+                .ok_or_else(|| "Window manager not initialized".to_string())?;
+            let result = manager.show_pill_window_for_take(generation).await;
+            let state = task_app.state::<AppState>();
+            state.pending_start.with_active(&state, generation, || {
+                crate::perf::mark(generation, crate::perf::Stage::PillShown);
+            });
             result
         });
         Self {
@@ -5038,7 +5052,7 @@ pub async fn start_recording(
 
 pub(crate) async fn start_recording_with_permit(
     app: AppHandle,
-    state: State<'_, RecorderState>,
+    _state: State<'_, RecorderState>,
     source: Option<crate::recording::start_source::StartSource>,
     start_permit: crate::recording::secure_input::StartPermit,
 ) -> Result<bool, String> {
@@ -5057,20 +5071,6 @@ pub(crate) async fn start_recording_with_permit(
             ("command", "start_recording"),
             ("timestamp", &chrono::Utc::now().to_rfc3339()),
         ],
-    );
-
-    // If we're stuck in Error, recover to Idle before attempting a new start
-    let current_state = crate::get_recording_state(&app);
-    if matches!(current_state, crate::RecordingState::Error) {
-        crate::update_recording_state(
-            &app,
-            crate::RecordingState::Idle,
-            Some("recover".to_string()),
-        );
-    }
-    log::debug!(
-        "⏱️ [REC TIMING] state check complete (+{}ms)",
-        recording_start.elapsed().as_millis()
     );
 
     // Own the pending request before any validation await.
@@ -5132,72 +5132,15 @@ pub(crate) async fn start_recording_with_permit(
         return Ok(false);
     };
 
-    // Arm Escape as soon as Starting is published, before device initialization.
     let app_state = app.state::<AppState>();
-    app_state
-        .esc_pressed_once
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-    if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
-        if let Some(handle) = timeout_guard.take() {
-            handle.abort();
-        }
-    }
-    crate::trigger::engine_host::rebuild_engine_bindings(&app);
-    // A bound Escape is swallowed system-wide, so rebuild on every exit: a start
-    // that ends without reaching Recording (quick PTT release, readiness failure,
-    // cancel, stale generation) must not leave the Starting-only binding armed.
-    let _rebuild_bindings_on_exit = RebuildBindingsOnExit(app.clone());
-
-    let (streaming_tap_enabled, streaming_engine_enabled, live_preview_mode) = app
-        .store("settings")
-        .ok()
-        .map(|store| {
-            let live_preview_mode = store
-                .get("transcription_mode")
-                .and_then(|value| value.as_str().map(|value| value == "live_preview"))
-                .unwrap_or(false);
-            let dev_tap_enabled = store
-                .get("streaming_tap_enabled")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-            let dev_engine_enabled = store
-                .get("streaming_engine_enabled")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-            (
-                live_preview_mode || dev_tap_enabled,
-                live_preview_mode || dev_engine_enabled,
-                live_preview_mode,
-            )
-        })
-        .unwrap_or((false, false, false));
-    app_state
-        .recording_live_preview
-        .store(live_preview_mode, AtomicOrdering::SeqCst);
-
-    // Pause system media if enabled (default: off)
-    let mut resume_media_on_error = false;
-    if let Ok(store) = app.store("settings") {
-        let pause_media = store
-            .get("pause_media_during_recording")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false); // Default to off
-        if pause_media {
-            log::info!("🎵 Pause media during recording is enabled");
-            let paused = MEDIA_CONTROLLER.pause_if_playing();
-            resume_media_on_error = paused;
-            log::debug!("🎵 Media pause result: {}", paused);
-        } else {
-            log::debug!("🎵 Pause media during recording is disabled");
-        }
-    }
-
-    let resume_media_if_needed = || {
-        if resume_media_on_error {
-            MEDIA_CONTROLLER.resume_if_we_paused();
-        }
+    let _rebuild_bindings_on_exit = RebuildBindingsOnExit(app.clone(), recording_generation);
+    let Some(preview) = start_cleanup::prepare(&app, recording_generation) else {
+        start_cleanup::abort_start(&app, None, recording_generation)?;
+        return Ok(false);
     };
-
+    // Rebuilds derive LIVE state, never a retired start's snapshot. Do not hold
+    // the ownership lock across engine/native dispatch.
+    crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&app, recording_generation);
     // Load recording config once to avoid repeated store access
     log::debug!(
         "⏱️ [REC TIMING] loading recording config (+{}ms)",
@@ -5207,10 +5150,24 @@ pub(crate) async fn start_recording_with_permit(
         Ok(config) => config,
         Err(e) => {
             log::error!("Failed to load recording config: {}", e);
-            resume_media_if_needed();
-            return Err(format!("Configuration error: {}", e));
+            return start_cleanup::fail_start(
+                &app,
+                None,
+                recording_generation,
+                format!("Configuration error: {e}"),
+                false,
+            );
         }
     };
+    if app_state
+        .pending_start
+        .with_active(&app_state, recording_generation, || ())
+        .is_none()
+        || !start_permit.is_current(&app)
+    {
+        start_cleanup::abort_start(&app, None, recording_generation)?;
+        return Ok(false);
+    }
     log::debug!(
         "Using recording config: show_pill={} pill_indicator_mode='{}' ai_enabled={} model={}",
         config.show_pill_widget,
@@ -5221,33 +5178,44 @@ pub(crate) async fn start_recording_with_permit(
     // Show the island now (non-blocking); the mic opening below must not delay it.
     let should_show_pill = config.show_pill_widget && config.pill_indicator_mode != "never";
     let early_pill = should_show_pill.then(|| EarlyPillShow::spawn(&app, recording_generation));
-    // Warm the active cloud provider's connection so the first transcription skips the handshake (skipped when a remote handles dispatch).
     if let Some(provider) = crate::cloud_stt::CloudProvider::from_id(&config.current_engine) {
-        let app = app.clone();
-        tokio::spawn(async move {
-            let remote_active = {
-                let remote = app.state::<AsyncMutex<RemoteSettings>>();
-                let guard = remote.lock().await;
-                guard.get_active_connection().is_some()
-            };
-            if !remote_active
-                && crate::secure_store::secure_has(&app, provider.key_name()).unwrap_or(false)
-            {
-                provider.warm_up().await;
-            }
+        let task_app = app.clone();
+        let interrupt = capture_interrupt.clone();
+        app_state.pending_start.with_active(&app_state, recording_generation, || {
+            tokio::spawn(async move {
+                tokio::select! {
+                    biased;
+                    () = interrupt.wait() => {},
+                    () = async {
+                        let remote_active = {
+                            let remote = task_app.state::<AsyncMutex<RemoteSettings>>();
+                            let guard = remote.lock().await;
+                            guard.get_active_connection().is_some()
+                        };
+                        let state = task_app.state::<AppState>();
+                        let warm = state.pending_start.with_active(&state, recording_generation, || {
+                            !remote_active && crate::secure_store::secure_has(&task_app, provider.key_name()).unwrap_or(false)
+                        }).unwrap_or(false);
+                        if warm { provider.warm_up().await; }
+                    } => {},
+                }
+            });
         });
     }
-    // Prefetch the LLM polish path too (runs post-transcription regardless of the STT engine):
-    // HTTP providers get a pooled HEAD, agent-CLI providers a binary + capability probe.
     if config.ai_enabled && !config.ai_provider.is_empty() {
-        let app = app.clone();
+        let task_app = app.clone();
         let provider_id = config.ai_provider.clone();
-        let generation = recording_generation;
-        tokio::spawn(async move {
-            crate::commands::ai::prefetch_ai_provider(app, provider_id, generation).await;
+        let interrupt = capture_interrupt.clone();
+        app_state.pending_start.with_active(&app_state, recording_generation, || {
+            tokio::spawn(async move {
+                tokio::select! {
+                    biased;
+                    () = interrupt.wait() => {},
+                    () = crate::commands::ai::prefetch_ai_provider(task_app, provider_id, recording_generation) => {},
+                }
+            });
         });
-    }
-    // Every take owns a disposable directory, separate from opted-in saves.
+    } // Every take owns a disposable directory, separate from opted-in saves.
     let capture_files = match app
         .path()
         .app_data_dir()
@@ -5256,27 +5224,25 @@ pub(crate) async fn start_recording_with_permit(
     {
         Ok(files) => files,
         Err(e) => {
-            resume_media_if_needed();
-            return Err(e);
+            return start_cleanup::fail_start(&app, None, recording_generation, e, false);
         }
     };
     let audio_path = capture_files.audio_path();
 
-    // Store path for later use. The stale `pending_stop_after_start` flag is
-    // cleared before `Starting` is published (above), so a stop arriving
-    // during the Starting window survives to the Recording-commit check.
     let app_state = app.state::<AppState>();
-    // Save current recording path
-    match app_state.current_recording_path.lock() {
-        Ok(mut guard) => {
-            guard.replace(audio_path.clone());
-        }
-        Err(e) => {
-            resume_media_if_needed();
-            return Err(format!("Failed to acquire path lock: {}", e));
-        }
+    if !app_state
+        .pending_start
+        .with_active(&app_state, recording_generation, || {
+            app_state
+                .current_recording_path
+                .replace(recording_generation, audio_path.clone())
+        })
+        .unwrap_or(false)
+    {
+        capture_files.writer_stopped(false);
+        start_cleanup::abort_start(&app, Some(&capture_files), recording_generation)?;
+        return Ok(false);
     }
-
     // Get selected microphone from settings (before acquiring recorder lock)
     log::debug!(
         "⏱️ [REC TIMING] getting microphone settings (+{}ms)",
@@ -5321,224 +5287,44 @@ pub(crate) async fn start_recording_with_permit(
         || app_state.is_cancellation_requested()
     {
         capture_interrupt.interrupt();
-        start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
+        start_cleanup::abort_start(&app, Some(&capture_files), recording_generation)?;
         return Ok(false);
     }
 
-    // Start recording (scoped to release mutex before async operations)
-    log::debug!(
-        "⏱️ [REC TIMING] acquiring recorder lock (+{}ms)",
-        recording_start.elapsed().as_millis()
-    );
-    let (audio_level_rx_to_spawn, silence_event_rx_to_spawn, readiness_rx, recording_generation) =
-        {
-            let mut recorder = match state.inner().0.lock() {
-                Ok(recorder) => recorder,
-                Err(e) => {
-                    resume_media_if_needed();
-                    return Err(format!("Failed to acquire recorder lock: {}", e));
-                }
-            };
-            log::debug!(
-                "⏱️ [REC TIMING] recorder lock acquired (+{}ms)",
-                recording_start.elapsed().as_millis()
-            );
-
-            // Check if already recording
-            if recorder.is_recording() {
-                // Reaching here means the entry idempotent guard did not catch this
-                // (backend state was not Starting/Recording) yet the recorder already
-                // has an active handle — a genuine inconsistency, so surface it.
-                log::warn!("Already recording!");
-                resume_media_if_needed();
-                return Err("Already recording".to_string());
-            }
-
-            // Try to start recording with graceful error handling
-            log::debug!(
-                "⏱️ [REC TIMING] about to call recorder.start_recording (+{}ms)",
-                recording_start.elapsed().as_millis()
-            );
-            let recorder_init_start = Instant::now();
-            let audio_path_str = match audio_path.to_str() {
-                Some(path) => path,
-                None => {
-                    resume_media_if_needed();
-                    return Err("Invalid path encoding".to_string());
-                }
-            };
-
-            log::debug!("Recording file ready");
-
-            // Start recording and get side-channel receivers
-            // Streaming preview is engine-dispatched (plan 032/043 #14a). Parakeet keeps its
-            // OWN factory so its behavior is byte-identical even though its capability row is
-            // dormant-FINAL_ONLY (the reconciliation trap); Whisper adds decode-ahead. The
-            // streaming_* flags already encode live-preview mode from settings.
-            // Plan 073: Soniox streams every plain transcription over the realtime WS
-            // (faster final); live preview only decides whether the pill shows text.
-            let soniox_realtime = config.current_engine == "soniox"
-                && config.transcription_task == TRANSCRIPTION_TASK_TRANSCRIBE
-                && !remote_server_online;
-            let streaming_engine_supported = matches!(
-                config.current_engine.as_str(),
-                "parakeet" | "whisper" | "soniox" | "deepgram"
-            );
-            let streaming_tap_enabled =
-                (streaming_tap_enabled || soniox_realtime) && streaming_engine_supported;
-            let streaming_engine_enabled =
-                (streaming_engine_enabled || soniox_realtime) && streaming_engine_supported;
-            let cancellation_flag = app_state.should_cancel_recording.clone();
-            let stream_cancelled: Arc<dyn Fn() -> bool + Send + Sync> =
-                Arc::new(move || cancellation_flag.load(AtomicOrdering::SeqCst));
-            let stream_sink_factory = match config.current_engine.as_str() {
-                "soniox" | "deepgram" if remote_server_online => None,
-                "parakeet" => build_parakeet_stream_sink_factory(
-                    &app,
-                    &config,
-                    streaming_tap_enabled,
-                    streaming_engine_enabled,
-                    live_preview_mode,
-                    recording_generation,
-                ),
-                "whisper" => build_whisper_stream_sink_factory(
-                    &app,
-                    &config,
-                    streaming_tap_enabled,
-                    streaming_engine_enabled,
-                    live_preview_mode,
-                    recording_generation,
-                ),
-                "soniox" => build_soniox_stream_sink_factory(
-                    &app,
-                    &config,
-                    streaming_tap_enabled,
-                    streaming_engine_enabled,
-                    live_preview_mode,
-                    recording_generation,
-                ),
-                "deepgram" => build_deepgram_stream_sink_factory(
-                    &app,
-                    &config,
-                    streaming_tap_enabled,
-                    streaming_engine_enabled,
-                    live_preview_mode,
-                    recording_generation,
-                ),
-                _ => None,
-            };
-            let (audio_level_rx, silence_event_rx, readiness_rx) = match start_permit
-                .start_if_current(&app, recording_generation, &capture_interrupt, || {
-                    recorder.start_recording(
-                        audio_path_str,
-                        selected_microphone.clone(),
-                        streaming_tap_enabled,
-                        recording_generation,
-                        capture_interrupt.clone(),
-                        stream_cancelled,
-                        stream_sink_factory,
-                        recording_start,
-                    )
-                }) {
-                Ok(Some(readiness_rx)) => {
-                    log::debug!(
-                        "⏱️ [REC TIMING] recorder.start_recording returned Ok (+{}ms)",
-                        recording_start.elapsed().as_millis()
-                    );
-                    // Verify recording actually started
-                    let is_recording = recorder.is_recording();
-
-                    // Get receivers before potentially dropping recorder
-                    let level_rx = recorder.take_audio_level_receiver();
-                    let silence_rx = recorder.take_silence_event_receiver();
-
-                    if !is_recording {
-                        drop(recorder); // Release the lock if we're erroring out
-                        log_failed(
-                            "RECORDER_INIT",
-                            "Recording failed to start after initialization",
-                        );
-                        log_with_context(
-                            log::Level::Debug,
-                            "Recorder initialization failed",
-                            &[(
-                                "init_time_ms",
-                                recorder_init_start
-                                    .elapsed()
-                                    .as_millis()
-                                    .to_string()
-                                    .as_str(),
-                            )],
-                        );
-
-                        update_recording_state(
-                            &app,
-                            RecordingState::Error,
-                            Some("Microphone initialization failed".to_string()),
-                        );
-
-                        crate::commands::island_notice::notice_at(
-                            &app,
-                            crate::commands::island_notice::NoticeKind::RecordingFailed,
-                            recording_generation,
-                        );
-
-                        resume_media_if_needed();
-                        return Err("Failed to start recording".to_string());
-                    } else {
-                        log_performance(
-                            "RECORDER_INIT",
-                            recorder_init_start.elapsed().as_millis() as u64,
-                            Some(&format!("file={}", audio_path_str)),
-                        );
-                        log::info!("✅ Recording started successfully");
-
-                        // Monitor system resources at recording start
-                        #[cfg(debug_assertions)]
-                        system_monitor::log_resources_before_operation("RECORDING_START");
-                    }
-
-                    (level_rx, silence_rx, readiness_rx)
-                }
-                Ok(None) => {
-                    drop(recorder);
-                    start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
-                    return Ok(false);
-                }
-                Err(e) => {
-                    log_failed("RECORDER_START", &e);
-                    log_with_context(
-                        log::Level::Debug,
-                        "Recorder start failed",
-                        &[(
-                            "init_time_ms",
-                            recorder_init_start
-                                .elapsed()
-                                .as_millis()
-                                .to_string()
-                                .as_str(),
-                        )],
-                    );
-
-                    update_recording_state(&app, RecordingState::Error, Some(e.to_string()));
-
-                    // Provide specific error messages for common issues
-
-                    resume_media_if_needed();
-                    return Err(e);
-                }
-            };
-
-            // Release the recorder lock after successful start
-            drop(recorder);
-            (
-                audio_level_rx,
-                silence_event_rx,
-                readiness_rx,
+    let channels = match start_cleanup::construct(
+        &app,
+        start_cleanup::CaptureSetup {
+            config: &config,
+            preview: &preview,
+            path: &audio_path,
+            microphone: selected_microphone,
+            remote_online: remote_server_online,
+            generation: recording_generation,
+            interrupt: &capture_interrupt,
+            permit: start_permit,
+            started: recording_start,
+        },
+    ) {
+        Ok(Some(channels)) => channels,
+        Ok(None) => {
+            start_cleanup::abort_start(&app, Some(&capture_files), recording_generation)?;
+            return Ok(false);
+        }
+        Err(error) => {
+            return start_cleanup::fail_start(
+                &app,
+                Some(&capture_files),
                 recording_generation,
+                error,
+                false,
             )
-        }; // MutexGuard dropped here
-
+        }
+    };
+    let start_cleanup::CaptureChannels {
+        levels: audio_level_rx_to_spawn,
+        silence: silence_event_rx_to_spawn,
+        readiness: readiness_rx,
+    } = channels;
     // Now perform async operations after mutex is released
     let readiness =
         crate::audio::recorder::wait_for_readiness(readiness_rx, &capture_interrupt).await;
@@ -5563,109 +5349,62 @@ pub(crate) async fn start_recording_with_permit(
             // The cancellation path below owns its Idle transition and file cleanup.
         }
         StartReadinessDecision::Failed(error) => {
-            log_failed("RECORDER_START", &error);
-            let stop_result = state
-                .inner()
-                .0
-                .lock()
-                .map_err(|e| format!("Failed to acquire recorder lock: {e}"))
-                .and_then(|mut recorder| recorder.stop_recording());
-            capture_files.writer_stopped(
-                stop_result
-                    .as_ref()
-                    .err()
-                    .is_some_and(|e| crate::recording::storage::writer_may_be_running(e)),
+            return start_cleanup::fail_start(
+                &app,
+                Some(&capture_files),
+                recording_generation,
+                error,
+                true,
             );
-            if let Err(stop_error) = stop_result {
-                log::warn!("Recorder cleanup after start failure: {stop_error}");
-            }
-            begin_recording_generation();
-            clear_pending_stop_after_start(&app_state);
-            if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
-                if let Some(path) = path_guard.take() {
-                    crate::recording::storage::remove_finished_audio(&path);
-                }
-            }
-            island::mic_blocked(&app, recording_generation, &error);
-            update_recording_state(&app, RecordingState::Error, Some(error.clone()));
-
-            resume_media_if_needed();
-            return Err(error);
         }
     }
-
-    // If cancellation was requested while we were starting (e.g. Escape
-    // during slow device init), abort instead of committing to Recording.
-    if app_state.is_cancellation_requested() {
-        log::info!("Cancellation requested during start; aborting before Recording state");
-        let recorder_state_handle = app.state::<RecorderState>();
-        let stop_result = recorder_state_handle
-            .inner()
-            .0
-            .lock()
-            .map_err(|e| format!("Failed to acquire recorder lock: {}", e))
-            .and_then(|mut recorder| {
-                if recorder.is_recording() {
-                    recorder.stop_recording()
-                } else {
-                    Ok(String::new())
-                }
-            });
-
-        clear_pending_stop_after_start(&app_state);
-        MEDIA_CONTROLLER.resume_if_we_paused();
-        capture_files.writer_stopped(
-            stop_result
-                .as_ref()
-                .err()
-                .is_some_and(|e| crate::recording::storage::writer_may_be_running(e)),
-        );
-
-        if let Ok(mut path_guard) = app_state.current_recording_path.lock() {
-            if let Some(path) = path_guard.take() {
-                crate::recording::storage::remove_finished_audio(&path);
-            }
-        }
-
-        update_recording_state(&app, RecordingState::Idle, None);
-        stop_result?;
+    if app_state.is_cancellation_requested() || capture_interrupt.is_interrupted() {
+        start_cleanup::abort_start(&app, Some(&capture_files), recording_generation)?;
         return Ok(false);
     }
 
-    // Recheck ownership after device initialization, before publishing Recording.
-    if ptt_key_released(&app_state, source)
-        || !start_permit.is_current(&app)
-        || capture_interrupt.is_interrupted()
-    {
-        log::info!("PTT: Key was released during audio init; stopping recorder immediately");
-        start_cleanup::abort_start(&app, &capture_files, recording_generation)?;
-        return if start_permit.is_current(&app) {
+    let released = ptt_key_released(&app_state, source);
+    if released || !start_permit.is_current(&app) {
+        start_cleanup::abort_start(&app, Some(&capture_files), recording_generation)?;
+        return if released && start_permit.is_current(&app) {
             Err(PTT_START_ABORTED_AFTER_RELEASE.to_string())
         } else {
             Ok(false)
         };
     }
 
+    // Publication, capture registration, telemetry and pending-stop consumption
+    // are one owned synchronous operation. A retired A cannot mutate B.
+    let pending_stop_requested = app_state
+        .pending_start
+        .with_active(&app_state, recording_generation, || {
+            if ptt_key_released(&app_state, source)
+                || !start_permit.is_current(&app)
+                || !app_state
+                    .capture_files
+                    .replace(recording_generation, capture_files.clone())
+            {
+                return None;
+            }
+            update_recording_state(&app, RecordingState::Recording, None);
+            crate::product_analytics::capture_at(
+                crate::product_analytics::ProductEvent::RecordingStarted,
+                recording_generation,
+            );
+            Some(start_permit.pending_stop(
+                &app,
+                consume_pending_stop_after_start(
+                    &app_state.pending_stop_after_start,
+                    &app_state.pending_stop_requested,
+                ),
+            ))
+        })
+        .flatten();
+    let Some(pending_stop_requested) = pending_stop_requested else {
+        start_cleanup::abort_start(&app, Some(&capture_files), recording_generation)?;
+        return Ok(false);
+    };
     spawn_island_context(&app, source, recording_generation);
-
-    *app_state
-        .capture_files
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(capture_files);
-    update_recording_state(&app, RecordingState::Recording, None);
-    crate::product_analytics::capture_at(
-        crate::product_analytics::ProductEvent::RecordingStarted,
-        recording_generation,
-    );
-
-    // Honor stops arriving between the final start guard and publishing Recording.
-    let pending_stop_requested = start_permit.pending_stop(
-        &app,
-        consume_pending_stop_after_start(
-            &app_state.pending_stop_after_start,
-            &app_state.pending_stop_requested,
-        ),
-    );
     let pending_stop_consumed = pending_stop_requested.is_some();
     if let Some(stop_requested) = pending_stop_requested {
         log::info!("Toggle: pending stop triggered right after start; stopping now");
@@ -5684,24 +5423,32 @@ pub(crate) async fn start_recording_with_permit(
                 log::error!("Toggle: pending stop failed: {}", e);
             }
         });
-    } else if recording_started_cue_eligible(
-        pending_stop_consumed,
-        app_state.get_current_state(),
-        recording_generation_is_stale(recording_generation),
-    ) {
-        crate::commands::audio_feedback::play_audio_feedback(
-            &app,
-            crate::commands::audio_feedback::AudioFeedbackCue::RecordingStarted,
-        );
+    } else {
+        app_state
+            .pending_start
+            .with_active(&app_state, recording_generation, || {
+                if recording_started_cue_eligible(
+                    pending_stop_consumed,
+                    app_state.get_current_state(),
+                    recording_generation_is_stale(recording_generation),
+                ) {
+                    crate::commands::audio_feedback::play_audio_feedback(
+                        &app,
+                        crate::commands::audio_feedback::AudioFeedbackCue::RecordingStarted,
+                    );
+                }
+            });
     }
-    if let Some(silence_event_rx) = silence_event_rx_to_spawn {
-        spawn_silence_event_listener(app.clone(), silence_event_rx, recording_generation);
-    }
-
-    if let Some(audio_level_rx) = audio_level_rx_to_spawn {
-        crate::pill::level::spawn(app.clone(), audio_level_rx, recording_generation);
-    }
-
+    app_state
+        .pending_start
+        .with_active(&app_state, recording_generation, || {
+            if let Some(silence_event_rx) = silence_event_rx_to_spawn {
+                spawn_silence_event_listener(app.clone(), silence_event_rx, recording_generation);
+            }
+            if let Some(audio_level_rx) = audio_level_rx_to_spawn {
+                crate::pill::level::spawn(app.clone(), audio_level_rx, recording_generation);
+            }
+        });
     // The island was shown when Starting was published; settle that show now that
     // we are Recording (graceful degradation if it failed).
     log::info!(
@@ -5712,7 +5459,11 @@ pub(crate) async fn start_recording_with_permit(
     );
     if let Some(early_pill) = early_pill {
         let pill_result = early_pill.consume().await;
-        if recording_generation_is_stale(recording_generation) {
+        if app_state
+            .pending_start
+            .with_active(&app_state, recording_generation, || ())
+            .is_none()
+        {
             return Ok(false);
         }
         match pill_result {
@@ -5721,27 +5472,33 @@ pub(crate) async fn start_recording_with_permit(
                 log::warn!("Failed to show pill widget: {}. Recording will continue without visual feedback.", e);
 
                 // Emit event so frontend knows pill isn't visible
-                let _ = emit_to_window(
-                    &app,
-                    "main",
-                    "pill-widget-error",
-                    "Recording indicator unavailable. Recording is still active.",
-                );
+                app_state
+                    .pending_start
+                    .with_active(&app_state, recording_generation, || {
+                        let _ = emit_to_window(
+                            &app,
+                            "main",
+                            "pill-widget-error",
+                            "Recording indicator unavailable. Recording is still active.",
+                        );
+                    });
             }
         }
     } else if config.pill_indicator_mode == "never" {
         log::debug!("Pill widget hidden (pill_indicator_mode=never)");
     }
 
-    // Also emit legacy event for compatibility
-    if recording_started_cue_eligible(
-        pending_stop_consumed,
-        app_state.get_current_state(),
-        recording_generation_is_stale(recording_generation),
-    ) {
-        let _ = emit_to_window(&app, "pill", "recording-started", ());
-    }
-
+    app_state
+        .pending_start
+        .with_active(&app_state, recording_generation, || {
+            if recording_started_cue_eligible(
+                pending_stop_consumed,
+                app_state.get_current_state(),
+                recording_generation_is_stale(recording_generation),
+            ) {
+                let _ = emit_to_window(&app, "pill", "recording-started", ());
+            }
+        });
     log_complete(
         "RECORDING_START",
         recording_start.elapsed().as_millis() as u64,
@@ -5754,8 +5511,15 @@ pub(crate) async fn start_recording_with_permit(
 
     // Refresh bindings after the Recording transition without resetting an
     // Escape tap already received during Starting.
-    crate::trigger::engine_host::rebuild_engine_bindings(&app);
+    crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&app, recording_generation);
 
+    if app_state
+        .pending_start
+        .with_active(&app_state, recording_generation, || ())
+        .is_none()
+    {
+        return Ok(false);
+    }
     Ok(true)
 }
 
@@ -5830,7 +5594,7 @@ async fn stop_recording_with_mode_at(
 
     // Update state to stopping
     log_state_transition("RECORDING", "recording", "stopping", true, None);
-    update_recording_state(&app, RecordingState::Stopping, None);
+    start_cleanup::update_state(&app, task_generation, RecordingState::Stopping, None);
     // DO NOT request cancellation here - we want transcription to complete!
     // Cancellation should only happen in cancel_recording command
 
@@ -5848,13 +5612,17 @@ async fn stop_recording_with_mode_at(
             .lock()
             .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?;
 
+        if recording_generation_is_stale(task_generation) {
+            return Ok(String::new());
+        }
+
         // Check if actually recording first
         if !recorder.is_recording() {
             log::warn!("stop_recording called but not currently recording");
             // Don't error - just return empty result; only reset if this stop owns the flow.
             drop(recorder); // Drop the lock before updating state
             if stop_should_reset_to_idle(entry_state) {
-                update_recording_state(&app, RecordingState::Idle, None);
+                start_cleanup::update_state(&app, task_generation, RecordingState::Idle, None);
             } else if entry_state == RecordingState::Stopping
                 && !transcription_task_in_flight(&app_state)
             {
@@ -5867,7 +5635,7 @@ async fn stop_recording_with_mode_at(
                 log::warn!(
                     "stop_recording: recovering from stuck Stopping state (no transcription in flight)"
                 );
-                update_recording_state(&app, RecordingState::Idle, None);
+                start_cleanup::update_state(&app, task_generation, RecordingState::Idle, None);
             } else {
                 log::debug!(
                     "stop_recording: stop/transcribe already in progress (entry state={:?}); not overriding",
@@ -5907,9 +5675,6 @@ async fn stop_recording_with_mode_at(
             );
         }
 
-        // Resume system media if we paused it
-        MEDIA_CONTROLLER.resume_if_we_paused();
-
         // Monitor system resources after recording stop
         #[cfg(debug_assertions)]
         system_monitor::log_resources_after_operation(
@@ -5918,40 +5683,42 @@ async fn stop_recording_with_mode_at(
         );
     } // MutexGuard dropped here BEFORE any await
 
-    let capture_files = app_state
-        .capture_files
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
+    app_state.pending_start.with_current(task_generation, || {
+        MEDIA_CONTROLLER.resume_if_we_paused();
+    });
+    let capture_files = app_state.capture_files.take(task_generation);
     if let Some(files) = &capture_files {
         files.writer_stopped(writer_pending);
     }
     let mut dictation_telemetry =
         DictationCompletionGuard::new(&app, stop_requested, capture_metrics, task_generation).await;
 
-    crate::trigger::engine_host::rebuild_engine_bindings(&app);
+    crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&app, task_generation);
+    if app_state
+        .pending_start
+        .with_current(task_generation, || {
+            // Clean up ESC state
+            app_state
+                .esc_pressed_once
+                .store(false, std::sync::atomic::Ordering::SeqCst);
 
-    // Clean up ESC state
-    app_state
-        .esc_pressed_once
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-
-    // Cancel any ESC timeout
-    if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
-        if let Some(handle) = timeout_guard.take() {
-            handle.abort();
-        }
+            // Cancel any ESC timeout
+            if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
+                if let Some(handle) = timeout_guard.take() {
+                    handle.abort();
+                }
+            }
+        })
+        .is_none()
+    {
+        return Ok(String::new());
     }
 
     log::debug!("Unregistered ESC key and cleaned up state");
 
     if stop_integrity_failure || stop_unfinalized {
         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
-        let path = app_state
-            .current_recording_path
-            .lock()
-            .ok()
-            .and_then(|mut p| p.take());
+        let path = app_state.current_recording_path.take(task_generation);
         if let Some(path) = path {
             if delivery_aborted(app_state.is_cancellation_requested(), task_generation) {
                 let _ = std::fs::remove_file(path);
@@ -5965,7 +5732,7 @@ async fn stop_recording_with_mode_at(
                 .await;
             }
         }
-        update_recording_state(&app, RecordingState::Idle, None);
+        start_cleanup::update_state(&app, task_generation, RecordingState::Idle, None);
         return Ok(String::new());
     }
 
@@ -5975,37 +5742,20 @@ async fn stop_recording_with_mode_at(
         log::info!("Recording was cancelled, skipping transcription");
 
         // Clean up audio file if it exists
-        if let Ok(path_guard) = app_state.current_recording_path.lock() {
-            if let Some(audio_path) = path_guard.as_ref() {
-                log::info!("Removing cancelled recording file");
-                if let Err(e) = std::fs::remove_file(audio_path) {
-                    log::warn!("Failed to remove cancelled recording: {}", e);
-                }
+        if let Some(audio_path) = app_state.current_recording_path.take(task_generation) {
+            if let Err(e) = std::fs::remove_file(audio_path) {
+                log::warn!("Failed to remove cancelled recording: {}", e);
             }
         }
 
-        // Hide pill window (only if show_pill_indicator is false)
-        if should_hide_pill(&app).await {
-            if let Err(e) = crate::commands::window::hide_pill_widget(app.clone()).await {
-                log::error!("Failed to hide pill window: {}", e);
-            }
-        }
-
-        // Transition to idle
-        update_recording_state(&app, RecordingState::Idle, None);
+        start_cleanup::update_state(&app, task_generation, RecordingState::Idle, None);
+        hide_unneeded_early_pill(&app);
 
         return Ok("".to_string());
     }
 
     // Get the audio file path
-    let audio_path = app_state
-        .current_recording_path
-        .lock()
-        .map_err(|e| {
-            dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Failed;
-            format!("Failed to acquire path lock: {}", e)
-        })?
-        .take();
+    let audio_path = app_state.current_recording_path.take(task_generation);
 
     // If no audio path, there was no recording
     let audio_path = match audio_path {
@@ -6022,7 +5772,7 @@ async fn stop_recording_with_mode_at(
             dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Empty;
             log::warn!("No audio file found - no recording was made");
             // Make sure to transition back to Idle state
-            update_recording_state(&app, RecordingState::Idle, None);
+            start_cleanup::update_state(&app, task_generation, RecordingState::Idle, None);
             return Ok("".to_string());
         }
     };
@@ -8450,185 +8200,7 @@ pub async fn diarize_audio_file(
 
 #[tauri::command]
 pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
-    log::info!("=== CANCEL RECORDING CALLED ===");
-
-    // Request cancellation FIRST
-    let app_state = app.state::<AppState>();
-    if app_state.pending_start.cancel_before_recording(&app_state) {
-        return Ok(());
-    }
-    let cancel_generation = current_recording_generation();
-    app_state.cancel_capture(cancel_generation);
-    super::ai_lifecycle::cancel_recording();
-    crate::recording::kept::discard_generation(&app, cancel_generation);
-    log::info!("Cancellation requested in app state");
-
-    // Get current state
-    let current_state = app_state.get_current_state();
-    log::info!("Current state when cancelling: {:?}", current_state);
-
-    // Abort any ongoing transcription task
-    if let Ok(mut task_guard) = app_state.transcription_task.lock() {
-        if let Some(task) = task_guard.take() {
-            log::info!("Aborting transcription task");
-            task.abort();
-        }
-    }
-    // JoinHandle::abort preempts the task at its next await and skips the
-    // task's own remove_file cleanup, so explicitly delete the temp recording
-    // the aborted task owned. Without this the cancelled dictation's audio is
-    // left on disk. A NotFound result means the task already cleaned up.
-    if let Some(cancelled_audio) = take_in_flight_transcription_audio() {
-        log::info!("Removing transcription task's temp recording after abort");
-        if let Err(e) = std::fs::remove_file(&cancelled_audio) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("Failed to remove cancelled transcription audio: {}", e);
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    if matches!(current_state, RecordingState::Transcribing) {
-        let gpu_client = app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>();
-        gpu_client.abort_active_process().await;
-    }
-
-    // Stop recording if active
-    //
-    // Plan 060.1 — restoration before propagation: the stop outcome is
-    // COLLECTED, not propagated with `?`. Every cancellation cleanup below
-    // (media resume, ESC state, pill, state transitions) must run even when
-    // the recorder stop fails, and the error is surfaced only AFTER the
-    // user's paused media is restored — a failed ESC-cancel must never
-    // strand a paused track or a stuck recording state.
-    let recorder_state = app.state::<RecorderState>();
-    let cancel_stop_requested = Instant::now();
-    let (stop_result, cancelled_metrics) = (|| -> (Result<(), String>, Option<Option<crate::audio::recorder::CaptureAudioMetrics>>) {
-        let mut guard = match recorder_state
-            .inner()
-            .0
-            .lock()
-        {
-            Ok(guard) => guard,
-            Err(e) => return (Err(format!("Failed to acquire recorder lock: {}", e)), None),
-        };
-        if !guard.is_recording() {
-            return (Ok(()), None);
-        }
-        log::info!("Stopping recorder");
-        // Just stop the recorder, don't do full stop_recording flow.
-        // A stop error keeps the WAV on disk for the orphan cleanup when the
-        // worker never finalized (same policy as stop_unfinalized); only a
-        // clean stop may delete the cancelled recording.
-        let result = match guard.stop_recording() {
-            Ok(_) => {
-                // Clean up audio file if it exists
-                if let Ok(path_guard) = app_state.current_recording_path.lock() {
-                    if let Some(audio_path) = path_guard.as_ref() {
-                        log::info!("Removing cancelled recording file");
-
-                        if let Err(e) = std::fs::remove_file(audio_path) {
-                            log::warn!("Failed to remove cancelled recording: {}", e);
-                        }
-                    }
-                }
-                Ok(())
-            }
-            Err(e) => Err(e),
-        };
-        (result, Some(guard.take_last_capture_metrics()))
-    })();
-    if let Some(metrics) = cancelled_metrics {
-        let mut completion =
-            DictationCompletionGuard::new(&app, cancel_stop_requested, metrics, cancel_generation)
-                .await;
-        completion.facts.outcome = if stop_result.is_ok() {
-            crate::product_analytics::DictationOutcome::Cancelled
-        } else {
-            crate::product_analytics::DictationOutcome::Failed
-        };
-    }
-    let stop_error = stop_result.err();
-    app_state
-        .current_recording_path
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    let capture_files = app_state
-        .capture_files
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    if let Some(files) = &capture_files {
-        files.writer_stopped(
-            stop_error
-                .as_deref()
-                .is_some_and(crate::recording::storage::writer_may_be_running),
-        );
-    }
-    drop(capture_files); // Background cleanup also covers failed cancellation stops.
-
-    // Resume system media if we paused it
-    MEDIA_CONTROLLER.resume_if_we_paused();
-
-    // Clean up ESC state
-    app_state
-        .esc_pressed_once
-        .store(false, std::sync::atomic::Ordering::SeqCst);
-    if let Ok(mut timeout_guard) = app_state.esc_timeout_handle.lock() {
-        if let Some(handle) = timeout_guard.take() {
-            handle.abort();
-        }
-    }
-
-    // Hide pill window immediately (only if show_pill_indicator is false)
-    if should_hide_pill(&app).await {
-        if let Err(e) = crate::commands::window::hide_pill_widget(app.clone()).await {
-            log::error!("Failed to hide pill window: {}", e);
-        }
-    }
-
-    // Properly transition through states based on current state
-    match current_state {
-        RecordingState::Recording => {
-            // First transition to Stopping
-            update_recording_state(&app, RecordingState::Stopping, None);
-            // Then transition to Idle
-            update_recording_state(&app, RecordingState::Idle, None);
-        }
-        RecordingState::Starting => {
-            // Starting can go directly to Idle
-            update_recording_state(&app, RecordingState::Idle, None);
-        }
-        RecordingState::Stopping => {
-            // Already stopping, just go to Idle
-            update_recording_state(&app, RecordingState::Idle, None);
-        }
-        RecordingState::Transcribing => {
-            // Can't go directly to Idle from Transcribing, need to go through Error
-            update_recording_state(
-                &app,
-                RecordingState::Error,
-                Some("Transcription cancelled".to_string()),
-            );
-            update_recording_state(&app, RecordingState::Idle, None);
-        }
-        _ => {
-            // For other states (Idle, Error), try to transition to Idle
-            update_recording_state(&app, RecordingState::Idle, None);
-        }
-    }
-    crate::trigger::engine_host::rebuild_engine_bindings(&app);
-
-    // Plan 060.1: restoration is complete (media resumed, ESC state cleared,
-    // state machine landed on Idle/Error) — NOW surface the stop failure.
-    if let Some(e) = stop_error {
-        log::error!("Cancellation stop failed after cleanup: {}", e);
-        return Err(e);
-    }
-
-    log::info!("=== CANCEL RECORDING COMPLETED ===");
-    Ok(())
+    cancel_cleanup::cancel(app).await
 }
 
 #[tauri::command]

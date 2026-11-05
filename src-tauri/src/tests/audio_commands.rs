@@ -50,8 +50,7 @@ mod tests {
         }
 
         {
-            let path = app_state.current_recording_path.lock().unwrap();
-            assert!(path.is_none());
+            assert!(app_state.current_recording_path.get(0).is_none());
         }
 
         {
@@ -87,32 +86,16 @@ mod tests {
     fn test_app_state_path_management() {
         let app_state = AppState::new();
         let test_path = PathBuf::from("/tmp/test_recording.wav");
-
-        // Set path
-        {
-            let mut path = app_state.current_recording_path.lock().unwrap();
-            *path = Some(test_path.clone());
-        }
-
-        // Verify path is set
-        {
-            let path = app_state.current_recording_path.lock().unwrap();
-            assert_eq!(path.as_ref().unwrap(), &test_path);
-        }
-
-        // Take path (should remove it)
-        let taken_path = {
-            let mut path = app_state.current_recording_path.lock().unwrap();
-            path.take()
-        };
-
-        assert_eq!(taken_path.unwrap(), test_path);
-
-        // Verify path is now None
-        {
-            let path = app_state.current_recording_path.lock().unwrap();
-            assert!(path.is_none());
-        }
+        app_state.current_recording_path.begin(42);
+        assert!(app_state
+            .current_recording_path
+            .replace(42, test_path.clone()));
+        assert_eq!(
+            app_state.current_recording_path.get(42),
+            Some(test_path.clone())
+        );
+        assert_eq!(app_state.current_recording_path.take(42), Some(test_path));
+        assert!(app_state.current_recording_path.get(42).is_none());
     }
 
     #[test]
@@ -198,15 +181,11 @@ mod tests {
         ];
 
         for test_path in test_paths {
-            {
-                let mut path = app_state.current_recording_path.lock().unwrap();
-                *path = Some(test_path.clone());
-            }
-
-            {
-                let path = app_state.current_recording_path.lock().unwrap();
-                assert_eq!(path.as_ref().unwrap(), &test_path);
-            }
+            app_state.current_recording_path.begin(42);
+            assert!(app_state
+                .current_recording_path
+                .replace(42, test_path.clone()));
+            assert_eq!(app_state.current_recording_path.get(42), Some(test_path));
         }
     }
 

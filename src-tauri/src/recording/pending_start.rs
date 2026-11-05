@@ -73,21 +73,49 @@ impl StartRequests {
         self.cancel_if(|pending| !pending.permit.is_current_state(state), || ());
     }
 
-    /// There is no take to clean up while an Idle/Error start is validating.
-    /// Set cancellation under the ownership lock and let the command return
-    /// without asynchronous cleanup that could reset a newer request to Idle.
-    pub(crate) fn cancel_before_recording(&self, state: &AppState) -> bool {
-        self.cancel_if(
-            |_| true,
-            || {
-                state.request_cancellation();
-                matches!(
-                    state.get_current_state(),
-                    RecordingState::Idle | RecordingState::Error
-                )
-            },
-        )
-        .unwrap_or(false)
+    /// Capture the cancellation target and latch it in the publication lock.
+    pub(crate) fn begin_cancel(&self, state: &AppState) -> (u64, bool, RecordingState) {
+        let mut requests = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let pending = requests.take();
+        if let Some(pending) = &pending {
+            pending.cancellation.cancel();
+        }
+        let generation = audio::current_recording_generation();
+        let phase = state.get_current_state();
+        state.cancel_capture(generation);
+        let pending_only =
+            pending.is_some() && matches!(phase, RecordingState::Idle | RecordingState::Error);
+        (generation, pending_only, phase)
+    }
+
+    /// Synchronous start effects and replacement publication share this lock.
+    /// Never await or synchronously hop to the UI thread inside `work`.
+    pub(crate) fn with_active<T>(
+        &self,
+        state: &AppState,
+        generation: u64,
+        work: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _requests = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.capture_interrupts.is_active(generation)
+            || state.is_cancellation_requested()
+            || !matches!(
+                state.get_current_state(),
+                RecordingState::Starting | RecordingState::Recording
+            )
+        {
+            return None;
+        }
+        Some(work())
+    }
+
+    /// Cleanup may run after interruption, but never against a replacement.
+    pub(crate) fn with_current<T>(&self, generation: u64, work: impl FnOnce() -> T) -> Option<T> {
+        let _requests = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if audio::recording_generation_is_stale(generation) {
+            return None;
+        }
+        Some(work())
     }
 
     fn cancel_if<T>(
@@ -145,11 +173,16 @@ impl StartRequest<'_> {
             {
                 return Ok(None);
             }
+            if state.get_current_state() == RecordingState::Error {
+                crate::update_recording_state(app, RecordingState::Idle, Some("recover".into()));
+            }
             super::kept::cancel_active_retry(app);
             state
                 .pointer_recording
                 .store(source.is_toggle(), std::sync::atomic::Ordering::SeqCst);
             let generation = audio::begin_recording_generation();
+            state.current_recording_path.begin(generation);
+            state.capture_files.begin(generation);
             crate::perf::begin_take(generation);
             let hold = !source.is_toggle()
                 && state

@@ -1,4 +1,5 @@
 pub mod app_state;
+pub(crate) mod capture_slot;
 pub mod unified_state;
 
 pub use app_state::{

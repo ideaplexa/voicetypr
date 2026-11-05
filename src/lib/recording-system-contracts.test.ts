@@ -14,13 +14,15 @@ describe("recording system ownership contracts", () => {
     );
     expect(source).toContain("cancel_recording(app.clone()).await?");
     expect(source).not.toContain("recorder.stop_recording()");
-    const cancel = section(
+    const command = section(
       read("commands/audio.rs"),
       "pub async fn cancel_recording",
       "pub async fn delete_transcription_entry",
     );
-    expect(cancel).toMatch(/current_recording_path[\s\S]*?\.take\(\)/);
-    expect(cancel).toMatch(/capture_files[\s\S]*?\.take\(\)/);
+    expect(command).toContain("cancel_cleanup::cancel(app).await");
+    const cancel = read("commands/audio_cancel.rs");
+    expect(cancel).toMatch(/current_recording_path[\s\S]*?\.take\(cancel_generation\)/);
+    expect(cancel).toMatch(/capture_files[\s\S]*?\.take\(cancel_generation\)/);
     expect(cancel).toContain("files.writer_stopped(");
     expect(cancel).toContain("discard_generation(&app, cancel_generation)");
     expect(cancel).not.toContain("stop_recording_with_post_roll");

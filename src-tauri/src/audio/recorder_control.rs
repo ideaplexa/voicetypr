@@ -69,7 +69,7 @@ impl CaptureInterrupt {
         }
     }
 
-    async fn wait(&self) {
+    pub(crate) async fn wait(&self) {
         let notified = self.0.wake.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();

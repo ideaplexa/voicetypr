@@ -231,32 +231,35 @@ impl Snapshot {
             ),
             key_ok: self.payload.polish.key_ok,
         };
-        let mut last = LAST.lock().unwrap();
-        self.payload.changed_since_last = last.as_ref() != Some(&key);
-        *last = Some(key);
-        self.payload.generation = generation;
-        self.payload.show_start_card =
-            show_start_card(&self.details, self.payload.changed_since_last);
-        for (key, value) in [
-            ("mode", serde_json::json!(self.payload.mode)),
-            (
-                "start_card_shown",
-                serde_json::json!(self.payload.show_start_card),
-            ),
-            ("island_start_details", serde_json::json!(self.details)),
-            ("language", serde_json::json!(self.payload.language.code)),
-            (
-                "polish_keep_words",
-                serde_json::json!(self.payload.polish.keep_words),
-            ),
-            (
-                "polish_style",
-                serde_json::json!(self.payload.polish.style.unwrap_or("off").to_lowercase()),
-            ),
-        ] {
-            crate::observability::update(generation, key, value);
-        }
-        let _ = app.emit_to("pill", "dictation-context", self.payload);
+        let state = app.state::<crate::AppState>();
+        state.pending_start.with_active(&state, generation, || {
+            let mut last = LAST.lock().unwrap();
+            self.payload.changed_since_last = last.as_ref() != Some(&key);
+            *last = Some(key);
+            self.payload.generation = generation;
+            self.payload.show_start_card =
+                show_start_card(&self.details, self.payload.changed_since_last);
+            for (key, value) in [
+                ("mode", serde_json::json!(self.payload.mode)),
+                (
+                    "start_card_shown",
+                    serde_json::json!(self.payload.show_start_card),
+                ),
+                ("island_start_details", serde_json::json!(self.details)),
+                ("language", serde_json::json!(self.payload.language.code)),
+                (
+                    "polish_keep_words",
+                    serde_json::json!(self.payload.polish.keep_words),
+                ),
+                (
+                    "polish_style",
+                    serde_json::json!(self.payload.polish.style.unwrap_or("off").to_lowercase()),
+                ),
+            ] {
+                crate::observability::update(generation, key, value);
+            }
+            let _ = app.emit_to("pill", "dictation-context", self.payload);
+        });
     }
 }
 #[derive(Serialize)]
