@@ -1,7 +1,7 @@
 //! Cancel restores only its captured generation, before any telemetry await.
 use super::*;
 
-pub(super) async fn cancel(app: AppHandle) -> Result<(), String> {
+pub(super) async fn cancel<R: RecordingRuntime>(app: AppHandle<R>) -> Result<(), String> {
     let state = app.state::<AppState>();
     let (cancel_generation, pending_only, _) = state.pending_start.begin_cancel(&state);
     if pending_only {
@@ -9,7 +9,7 @@ pub(super) async fn cancel(app: AppHandle) -> Result<(), String> {
     }
     let Some(phase) = state.pending_start.with_current(cancel_generation, || {
         super::super::ai_lifecycle::cancel_recording();
-        crate::recording::kept::discard_generation(&app, cancel_generation);
+        crate::recording::kept::cancel_generation(&app, cancel_generation);
         if let Ok(mut task) = state.transcription_task.lock() {
             if let Some(task) = task.take() {
                 task.abort();
@@ -20,8 +20,9 @@ pub(super) async fn cancel(app: AppHandle) -> Result<(), String> {
         }
         let phase = state.get_current_state();
         #[cfg(target_os = "windows")]
-        if phase == RecordingState::Transcribing {
-            app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
+        if let Some(native) = R::native(&app).filter(|_| phase == RecordingState::Transcribing) {
+            native
+                .state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
                 .request_abort();
         }
         phase
@@ -31,8 +32,9 @@ pub(super) async fn cancel(app: AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     let _ = phase;
     #[cfg(target_os = "windows")]
-    if phase == RecordingState::Transcribing {
-        app.state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
+    if let Some(native) = R::native(&app).filter(|_| phase == RecordingState::Transcribing) {
+        native
+            .state::<crate::whisper::gpu_sidecar::GpuSidecarClient>()
             .reap_aborted_process_if(|| !recording_generation_is_stale(cancel_generation))
             .await;
     }
@@ -94,9 +96,9 @@ pub(super) async fn cancel(app: AppHandle) -> Result<(), String> {
     // thread, so it cannot hide a replacement's visible island after a hop.
     hide_unneeded_early_pill(&app);
     crate::trigger::engine_host::rebuild_engine_bindings_for_generation(&app, cancel_generation);
-    if let Some(metrics) = metrics {
+    if let (Some(metrics), Some(native)) = (metrics, R::native(&app)) {
         let mut completion =
-            DictationCompletionGuard::new(&app, requested, metrics, cancel_generation).await;
+            DictationCompletionGuard::new(native, requested, metrics, cancel_generation).await;
         completion.facts.outcome = if result.is_ok() {
             crate::product_analytics::DictationOutcome::Cancelled
         } else {

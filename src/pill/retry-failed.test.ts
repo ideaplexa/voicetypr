@@ -71,6 +71,31 @@ it.each([
   expect(h.get('[data-key="retry-error"]').textContent).toContain(copy);
 });
 
+it.each([1, 2])("restores the same failed card after cancelling retry action %s", async action => {
+  h = pillHarness(); await h.settle(0);
+  const base = h.invoke.getMockImplementation()!;
+  let cancel: (() => void) | undefined;
+  h.invoke.mockImplementation(command => {
+    if (command === "retry_kept_dictation") return new Promise((_, reject) => {
+      cancel = () => reject("Retry discarded");
+    });
+    return base(command);
+  });
+  h.emit("dictation-recovery", failed); await h.settle(1500);
+  h.get(`[data-key="recovery:clip"] .act:nth-child(${action})`).click(); await h.settle(0);
+  h.emit("recording-state-changed", { state: "transcribing", generation: 3 });
+  await h.settle(500);
+  h.emit("recording-state-changed", { state: "idle", generation: 3 });
+  cancel!(); await h.settle(500);
+  h.emit("dictation-recovery", failed); await h.settle(1500);
+  const restored = h.get('[data-key="recovery:clip"]');
+  expect(restored.hidden).toBe(false);
+  expect(restored.textContent).toContain("Soniox couldn't transcribe this");
+  expect([...restored.querySelectorAll<HTMLButtonElement>(".act")].map(button => [button.textContent, button.disabled]))
+    .toEqual([["Retry again", false], ["Try another model", false], ["Delete audio", false]]);
+  expect(h.invoke).not.toHaveBeenCalledWith("discard_kept_dictation", { id: "clip" });
+});
+
 it.each(["Requested local engine is not ready", "Requested engine is not ready"])("withdraws an unavailable alternative without hiding its explanation: %s", async error => {
   h = pillHarness(); await h.settle(0);
   const base = h.invoke.getMockImplementation()!;

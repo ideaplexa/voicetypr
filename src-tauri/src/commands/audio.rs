@@ -8090,7 +8090,7 @@ pub async fn diarize_audio_file(
 }
 
 #[tauri::command]
-pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
+pub async fn cancel_recording<R: RecordingRuntime>(app: AppHandle<R>) -> Result<(), String> {
     cancel_cleanup::cancel(app).await
 }
 

@@ -1,3 +1,4 @@
+use crate::commands::recording_runtime::RecordingRuntime;
 use crate::{cancel_recording, get_recording_state, AppState, RecordingState};
 use keytrigger::KeyPhase;
 use std::sync::atomic::Ordering;
@@ -9,9 +10,9 @@ use tauri::{AppHandle, Emitter, Manager};
 /// 1. First ESC: Show inline hint "Press ESC again to cancel" for 2 seconds
 /// 2. Second ESC within 2 seconds: Cancel recording
 /// 3. Timeout after 2 seconds: Reset to single-tap mode
-pub async fn handle_escape_key_press(
+pub async fn handle_escape_key_press<R: RecordingRuntime>(
     app_state: &AppState,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
     event_state: KeyPhase,
 ) {
     // Only react to ESC key press events (ignore key release)
@@ -48,7 +49,10 @@ pub async fn handle_escape_key_press(
 }
 
 /// Handle first ESC press: Show confirmation hint and start timeout
-async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
+async fn handle_first_esc_press<R: RecordingRuntime>(
+    app_state: &AppState,
+    app_handle: &AppHandle<R>,
+) {
     log::info!("First ESC press detected during recording");
     app_state.esc_pressed_once.store(true, Ordering::SeqCst);
 
@@ -91,7 +95,10 @@ async fn handle_first_esc_press(app_state: &AppState, app_handle: &AppHandle) {
 }
 
 /// Handle second ESC press: Cancel recording immediately
-async fn handle_second_esc_press(app_state: &AppState, app_handle: &AppHandle) {
+async fn handle_second_esc_press<R: RecordingRuntime>(
+    app_state: &AppState,
+    app_handle: &AppHandle<R>,
+) {
     log::info!("Second ESC press detected, cancelling recording");
 
     // Cancel timeout

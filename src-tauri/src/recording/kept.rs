@@ -11,6 +11,8 @@ mod blocking;
 mod durable;
 #[path = "kept_persistent.rs"]
 mod persistent;
+#[path = "kept_retry_work.rs"]
+mod retry_work;
 #[path = "kept_selection.rs"]
 mod selection;
 use std::{
@@ -119,7 +121,10 @@ impl Clip {
         )
     }
 }
-fn current_retry_model(app: &AppHandle, candidates: &[(String, String)]) -> Option<String> {
+fn current_retry_model<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    candidates: &[(String, String)],
+) -> Option<String> {
     let store = app.store("settings").ok()?;
     let model = store
         .get("current_model")
@@ -540,12 +545,32 @@ impl Store {
         Ok(())
     }
 }
-pub fn discard_generation(app: &AppHandle, generation: u64) {
-    STORE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .discard_generation(generation);
-    crate::menu::runtime::refresh(app);
+pub fn cancel_generation<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: &AppHandle<R>,
+    generation: u64,
+) {
+    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    if store
+        .clips
+        .iter()
+        .any(|clip| clip.retry_generation == Some(generation))
+    {
+        // Escape cancels the attempt, never the retained original. Leave the
+        // lease busy until its future unwinds, then restore its preceding card.
+        if store
+            .active_retry
+            .as_ref()
+            .is_some_and(|(_, g, _)| *g == generation)
+        {
+            store.cancel_retry();
+        }
+    } else {
+        store.discard_generation(generation);
+    }
+    drop(store);
+    if let Some(native) = R::native(app) {
+        crate::menu::runtime::refresh(native);
+    }
 }
 pub fn has_generation(generation: u64) -> bool {
     STORE
@@ -1006,19 +1031,22 @@ pub async fn discard_kept_dictation(app: AppHandle, id: String) -> Result<(), St
     blocking::discard(app, id).await
 }
 #[tauri::command]
-pub async fn retry_kept_dictation(
-    app: AppHandle,
+pub async fn retry_kept_dictation<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: AppHandle<R>,
     id: String,
     engine: Option<String>,
 ) -> Result<(), String> {
     retry(app, id, engine, false).await
 }
 #[tauri::command]
-pub async fn transcribe_anyway(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn transcribe_anyway<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: AppHandle<R>,
+    id: String,
+) -> Result<(), String> {
     retry(app, id, None, true).await
 }
-async fn retry(
-    app: AppHandle,
+async fn retry<R: crate::commands::recording_runtime::RecordingRuntime>(
+    app: AppHandle<R>,
     id: String,
     engine: Option<String>,
     anyway: bool,
@@ -1026,14 +1054,16 @@ async fn retry(
     let state = app.state::<crate::AppState>();
     // Capture native context outside the publication lock; only an accepted
     // retry may install it, together with its generation and phase.
-    let context = crate::writing::capture_active_app_context();
+    let context = R::native(&app).and_then(|_| crate::writing::capture_active_app_context());
     let lease = admission::admit(&app, &id, anyway, context)?;
     let generation = lease.generation;
     crate::observability::inherit(lease.original_generation, generation, lease.trace.clone());
     let _trace_lease = crate::observability::pin(generation);
     let retry_started = Instant::now();
     // Retry never owns the capture-stop lock while awaiting decoding/network I/O.
-    crate::menu::runtime::refresh(&app);
+    if let Some(native) = R::native(&app) {
+        crate::menu::runtime::refresh(native);
+    }
     let alt_engine_kind = engine
         .as_deref()
         .map(|id| {
@@ -1047,7 +1077,7 @@ async fn retry(
     let mut attempted = None;
     let result = cancellable_retry(
         lease.cancelled.clone(),
-        retry_inner(&app, &lease, generation, engine, &mut attempted),
+        retry_work::run(&app, &lease, generation, engine, &mut attempted),
     )
     .await;
     let cancelled = matches!(&result, Err(RetryError::Cancelled))
@@ -1082,7 +1112,11 @@ async fn retry(
     }
     // A model may have been removed or the selected engine changed since this card's offer.
     let candidates = if result.is_err() && !cancelled {
-        local_candidates(&app).await
+        if let Some(native) = R::native(&app) {
+            local_candidates(native).await
+        } else {
+            Vec::new()
+        }
     } else {
         Vec::new()
     };
@@ -1104,6 +1138,13 @@ async fn retry(
     }
     let retained = store.clips.iter().any(|c| c.recovery.id == id);
     let mut publication = None;
+    if cancelled && !audio::recording_generation_is_stale(generation) && !store.closed {
+        if let Some(clip) = store.clips.iter().find(|clip| clip.recovery.id == id) {
+            let mut recovery = clip.recovery.clone();
+            recovery.expires_in_ms = clip.remaining_ms(Instant::now());
+            publication = Some(recovery);
+        }
+    }
     if result.is_err() && !cancelled && !discarded {
         if let Some(clip) = store.clips.iter_mut().find(|c| c.recovery.id == id) {
             if matches!(&result, Err(RetryError::Failed)) {
@@ -1130,7 +1171,9 @@ async fn retry(
     if let Some(recovery) = publication {
         emit_recovery(&app, &recovery);
     }
-    crate::menu::runtime::refresh(&app);
+    if let Some(native) = R::native(&app) {
+        crate::menu::runtime::refresh(native);
+    }
     result.map_err(|error| retry_error_message(error, retained).to_owned())
 }
 fn retry_setup<T>(
@@ -1341,6 +1384,10 @@ fn resolve_clip(clip: &Clip, resolution: &str) {
 #[cfg(test)]
 #[path = "kept_availability_tests.rs"]
 mod availability_tests;
+
+#[cfg(test)]
+#[path = "kept_lifecycle_tests.rs"]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {
