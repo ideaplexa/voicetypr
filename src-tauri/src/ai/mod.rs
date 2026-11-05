@@ -30,6 +30,9 @@ pub mod skip;
 mod catalog_migration_tests;
 
 pub(crate) mod keep_words;
+pub(crate) mod language_intent;
+#[cfg(test)]
+pub(crate) mod translation_fixtures;
 
 #[cfg(test)]
 mod fix_round_tests;
