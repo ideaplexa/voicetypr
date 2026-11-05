@@ -1,6 +1,8 @@
 # Plan 086: Multilingual text correctness for beta.6
 
-Status: SPEC, not claimed for implementation. On 2026-11-02 the founder
+Status: PARTIAL IMPLEMENTATION. Beta.8 quick wins are fixture-tested below;
+all other work remains SPEC. Release scope: [plan 087](087-2.1-beta8-beta9.md).
+On 2026-11-02 the founder
 approved adding this work to 2.1.0-beta.6 and requested re-estimation.
 See the updated scope in [plan 083](083-2.1-beta6.md).
 Audit baseline: beta.5 worktree commit
@@ -38,12 +40,14 @@ parity for app context or cloud diarized early returns.
    U+00A0 and U+202F and ordinary spaces; do not introduce or normalize one
    form until locale policy is approved. Assert exact code points and
    idempotence through both stages.
+   Beta.8: implemented exact spacing preservation and fixtures; NEEDS-SMOKE (French local/cloud).
 3. **P0, M: translation intent.** In `writing/pipeline.rs` around 255-270
    and 564-575 and `ai/prompts.rs` around 261-291, recheck line drift. Unknown
    source plus “same as transcript” must not request English translation.
    Thread explicit no-translation versus translate-to-language intent, not
    a guessed source; treat empty or whitespace-only language as missing.
    Explicit target translation must still work when source is unknown.
+   Beta.8: implemented explicit translation intent and missing-language fixtures; NEEDS-SMOKE (Polish providers).
 4. **P1, L: CJK joining and insertion.** Audit Whisper segment joining
    (`whisper/transcriber.rs` around 790-810), Deepgram realtime finals and
    Soniox / diarized token joins under `cloud_stt/`. Avoid invented ASCII
@@ -52,11 +56,13 @@ parity for app context or cloud diarized early returns.
    after `!` in Han/kana, full-width punctuation paragraph boundaries, and
    `insertion/leading_space.rs` treating Hangul like Han. Engine-specific
    token metadata and actual separator evidence take precedence over guesses.
+   Beta.8: Hangul leading space implemented and fixture-tested; rest deferred; NEEDS-SMOKE (macOS/Windows).
 5. **P1, M: snippets.** In `writing/library_rules.rs`, replace ASCII-only
    case comparison and ASCII-only trailing `. ! ?` stripping with tested
    Unicode-aware, language-sensitive behavior. Cover `Öffne`, `Привет`,
    `挨拶。` and inverted Spanish `¿`; do not strip internal punctuation or
    turn nonmatches into matches accidentally.
+   Beta.8: implemented NFC/simple-fold snippets and language-scoped terminators; fixture-tested; NEEDS-SMOKE.
 6. **P1, L: dictionary.** Existing alphanumeric boundaries miss replacements
    within Han text; define safe language-specific segmentation and match
    scope, never substring-replace unrelated words. Test Turkish case folding
@@ -78,6 +84,7 @@ parity for app context or cloud diarized early returns.
    terms before applying them; test identical terms in different languages,
    unknown language and user vocabulary. Do not alter proper names or words
    outside that language.
+   Beta.8: implemented language-filtered protected vocabulary and negative fixtures; NEEDS-SMOKE.
 10. **P2, L: language provenance.** Cloud results inherit requested language,
     and a take currently has one language even when speech is mixed. Model
     requested, provider-detected and unknown provenance separately; do not

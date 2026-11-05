@@ -63,16 +63,21 @@ fn needs_leading_space(previous: Option<char>, text: &str) -> bool {
 }
 
 fn is_cjk(c: char) -> bool {
-    // No inserted spaces adjacent to Han, kana, hangul or CJK/fullwidth
+    // No inserted spaces adjacent to Han, kana or CJK/fullwidth
     // punctuation. This deliberately simple script-range rule is not language
-    // detection; mixed Latin/CJK text keeps its existing boundaries.
+    // detection; mixed Latin/CJK text keeps its existing boundaries. Hangul
+    // (including compatibility/halfwidth jamo) uses word spaces like Latin.
     matches!(c as u32,
-        0x1100..=0x11ff | 0x2e80..=0x30ff | 0x3100..=0x318f |
+        0x2e80..=0x302d | 0x3030..=0x30ff | 0x3100..=0x312f |
         0x31a0..=0x31ff | 0x3400..=0x4dbf | 0x4e00..=0x9fff |
-        0xa960..=0xa97f | 0xac00..=0xd7ff | 0xf900..=0xfaff |
-        0xfe10..=0xfe1f | 0xfe30..=0xfe4f | 0xff00..=0xffef |
+        0xf900..=0xfaff | 0xfe10..=0xfe1f | 0xfe30..=0xfe4f |
+        0xff00..=0xff9f | 0xffdd..=0xffef |
         0x20000..=0x323af)
 }
+
+#[cfg(test)]
+#[path = "leading_space/hangul_tests.rs"]
+mod hangul_tests;
 
 #[cfg(test)]
 mod tests {
@@ -211,7 +216,7 @@ mod tests {
 
     #[test]
     fn cjk_boundaries_are_not_westernized() {
-        for c in ['中', 'あ', 'ア', '한', '。', '，', 'Ａ', 'ｶ', '𠀀'] {
+        for c in ['中', 'あ', 'ア', '。', '，', 'Ａ', 'ｶ', '𠀀'] {
             assert!(!needs_leading_space(Some(c), "Hello"));
             assert!(!needs_leading_space(Some('o'), &format!("{c}world")));
         }

@@ -109,14 +109,33 @@ pub fn get_language_name(code: &str) -> &'static str {
         "lo" => "Lao",
         "my" => "Burmese",
         "mn" => "Mongolian",
-        _ => "English", // Default fallback
+        // Keep names for every supported source/target rather than silently
+        // calling an unmapped language (for example Latin) English.
+        _ => crate::whisper::languages::SUPPORTED_LANGUAGES
+            .get(code.to_ascii_lowercase().as_str())
+            .map(|language| language.name)
+            .unwrap_or("English"),
     }
 }
 
 /// Build the base prompt with the specified language
 fn build_base_prompt(language: Option<&str>) -> String {
-    let lang_name = language.map(get_language_name).unwrap_or("English");
-    BASE_PROMPT_TEMPLATE.replace("{language}", lang_name)
+    match language {
+        Some(language) => {
+            let base = language.split(['-', '_']).next().unwrap_or(language);
+            BASE_PROMPT_TEMPLATE.replace("{language}", get_language_name(base))
+        }
+        None => {
+            BASE_PROMPT_TEMPLATE
+                .replace("{language}", "the original language")
+                .replacen(
+                    "into written the original language.",
+                    "into written text in the original language.",
+                    1,
+                )
+                + "\nDo not translate. Preserve the original language even when it is unknown."
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -258,13 +277,14 @@ pub(crate) fn build_prompt_with_wording(
     app_category_hint: Option<&str>,
     keep_words: bool,
 ) -> String {
-    let base_prompt = build_base_prompt(output_language);
-    let output_language_name = output_language.map(get_language_name).unwrap_or("English");
-    let is_translation = match (transcript_language, output_language) {
-        (Some(source), Some(target)) => source != target,
-        (None, Some(_)) => true,
-        _ => false,
-    };
+    use super::language_intent::{present_language, TranslationIntent};
+    let intent = TranslationIntent::resolve(transcript_language, output_language);
+    let base_prompt = build_base_prompt(
+        intent
+            .target()
+            .or_else(|| present_language(transcript_language))
+            .or_else(|| present_language(output_language)),
+    );
 
     let mode_transform = if keep_words {
         super::keep_words::format_instruction(options.preset)
@@ -285,7 +305,9 @@ pub(crate) fn build_prompt_with_wording(
         format!("{}\n\n{}", base_prompt, mode_transform)
     };
 
-    if is_translation {
+    if let Some(target) = intent.target() {
+        let output_language_name =
+            get_language_name(target.split(['-', '_']).next().unwrap_or(target));
         prompt.push_str(&format!(
             "\n\nThe dictation may be in another language; translate it into {output_language_name}."
         ));

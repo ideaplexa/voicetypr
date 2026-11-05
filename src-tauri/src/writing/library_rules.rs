@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use regex::{Regex, RegexBuilder};
 
+use super::snippets::match_snippet;
 use super::{
-    language_scope_matches, normalize_language_scope, AppliedWritingOperation, CustomWord, Snippet,
+    language_scope_matches, normalize_language_scope, AppliedWritingOperation, CustomWord,
     TextReplacementRule, WritingOperationKind, WritingSettings,
 };
 
@@ -322,46 +323,6 @@ fn apply_text_replacements(
     (result.text, result.operations)
 }
 
-fn match_snippet<'a>(
-    text: &str,
-    snippets: &'a [Snippet],
-    transcript_language: Option<&str>,
-) -> Option<&'a Snippet> {
-    let trimmed = text.trim();
-    let eligible_snippets = || {
-        snippets.iter().filter(|snippet| {
-            snippet.enabled
-                && language_scope_matches(snippet.language.as_deref(), transcript_language)
-        })
-    };
-
-    // Preserve punctuation as part of an explicitly configured trigger. This
-    // pass also makes a punctuated trigger win over the fallback below when an
-    // unpunctuated trigger with the same words exists.
-    if let Some(snippet) = eligible_snippets()
-        .filter(|snippet| snippet.trigger.eq_ignore_ascii_case(trimmed))
-        .max_by_key(|snippet| snippet.trigger.len())
-    {
-        return Some(snippet);
-    }
-
-    // Speech engines commonly append one sentence terminator to an otherwise
-    // exact command utterance. Tolerate only that final character: punctuation
-    // inside the trigger, repeated punctuation, and surrounding words remain
-    // meaningful and cannot turn a substring into a snippet match.
-    let without_stt_terminator = trimmed
-        .strip_suffix('.')
-        .or_else(|| trimmed.strip_suffix('!'))
-        .or_else(|| trimmed.strip_suffix('?'))?;
-
-    eligible_snippets()
-        .filter(|snippet| {
-            !matches!(snippet.trigger.chars().last(), Some('.' | '!' | '?'))
-                && snippet.trigger.eq_ignore_ascii_case(without_stt_terminator)
-        })
-        .max_by_key(|snippet| snippet.trigger.len())
-}
-
 pub(crate) struct LibraryRulesResult {
     pub(crate) text: String,
     pub(crate) literal_locked: bool,
@@ -558,6 +519,7 @@ pub(crate) fn apply_final_restoration_guard(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::writing::Snippet;
 
     #[test]
     fn regional_transcripts_use_base_language_dictionary_entries() {

@@ -1,33 +1,64 @@
 use std::borrow::Cow;
 
+#[cfg(test)]
+mod french_spacing_fixtures;
+
 /// Normalize mechanical dictation spacing: collapse ASCII space runs, drop space-before-punctuation.
 /// Leaves newlines/tabs/non-breaking-spaces/non-ASCII intact. Returns [`Cow::Borrowed`] when no change needed.
 /// Expects already-trimmed input: a leading space is dropped and a trailing space run collapses to one (not zero).
 pub fn normalize_transcript_spacing(input: &str) -> Cow<'_, str> {
+    normalize_spacing(input, false)
+}
+
+/// French typography preserves the separator the engine/user supplied, without
+/// choosing between ordinary, non-breaking or narrow non-breaking spaces.
+/// Other languages retain the legacy mechanical spacing policy.
+pub fn normalize_transcript_spacing_for_language<'a>(
+    input: &'a str,
+    language: Option<&str>,
+) -> Cow<'a, str> {
+    normalize_spacing(input, is_french(language))
+}
+
+pub fn is_french(language: Option<&str>) -> bool {
+    language
+        .unwrap_or("")
+        .trim()
+        .split(['-', '_'])
+        .next()
+        .is_some_and(|base| base.eq_ignore_ascii_case("fr"))
+}
+
+fn normalize_spacing(input: &str, french: bool) -> Cow<'_, str> {
     if input.is_empty() || has_structural_guard(input) {
         return Cow::Borrowed(input);
     }
 
     let mut out = String::with_capacity(input.len());
-    let mut pending_ascii_space = false;
+    let mut pending_ascii_spaces = 0;
 
     for ch in input.chars() {
         if ch == ' ' {
-            pending_ascii_space = true;
+            pending_ascii_spaces += 1;
             continue;
         }
 
-        if pending_ascii_space {
-            if !should_drop_space_before(ch) && !out.is_empty() {
+        if pending_ascii_spaces > 0 {
+            if french
+                && (matches!(ch, '?' | '!' | ':' | ';' | '«' | '»' | '\u{202f}')
+                    || out.ends_with(['«', '»', '\u{202f}']))
+            {
+                out.extend(std::iter::repeat_n(' ', pending_ascii_spaces));
+            } else if !should_drop_space_before(ch) && !out.is_empty() {
                 out.push(' ');
             }
-            pending_ascii_space = false;
+            pending_ascii_spaces = 0;
         }
 
         out.push(ch);
     }
 
-    if pending_ascii_space && !out.is_empty() {
+    if pending_ascii_spaces > 0 && !out.is_empty() {
         out.push(' ');
     }
 
@@ -93,6 +124,23 @@ fn should_drop_space_before(ch: char) -> bool {
 mod tests {
     use super::*;
     use std::borrow::Cow;
+
+    #[test]
+    fn french_spacing_preserves_exact_code_points_and_is_idempotent() {
+        for case in super::french_spacing_fixtures::fixtures() {
+            let actual =
+                normalize_transcript_spacing_for_language(&case.input, Some(case.language));
+            assert_eq!(actual.as_bytes(), case.expected.as_bytes(), "{}", case.id);
+            assert_eq!(
+                normalize_transcript_spacing_for_language(&actual, Some(case.language)),
+                actual,
+                "{} {} {}",
+                case.id,
+                case.engine,
+                case.flags
+            );
+        }
+    }
 
     #[test]
     fn empty_borrowed() {

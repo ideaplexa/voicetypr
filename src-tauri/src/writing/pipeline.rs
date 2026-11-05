@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 use crate::ai::error::{persisted_message, AiProviderError};
+use crate::ai::language_intent::{present_language, TranslationIntent};
 use crate::ai::prompts::EnhancementPreset;
 use crate::commands::settings::{
     normalize_final_text_language, normalize_transcription_task,
@@ -279,19 +280,22 @@ fn resolve_output_language(
     profile: &WritingProfile,
     transcription: &TranscriptionResult,
 ) -> String {
-    if profile.final_text_language == FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT {
-        transcription
-            .transcript_language
-            .clone()
-            .or_else(|| {
-                transcription
-                    .task
-                    .fallback_transcript_language(transcription.spoken_language.as_deref())
-            })
-            .unwrap_or_else(|| "en".to_string())
-    } else {
-        profile.final_text_language.clone()
-    }
+    present_language(Some(&profile.final_text_language))
+        .map(str::to_string)
+        .or_else(|| effective_transcript_language(transcription))
+        .unwrap_or_else(|| FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string())
+}
+
+fn effective_transcript_language(transcription: &TranscriptionResult) -> Option<String> {
+    present_language(transcription.transcript_language.as_deref())
+        .map(str::to_string)
+        .or_else(|| {
+            transcription
+                .task
+                .fallback_transcript_language(present_language(
+                    transcription.spoken_language.as_deref(),
+                ))
+        })
 }
 
 pub(crate) fn language_scope_matches(
@@ -347,7 +351,7 @@ fn record_output_language_transform_fallback(
     // it, remote STT, pre-detection models), fall back to the "same as
     // transcript" sentinel rather than falsely reporting a target language the
     // transform never produced.
-    *output_language = match transcript_language {
+    *output_language = match present_language(transcript_language) {
         Some(language) => language.to_string(),
         None => FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string(),
     };
@@ -370,6 +374,7 @@ struct SmartFormattingRequest<'a> {
     text: &'a str,
     transcript_language: Option<String>,
     output_language: &'a mut String,
+    translation_target: Option<&'a str>,
     config: &'a EffectiveConfig,
     settings: &'a WritingSettings,
     needs_output_language_transform: bool,
@@ -410,7 +415,7 @@ async fn run_smart_formatting(
         &request.app,
         request.text,
         &options,
-        Some(request.output_language.as_str()),
+        request.translation_target,
         request.transcript_language.as_deref(),
         ai_context.as_deref(),
         app_category_hint.as_deref(),
@@ -552,11 +557,7 @@ pub async fn process_transcription_at(
     if let Some(hint) = &mut active_app {
         hint.category = pipeline_config.category_hint;
     }
-    let transcript_language = transcription.transcript_language.clone().or_else(|| {
-        transcription
-            .task
-            .fallback_transcript_language(transcription.spoken_language.as_deref())
-    });
+    let transcript_language = effective_transcript_language(&transcription);
     let output_profile = WritingProfile {
         mode: pipeline_config.preset,
         final_text_language: pipeline_config.final_text_language.clone(),
@@ -598,10 +599,11 @@ pub async fn process_transcription_at(
     // OutputLanguageRequiresAi guard or an AI run). In "same as transcript" mode
     // the user has not requested a language change, so an unknown source language
     // is left untouched (pass-through) rather than forcing a spurious error.
-    let needs_output_language_transform = match transcript_language.as_deref() {
-        Some(language) => language != output_language,
-        None => pipeline_config.final_text_language != FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
-    };
+    let translation_intent = TranslationIntent::resolve(
+        transcript_language.as_deref(),
+        Some(&pipeline_config.final_text_language),
+    );
+    let needs_output_language_transform = translation_intent.target().is_some();
 
     let can_run_ai_formatting = pipeline_config.ai_effective
         && pipeline_config.preset != EnhancementPreset::PersonalDictation;
@@ -670,6 +672,7 @@ pub async fn process_transcription_at(
             text: &library_result.text,
             transcript_language: transcript_language.clone(),
             output_language: &mut output_language,
+            translation_target: translation_intent.target(),
             config: &pipeline_config,
             settings: &settings,
             needs_output_language_transform,
@@ -729,7 +732,7 @@ pub async fn process_transcription_at(
                 paragraphs: crate::commands::settings::read_transcript_paragraphs(&app),
                 remove_fillers: crate::commands::settings::read_transcript_remove_fillers(&app),
             },
-            &protected_terms(&settings),
+            &protected_terms(&settings, transcript_language.as_deref()),
         );
         log::info!(
             "transcription_stage_timing stage=format duration_ms={} changed={}",
@@ -797,6 +800,82 @@ mod tests {
     use super::*;
     use crate::ai::prompts::EnhancementPreset;
     use crate::transcription::{TranscriptionJob, TranscriptionSource, TranscriptionTask};
+
+    #[test]
+    fn translation_fixtures_reach_the_production_prompt_without_invented_language() {
+        for case in crate::ai::translation_fixtures::fixtures() {
+            let mut transcription = make_result(
+                case.input,
+                case.language,
+                case.language,
+                TranscriptionTask::Transcribe,
+            );
+            transcription.engine = case.engine.into();
+            let profile = WritingProfile {
+                mode: EnhancementPreset::CleanDictation,
+                final_text_language: case
+                    .target
+                    .unwrap_or(FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT)
+                    .into(),
+            };
+            let source = effective_transcript_language(&transcription);
+            let intent =
+                TranslationIntent::resolve(source.as_deref(), Some(&profile.final_text_language));
+            assert_eq!(
+                intent, case.expected,
+                "{} {} {}",
+                case.id, case.engine, case.flags
+            );
+            let output_language = resolve_output_language(&profile, &transcription);
+            if source.is_none() && present_language(case.target).is_none() {
+                assert_eq!(
+                    output_language, FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
+                    "{}",
+                    case.id
+                );
+            }
+            let prompt = crate::ai::polish::assemble_prompt(
+                &crate::ai::EnhancementOptions {
+                    preset: profile.mode,
+                },
+                intent.target(),
+                source.as_deref(),
+                None,
+                None,
+                false,
+            );
+            assert_eq!(
+                prompt.contains("translate it into"),
+                intent.target().is_some(),
+                "{}",
+                case.id
+            );
+            if source.is_none() && intent == TranslationIntent::Preserve {
+                assert!(!prompt.contains("English"), "{}", case.id);
+            }
+        }
+        for language in ["", " \t "] {
+            let transcription = make_result(
+                "Bonjour.",
+                Some("fr-CA"),
+                Some(language),
+                TranscriptionTask::Transcribe,
+            );
+            assert_eq!(
+                effective_transcript_language(&transcription).as_deref(),
+                Some("fr-CA")
+            );
+            let mut output_language = "fr".to_string();
+            record_output_language_transform_fallback(
+                &mut Vec::new(),
+                &mut output_language,
+                Some(language),
+                "fixture",
+                "fixture".into(),
+            );
+            assert_eq!(output_language, FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT);
+        }
+    }
 
     #[test]
     fn dictionary_scopes_match_regional_transcripts_by_base() {
@@ -877,7 +956,7 @@ mod tests {
                 paragraphs: true,
                 remove_fillers: true,
             },
-            &protected_terms(&settings),
+            &protected_terms(&settings, transcription.transcript_language.as_deref()),
         );
         let text = formatted.unwrap_or(library.text);
         apply_final_restoration_guard(&text, &library.provenance, library.literal_locked, false).0

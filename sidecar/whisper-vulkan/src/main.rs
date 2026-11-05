@@ -449,7 +449,11 @@ fn transcribe_with_context(
     }
 
     Ok(TranscriptionOutput {
-        text: transcript_text::normalize_transcript_spacing(text.trim()).into_owned(),
+        text: transcript_text::normalize_transcript_spacing_for_language(
+            text.trim(),
+            transcript_language.as_deref(),
+        )
+        .into_owned(),
         transcript_language,
         segments,
         audio_duration_ms,
