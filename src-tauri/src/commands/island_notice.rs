@@ -18,6 +18,8 @@ pub enum NoticeKind {
     HistoryRetry,
     ShortcutThrottled,
     NoSpeech,
+    // macOS-only, kept everywhere so the island event contract is the same.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     SecureInput,
 }
 pub fn notice<R: Runtime>(app: &AppHandle<R>, kind: NoticeKind) -> NoticeKind {
