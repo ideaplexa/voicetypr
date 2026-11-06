@@ -294,7 +294,8 @@ test("every Windows artifact uploader runs the Ivy Bridge gate first", () => {
 test("Mac native caches and RUSTFLAGS preserve the CPU VAD patch epoch", () => {
   let jobs = 0;
   for (const file of ["ci.yml", "native-ci.yml", "release.yml"]) {
-    const source = fs.readFileSync(path.join(repo, ".github/workflows", file), "utf8");
+    // Windows checkouts may convert workflows to CRLF; the job and cache patterns assume LF.
+    const source = fs.readFileSync(path.join(repo, ".github/workflows", file), "utf8").replace(/\r\n/g, "\n");
     for (const job of source.split(/(?=^  [\w-]+:)/m)) {
       if (!/runs-on:\s*macos-/.test(job) || !job.includes("uses: Swatinem/rust-cache@")) continue;
       jobs += 1;
