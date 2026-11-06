@@ -227,7 +227,7 @@ test("Store generates a MAP with preserved flags and checks layout plus packed Z
   assert.match(source, /ZipFile\]::ExtractToDirectory/);
   assert.match(source, /--check-layout/);
   assert.match(source, /-MapPath \$MainMap/);
-  assert.match(source, /link-arg=\/MAP:\$MainMap/);
+  assert.match(source, /\$env:VOICETYPR_MAIN_MAP = \$MainMap/);
   assert.match(source, /\$OriginalEncodedRustFlags = \$env:CARGO_ENCODED_RUSTFLAGS/);
   assert.match(source, /\$env:RUSTFLAGS -split/);
   assert.match(source, /target-feature=\+crt-static/);
@@ -240,6 +240,16 @@ function psRegex(source, marker) {
   const flags = /^\(\?([a-z]+)\)/.exec(pattern)[1];
   return new RegExp(pattern.replace(/^\(\?[a-z]+\)/, ""), flags);
 }
+
+test("linker MAP is scoped to the main executable, never RUSTFLAGS", () => {
+  const build = fs.readFileSync(path.join(repo, "src-tauri/build.rs"), "utf8");
+  assert.match(build, /cargo:rustc-link-arg-bin=voicetypr=\/MAP:/);
+  const sources = ["windows-check.yml", "native-ci.yml", "release.yml", "store-msix.yml"]
+    .map((file) => fs.readFileSync(path.join(repo, ".github/workflows", file), "utf8"))
+    .concat(fs.readFileSync(path.join(__dirname, "build-msix-store.ps1"), "utf8"));
+  // A RUSTFLAGS /MAP also links build scripts in parallel into one file (LNK1104).
+  for (const source of sources) assert.doesNotMatch(source, /link-arg=\/MAP/);
+});
 
 test("MAP public-symbol pattern rejects a static definition but permits loader strings", () => {
   const source = fs.readFileSync(path.join(repo, "src-tauri/windows/assert-no-onnxruntime-import.ps1"), "utf8");

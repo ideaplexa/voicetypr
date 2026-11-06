@@ -82,6 +82,16 @@ fn main() {
         }
     }
 
+    // Linker map for the main executable only (CI's static-ORT check). As a
+    // RUSTFLAGS link-arg it also reaches build scripts and the cdylib, which
+    // link in parallel into the same file (LNK1104) or overwrite it.
+    println!("cargo:rerun-if-env-changed=VOICETYPR_MAIN_MAP");
+    if let Ok(map) = std::env::var("VOICETYPR_MAIN_MAP") {
+        if !map.is_empty() && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+            println!("cargo:rustc-link-arg-bin=voicetypr=/MAP:{map}");
+        }
+    }
+
     println!("cargo:rerun-if-changed=../package.json");
     println!("cargo:rerun-if-changed=../pnpm-lock.yaml");
     println!("cargo:rerun-if-changed=../pnpm-workspace.yaml");

@@ -100,7 +100,8 @@ jobs:
         run: |
           # Keep map output out of clippy/tests and preserve any existing flags.
           $targetRoot = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR).Replace('\', '/')
-          $env:RUSTFLAGS = "$env:RUSTFLAGS -C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB% -C link-arg=/MAP:$targetRoot/voicetypr.map".Trim()
+          $env:RUSTFLAGS = "$env:RUSTFLAGS -C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB%".Trim()
+          $env:VOICETYPR_MAIN_MAP = "$targetRoot/voicetypr.map"
           cargo build --manifest-path src-tauri/Cargo.toml --release --bin voicetypr
           if ($LASTEXITCODE -ne 0) { throw "Main executable build failed: $LASTEXITCODE" }
 

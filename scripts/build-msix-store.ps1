@@ -77,12 +77,16 @@ if (-not $SkipTauriBuild) {
     Write-Step "Building Tauri Store binary"
     $env:VOICETYPR_DISTRIBUTION = "store_msix"
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+    $OriginalMainMap = $env:VOICETYPR_MAIN_MAP
     try {
-        $env:CARGO_ENCODED_RUSTFLAGS = (@($BuildRustFlags) + @("-C", "link-arg=/MAP:$MainMap")) -join [char]0x1f
+        $env:CARGO_ENCODED_RUSTFLAGS = $BuildRustFlags -join [char]0x1f
+        # build.rs scopes the map to the main executable (see src-tauri/build.rs).
+        $env:VOICETYPR_MAIN_MAP = $MainMap
         pnpm tauri build --no-bundle --ci --config src-tauri/tauri.windows.store.conf.json
         if ($LASTEXITCODE -ne 0) { throw "Tauri Store build failed with exit code $LASTEXITCODE" }
     } finally {
         $env:CARGO_ENCODED_RUSTFLAGS = $OriginalEncodedRustFlags
+        $env:VOICETYPR_MAIN_MAP = $OriginalMainMap
     }
 }
 

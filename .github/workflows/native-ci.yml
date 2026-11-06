@@ -216,7 +216,8 @@ jobs:
         run: |
           # Only this main-executable build writes the map, never clippy/tests.
           $targetRoot = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR).Replace('\', '/')
-          $env:RUSTFLAGS = "$env:RUSTFLAGS -C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB% -C link-arg=/MAP:$targetRoot/voicetypr.map".Trim()
+          $env:RUSTFLAGS = "$env:RUSTFLAGS -C target-feature=+crt-static -C link-arg=/PDBALTPATH:%_PDB%".Trim()
+          $env:VOICETYPR_MAIN_MAP = "$targetRoot/voicetypr.map"
           pnpm tauri build --bundles nsis --ci --config src-tauri/tauri.windows.conf.json
           if ($LASTEXITCODE -ne 0) { throw "Tauri build failed: $LASTEXITCODE" }
 
