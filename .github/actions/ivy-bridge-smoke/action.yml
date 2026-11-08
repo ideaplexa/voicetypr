@@ -23,13 +23,41 @@ runs:
         $ErrorActionPreference = 'Stop'
         $root = Join-Path $env:RUNNER_TEMP ("ivybridge-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $root | Out-Null
+        # Every phase is timed and bounded so a hang names its phase instead of
+        # silently consuming the caller's whole step timeout.
+        function Invoke-Bounded {
+          param([string]$Label, [string]$File, [string[]]$Arguments, [int]$Seconds)
+          $psi = [Diagnostics.ProcessStartInfo]::new($File)
+          foreach ($argument in $Arguments) { $psi.ArgumentList.Add($argument) }
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.WorkingDirectory = $root
+          Write-Host "[$Label] start (limit ${Seconds}s)"
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $process = [Diagnostics.Process]::Start($psi)
+          $stdout = $process.StandardOutput.ReadToEndAsync()
+          $stderr = $process.StandardError.ReadToEndAsync()
+          $finished = $process.WaitForExit($Seconds * 1000)
+          if (-not $finished) { $process.Kill($true) }
+          $process.WaitForExit()
+          $tail = (($stderr.Result.Trim() -split "`r?`n") | Select-Object -Last 20) -join "`n"
+          if ($tail) { Write-Host "[$Label] stderr tail:`n$tail" }
+          if (-not $finished) { throw "[$Label] timed out after ${Seconds}s" }
+          Write-Host ("[{0}] exit {1} after {2:n1}s" -f $Label, $process.ExitCode, $watch.Elapsed.TotalSeconds)
+          [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $stdout.Result }
+        }
+
+        Write-Host "Runner: $([Environment]::OSVersion.VersionString)"
         $archive = Join-Path $root 'sde.tar.xz'
-        Invoke-WebRequest -Uri $env:SDE_URL -OutFile $archive
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        Invoke-WebRequest -Uri $env:SDE_URL -OutFile $archive -TimeoutSec 180
+        Write-Host ("[download] SDE in {0:n1}s" -f $watch.Elapsed.TotalSeconds)
         if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:SDE_SHA256) {
           throw 'Intel SDE archive SHA-256 mismatch'
         }
-        tar -xf $archive -C $root
-        if ($LASTEXITCODE -ne 0) { throw "SDE extraction failed: $LASTEXITCODE" }
+        $extract = Invoke-Bounded -Label 'extract' -File 'tar' -Arguments @('-xf', $archive, '-C', $root) -Seconds 180
+        if ($extract.ExitCode -ne 0) { throw "SDE extraction failed: $($extract.ExitCode)" }
         # 10.13.1 ships sde.exe (not sde64.exe); keep its kit layout intact.
         $sde = Join-Path $root 'sde-external-10.13.1-2026-07-28-win/sde.exe'
         if (-not (Test-Path -LiteralPath $sde)) { throw 'Missing Intel SDE executable' }
@@ -37,7 +65,7 @@ runs:
         if (-not (Test-Path -LiteralPath $exe)) { throw 'Missing built app executable' }
 
         $jfk = Join-Path $root 'jfk.wav'
-        Invoke-WebRequest -Uri $env:JFK_URL -OutFile $jfk
+        Invoke-WebRequest -Uri $env:JFK_URL -OutFile $jfk -TimeoutSec 60
         if ((Get-FileHash $jfk -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:JFK_SHA256) {
           throw 'JFK WAV SHA-256 mismatch'
         }
@@ -68,28 +96,25 @@ runs:
         $env:APPDATA = Join-Path $root 'appdata'
         $env:LOCALAPPDATA = Join-Path $root 'localappdata'
         New-Item -ItemType Directory -Path $env:HOME, $env:APPDATA, $env:LOCALAPPDATA | Out-Null
-        Push-Location $root
-        try {
-          $version = @(& $sde -ivb -chip_check_die 1 -- $exe --version)
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -ne 0) {
-            throw "Ivy Bridge --version failed: $exitCode (including illegal-instruction 0xC000001D)"
+        # A system binary first: separates "SDE cannot run on this runner" from an app hang.
+        $sanity = Invoke-Bounded -Label 'sde-sanity' -File $sde -Arguments @('-ivb', '--', $env:ComSpec, '/d', '/c', 'ver') -Seconds 180
+        if ($sanity.ExitCode -ne 0) { throw "Intel SDE cannot run a system binary on this runner: $($sanity.ExitCode)" }
+
+        $version = Invoke-Bounded -Label 'version' -File $sde -Arguments @('-ivb', '-chip_check_die', '1', '--', $exe, '--version') -Seconds 300
+        if ($version.ExitCode -ne 0) {
+          throw "Ivy Bridge --version failed: $($version.ExitCode) (including illegal-instruction 0xC000001D)"
+        }
+        if ($version.Output.Trim() -notmatch '^voicetypr \S+$') {
+          throw 'Ivy Bridge --version did not return the app version'
+        }
+        foreach ($clip in @(@{ Label = 'silence'; File = $silence }, @{ Label = 'JFK'; File = $jfk })) {
+          $run = Invoke-Bounded -Label "vad-$($clip.Label)" -File $sde -Arguments @('-ivb', '-chip_check_die', '1', '--', $exe, 'vad', 'analyze', '--file', $clip.File, '--shadow', '--json') -Seconds 240
+          if ($run.ExitCode -ne 0) {
+            throw "Ivy Bridge $($clip.Label) VAD failed: $($run.ExitCode) (including illegal-instruction 0xC000001D)"
           }
-          if (($version -join "`n").Trim() -notmatch '^voicetypr \S+$') {
-            throw 'Ivy Bridge --version did not return the app version'
+          $result = $run.Output | ConvertFrom-Json -ErrorAction Stop
+          if ($result.mode -ne 'shadow' -or @($result.runs).Count -ne 1 -or $result.runs[0].status -ne 'runtime_unsupported') {
+            throw "Ivy Bridge $($clip.Label) VAD must report runtime_unsupported"
           }
-          foreach ($clip in @(@{ Label = 'silence'; File = $silence }, @{ Label = 'JFK'; File = $jfk })) {
-            $output = @(& $sde -ivb -chip_check_die 1 -- $exe vad analyze --file $clip.File --shadow --json)
-            $exitCode = $LASTEXITCODE
-            if ($exitCode -ne 0) {
-              throw "Ivy Bridge $($clip.Label) VAD failed: $exitCode (including illegal-instruction 0xC000001D)"
-            }
-            $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop
-            if ($result.mode -ne 'shadow' -or @($result.runs).Count -ne 1 -or $result.runs[0].status -ne 'runtime_unsupported') {
-              throw "Ivy Bridge $($clip.Label) VAD must report runtime_unsupported"
-            }
-          }
-        } finally {
-          Pop-Location
         }
         Write-Host 'OK: Ivy Bridge --version and both shadow VAD inputs passed.'

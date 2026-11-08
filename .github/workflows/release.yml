@@ -558,7 +558,7 @@ jobs:
       # No desktop or ASR model: Ivy Bridge must reach the lazy-runtime CPU guard.
       - name: Check CLI on Ivy Bridge (no AVX2, Intel SDE)
         uses: ./.github/actions/ivy-bridge-smoke
-        timeout-minutes: 15
+        timeout-minutes: 30
         with:
           executable-path: ${{ env.CARGO_TARGET_DIR }}/x86_64-pc-windows-msvc/release/voicetypr.exe
       - name: Sign installer for updates

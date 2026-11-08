@@ -197,7 +197,7 @@ jobs:
 
       - name: Check CLI on Ivy Bridge (no AVX2, Intel SDE)
         uses: ./.github/actions/ivy-bridge-smoke
-        timeout-minutes: 15
+        timeout-minutes: 30
         with:
           executable-path: ${{ env.CARGO_TARGET_DIR }}/release/voicetypr.exe
 

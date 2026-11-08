@@ -294,7 +294,7 @@ test("every Windows artifact uploader runs the Ivy Bridge gate first", () => {
       uploaders += 1;
       const smoke = job.indexOf("uses: ./.github/actions/ivy-bridge-smoke");
       if (smoke < 0 || smoke > upload) ungated.push(file);
-      else assert.match(job.slice(smoke, upload), /timeout-minutes: 15/);
+      else assert.match(job.slice(smoke, upload), /timeout-minutes: 30/);
     }
   }
   assert.ok(uploaders >= 3, "Expected preview, release and Store Windows uploaders");
