@@ -105,7 +105,7 @@ pub struct WritingSettings {
     pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub app_formatting_rules: Vec<AppFormattingRule>,
-    /// Opt-in: German spoken punctuation commands ("Strichpunkt" → ";").
+    /// Opt-in: spoken punctuation commands ("semicolon" → ";"), see `spoken_punctuation`.
     #[serde(default)]
     pub spoken_punctuation: bool,
 }

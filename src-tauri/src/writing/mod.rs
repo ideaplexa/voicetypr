@@ -35,3 +35,4 @@ pub(crate) use pipeline::{
     language_scope_matches, normalize_language_scope, smart_formatting_ai_context,
 };
 pub(crate) use spoken_punctuation::apply_spoken_punctuation;
+pub use spoken_punctuation::{spoken_punctuation_reference, SpokenPunctuationLanguage};

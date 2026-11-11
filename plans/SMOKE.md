@@ -6,22 +6,27 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
-## 2.0.12 — German spoken punctuation, opt-in (hotfix, not released)
+## 2.0.12 — Spoken punctuation, opt-in, 8 languages (hotfix, not released)
 
 - [ ] **SP-S1 — Packaged Windows, Whisper large-v3-turbo, German, Polish off:**
-  enable Polish → Corrections → Spoken punctuation (German). Dictate real
-  German speech (never TTS) using every command in the setting description:
-  Beistrich, Strichpunkt, Doppelpunkt, Fragezeichen, Rufzeichen,
-  Gedankenstrich, neue Zeile, neuer Absatz, Anführungszeichen auf/zu, Klammer
-  auf/zu, eckige Klammer auf/zu, Paragraphzeichen, Prozentzeichen, Und-Zeichen,
-  Raute, Sternchen, Pluszeichen, Minuszeichen, Gleichheitszeichen, Bindestrich,
-  Schrägstrich, Backslash. Record pass/fail per command and any doubled marks
-  from Whisper's own punctuation; record counts only, no dictated text.
-- [ ] **SP-S2 — Line breaks:** in Word and in a chat draft (Teams or Slack),
-  "neue Zeile" and "neuer Absatz" insert line breaks without sending the message.
-- [ ] **SP-S3 — Off by default and literal words:** with the setting off, or with
-  English dictation, the same commands stay words; with it on, "Komma",
-  "Punkt" and "Strichpunkte" stay words.
+  enable Polish → Corrections → Spoken punctuation. Dictate real German speech
+  (never TTS) with every German command under "Show commands", including the
+  original report's list (Komma/Beistrich, Strichpunkt, Gedankenstrich, neuer
+  Absatz, neue Zeile, Anführungszeichen auf/zu, § % & ( ) [ ] # + - = ? ! \ /).
+  Record pass/fail per command and any doubled marks from Whisper's own
+  punctuation; record counts only, no dictated text.
+- [ ] **SP-S2 — Other languages, native speakers:** repeat SP-S1 for English,
+  French, Spanish, Italian, Portuguese, Dutch and Polish, on Whisper and one
+  cloud engine. Include: comma word between digits stays a word; period word
+  mid-sentence stays a word and converts at the end; the prefix forces a
+  prefix-only command; the escape keeps a command literal; a command after an
+  article stays a word. Check French spacing (narrow space before ; ? !) and
+  Spanish « » in the target app.
+- [ ] **SP-S3 — Line breaks:** in Word and in a chat draft (Teams or Slack),
+  new line / new paragraph commands insert line breaks without sending.
+- [ ] **SP-S4 — Off by default:** with the setting off, or with a language not
+  in the list, every command stays a word. "Show commands" lists all 8
+  languages.
 
 ## 068 — Whisper callback correctness (beta.11 candidate, not released)
 

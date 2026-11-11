@@ -13,7 +13,10 @@ use crate::commands::settings::{
     TRANSCRIPTION_TASK_TRANSCRIBE,
 };
 use crate::secure_store;
-use crate::writing::{load_writing_settings, save_writing_settings, WritingSettings};
+use crate::writing::{
+    load_writing_settings, save_writing_settings, spoken_punctuation_reference,
+    SpokenPunctuationLanguage, WritingSettings,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1054,6 +1057,11 @@ pub async fn update_enhancement_options(
 #[tauri::command]
 pub async fn get_writing_settings(app: tauri::AppHandle) -> Result<WritingSettings, String> {
     load_writing_settings(&app)
+}
+
+#[tauri::command]
+pub fn get_spoken_punctuation_commands() -> Vec<SpokenPunctuationLanguage> {
+    spoken_punctuation_reference()
 }
 
 #[tauri::command]
