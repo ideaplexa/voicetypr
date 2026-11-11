@@ -1,4 +1,5 @@
 import { LanguageSelection } from "@/components/LanguageSelection";
+import { SpokenPunctuationField } from "@/components/polish/SpokenPunctuationField";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -852,12 +853,19 @@ export function EnhancementSettings({
           />
         </section>
 
-        <section aria-label="Corrections">
+        <section aria-label="Corrections" className="flex flex-col gap-5">
           <ReplacementEditor
             replacements={writingSettings.replacements}
             disabled={writingSettingsDisabled}
             onChange={(replacements) =>
               onWritingSettingsChange({ ...writingSettings, replacements })
+            }
+          />
+          <SpokenPunctuationField
+            enabled={writingSettings.spoken_punctuation}
+            disabled={writingSettingsDisabled}
+            onChange={(spoken_punctuation) =>
+              onWritingSettingsChange({ ...writingSettings, spoken_punctuation })
             }
           />
         </section>

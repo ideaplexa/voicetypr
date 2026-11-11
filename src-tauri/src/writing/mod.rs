@@ -2,6 +2,7 @@ mod app_category;
 mod library_rules;
 mod pipeline;
 mod settings;
+mod spoken_punctuation;
 mod vocabulary;
 
 #[allow(unused_imports)]
@@ -33,3 +34,4 @@ pub(crate) use library_rules::{
 pub(crate) use pipeline::{
     language_scope_matches, normalize_language_scope, smart_formatting_ai_context,
 };
+pub(crate) use spoken_punctuation::apply_spoken_punctuation;

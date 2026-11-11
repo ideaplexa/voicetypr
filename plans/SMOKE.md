@@ -6,6 +6,23 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
+## 2.0.12 — German spoken punctuation, opt-in (hotfix, not released)
+
+- [ ] **SP-S1 — Packaged Windows, Whisper large-v3-turbo, German, Polish off:**
+  enable Polish → Corrections → Spoken punctuation (German). Dictate real
+  German speech (never TTS) using every command in the setting description:
+  Beistrich, Strichpunkt, Doppelpunkt, Fragezeichen, Rufzeichen,
+  Gedankenstrich, neue Zeile, neuer Absatz, Anführungszeichen auf/zu, Klammer
+  auf/zu, eckige Klammer auf/zu, Paragraphzeichen, Prozentzeichen, Und-Zeichen,
+  Raute, Sternchen, Pluszeichen, Minuszeichen, Gleichheitszeichen, Bindestrich,
+  Schrägstrich, Backslash. Record pass/fail per command and any doubled marks
+  from Whisper's own punctuation; record counts only, no dictated text.
+- [ ] **SP-S2 — Line breaks:** in Word and in a chat draft (Teams or Slack),
+  "neue Zeile" and "neuer Absatz" insert line breaks without sending the message.
+- [ ] **SP-S3 — Off by default and literal words:** with the setting off, or with
+  English dictation, the same commands stay words; with it on, "Komma",
+  "Punkt" and "Strichpunkte" stay words.
+
 ## 068 — Whisper callback correctness (beta.11 candidate, not released)
 
 - [ ] **068-S1 — Packaged desktop:** Base English on macOS Metal and Windows

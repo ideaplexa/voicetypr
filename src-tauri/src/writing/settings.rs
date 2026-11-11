@@ -105,6 +105,9 @@ pub struct WritingSettings {
     pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub app_formatting_rules: Vec<AppFormattingRule>,
+    /// Opt-in: German spoken punctuation commands ("Strichpunkt" → ";").
+    #[serde(default)]
+    pub spoken_punctuation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,7 +124,8 @@ pub enum WritingOperationKind {
     Snippet,
     Translation,
     AiCleanup,
-    // Retained so history written before spoken commands were removed still deserializes.
+    // Spoken punctuation commands; also keeps history from the earlier, removed
+    // spoken-command feature deserializable.
     VoiceCommand,
     FinalGuard,
 }
@@ -271,6 +275,7 @@ pub fn sanitize_writing_settings(settings: WritingSettings) -> WritingSettings {
                 })
             })
             .collect(),
+        spoken_punctuation: settings.spoken_punctuation,
     }
 }
 
