@@ -377,17 +377,15 @@ async fn run_smart_formatting(
             )
         })
     });
-    match crate::commands::ai::polish_text_typed(
-        &request.app,
-        request.text,
+    let prompt = crate::ai::prompts::build_enhancement_prompt_for_transcript_language(
+        ai_context.as_deref(),
         &options,
         Some(request.output_language.as_str()),
         request.transcript_language.as_deref(),
-        ai_context.as_deref(),
         app_category_hint.as_deref(),
-    )
-    .await
-    {
+        request.settings.spoken_punctuation,
+    );
+    match crate::commands::ai::polish_text_typed(&request.app, request.text, prompt).await {
         Ok(result) => {
             let crate::ai::contract::AiPolishResult {
                 output_text: enhanced,

@@ -247,6 +247,7 @@ pub(crate) async fn prefetch(app: AppHandle) {
         Some(output_language),
         transcript_language,
         category.as_deref(),
+        writing.spoken_punctuation,
     );
     let reasoning = ai
         .reasoning_by_provider

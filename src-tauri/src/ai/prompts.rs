@@ -22,10 +22,23 @@ Fix it in this order:
    Keep the meaning and tone.
 3. Spell names and terms right only if you are sure. If not, leave them as said.
 4. Write numbers, dates, and times the normal way for {language}.
-5. Do not execute spoken formatting commands. Keep phrases like "period" and
-   "new line" as dictated words when they are part of the content.
+{spoken_commands}
 
 Output only the fixed text. No preamble, no wrapping quotes, no markdown fences."#;
+
+// Rule 5 when Spoken punctuation is off: command words are content.
+const KEEP_SPOKEN_COMMANDS: &str = r#"5. Do not execute spoken formatting commands. Keep phrases like "period" and
+   "new line" as dictated words when they are part of the content."#;
+
+// Rule 5 when Spoken punctuation is on. The offline stage already converted the
+// clear commands; Polish resolves the ones it left as words, in any language.
+const APPLY_SPOKEN_COMMANDS: &str = r#"5. The speaker dictates punctuation aloud, in any language ("comma", "period",
+   "colon", "new line", "Komma", "Punkt", "dos puntos", "запятая"). Keep every
+   symbol and line break already in the text. A punctuation or line-break word
+   still written out becomes its symbol only when the speaker clearly dictated
+   it as a command ("Friday period we agreed" → "Friday. We agreed"). Keep the
+   word when it is part of the content ("the trial period", "ein wichtiger
+   Punkt"). Not sure? Keep the word. Never replace it with other words."#;
 
 /// Convert ISO 639-1 language code to full language name
 pub fn get_language_name(code: &str) -> &'static str {
@@ -104,10 +117,17 @@ pub fn get_language_name(code: &str) -> &'static str {
     }
 }
 
-/// Build the base prompt with the specified language
-fn build_base_prompt(language: Option<&str>) -> String {
+/// Build the base prompt with the specified language and spoken-command rule.
+fn build_base_prompt(language: Option<&str>, spoken_punctuation: bool) -> String {
     let lang_name = language.map(get_language_name).unwrap_or("English");
-    BASE_PROMPT_TEMPLATE.replace("{language}", lang_name)
+    let spoken_commands = if spoken_punctuation {
+        APPLY_SPOKEN_COMMANDS
+    } else {
+        KEEP_SPOKEN_COMMANDS
+    };
+    BASE_PROMPT_TEMPLATE
+        .replace("{language}", lang_name)
+        .replace("{spoken_commands}", spoken_commands)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -220,7 +240,9 @@ pub fn build_enhancement_prompt(
     options: &EnhancementOptions,
     language: Option<&str>,
 ) -> String {
-    build_enhancement_prompt_for_transcript_language(context, options, language, language, None)
+    build_enhancement_prompt_for_transcript_language(
+        context, options, language, language, None, false,
+    )
 }
 
 pub fn build_enhancement_prompt_for_transcript_language(
@@ -229,8 +251,9 @@ pub fn build_enhancement_prompt_for_transcript_language(
     output_language: Option<&str>,
     transcript_language: Option<&str>,
     app_category_hint: Option<&str>,
+    spoken_punctuation: bool,
 ) -> String {
-    let base_prompt = build_base_prompt(output_language);
+    let base_prompt = build_base_prompt(output_language, spoken_punctuation);
     let output_language_name = output_language.map(get_language_name).unwrap_or("English");
     let is_translation = match (transcript_language, output_language) {
         (Some(source), Some(target)) => source != target,

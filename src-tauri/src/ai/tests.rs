@@ -210,6 +210,7 @@ mod behavior_tests {
             Some("es"),
             Some("en"),
             None,
+            false,
         );
         assert!(prompt.contains("written Spanish"));
         assert!(
@@ -226,6 +227,7 @@ mod behavior_tests {
             Some("en"),
             Some("en"),
             None,
+            false,
         );
         assert!(!prompt.contains("translate it into"));
     }
@@ -240,6 +242,7 @@ mod behavior_tests {
             Some("en"),
             Some("en"),
             Some(hint),
+            false,
         );
         assert!(prompt.contains(hint), "category hint must appear in prompt");
         assert!(prompt.contains("dictating into a Chat context"));
@@ -254,6 +257,7 @@ mod behavior_tests {
             Some("en"),
             Some("en"),
             None,
+            false,
         );
         assert!(!prompt.contains("dictating into a"));
         assert!(!prompt.contains("Context:"));
@@ -270,6 +274,7 @@ mod behavior_tests {
             Some("en"),
             Some("en"),
             Some(hint),
+            false,
         );
         let hint_pos = prompt.find("dictating into a Chat context");
         let terms_pos = prompt.find("Known terms");
