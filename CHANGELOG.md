@@ -1,3 +1,10 @@
+## 2.0.12 (2026-11-12)
+
+### Features
+
+* **writing:** spoken punctuation, opt-in under Polish → Corrections: say "comma", "new paragraph", "open parenthesis" and more while dictating in English, German, French, Spanish, Italian, Portuguese, Dutch or Polish. Works offline with Polish off; "Show commands" lists every command per language
+* **polish:** with spoken punctuation on, Polish also converts command words the offline step leaves alone, such as a period word mid-sentence or a language outside the list
+
 ## 2.0.11 (2026-11-02)
 
 ### Bug Fixes
