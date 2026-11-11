@@ -33,6 +33,7 @@ export interface WritingSettings {
   custom_words: CustomWord[];
   snippets: Snippet[];
   app_formatting_rules: AppFormattingRule[];
+  spoken_punctuation: boolean;
 }
 
 export const defaultWritingSettings: WritingSettings = {
@@ -40,6 +41,7 @@ export const defaultWritingSettings: WritingSettings = {
   custom_words: [],
   snippets: [],
   app_formatting_rules: [],
+  spoken_punctuation: false,
 };
 
 // Only known fields are merged, so old persisted settings that still carry a
@@ -52,4 +54,5 @@ export const mergeWritingSettings = (
   custom_words: partial.custom_words ?? defaultWritingSettings.custom_words,
   snippets: partial.snippets ?? defaultWritingSettings.snippets,
   app_formatting_rules: partial.app_formatting_rules ?? defaultWritingSettings.app_formatting_rules,
+  spoken_punctuation: partial.spoken_punctuation ?? defaultWritingSettings.spoken_punctuation,
 });

@@ -15,7 +15,7 @@ use crate::transcription::TranscriptionResult;
 use crate::whisper::languages::is_language_supported;
 
 use super::{
-    apply_final_restoration_guard, apply_library_rules, category_label, category_prompt_hint,
+    apply_final_restoration_guard, apply_library_rules, apply_spoken_punctuation, category_label, category_prompt_hint,
     classify, compile_context_for_target, format_for_transcription, load_writing_settings,
     protected_terms, sanitize_transcript, should_run_format_stage, AiExecutionMetadata,
     AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint, FormatStageSettings,
@@ -579,8 +579,20 @@ pub async fn process_transcription_at(
             detail: "Applied transcript cleanup".to_string(),
         });
     }
+    let spoken_punctuation_text = settings
+        .spoken_punctuation
+        .then(|| apply_spoken_punctuation(cleaned_text.as_ref(), transcript_language.as_deref()))
+        .flatten();
+    if spoken_punctuation_text.is_some() {
+        applied_operations.push(AppliedWritingOperation {
+            kind: WritingOperationKind::VoiceCommand,
+            detail: "Applied spoken punctuation".to_string(),
+        });
+    }
     let library_result = apply_library_rules(
-        cleaned_text.as_ref(),
+        spoken_punctuation_text
+            .as_deref()
+            .unwrap_or(cleaned_text.as_ref()),
         &settings,
         transcript_language.as_deref(),
         &mut applied_operations,
