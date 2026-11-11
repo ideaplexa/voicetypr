@@ -36,6 +36,25 @@ export interface WritingSettings {
   spoken_punctuation: boolean;
 }
 
+export type SpokenPunctuationTrigger =
+  | "always"
+  | "not_between_digits"
+  | "phrase_end"
+  | "prefix_only";
+
+export interface SpokenPunctuationCommand {
+  phrases: string[];
+  symbol: string;
+  trigger: SpokenPunctuationTrigger;
+}
+
+export interface SpokenPunctuationLanguage {
+  code: string;
+  prefix: string;
+  escape: string;
+  commands: SpokenPunctuationCommand[];
+}
+
 export const defaultWritingSettings: WritingSettings = {
   replacements: [],
   custom_words: [],
