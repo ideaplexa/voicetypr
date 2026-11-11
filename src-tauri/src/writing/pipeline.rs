@@ -423,6 +423,7 @@ async fn run_smart_formatting(
         ai_context.as_deref(),
         app_category_hint.as_deref(),
         request.needs_output_language_transform,
+        request.settings.spoken_punctuation,
         request.generation,
     )
     .await

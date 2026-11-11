@@ -36,6 +36,16 @@ Fix it in this order:
 
 Output only the fixed text. No preamble, no wrapping quotes, no markdown fences."#;
 
+pub(crate) fn apply_spoken_punctuation_rule(prompt: String, enabled: bool) -> String {
+    if !enabled {
+        return prompt;
+    }
+    prompt.replace(
+        "5. Do not execute spoken formatting commands. Keep phrases like \"period\" and\n   \"new line\" as dictated words when they are part of the content.",
+        "5. The speaker dictates punctuation aloud, in any language (\"comma\", \"period\",\n   \"colon\", \"new line\", \"Komma\", \"Punkt\", \"dos puntos\", \"запятая\"). Keep every\n   symbol and line break already in the text. A punctuation or line-break word\n   still written out becomes its symbol only when the speaker clearly dictated\n   it as a command (\"Friday period we agreed\" → \"Friday. We agreed\"). Keep the\n   word when it is part of the content (\"the trial period\", \"ein wichtiger\n   Punkt\"). Not sure? Keep the word. Never replace it with other words.",
+    )
+}
+
 /// Convert ISO 639-1 language code to full language name
 pub fn get_language_name(code: &str) -> &'static str {
     match code.to_lowercase().as_str() {

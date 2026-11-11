@@ -258,7 +258,7 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
             )
         })
     });
-    let prompt = crate::ai::polish::assemble_prompt(
+    let prompt = crate::ai::prompts::apply_spoken_punctuation_rule(crate::ai::polish::assemble_prompt(
         &crate::ai::EnhancementOptions {
             preset: config.preset,
         },
@@ -267,7 +267,7 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
         context.as_deref(),
         category.as_deref(),
         crate::ai::keep_words::read(&app),
-    );
+    ), writing.spoken_punctuation);
     let Ok(runtime) = super::ai::prepare_polish_runtime(&app, &ai.provider, &ai.model) else {
         return;
     };
