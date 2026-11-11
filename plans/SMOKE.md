@@ -27,6 +27,19 @@ reproduced failure against the named plan.
 - [ ] **SP-S4 — Off by default:** with the setting off, or with a language not
   in the list, every command stays a word. "Show commands" lists all 8
   languages.
+- [ ] **SP-S5 — Polish on:** with Spoken punctuation on, dictate a mid-sentence
+  period word ("Friday period we agreed"), a bare "colon", and the same words
+  as content ("the trial period", "ein wichtiger Punkt") through two real
+  providers, one small model. Commands become marks, content stays words, no
+  word is swapped for another. With Spoken punctuation off, 046-S2 still holds.
+
+Pipeline pass (2026-11-11, not accuracy proof): ElevenLabs TTS → Whisper
+large-v3-turbo → stage, 15 clips in 8 languages. Whisper writes commas inside
+phrases ("open, quote"), a period before a spoken comma ("müssen. Komma"), the
+question mark after a following "new line", and often types a dictated comma
+itself before a break; the stage handles all four. Not handled: a command glued
+by hyphen ("Huber-Beistrich") or merged ("briefpunt"), and commands Whisper
+drops after typing the mark itself.
 
 ## 068 — Whisper callback correctness (beta.11 candidate, not released)
 

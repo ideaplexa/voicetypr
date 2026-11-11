@@ -828,9 +828,12 @@ struct Matcher {
     commands: HashMap<String, &'static Command>,
 }
 
+/// Lowercase with single spaces; a recognizer comma inside a phrase ("open,
+/// quote") is dropped.
 fn normalize_phrase(phrase: &str) -> String {
     phrase
-        .split_whitespace()
+        .split(|ch: char| ch.is_whitespace() || ch == ',')
+        .filter(|word| !word.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
@@ -851,7 +854,8 @@ fn build_matcher(language: &'static Language) -> Matcher {
                 .split_whitespace()
                 .map(regex::escape)
                 .collect::<Vec<_>>()
-                .join(r"\s+")
+                // Whisper puts commas inside spoken phrases: "open, quote".
+                .join(r"(?:\s*,\s*|\s+)")
         })
         .collect::<Vec<_>>()
         .join("|");
@@ -962,22 +966,13 @@ fn push_space_before_next_word(out: &mut String, text: &str, pos: usize) {
     }
 }
 
-fn ends_sentence(symbol: &str) -> bool {
-    symbol
-        .trim_start_matches(['\u{A0}', '\u{202F}'])
-        .starts_with(['.', '?', '!'])
-}
-
 /// Write `command` to `out` and return where copying the transcript resumes.
 fn render(out: &mut String, text: &str, after: usize, command: &Command) -> usize {
-    let preceding = if ends_sentence(command.symbol) {
-        CLAUSE_AND_PERIOD_MARKS
-    } else {
-        CLAUSE_MARKS
-    };
     match command.placement {
         Placement::AfterWord => {
-            drop_preceding_mark(out, preceding);
+            // Whisper often ends a sentence on the pause before a spoken
+            // mark ("müssen. Komma"): the dictated mark replaces it.
+            drop_preceding_mark(out, CLAUSE_AND_PERIOD_MARKS);
             out.push_str(command.symbol);
             let pos = skip_following_mark(text, after, ENGINE_MARKS);
             push_space_before_next_word(out, text, pos);
@@ -991,9 +986,17 @@ fn render(out: &mut String, text: &str, after: usize, command: &Command) -> usiz
             pos
         }
         Placement::Break => {
-            drop_preceding_mark(out, preceding);
+            // A bare break keeps the mark before it: usually a dictated comma
+            // Whisper already wrote ("Dear Anna, new paragraph"). A period
+            // break ("punto y aparte") replaces it. A mark after the break
+            // belongs to the previous line.
+            if command.symbol.starts_with('.') {
+                drop_preceding_mark(out, CLAUSE_AND_PERIOD_MARKS);
+            } else {
+                trim_trailing_spaces(out);
+            }
             out.push_str(command.symbol);
-            skip_following_mark(text, after, CLAUSE_AND_PERIOD_MARKS)
+            skip_following_mark(text, after, ENGINE_MARKS)
         }
         Placement::Opening => {
             trim_trailing_spaces(out);
