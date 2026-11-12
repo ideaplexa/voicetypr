@@ -70,6 +70,7 @@ Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified 
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
+| 088 | [2.1 stable hardening](088-2.1-stable-hardening.md): master plan Phase 0 in nine slices (spoken punctuation port, log privacy, release gate, upload, settings, streams, sharing, island/tray port, ledger) | P0 | L | `release/2.1.0-beta.9` | IN PROGRESS — claimed Claude 2026-11-13; slices on `p0/*` branches |
 | 087 | [2.1.0-beta.8, beta.9 and stable](087-2.1-beta8-beta9.md): release map and "Only failed" audio | P0 | XL | beta.7 baseline | beta.8 IMPLEMENTED / MERGED on `release/2.1.0-beta.8`; hardware smoke and Windows CI pending; beta.9 OPEN |
 | 085 | [Spoken punctuation commands](085-spoken-punctuation-commands.md), opt-in for 2.1 | P1 | L | Beta.5 baseline; quote and spacing decisions | TODO — scope and trigger approved; not claimed for execution |
 | 086 | [Multilingual text correctness](086-multilingual-text-correctness.md), beta.6 | P0 | XL | Beta.5 baseline; security review for bidi changes | TODO — beta.6 scope approved; not claimed for execution |
