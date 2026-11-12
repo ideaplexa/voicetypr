@@ -25,7 +25,7 @@ src-tauri/                   Rust backend (workspace: ., crates/keytrigger,
                              crates/transcript-text, crates/vulkan-device-select)
 sidecar/parakeet-swift/      macOS Parakeet engine (Swift + FluidAudio 0.17.4)
 sidecar/whisper-vulkan/      Windows GPU Whisper engine (Rust + whisper-rs/Vulkan)
-plans/                       plan ledger (README.md), SMOKE.md, MASTER-PLAN-2026-Q4.md
+plans/                       plan ledger (README.md), SMOKE.md, MASTER-PLAN.md
 docs/                        research, reports, reviews, this file, RELEASING.md
 ```
 

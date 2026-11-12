@@ -7,7 +7,7 @@ and a live-preview pill. Tauri v2 + Rust, React 19 + TypeScript, Base UI.
 
 How the code fits together: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 CI and releases: [`docs/RELEASING.md`](docs/RELEASING.md). Roadmap and
-decisions: `plans/MASTER-PLAN-2026-Q4.md`.
+decisions: `plans/MASTER-PLAN.md`.
 
 ## Rules
 
