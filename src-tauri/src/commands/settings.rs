@@ -18,6 +18,7 @@ use tauri::async_runtime::Mutex as AsyncMutex;
 /// Generation counter for tray menu updates to prevent race conditions.
 /// Each update increments this and checks if it's still current before applying.
 static TRAY_MENU_GENERATION: AtomicU64 = AtomicU64::new(0);
+static SETTINGS_SAVE_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
@@ -772,6 +773,7 @@ pub async fn save_settings(
     settings: Settings,
     update_channel_explicit: Option<bool>,
 ) -> Result<(), String> {
+    let _save_guard = SETTINGS_SAVE_LOCK.lock().await;
     let store = app.store("settings").map_err(|e| e.to_string())?;
 
     // Check if model, recording mode, onboarding, and pill indicator mode changed
@@ -995,7 +997,15 @@ pub async fn save_settings(
     if let Some(port) = settings.sharing_port {
         store.set("sharing_port", json!(port));
     }
-    store.delete("sharing_password");
+    // Preserve the only copy if migration or secure-store access failed.
+    if store.get("sharing_password").is_none()
+        || matches!(
+            crate::secure_store::secure_get(&app, super::remote::SHARING_PASSWORD_KEY),
+            Ok(Some(_))
+        )
+    {
+        store.delete("sharing_password");
+    }
 
     if let Some(remote_state) = app.try_state::<AsyncMutex<RemoteSettings>>() {
         let mut remote_settings = remote_state.lock().await;

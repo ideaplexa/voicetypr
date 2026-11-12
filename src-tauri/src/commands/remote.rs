@@ -24,7 +24,7 @@ use crate::whisper::manager::WhisperManager;
 
 /// Default port for remote transcription
 pub const DEFAULT_PORT: u16 = 47842;
-const SHARING_PASSWORD_KEY: &str = "remote_sharing_password";
+pub(crate) const SHARING_PASSWORD_KEY: &str = "remote_sharing_password";
 
 fn remote_connection_password_key(server_id: &str) -> String {
     format!("remote_connection_password_{}", server_id)
