@@ -68,7 +68,9 @@ for (const path of rustFiles('src-tauri/src')) {
 }
 const swiftPath = 'sidecar/parakeet-swift/Sources/main.swift';
 const swift = readFileSync(swiftPath, 'utf8');
+// Error descriptions are allowed: the Rust side scrubs every line it forwards,
+// and without them a Parakeet failure cannot be diagnosed.
 for (const match of swift.matchAll(/\blog\s*\([^\n]*/g)) {
-  if (/\\\((?:audioPath|expectedPath\.path|path\.path|toks\.suffix|(?:text|transcript)(?:\)|\.)|error(?:\)|\.localizedDescription))/.test(match[0])) report(swiftPath, swift, match.index);
+  if (/\\\((?:audioPath|expectedPath\.path|path\.path|toks\.suffix|(?:text|transcript)(?:\)|\.))/.test(match[0])) report(swiftPath, swift, match.index);
 }
 if (failures) process.exitCode = 1;
