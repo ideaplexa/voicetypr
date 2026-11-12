@@ -118,6 +118,22 @@ Rules for every slice: one git worktree per slice; claim the row in
 [`README.md`](README.md) first; nothing is pushed or released without the
 founder's OK; hardware-dependent claims stay `NEEDS-SMOKE` until run.
 
+### Repositories and branches (decided 2026-11-13)
+
+- **Three repositories, not one.** This repo (desktop app and the shared core,
+  public, AGPL), `voicetypr-web` (website and backend, private, already a pnpm
+  + turbo workspace), and later a mobile repo. Merging them would put private
+  server code next to public code, make every CI run and every agent's context
+  bigger, and buy nothing: the only thing they share is the HTTP contract.
+  That contract lives as one versioned schema file in `voicetypr-web`, and
+  this repo pins a copy.
+- **One integration line for 2.1:** branch `release/2.1.0-beta.9` in the
+  worktree `worktrees/voicetypr-2.1`. Slices branch from it and merge back
+  into it. `hotfix/2.0.12` is the stable line. Everything else is history.
+- Stale worktrees were removed on 2026-11-13 (29 → 9 before the Phase 0
+  slices); their branches were kept. Only `hotfix/2.0.12` (spoken
+  punctuation) held work missing from the 2.1 line.
+
 ## Phase 0 — Ship 2.1 stable
 
 Goal: 2.1.0 before 2027-01-15, with the audit's privacy, security and release
@@ -142,12 +158,20 @@ Not in 2.1: encryption for network sharing (Phase 4), the `audio.rs` split
 
 Goal: one honest scoreboard that every later phase is judged against. Today
 there are 212 invented Polish cases in `perf-corpus/polish/golden.jsonl` and a
-hidden `voicetypr polish-eval` command; there is no real-speech set.
+hidden `voicetypr polish-eval` command.
+
+A private real-speech set now exists outside the repo, at
+`oss/voicetypr-test-audio/founder-dictation/`: 654 of the founder's own
+dictations (8.7 hours, 16 kHz WAV, 2026-10-31 to 2026-11-13) with what the
+engine recognized at the time. All are English, all went into AI assistants
+and agents, none used Polish. They are unlabelled: the recognized text is not
+a correct reference. The app keeps roughly two weeks of recordings, so copy
+new ones into the set regularly.
 
 | # | Work | Proof of done |
 |---|---|---|
-| 1.1 | **Capture tool:** record → save audio → type the correct text → type the ideal final text → tag the destination (chat, email, code, agent prompt, notes) | Founder can add a clip in under a minute |
-| 1.2 | **Real-speech set:** 300+ clips of real messy speech: fillers, false starts, self-corrections, lists, names, numbers, jargon, questions that must not be answered. English, German, Bangla, Hindi, and mixed Bangla–English and Hindi–English | Set locked and versioned; kept out of the public repo |
+| 1.1 | **Label the founder set:** draft `reference_text` with the strongest cloud engine and `ideal_text` with a strong model, then the founder corrects a sample of 100. Needs the founder's OK first, because it sends his private dictations to those providers | 100 clips with a human-approved reference and ideal text |
+| 1.2 | **Fill the gaps the founder set does not cover:** other destinations (chat, email, documents), other speakers and accents, German, Bangla, Hindi, mixed Bangla–English. Sources in order: beta users who opt in (1.5), public spontaneous-speech sets whose licence allows it (IndicVoices and Vaani for Indic; licences to be checked per set), and recordings we ask people to make | Each destination and language has at least 30 clips; set locked and versioned; never in the public repo |
 | 1.3 | **Harness through the CLI:** engines × Polish providers → the north-star metrics, p50/p95, on an M-series Mac and a Windows laptop | One command prints the table |
 | 1.4 | Human judgement for ambiguous Polish results; automatic checks only for hard failures | A second person can reproduce a verdict |
 | 1.5 | Opt-in recording donation: separate consent, off by default, own storage, preview before sending, delete any time | Founder decision first |
@@ -187,7 +211,7 @@ cursor (beta.9 adds it) and knows nothing about the user's tone.
 | # | Work | Proof of done |
 |---|---|---|
 | 3.1 | **Context:** text before and after the cursor, selected text, the kind of field, the app, vocabulary. Collected with permission, sent only to the Polish provider the user chose, never logged | Hard-word accuracy and accepted-without-edit go up on the set |
-| 3.2 | **Destination shapes:** chat message, email, document, code comment, commit message, terminal command, prompt for an AI agent. Each has rules for length, structure and what must stay literal | Per-destination cases in the set pass |
+| 3.2 | **Destination shapes:** chat message, email, document, code comment, commit message, terminal command, prompt for an AI agent. Each has rules for length, structure and what must stay literal. Add an "AI assistant or agent" app category first: today ChatGPT, Claude and agent apps classify as Other and get no hint, and an agent running in a terminal gets the "literal command line" hint, which is wrong for a prompt (`writing/app_category.rs`). All 654 clips in the founder set are this destination | Per-destination cases in the set pass |
 | 3.3 | **Tone:** learned per app from what the user keeps and what they fix after insertion; stored locally; visible and resettable. "Keep my words" stays as the opt-out | The same sentence comes out in the user's register in two different apps |
 | 3.4 | **Guards:** never change meaning, never answer; skip Polish when the text is already clean; one key swaps back to the raw transcript | Zero meaning-change errors on the set |
 | 3.5 | **Vocabulary engine:** terms with spoken aliases and scope (global, app, project); short relevance-ranked lists per dictation; recognition-time biasing per engine; learn a fix when the user retypes a word, with undo | Hard-word accuracy per engine before and after |
