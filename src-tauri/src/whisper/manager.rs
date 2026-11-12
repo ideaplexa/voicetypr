@@ -291,7 +291,6 @@ impl WhisperManager {
             }
         }
 
-        log::info!("[download_model] Output path: {:?}", output_path);
         log::info!(
             "[download_model] File name will be: {}.bin",
             model_info.name

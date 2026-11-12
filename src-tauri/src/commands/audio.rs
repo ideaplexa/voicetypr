@@ -5814,12 +5814,7 @@ async fn stop_recording_with_mode_at(
             remote_conn.status,
             crate::remote::settings::ConnectionStatus::Online
         ) {
-            log::info!(
-                "🌐 Using remote server for transcription: {} ({}:{})",
-                remote_conn.display_name(),
-                remote_conn.host,
-                remote_conn.port
-            );
+            log::info!("🌐 Using remote server for transcription");
             ActiveEngineSelection::Remote {
                 server_id: remote_conn.id.clone(),
                 server_name: remote_conn.display_name(),
@@ -6067,11 +6062,8 @@ async fn stop_recording_with_mode_at(
             );
             audio_path
         }
-        ActiveEngineSelection::Remote { server_name, .. } => {
-            log::info!(
-                "[RECORD] Remote server '{}' selected — skipping normalization",
-                server_name
-            );
+        ActiveEngineSelection::Remote { .. } => {
+            log::info!("[RECORD] Remote server selected — skipping normalization");
             audio_path
         }
         _ => {
@@ -6380,7 +6372,6 @@ async fn stop_recording_with_mode_at(
                 }
                 ActiveEngineSelection::Remote {
                     server_id,
-                    server_name,
                     host,
                     port,
                     password,
@@ -6388,12 +6379,7 @@ async fn stop_recording_with_mode_at(
                 } => {
                     async {
                         let remote_start = std::time::Instant::now();
-                        log::info!(
-                            "🌐 [Remote] Starting transcription to '{}' ({}:{})",
-                            server_name,
-                            host,
-                            port
-                        );
+                        log::info!("🌐 [Remote] Starting transcription");
 
                         let audio_data = std::fs::read(&audio_path_clone).map_err(|e| {
                             TranscriptionFailure::local(format!("Failed to read audio file: {}", e))
@@ -6401,9 +6387,8 @@ async fn stop_recording_with_mode_at(
 
                         let audio_size_kb = audio_data.len() as f64 / 1024.0;
                         log::info!(
-                            "🌐 [Remote] Sending {:.1} KB audio to '{}' (+{}ms)",
+                            "🌐 [Remote] Sending {:.1} KB audio (+{}ms)",
                             audio_size_kb,
-                            server_name,
                             remote_start.elapsed().as_millis()
                         );
 
@@ -6436,8 +6421,7 @@ async fn stop_recording_with_mode_at(
                         match client::transcribe_audio(&server_conn, request, timeout_ms).await {
                             Ok(response) => {
                                 log::info!(
-                                "🌐 [Remote] Transcription COMPLETED from '{}': {} chars received",
-                                server_name,
+                                "🌐 [Remote] Transcription COMPLETED: {} chars received",
                                 response.text.len()
                             );
                                 Ok(build_remote_transcription_result(
@@ -6447,8 +6431,7 @@ async fn stop_recording_with_mode_at(
                             }
                             Err(error) => {
                                 log::warn!(
-                                "🌐 [Remote] Remote transcription FAILED to '{}' after {}ms: {}",
-                                server_name,
+                                "🌐 [Remote] Remote transcription FAILED after {}ms: {}",
                                 remote_start.elapsed().as_millis(),
                                 error
                             );
@@ -7552,10 +7535,7 @@ async fn save_failed_transcription_internal(
                 );
             }
 
-            log::info!(
-                "Saved failed transcription with recording file: {}",
-                recording_file
-            );
+            log::info!("Saved failed transcription with recording file");
             Some(Ok(()))
         }
     }
@@ -7844,7 +7824,6 @@ pub(crate) async fn transcribe_audio_file_impl(
 
     let transcription_result = if let ActiveEngineSelection::Remote {
         server_id,
-        server_name,
         host,
         port,
         password,
@@ -7856,21 +7835,15 @@ pub(crate) async fn transcribe_audio_file_impl(
         let normalized_file = normalize_upload_audio(&recordings_dir, &wav_path).await?;
         log::info!("[UPLOAD] Normalized WAV ready");
 
-        log::info!(
-            "🌐 [Remote Upload] Starting transcription to '{}' ({}:{})",
-            server_name,
-            host,
-            port
-        );
+        log::info!("🌐 [Remote Upload] Starting transcription");
 
         let audio_data = std::fs::read(normalized_file.path())
             .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
         let audio_size_kb = audio_data.len() as f64 / 1024.0;
         log::info!(
-            "🌐 [Remote Upload] Sending {:.1} KB audio to '{}'",
-            audio_size_kb,
-            server_name
+            "🌐 [Remote Upload] Sending {:.1} KB audio",
+            audio_size_kb
         );
 
         let server_conn = RemoteServerConnection::new(host.clone(), *port, password.clone());
@@ -7893,16 +7866,14 @@ pub(crate) async fn transcribe_audio_file_impl(
             .await
             .map_err(|e| {
                 log::warn!(
-                    "🌐 [Remote Upload] Remote transcription FAILED to '{}': {}",
-                    server_name,
+                    "🌐 [Remote Upload] Remote transcription FAILED: {}",
                     e
                 );
                 e.to_string()
             })?;
 
         log::info!(
-            "🌐 [Remote Upload] Transcription COMPLETED from '{}': {} chars received",
-            server_name,
+            "🌐 [Remote Upload] Transcription COMPLETED: {} chars received",
             response.text.len()
         );
 

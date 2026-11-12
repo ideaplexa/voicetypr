@@ -277,7 +277,6 @@ use commands::{
     audio::*,
     cli_tool::{cli_tool_status, install_cli_tool, repair_cli_tool, uninstall_cli_tool},
     clipboard::{copy_image_to_clipboard, save_image_to_file},
-    debug::{debug_transcription_flow, test_transcription_event},
     device::get_device_id,
     distribution::get_distribution_info,
     keyring::{keyring_delete, keyring_get, keyring_has, keyring_set},
@@ -374,6 +373,10 @@ fn setup_logging() -> tauri_plugin_log::Builder {
     };
 
     LogBuilder::default()
+        .format(|out, message, record| {
+            let message = crate::utils::ring_log::scrub_log_message(&message.to_string());
+            out.finish(format_args!("[{}][{}][{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), record.target(), record.level(), message));
+        })
         .targets([
             Target::new(TargetKind::Stdout)
                 .filter(log_filter_predicate)
@@ -527,8 +530,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Load .env file if it exists (development builds only)
         log_start("ENV_FILE_LOAD");
         match dotenv::dotenv() {
-            Ok(path) => {
-                log_file_operation("LOAD", &format!("{:?}", path), true, None, None);
+            Ok(_) => {
+                log::debug!("Environment file loaded");
             }
             Err(e) => {
                 log::info!("📄 No .env file found or error loading it: {}", e);
@@ -754,21 +757,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             // Initialize whisper manager
             let models_dir = app.path().app_data_dir()?.join("models");
-            log::info!("🗂️  Models directory: {:?}", models_dir);
+            log::info!("Initializing models directory");
 
             log_start("WHISPER_MANAGER_INIT");
-            log_with_context(log::Level::Debug, "Initializing Whisper manager", &[
-                ("models_dir", format!("{:?}", models_dir).as_str())
-            ]);
+            log::debug!("Initializing Whisper manager");
 
             // Ensure the models directory exists
             match std::fs::create_dir_all(&models_dir) {
                 Ok(_) => {
-                    log_file_operation("CREATE_DIR", &format!("{:?}", models_dir), true, None, None);
+                    log::debug!("Models directory ready");
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to create models directory: {}", e);
-                    log_file_operation("CREATE_DIR", &format!("{:?}", models_dir), false, None, Some(&e.to_string()));
+                    log::error!("Failed to create models directory");
                     return Err(Box::new(std::io::Error::other(error_msg)));
                 }
             }
@@ -782,11 +783,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             let parakeet_dir = models_dir.join("parakeet");
             if let Err(e) = std::fs::create_dir_all(&parakeet_dir) {
                 let error_msg = format!("Failed to create parakeet models directory: {}", e);
-                log_file_operation("CREATE_DIR", &format!("{:?}", parakeet_dir), false, None, Some(&e.to_string()));
+                log::error!("Failed to create Parakeet models directory");
                 return Err(Box::new(std::io::Error::other(error_msg)));
             }
 
-            log_file_operation("CREATE_DIR", &format!("{:?}", parakeet_dir), true, None, None);
+            log::debug!("Parakeet models directory ready");
             let parakeet_manager = parakeet::ParakeetManager::new(parakeet_dir);
             app.manage(parakeet_manager);
             log::info!("🦜 Parakeet manager initialized");
@@ -1269,8 +1270,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::recording_toggle::toggle_recording,
             cancel_recording,
             get_current_recording_state,
-            debug_transcription_flow,
-            test_transcription_event,
             save_transcription,
             get_audio_devices,
             get_current_audio_device,

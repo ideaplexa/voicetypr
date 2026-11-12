@@ -179,9 +179,9 @@ fn log_parakeet_stderr(line: &str) {
             "Parakeet sidecar: Core ML shape probe emitted a benign diagnostic; model loading continued"
         );
     } else if looks_like_error {
-        warn!("Parakeet sidecar: {}", line);
+        warn!("Parakeet sidecar reported an error");
     } else {
-        log::info!("Parakeet sidecar: {}", line);
+        log::debug!("Parakeet sidecar diagnostic received");
     }
 }
 

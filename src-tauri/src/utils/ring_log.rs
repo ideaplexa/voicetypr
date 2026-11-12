@@ -14,6 +14,35 @@ use std::sync::LazyLock;
 
 use tauri_plugin_log::fern;
 
+/// Scrub a complete record before fern dispatches it to any output target.
+pub fn scrub_log_message(message: &str) -> String {
+    static HOME: LazyLock<Option<String>> = LazyLock::new(|| {
+        dirs::home_dir().map(|path| path.to_string_lossy().into_owned()).filter(|path| !path.is_empty())
+    });
+    static HOME_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)(?:/Users/[^/\r\n"',):]+|/home/[^/\r\n"',):]+|[A-Z]:\\Users\\[^\\\r\n"',):]+)"#).unwrap()
+    });
+    static URL: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+"#).unwrap()
+    });
+    let result = URL.replace_all(message, |caps: &regex::Captures<'_>| {
+        let url = &caps[0];
+        let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
+        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let authority = &rest[..end];
+        let host = authority.rsplit('@').next().unwrap_or(authority);
+        let suffix = &rest[end..];
+        let suffix = suffix.split(['?', '#']).next().unwrap_or("");
+        format!("{scheme}://{host}{suffix}")
+    });
+    let result = if let Some(home) = HOME.as_ref() {
+        result.replace(home.as_str(), "~")
+    } else {
+        result.into_owned()
+    };
+    HOME_PREFIX.replace_all(&result, "~").into_owned()
+}
+
 const MAX_ENTRIES: usize = 1000;
 const MAX_TOTAL_BYTES: usize = 256 * 1024;
 

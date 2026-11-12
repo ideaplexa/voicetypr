@@ -125,6 +125,6 @@ pub async fn save_image_to_file(image_data_url: String, file_path: String) -> Re
         .await
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
-    log::info!("Successfully saved image to: {}", path.display());
+    log::info!("Successfully saved image");
     Ok(())
 }

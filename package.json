@@ -18,7 +18,7 @@
     "windows:store:stage": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-msix-store.ps1 -NoPack",
     "format": "oxfmt --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "lint": "oxlint src --deny-warnings",
-    "check": "./scripts/check.sh",
+    "check": "node scripts/check-private-logs.mjs && ./scripts/check.sh",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",

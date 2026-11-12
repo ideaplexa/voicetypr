@@ -579,10 +579,7 @@ impl AudioRecorder {
         stream_sink_factory: Option<StreamTapSinkFactory>,
         started_at: Instant,
     ) -> Result<oneshot::Receiver<RecordingReadiness>, String> {
-        log::info!(
-            "AudioRecorder::start_recording called with path: {}",
-            output_path
-        );
+        log::info!("AudioRecorder::start_recording called");
 
         // Acquire lock once and hold it through the entire initialization
         let mut handle_guard = self

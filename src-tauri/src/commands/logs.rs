@@ -361,8 +361,8 @@ pub async fn get_latest_log_for_bug_report(
 
     let (raw, _original_byte_count, truncated) = match read_log_tail(&log_path, MAX_TAIL_BYTES) {
         Ok(result) => result,
-        Err(e) => {
-            log::warn!("Failed to read log tail {:?}: {}", log_path, e);
+        Err(_) => {
+            log::warn!("Failed to read log tail");
             return Ok(LatestLogAttachment {
                 file_name,
                 redacted_content: String::new(),

@@ -271,9 +271,7 @@ fn lossy_body(bytes: &[u8]) -> String {
 /// would leak it into logs and failed-transcription history. Instead we keep
 /// only the byte length (a size signal) and a truncated SHA-256 digest (a
 /// stable correlation fingerprint) so two identical bad responses still match
-/// while the raw content never leaves this function. The raw `lossy_body` path
-/// is retained for non-content error bodies (`AuthFailed`, `HttpStatus`) which
-/// carry only the server's own error/auth message, never transcript text.
+/// while the raw content never leaves this function.
 fn redact_body(bytes: &[u8]) -> String {
     // Full 64-char digest, truncated to 16 hex chars (8 bytes / 64 bits) below —
     // enough to correlate identical bad responses without revealing content.
@@ -631,7 +629,7 @@ pub async fn transcribe_audio(
     if status == StatusCode::UNAUTHORIZED {
         return Err(RemoteClientError::AuthFailed {
             endpoint,
-            body: Some(lossy_body(body.as_ref())),
+            body: Some("Remote authentication failed".to_string()),
         });
     }
 
@@ -639,7 +637,7 @@ pub async fn transcribe_audio(
         return Err(RemoteClientError::HttpStatus {
             endpoint,
             status,
-            body: Some(lossy_body(body.as_ref())),
+            body: Some("Remote transcription request failed".to_string()),
         });
     }
 
