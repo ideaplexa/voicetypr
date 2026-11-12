@@ -13,6 +13,17 @@
 
 - `release.yml` (manual dispatch): `channel` stable|beta, `release_type`
   current|patch|minor|major, `beta_number`, `dry_run`.
+  - Every dispatch, including `dry_run`, requires one completed successful
+    `ci.yml` run on the exact dispatched commit with successful jobs `changes`,
+    `workflow`, `frontend`, `native / build-macos`, and
+    `native / build-windows`. A workflow success with skipped application or
+    native jobs is not enough. The gate uses the default `GITHUB_TOKEN` with
+    `actions: read` and `contents: read`; there is no override.
+    `native-ci.yml` supplies the two reusable native jobs; `windows-check.yml`
+    is optional and does not replace the full Windows installer lane. CI only
+    auto-runs on main and hotfix pushes; manually dispatch CI for other release
+    branches and wait for all required jobs to succeed before dispatching release.
+    If the commit changes, rerun CI for the new SHA.
   - Stable pushes the version bump and tag to the dispatched branch (`main` or
     `hotfix/*`); beta pushes only the tag, leaving the branch unchanged.
   - The release is created as a **draft**; publishing is a separate,
@@ -96,6 +107,16 @@
   flags a genuine Windows system DLL, add it to the allowlist in the script.
   The runner has a system redist, so the dependency check is the real proof; a
   fresh VM without VC++ stays NEEDS-SMOKE (`plans/082`, B.2).
+- The manual `scripts/release-windows.ps1` path runs those installer, Vulkan
+  import, lazy-ORT import/MAP and Ivy Bridge checks before signing or uploading.
+  It requires PowerShell 7 (`pwsh`), `dumpbin`, network access for pinned Intel
+  SDE and the speech sample, and a Windows x64 build with its linker MAP.
+  `-SkipBuild` still runs the checks and requires the staged installer to match
+  the current build output; the installed executable must match the checked
+  executable. A failed check or asset upload stops the script with an error;
+  earlier successful uploads are not rolled back.
+- `sidecar/parakeet-swift/build.sh` fails if the sidecar cannot answer its
+  protocol check. Vitest excludes the ignored `agent/` tooling tree.
 - `windows-check.yml` only stubs the resources (`vcredist/placeholder.dll`,
   `voicetypr.pdb`, a sidecar) so clippy and tests compile; it builds no installer.
 

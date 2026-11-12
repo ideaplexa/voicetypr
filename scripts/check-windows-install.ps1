@@ -26,7 +26,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Installer,
 
-    [string]$InstallDir = ''
+    [string]$InstallDir = '',
+
+    [string]$ExpectedExe = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -152,6 +154,9 @@ try {
 
     $mainExe = Join-Path $InstallDir 'voicetypr.exe'
     if (-not (Test-Path -LiteralPath $mainExe)) { throw "voicetypr.exe was not installed: $mainExe" }
+    if ($ExpectedExe -and (Get-FileHash -LiteralPath $mainExe).Hash -ne (Get-FileHash -LiteralPath $ExpectedExe).Hash) {
+        throw 'Installed executable does not match the executable being checked.'
+    }
 
     $sidecars = @(Get-ChildItem -LiteralPath $InstallDir -File -Filter 'whisper-vulkan-sidecar*.exe')
     if ($sidecars.Count -eq 0) { throw 'The Vulkan sidecar exe was not installed.' }

@@ -9,6 +9,8 @@ param(
     [switch]$SkipPublish
 )
 
+$ErrorActionPreference = 'Stop'
+
 $GitHubRepository = "ideaplexa/voicetypr"
 
 function Write-Success($Message) { Write-Host "[OK] $Message" -ForegroundColor Green }
@@ -29,6 +31,25 @@ function Require-File($Path) {
         exit 1
     }
 }
+function Assert-ReleaseArtifacts($Installer, $MainExe, $MapPath) {
+    Require-File $Installer
+    Require-File $MainExe
+    Require-File $MapPath
+    & pwsh -NoProfile -File .\src-tauri\windows\assert-no-vulkan-import.ps1 -ExePath $MainExe
+    if ($LASTEXITCODE -ne 0) { throw "Vulkan import check failed: $LASTEXITCODE" }
+    & pwsh -NoProfile -File .\scripts\check-windows-install.ps1 -Installer $Installer -ExpectedExe $MainExe
+    if ($LASTEXITCODE -ne 0) { throw "Installer check failed: $LASTEXITCODE" }
+    & pwsh -NoProfile -File .\src-tauri\windows\assert-no-onnxruntime-import.ps1 -ExePath $MainExe -MapPath $MapPath
+    if ($LASTEXITCODE -ne 0) { throw "ONNX Runtime check failed: $LASTEXITCODE" }
+    $env:VOICETYPR_EXECUTABLE = (Resolve-Path -LiteralPath $MainExe).Path
+    $env:SDE_URL = 'https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz'
+    $env:SDE_SHA256 = '74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651'
+    $env:JFK_URL = 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/b0a11594aec50892a02cd8d129eee2dfe93a8bb8/samples/jfk.wav'
+    $env:JFK_SHA256 = '59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e'
+    & pwsh -NoProfile -File .\scripts\check-ivy-bridge.ps1
+    if ($LASTEXITCODE -ne 0) { throw "Ivy Bridge check failed: $LASTEXITCODE" }
+}
+
 
 if ($Help) {
     Write-Host @"
@@ -74,11 +95,20 @@ if (-not (Test-Path $OutputDir)) {
 
 Require-Command cargo
 Require-Command pnpm
+Require-Command pwsh
 Require-File "package.json"
 
 if (-not $SkipPublish) {
     Require-Command gh
 }
+$AppTargetDir = $env:CARGO_TARGET_DIR
+if ([string]::IsNullOrWhiteSpace($AppTargetDir)) {
+    $AppTargetDir = "src-tauri\target"
+}
+$MainExe = Join-Path $AppTargetDir "$WindowsTarget\release\voicetypr.exe"
+$MapPath = Join-Path ([IO.Path]::GetFullPath($AppTargetDir)) "voicetypr.map"
+$InstallerDir = Join-Path $AppTargetDir "$WindowsTarget\release\bundle\nsis"
+
 
 if (-not $SkipBuild) {
     if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [System.Runtime.InteropServices.Architecture]::X64) {
@@ -92,16 +122,22 @@ if (-not $SkipBuild) {
 
     Write-Step "Building x86_64 CPU-safe app with bundled Vulkan sidecar"
 
-    $AppTargetDir = $env:CARGO_TARGET_DIR
-    if ([string]::IsNullOrWhiteSpace($AppTargetDir)) {
-        $AppTargetDir = "src-tauri\target"
-    }
-
     if ([string]::IsNullOrEmpty($env:VULKAN_SDK) -or -not (Test-Path $env:VULKAN_SDK)) {
         Write-Error "VULKAN_SDK not set. Install Vulkan SDK to build the optional GPU sidecar."
         Write-Info "Download from: https://vulkan.lunarg.com/sdk/home"
         exit 1
     }
+    $env:GGML_NATIVE = "OFF"
+    $env:GGML_AVX = "ON"
+    $env:GGML_AVX2 = "ON"
+    $env:GGML_BMI2 = "OFF"
+    $env:GGML_AVX_VNNI = "OFF"
+    $env:GGML_FMA = "ON"
+    $env:GGML_F16C = "ON"
+    $env:GGML_AVX512 = "OFF"
+    $env:GGML_AVX512_VBMI = "OFF"
+    $env:GGML_AVX512_VNNI = "OFF"
+    $env:GGML_AVX512_BF16 = "OFF"
 
     cargo clean --manifest-path src-tauri\Cargo.toml
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -146,6 +182,9 @@ if (-not $SkipBuild) {
     Require-File $SidecarDist
     Write-Success "Bundled Vulkan sidecar + app-local Visual C++ runtime present"
 
+    $env:RUSTFLAGS = "$env:RUSTFLAGS -C link-arg=/PDBALTPATH:%_PDB%".Trim()
+    $env:VOICETYPR_MAIN_MAP = $MapPath.Replace('\', '/')
+
     $env:VOICETYPR_REQUIRE_VULKAN_SIDECAR = "1"
 
     Write-Info "Building Tauri x86_64 installer..."
@@ -155,11 +194,6 @@ if (-not $SkipBuild) {
         exit $LASTEXITCODE
     }
 
-    $MainExe = Join-Path $AppTargetDir "$WindowsTarget\release\voicetypr.exe"
-    powershell -ExecutionPolicy Bypass -File .\src-tauri\windows\assert-no-vulkan-import.ps1 -ExePath $MainExe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-    $InstallerDir = Join-Path $AppTargetDir "$WindowsTarget\release\bundle\nsis"
     $installer = Get-ChildItem "$InstallerDir\*.exe" |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
@@ -167,6 +201,8 @@ if (-not $SkipBuild) {
         Write-Error "No installer found in $InstallerDir\"
         exit 1
     }
+    Assert-ReleaseArtifacts $installer.FullName $MainExe $MapPath
+
 
     $installerPath = "$OutputDir\$InstallerName"
     Copy-Item $installer.FullName $installerPath -Force
@@ -265,6 +301,14 @@ if ($SkipBuild) {
         Write-Error "No signature file found at $OutputDir\$InstallerName.sig"
         exit 1
     }
+    $installer = Get-ChildItem "$InstallerDir\*.exe" |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    Require-File "$OutputDir\$InstallerName"
+    if (-not $installer -or (Get-FileHash $installer.FullName).Hash -ne (Get-FileHash "$OutputDir\$InstallerName").Hash) {
+        throw "Existing release installer does not match the current build output"
+    }
+    Assert-ReleaseArtifacts "$OutputDir\$InstallerName" $MainExe $MapPath
 }
 
 if (-not $SkipPublish) {
@@ -276,9 +320,12 @@ if (-not $SkipPublish) {
     }
 
     gh release upload $ReleaseTag "$OutputDir\$InstallerName" --repo $GitHubRepository --clobber
+    if ($LASTEXITCODE -ne 0) { throw "Installer upload failed: $LASTEXITCODE" }
     gh release upload $ReleaseTag "$OutputDir\$InstallerName.sig" --repo $GitHubRepository --clobber
+    if ($LASTEXITCODE -ne 0) { throw "Signature upload failed: $LASTEXITCODE" }
     if (Test-Path "$OutputDir\latest.json") {
         gh release upload $ReleaseTag "$OutputDir\latest.json" --repo $GitHubRepository --clobber
+        if ($LASTEXITCODE -ne 0) { throw "Manifest upload failed: $LASTEXITCODE" }
     }
     Write-Success "Installer uploaded successfully"
 }

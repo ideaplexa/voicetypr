@@ -13,6 +13,7 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/.worktrees/**',
+      '**/agent/**',
       '**/scripts/e2e/**', // Node's test runner owns these suites.
       '**/scripts/**/*.test.cjs', // Packaging suites use node:test, not Vitest.
     ],
