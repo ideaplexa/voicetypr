@@ -15,12 +15,12 @@ use crate::transcription::TranscriptionResult;
 use crate::whisper::languages::is_language_supported;
 
 use super::{
-    apply_final_restoration_guard, apply_library_rules, category_label, category_prompt_hint,
-    classify, compile_context_for_target, format_for_transcription, load_writing_settings,
-    protected_terms, sanitize_transcript, should_run_format_stage, AiExecutionMetadata,
-    AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint, FormatStageSettings,
-    ProviderContextTarget, WritingError, WritingOperationKind, WritingProfile, WritingResult,
-    WritingSettings, WritingStageTimings, WritingWarning,
+    apply_final_restoration_guard, apply_library_rules, apply_spoken_punctuation, category_label,
+    category_prompt_hint, classify, compile_context_for_target, format_for_transcription,
+    load_writing_settings, protected_terms, sanitize_transcript, should_run_format_stage,
+    AiExecutionMetadata, AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint,
+    FormatStageSettings, ProviderContextTarget, WritingError, WritingOperationKind, WritingProfile,
+    WritingResult, WritingSettings, WritingStageTimings, WritingWarning,
 };
 
 fn enabled_app_rules(settings: &WritingSettings) -> impl Iterator<Item = &AppFormattingRule> {
@@ -423,6 +423,7 @@ async fn run_smart_formatting(
         ai_context.as_deref(),
         app_category_hint.as_deref(),
         request.needs_output_language_transform,
+        request.settings.spoken_punctuation,
         request.generation,
     )
     .await
@@ -596,8 +597,20 @@ async fn process_transcription_with_options(
             detail: "Applied transcript cleanup".to_string(),
         });
     }
+    let spoken_punctuation_text = settings
+        .spoken_punctuation
+        .then(|| apply_spoken_punctuation(cleaned_text.as_ref(), transcript_language.as_deref()))
+        .flatten();
+    if spoken_punctuation_text.is_some() {
+        applied_operations.push(AppliedWritingOperation {
+            kind: WritingOperationKind::VoiceCommand,
+            detail: "Applied spoken punctuation".to_string(),
+        });
+    }
     let library_result = apply_library_rules(
-        cleaned_text.as_ref(),
+        spoken_punctuation_text
+            .as_deref()
+            .unwrap_or(cleaned_text.as_ref()),
         &settings,
         transcript_language.as_deref(),
         &mut applied_operations,

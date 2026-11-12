@@ -8,6 +8,7 @@ mod pipeline;
 mod protected_terms_tests;
 mod settings;
 mod snippets;
+mod spoken_punctuation;
 mod vocabulary;
 
 #[allow(unused_imports)]
@@ -45,3 +46,5 @@ pub(crate) use pipeline::{
     process_diarized_transcription_at,
     language_scope_matches, normalize_language_scope, smart_formatting_ai_context,
 };
+pub(crate) use spoken_punctuation::apply_spoken_punctuation;
+pub use spoken_punctuation::{spoken_punctuation_reference, SpokenPunctuationLanguage};

@@ -16,7 +16,10 @@ use crate::commands::settings::{
     TRANSCRIPTION_TASK_TRANSCRIBE,
 };
 use crate::secure_store;
-use crate::writing::{load_writing_settings, save_writing_settings, WritingSettings};
+use crate::writing::{
+    load_writing_settings, save_writing_settings, spoken_punctuation_reference,
+    SpokenPunctuationLanguage, WritingSettings,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1078,6 +1081,11 @@ pub async fn get_writing_settings(app: tauri::AppHandle) -> Result<WritingSettin
 }
 
 #[tauri::command]
+pub fn get_spoken_punctuation_commands() -> Vec<SpokenPunctuationLanguage> {
+    spoken_punctuation_reference()
+}
+
+#[tauri::command]
 pub async fn update_writing_settings(
     settings: WritingSettings,
     app: tauri::AppHandle,
@@ -1513,6 +1521,7 @@ pub async fn polish_text_typed(
     context: Option<&str>,
     app_category_hint: Option<&str>,
     needs_output_language_transform: bool,
+    spoken_punctuation: bool,
     generation: u64,
 ) -> Result<crate::ai::contract::AiPolishResult, AiPolishAttemptError> {
     crate::observability::update(
@@ -1537,6 +1546,7 @@ pub async fn polish_text_typed(
     // Zero-wait: already-clean text needs no model call. The caller decides
     // eligibility (no translation pending); unknown/non-English transcripts always run.
     if !needs_output_language_transform
+        && !spoken_punctuation
         && crate::ai::skip::should_skip(text, options.preset, transcript_language)
     {
         crate::observability::update(generation, "polish_skip_used", serde_json::json!(true));
@@ -1548,13 +1558,16 @@ pub async fn polish_text_typed(
             fast_mode_fallback: false,
         });
     }
-    let prompt = crate::ai::polish::assemble_prompt(
-        options,
-        output_language,
-        transcript_language,
-        context,
-        app_category_hint,
-        crate::ai::keep_words::read(app),
+    let prompt = crate::ai::prompts::apply_spoken_punctuation_rule(
+        crate::ai::polish::assemble_prompt(
+            options,
+            output_language,
+            transcript_language,
+            context,
+            app_category_hint,
+            crate::ai::keep_words::read(app),
+        ),
+        spoken_punctuation,
     );
     let runtime = prepare_polish_runtime(app, &provider, &model).inspect_err(|error| {
         let provider = crate::telemetry::PROVIDERS

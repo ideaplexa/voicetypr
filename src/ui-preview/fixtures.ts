@@ -175,6 +175,7 @@ export const demoWriting: WritingSettings = {
     { app_name: "Slack", preset: "Message", enabled: true },
     { app_name: "Cursor", preset: "Code", enabled: true },
   ],
+  spoken_punctuation: false,
 };
 
 const shortcutActions: ShortcutActionDefinition[] = [
