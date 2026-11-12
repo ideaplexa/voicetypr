@@ -38,7 +38,10 @@ const FINALIZE_TIMEOUT: Duration = Duration::from_secs(3);
 const KEEPALIVE_EVERY: Duration = Duration::from_secs(10);
 /// Ten seconds absorbs brief network hiccups without retaining a long recording.
 const AUDIO_BUFFER_SECONDS: usize = 10;
-const AUDIO_QUEUE_CAPACITY: usize = 256;
+/// Slot count only: the tap delivers one chunk per audio callback (about 10 ms),
+/// so this must hold more than `AUDIO_BUFFER_SECONDS` of chunks. The sample
+/// budget above is the real memory bound.
+const AUDIO_QUEUE_CAPACITY: usize = 2048;
 
 enum Control {
     Chunk(Vec<i16>),
