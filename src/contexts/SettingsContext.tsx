@@ -50,10 +50,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // Always-current mirror of `settings`, kept in sync at every write site. Lets
   // updateSettings read the latest state without closing over a stale snapshot.
   const settingsRef = useRef<AppSettings | null>(null);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const revision = useRef(0);
+  const keyRevisions = useRef<Partial<Record<keyof AppSettings, number>>>({});
 
   const loadSettings = useCallback(async () => {
     try {
+      let pending: Promise<void>;
+      do {
+        pending = saveQueue.current;
+        await pending;
+      } while (pending !== saveQueue.current);
+      const loadRevision = revision.current;
       const appSettings = await invoke<AppSettings>("get_settings");
+      if (loadRevision !== revision.current) return;
       // Refreshes keep the previous object (and every consumer's render) when
       // nothing changed; `isLoading` only ever covers the first load.
       if (!settingsEqual(settingsRef.current, appSettings)) {
@@ -72,18 +82,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = useCallback(
     async (updates: Partial<AppSettings>, options?: { publishAfterSave?: boolean }) => {
-      // Read the latest settings from the ref rather than the `settings` captured
-      // by this closure. The old `[settings]` dependency captured a snapshot at
-      // closure-creation time, so an in-flight call held a stale `previousSettings`
-      // and its failure-rollback could discard a concurrent update that landed in
-      // between (and a concurrent call would even compute its next state from that
-      // same stale base, overwriting the first call's optimistic write).
+      // Merge optimistic edits immediately, but send full snapshots serially.
       const prev = settingsRef.current;
       if (!prev) {
         return;
       }
 
       const nextSettings = { ...prev, ...updates };
+      const updateRevision = ++revision.current;
+      const keys = Object.keys(updates) as (keyof AppSettings)[];
+      for (const key of keys) keyRevisions.current[key] = updateRevision;
       const publishAfterSave = options?.publishAfterSave === true;
       if (!publishAfterSave) {
         settingsRef.current = nextSettings;
@@ -91,54 +99,63 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setSettings(nextSettings);
       }
 
-      try {
-        await invoke("save_settings", {
-          settings: nextSettings,
-          ...(Object.prototype.hasOwnProperty.call(updates, "update_channel")
-            ? { updateChannelExplicit: true }
-            : {}),
-        });
-
-        const changed: ["mode" | "live_preview" | "language" | "engine" | "mic", keyof AppSettings][] = [
-          ["engine", "current_model"], ["mic", "selected_microphone"],
-          ["mode", "recording_mode"], ["live_preview", "transcription_mode"], ["language", "speech_language"],
-        ];
-        for (const [setting, key] of changed) {
-          if (key in updates && updates[key] !== prev[key]) {
-            recordEvent({ name: "quick_setting_changed", properties: { setting, source: "app" } });
+      const save = saveQueue.current.then(async () => {
+        const current = settingsRef.current;
+        if (!current) return;
+        const snapshot = { ...current };
+        if (publishAfterSave) {
+          const values = snapshot as unknown as Record<string, unknown>;
+          const updateValues = updates as Record<string, unknown>;
+          for (const key of keys) {
+            if (keyRevisions.current[key] === updateRevision) values[key] = updateValues[key];
           }
         }
 
-        if (publishAfterSave) {
-          // Onboarding completion controls which application tree is mounted.
-          // Publish it only after the backend confirms the durable save.
-          settingsRef.current = nextSettings;
-          setSettings(nextSettings);
-        }
-      } catch (err) {
-        if (publishAfterSave) {
+        try {
+          await invoke("save_settings", {
+            settings: snapshot,
+            ...(Object.prototype.hasOwnProperty.call(updates, "update_channel")
+              ? { updateChannelExplicit: true }
+              : {}),
+          });
+
+          const changed: ["mode" | "live_preview" | "language" | "engine" | "mic", keyof AppSettings][] = [
+            ["engine", "current_model"], ["mic", "selected_microphone"],
+            ["mode", "recording_mode"], ["live_preview", "transcription_mode"], ["language", "speech_language"],
+          ];
+          for (const [setting, key] of changed) {
+            if (key in updates && updates[key] !== prev[key]) {
+              recordEvent({ name: "quick_setting_changed", properties: { setting, source: "app" } });
+            }
+          }
+
+          if (publishAfterSave && settingsRef.current) {
+            // Publish only this action's still-current keys after durable save.
+            const published = { ...settingsRef.current } as unknown as Record<string, unknown>;
+            const updateValues = updates as Record<string, unknown>;
+            for (const key of keys) {
+              if (keyRevisions.current[key] === updateRevision) published[key] = updateValues[key];
+            }
+            settingsRef.current = published as unknown as AppSettings;
+            setSettings(settingsRef.current);
+          }
+        } catch (err) {
+          if (!publishAfterSave && settingsRef.current) {
+            const reverted = { ...settingsRef.current } as unknown as Record<string, unknown>;
+            const prevValues = prev as unknown as Record<string, unknown>;
+            for (const key of keys) {
+              if (keyRevisions.current[key] === updateRevision) reverted[key] = prevValues[key];
+            }
+            settingsRef.current = reverted as unknown as AppSettings;
+            setSettings(settingsRef.current);
+          }
           log.error("[SettingsContext] Failed to update settings:", err);
           throw err;
         }
-
-        // Roll back only the keys this call touched, preserving any concurrent
-        // updates applied since (to other keys). This is the surgical revert the
-        // stale-closure version got wrong when it restored the whole snapshot.
-        // Spread the latest state, then restore only this call's touched keys to
-        // their pre-call values. Casts sidestep TS's union-index write narrowing
-        // (it would otherwise collapse the write target to `never`); the restored
-        // values come from `prev`, the snapshot taken before applying `updates`.
-        const reverted = { ...(settingsRef.current as object) } as Record<string, unknown>;
-        const prevValues = prev as unknown as Record<string, unknown>;
-        for (const key of Object.keys(updates)) {
-          reverted[key] = prevValues[key];
-        }
-        const restored = reverted as unknown as AppSettings;
-        settingsRef.current = restored;
-        setSettings(restored);
-        log.error("[SettingsContext] Failed to update settings:", err);
-        throw err;
-      }
+      });
+      // A rejected save must not prevent later actions from being saved.
+      saveQueue.current = save.catch(() => undefined);
+      await save;
     },
     [],
   );
