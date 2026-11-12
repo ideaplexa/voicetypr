@@ -144,7 +144,6 @@ enum SystemPromptPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InputMode {
     Stdin,
-    PositionalArg,
     Acp,
 }
 
@@ -330,7 +329,7 @@ const OPENCODE_SPEC: AgentCliSpec = AgentCliSpec {
         omit_off: true,
     },
     system_prompt: SystemPromptPolicy::None,
-    input_mode: InputMode::PositionalArg,
+    input_mode: InputMode::Stdin,
     output: OutputParser::PlainText,
     static_env: &[("OPENCODE_CONFIG_CONTENT", OPENCODE_ISOLATION_CONFIG)],
 };

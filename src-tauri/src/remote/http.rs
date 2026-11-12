@@ -551,9 +551,9 @@ async fn handle_status<T: ServerContext + 'static>(
         }
     }
 
-    // Get unique machine ID to allow clients to detect self-connection
+    // Use the same sharing-only identifier as discovery, never the licence hash.
     let machine_id =
-        crate::license::device::get_device_hash().unwrap_or_else(|_| "unknown".to_string());
+        crate::remote::discovery::sharing_machine_id().unwrap_or_else(|_| "unknown".to_string());
     let (engine, model) = ctx.model_status_snapshot();
     let response = StatusResponse {
         status: "ok".to_string(),

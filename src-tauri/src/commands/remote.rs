@@ -1839,7 +1839,7 @@ pub fn load_remote_settings(app: &AppHandle) -> RemoteSettings {
 /// Used to prevent adding self as a remote server
 #[tauri::command]
 pub fn get_local_machine_id() -> Result<String, String> {
-    crate::license::device::get_device_hash()
+    crate::remote::discovery::sharing_machine_id()
 }
 
 // ============================================================================

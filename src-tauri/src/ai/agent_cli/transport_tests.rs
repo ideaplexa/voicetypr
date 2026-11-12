@@ -211,12 +211,14 @@ async fn acp_rejects_unbounded_output_and_honours_outer_cancellation() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn opencode_one_retains_only_the_documented_positional_exception() {
+async fn opencode_one_receives_input_on_stdin() {
     let (_dir, binary) = fixture(
         r#"
 import sys
-assert 'SYSTEM_CANARY_082' in sys.argv[-1]
-assert 'TRANSCRIPT_CANARY_082' in sys.argv[-1]
+assert all('SYSTEM_CANARY_082' not in arg and 'TRANSCRIPT_CANARY_082' not in arg for arg in sys.argv)
+text = sys.stdin.read()
+assert 'SYSTEM_CANARY_082' in text
+assert 'TRANSCRIPT_CANARY_082' in text
 print('ok')
 "#,
     );
@@ -227,7 +229,7 @@ print('ok')
             &OPENCODE_SPEC,
             &binary,
             &argv,
-            InputMode::PositionalArg,
+            InputMode::Stdin,
             &input,
             OutputParser::PlainText
         )

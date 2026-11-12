@@ -10,8 +10,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
+
+/// A stable identifier for sharing, distinct from the licence device hash.
+pub(crate) fn sharing_machine_id() -> Result<String, String> {
+    let device_hash = crate::license::device::get_device_hash()?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"voicetypr.remote-sharing.machine-id.v1\0");
+    hasher.update(device_hash.as_bytes());
+    Ok(format!("{:x}", hasher.finalize()))
+}
 
 pub const DISCOVERY_PORT: u16 = 47_842;
 const DISCOVERY_PROTOCOL: &str = "voicetypr.remote-discovery.v1";
@@ -114,7 +124,11 @@ pub async fn start_discovery_responder(
                     let model_name = (config.model_name)();
 
                     let response = DiscoveredRemoteServer {
-                        name: config.server_name.clone(),
+                        name: if config.auth_required {
+                            "Voicetypr Server".to_string()
+                        } else {
+                            config.server_name.clone()
+                        },
                         host: String::new(),
                         port: config.port,
                         model: model_name,
