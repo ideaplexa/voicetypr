@@ -166,7 +166,7 @@ impl TranscriberCache {
                     "Model cleanup complete",
                     &[
                         ("operation", "MODEL_CLEANUP"),
-                            ("ref_count_before_drop", ref_count.to_string().as_str()),
+                        ("ref_count_before_drop", ref_count.to_string().as_str()),
                         ("cleanup_result", "success"),
                     ],
                 );
@@ -176,7 +176,7 @@ impl TranscriberCache {
                     "Model cleanup warning",
                     &[
                         ("operation", "MODEL_CLEANUP"),
-                            ("issue", "model_not_found_in_cache"),
+                        ("issue", "model_not_found_in_cache"),
                     ],
                 );
             }

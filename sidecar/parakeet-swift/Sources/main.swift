@@ -1046,7 +1046,7 @@ actor DecodeAheadAsrSession {
             }
             return DecodeAheadDecodeResult(outcome: .success(timings: [], text: text, modelReturnedTimings: false))
         } catch {
-            log("⚠️ decode_ahead: transcribe failed: \(type(of: error))")
+            log("⚠️ decode_ahead: transcribe failed: \(error.localizedDescription)")
             return DecodeAheadDecodeResult(outcome: .failure)
         }
     }
@@ -1968,6 +1968,7 @@ struct ParakeetSidecar {
                 } catch {
                     log("❌ Failed to load \(version.rawValue.uppercased()) from cache")
                     log("❌ Error type: \(type(of: error))")
+                    log("❌ Localized: \(error.localizedDescription)")
                     sendError("model_not_downloaded", message: "Parakeet \(version.rawValue.uppercased()) is not downloaded. Please download it first. Error: \(error.localizedDescription)", encoder: encoder)
                     return
                 }
@@ -1993,6 +1994,7 @@ struct ParakeetSidecar {
         } catch {
             log("❌ FATAL: Failed to load model \(version.rawValue.uppercased())")
             log("❌ Error type: \(type(of: error))")
+            log("❌ Localized: \(error.localizedDescription)")
             sendError("model_load_error", message: "Failed to load model: \(error.localizedDescription)", encoder: encoder)
         }
         log("───────────────────────────────────────────────────────")
@@ -2172,6 +2174,7 @@ struct ParakeetSidecar {
         } catch {
             log("❌ CTC MODEL DOWNLOAD FAILED")
             log("❌ Error type: \(type(of: error))")
+            log("❌ Localized: \(error.localizedDescription)")
             sendError("ctc_model_download_failed", message: "Failed to download CTC models: \(error.localizedDescription)", encoder: encoder)
         }
 
@@ -2295,7 +2298,7 @@ struct ParakeetSidecar {
             if warmed {
                 log("✅ Warmup complete in \(elapsedMs)ms")
             } else if let error {
-                log("⚠️ Warmup skipped/failed after \(elapsedMs)ms: \(type(of: error))")
+                log("⚠️ Warmup skipped/failed after \(elapsedMs)ms: \(error)")
             }
             sendResponse(WarmedResponse(warmed: warmed, ms: elapsedMs, error: error), encoder: encoder)
         }
@@ -2948,7 +2951,7 @@ struct ParakeetSidecar {
                 await manager.reset()
             }
         } catch {
-            log("⚠️ Stream cancel cleanup failed: \(type(of: error))")
+            log("⚠️ Stream cancel cleanup failed: \(error.localizedDescription)")
         }
         if let finalizationTask = session.finalizationTask {
             await finalizationTask.value
@@ -3049,6 +3052,7 @@ struct ParakeetSidecar {
         } catch {
             log("❌ DIARIZATION FAILED")
             log("❌ Error type: \(type(of: error))")
+            log("❌ Localized: \(error.localizedDescription)")
             sendError("diarization_failed", message: "Diarization failed: \(error.localizedDescription)", encoder: encoder)
         }
 

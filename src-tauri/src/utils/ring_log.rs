@@ -17,17 +17,23 @@ use tauri_plugin_log::fern;
 /// Scrub a complete record before fern dispatches it to any output target.
 pub fn scrub_log_message(message: &str) -> String {
     static HOME: LazyLock<Option<String>> = LazyLock::new(|| {
-        dirs::home_dir().map(|path| path.to_string_lossy().into_owned()).filter(|path| !path.is_empty())
+        dirs::home_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .filter(|path| !path.is_empty())
     });
     static HOME_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r#"(?i)(?:/Users/[^/\r\n"',):]+|/home/[^/\r\n"',):]+|[A-Z]:\\Users\\[^\\\r\n"',):]+)"#).unwrap()
+        regex::Regex::new(
+            r#"(?i)(?:/Users/[^/\r\n"',):]+|/home/[^/\r\n"',):]+|[A-Z]:\\Users\\[^\\\r\n"',):]+)"#,
+        )
+        .unwrap()
     });
-    static URL: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+"#).unwrap()
-    });
+    static URL: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+"#).unwrap());
     let result = URL.replace_all(message, |caps: &regex::Captures<'_>| {
         let url = &caps[0];
-        let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return url.to_string();
+        };
         let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
         let authority = &rest[..end];
         let host = authority.rsplit('@').next().unwrap_or(authority);

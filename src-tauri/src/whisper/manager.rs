@@ -344,7 +344,8 @@ impl WhisperManager {
                     drop(file);
                     let _ = fs::remove_file(&output_path).await;
                     return Err(
-                        "Whisper download stalled. Check your connection and try again.".to_string(),
+                        "Whisper download stalled. Check your connection and try again."
+                            .to_string(),
                     );
                 }
             };

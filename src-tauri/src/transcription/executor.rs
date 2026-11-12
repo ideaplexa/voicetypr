@@ -88,10 +88,7 @@ pub async fn transcribe_with_app(
         };
         if should_delete_input(&policy, success, retryable) {
             if let Err(e) = std::fs::remove_file(&path) {
-                log::warn!(
-                    "executor: failed to remove input audio {}: {e}",
-                    path.display()
-                );
+                log::warn!("executor: failed to remove input audio: {}", e.kind());
             }
         }
     }

@@ -264,9 +264,11 @@ start the trial; we can reach people who try and leave; settings follow the
 user across devices.
 
 Today: onboarding is welcome → source → permissions → readiness → hotkey →
-success. The trial is tied to a device hash and is checked at app start
-(`lib.rs:1554` → `commands/license.rs:541`); there is no account and no email.
-The license and trial server is not in this repo.
+success. The trial is 3 days, starts on the first app launch, and is tied only
+to a device hash the app sends (`lib.rs` startup check →
+`commands/license.rs`); there is no account and no email. The backend is the
+private `voicetypr-web` repo (`packages/api-core`); it has no sign-in, sends no
+email, has no CI and is deployed by hand.
 
 | # | Work | Proof of done |
 |---|---|---|
@@ -281,6 +283,40 @@ The license and trial server is not in this repo.
 
 Offline and enterprise buyers must still be able to activate without the
 sign-in flow; keep a license-key path for them.
+
+### Licensing: Polar decides, our API stays thin (decided 2026-11-13)
+
+Polar already decides whether a key is valid and how many devices it may
+activate; our database only remembers which Polar activation belongs to which
+device, and holds the trial. So "Polar as the only licence authority" is a
+cleanup, not a rebuild. Backend map and Polar research:
+private backend notes and `docs/reports/2026-11-12-audit/polar-capabilities.md`.
+
+- **The app keeps calling `api.voicetypr.com`, not Polar directly.** Installed
+  versions call it for years, so those routes must stay anyway; a thin server
+  lets us follow a Polar change without shipping an app update; and a paid
+  license already works offline for 90 days, so our server being down does
+  not lock anyone out.
+- **Backend cleanup (own plan in `voicetypr-web`, tests proposed first because
+  this is the money path):** take plan and device limit from Polar's answer
+  instead of the key prefix and a local table; tidy up activation
+  handling and harden the license and trial routes; delete the never-written
+  `License` table, unused columns and constants, and the duplicate route
+  shims in `apps/web`; add CI. Do not merge `agent/monorepo-api-split`: it
+  diverged and lacks the reactivation fix.
+- **Trial stays ours.** Polar has trials only for subscriptions. The new trial
+  starts on click and needs a verified email plus the device hash, one per
+  email and one per device. To try first: issuing the trial as a free Polar
+  product with an expiring key, so the app has a single validation path;
+  Polar's docs do not confirm a free checkout can be limited to one per
+  customer.
+- **Accounts are ours too.** Polar's customer portal is not a sign-in for our
+  app. Smallest version: email + one-time code in the same API, linked to the
+  Polar customer by email. This needs an email provider, which the backend
+  does not have yet.
+- **Credits (Plus):** Polar meters and credit benefits keep the balance and do
+  the billing; our proxy checks the balance and stops usage, because Polar
+  never blocks it.
 
 ## Phase 6 — Voice commands and agents
 
@@ -351,18 +387,22 @@ Goal: Core users get good cleanup with no key and no network. Plan
 ## Decisions needed from the founder
 
 1. Discord invite URL for Report a problem and the beta community.
-2. Trial length, and how many dictations are allowed before the trial starts.
+2. Trial length (3 days today), and how many dictations are allowed before
+   the trial starts.
 3. Starter cloud credit per trial (minutes or dollars).
-4. Who builds and hosts the backend track (accounts, trial, credit proxy).
+4. OK to work in `voicetypr-web` (backend cleanup, accounts, trial), and how
+   it is deployed today: the audit could not tell which deployment answers
+   `api.voicetypr.com`.
 5. Plus: device limit and yearly price ($79 or $90).
 6. Core price once mobile exists ($59–69 for 2 devices).
 7. Opt-in recording donation (Phase 1.5).
 8. Base model for Phase 8: plan 084 chose a small Liquid model; confirm, or
    let the Phase 1 scoreboard pick among models of 1B or under.
-9. Record the Phase 1 clips, including Bangla and mixed Bangla–English.
-10. Before this branch is pushed: Phase 0 and 4.5 name security and privacy
-    problems that are not fixed yet, and the repo is public. Fix first, or
-    accept that they are visible.
+9. OK to send the founder dictation set to a cloud engine and a model to
+   draft its labels (Phase 1.1), and people to record Bangla and mixed
+   Bangla–English.
+10. Decided 2026-11-13: branches are published only once the fixes are done;
+    until then everything stays local.
 
 ## Evidence
 

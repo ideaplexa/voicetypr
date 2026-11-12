@@ -178,10 +178,13 @@ fn log_parakeet_stderr(line: &str) {
         log::info!(
             "Parakeet sidecar: Core ML shape probe emitted a benign diagnostic; model loading continued"
         );
+    // The sidecar no longer writes recognized text or paths to stderr, and the
+    // log sinks scrub home directories and URL credentials, so its diagnostics
+    // stay in the log: without them a Parakeet failure cannot be diagnosed.
     } else if looks_like_error {
-        warn!("Parakeet sidecar reported an error");
+        warn!("Parakeet sidecar: {}", line);
     } else {
-        log::debug!("Parakeet sidecar diagnostic received");
+        log::info!("Parakeet sidecar: {}", line);
     }
 }
 

@@ -373,9 +373,17 @@ fn setup_logging() -> tauri_plugin_log::Builder {
     };
 
     LogBuilder::default()
+        // Same line shape as the plugin's default format (UTC date and time),
+        // with the message scrubbed before any sink sees it.
         .format(|out, message, record| {
             let message = crate::utils::ring_log::scrub_log_message(&message.to_string());
-            out.finish(format_args!("[{}][{}][{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), record.target(), record.level(), message));
+            out.finish(format_args!(
+                "{}[{}][{}] {}",
+                chrono::Utc::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ));
         })
         .targets([
             Target::new(TargetKind::Stdout)

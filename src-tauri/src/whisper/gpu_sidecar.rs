@@ -364,10 +364,7 @@ impl GpuSidecarClient {
             return false;
         }
 
-        log::info!(
-            "Warming Whisper Vulkan sidecar for preloaded model: {}",
-            model_path.display()
-        );
+        log::info!("Warming Whisper Vulkan sidecar for preloaded model");
         match self.probe(app, model_path, mode).await {
             Ok(()) => {
                 log::info!("Whisper Vulkan sidecar warmed successfully on preload");

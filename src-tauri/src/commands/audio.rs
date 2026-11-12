@@ -7743,12 +7743,8 @@ async fn process_diarized_upload(
         let mut run = template.clone();
         run.raw_text = join_tokens(&tokens);
         run.words = Some(run_words.to_vec());
-        let mut writing = crate::writing::process_diarized_transcription_at(
-            app.clone(),
-            run,
-            generation,
-        )
-        .await?;
+        let mut writing =
+            crate::writing::process_diarized_transcription_at(app.clone(), run, generation).await?;
         let prefix = speaker
             .map(|speaker| format!("{speaker}: "))
             .unwrap_or_default();
@@ -7893,10 +7889,7 @@ pub(crate) async fn transcribe_audio_file_impl(
             .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
         let audio_size_kb = audio_data.len() as f64 / 1024.0;
-        log::info!(
-            "🌐 [Remote Upload] Sending {:.1} KB audio",
-            audio_size_kb
-        );
+        log::info!("🌐 [Remote Upload] Sending {:.1} KB audio", audio_size_kb);
 
         let server_conn = RemoteServerConnection::new(host.clone(), *port, password.clone());
 
@@ -7917,10 +7910,7 @@ pub(crate) async fn transcribe_audio_file_impl(
         let response = client::transcribe_audio(&server_conn, request, timeout_ms)
             .await
             .map_err(|e| {
-                log::warn!(
-                    "🌐 [Remote Upload] Remote transcription FAILED: {}",
-                    e
-                );
+                log::warn!("🌐 [Remote Upload] Remote transcription FAILED: {}", e);
                 e.to_string()
             })?;
 
@@ -7962,19 +7952,19 @@ pub(crate) async fn transcribe_audio_file_impl(
             diarized_upload = result.words.is_some();
             result
         } else {
-            let engine =
-                ProviderEngine::from_engine_str(engine_selection.engine_name()).ok_or_else(|| {
+            let engine = ProviderEngine::from_engine_str(engine_selection.engine_name())
+                .ok_or_else(|| {
                     format!(
                         "Unknown transcription engine: {}",
                         engine_selection.engine_name()
                     )
                 })?;
-            let initial_prompt = if matches!(engine_selection, ActiveEngineSelection::Whisper { .. })
-            {
-                compile_whisper_initial_prompt(&app, Some(&language))
-            } else {
-                None
-            };
+            let initial_prompt =
+                if matches!(engine_selection, ActiveEngineSelection::Whisper { .. }) {
+                    compile_whisper_initial_prompt(&app, Some(&language))
+                } else {
+                    None
+                };
             let request = TranscriptionRequest {
                 source: TranscriptionSource::AudioFile,
                 audio: TranscriptionAudio::Path {
