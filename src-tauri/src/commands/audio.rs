@@ -7700,7 +7700,7 @@ async fn maybe_return_diarized_cloud_upload(
     audio_path: &Path,
     language: &str,
     transcription_job: &TranscriptionJob,
-) -> Result<Option<UploadTranscription>, String> {
+) -> Result<Option<TranscriptionResult>, String> {
     if !cloud_provider_supports_diarized_words(provider) {
         return Ok(None);
     }
@@ -7714,30 +7714,76 @@ async fn maybe_return_diarized_cloud_upload(
         None => transcribe.await,
     }?;
 
-    if cloud_transcript.words.is_empty() {
-        log::debug!(
-            "[UPLOAD] {} diarized probe returned plain transcript ({} chars); routing through executor",
-            provider.display_name(),
-            cloud_transcript.text.len()
-        );
-        return Ok(None);
-    }
+    let result = if cloud_transcript.words.is_empty() {
+        TranscriptionResult::new(transcription_job, cloud_transcript.text)
+    } else {
+        let text = group_words_into_speaker_text(&cloud_transcript.words);
+        let mut result = TranscriptionResult::new(transcription_job, text);
+        result.words = Some(cloud_transcript.words);
+        result
+    };
+    Ok(Some(result))
+}
 
-    let words = cloud_transcript.words;
-    let text = group_words_into_speaker_text(&words);
-    log::info!(
-        "[UPLOAD] Diarized cloud transcript: {} words, {} chars",
-        words.len(),
-        text.len()
-    );
-    let mut diarized_result = TranscriptionResult::new(transcription_job, text.clone());
-    diarized_result.words = Some(words.clone());
-    let metadata = Some(build_writing_history_metadata(&diarized_result, None));
-    Ok(Some(UploadTranscription {
-        text,
-        words: Some(words),
-        metadata,
-    }))
+async fn process_diarized_upload(
+    app: &AppHandle,
+    transcription: &TranscriptionResult,
+    generation: u64,
+) -> Result<crate::writing::WritingResult, crate::writing::WritingError> {
+    let words = transcription
+        .words
+        .as_deref()
+        .expect("diarized upload has words");
+    let mut runs = Vec::new();
+    let mut start = 0;
+    let mut speaker = words[0].speaker_id.as_deref();
+    for (index, word) in words.iter().enumerate().skip(1) {
+        if let Some(next) = word.speaker_id.as_deref() {
+            if Some(next) != speaker {
+                runs.push((start, index, speaker));
+                start = index;
+                speaker = Some(next);
+            }
+        }
+    }
+    runs.push((start, words.len(), speaker));
+    let mut template = transcription.clone();
+    template.raw_text.clear();
+    template.words = None;
+
+    let mut combined: Option<crate::writing::WritingResult> = None;
+    for (start, end, speaker) in runs {
+        let run_words = &words[start..end];
+        let tokens: Vec<String> = run_words.iter().map(|word| word.text.clone()).collect();
+        let mut run = template.clone();
+        run.raw_text = join_tokens(&tokens);
+        run.words = Some(run_words.to_vec());
+        let mut writing = crate::writing::process_diarized_transcription_at(
+            app.clone(),
+            run,
+            generation,
+        )
+        .await?;
+        let prefix = speaker
+            .map(|speaker| format!("{speaker}: "))
+            .unwrap_or_default();
+        writing.final_text = format!("{prefix}{}", writing.final_text);
+        if let Some(result) = combined.as_mut() {
+            result.final_text.push_str("\n\n");
+            result.final_text.push_str(&writing.final_text);
+            result.applied_operations.extend(writing.applied_operations);
+            result.warnings.extend(writing.warnings);
+            result.stage_timings.deterministic_ms = result
+                .stage_timings
+                .deterministic_ms
+                .saturating_add(writing.stage_timings.deterministic_ms);
+        } else {
+            combined = Some(writing);
+        }
+    }
+    let mut result = combined.expect("diarized upload has at least one speaker run");
+    result.raw_text = transcription.raw_text.clone();
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7842,6 +7888,7 @@ pub(crate) async fn transcribe_audio_file_impl(
         translate_to_english,
     );
 
+    let mut diarized_upload = false;
     let transcription_result = if let ActiveEngineSelection::Remote {
         server_id,
         server_name,
@@ -7909,6 +7956,7 @@ pub(crate) async fn transcribe_audio_file_impl(
         build_remote_transcription_result(&transcription_job, response)
     } else {
         let mut _executor_audio_guard: Option<NormalizedTempFile> = None;
+        let mut cloud_result = None;
         let (executor_audio_path, format_hint) = match &engine_selection {
             ActiveEngineSelection::Cloud { provider, .. } => {
                 ensure_cloud_task_supported(
@@ -7919,17 +7967,14 @@ pub(crate) async fn transcribe_audio_file_impl(
                 .map_err(upload_error_to_string)?;
                 let normalized_file = normalize_upload_audio(&recordings_dir, &wav_path).await?;
                 if retry_generation.is_none() {
-                    if let Some(diarized) = maybe_return_diarized_cloud_upload(
+                    cloud_result = maybe_return_diarized_cloud_upload(
                         &app,
                         *provider,
                         normalized_file.path(),
                         &language,
                         &transcription_job,
                     )
-                    .await?
-                    {
-                        return Ok(diarized);
-                    }
+                    .await?;
                 }
                 let path = normalized_file.path().to_path_buf();
                 _executor_audio_guard = Some(normalized_file);
@@ -7937,45 +7982,53 @@ pub(crate) async fn transcribe_audio_file_impl(
             }
             _ => (wav_path.clone(), None),
         };
-        let engine =
-            ProviderEngine::from_engine_str(engine_selection.engine_name()).ok_or_else(|| {
-                format!(
-                    "Unknown transcription engine: {}",
-                    engine_selection.engine_name()
-                )
-            })?;
-        let initial_prompt = if matches!(engine_selection, ActiveEngineSelection::Whisper { .. }) {
-            compile_whisper_initial_prompt(&app, Some(&language))
+        if let Some(result) = cloud_result {
+            diarized_upload = result.words.is_some();
+            result
         } else {
-            None
-        };
-        let request = TranscriptionRequest {
-            source: TranscriptionSource::AudioFile,
-            audio: TranscriptionAudio::Path {
-                path: executor_audio_path,
-                format_hint,
-                cleanup: CleanupPolicy::CallerOwns,
-            },
-            engine: EngineSelection::Explicit {
-                engine,
-                model: engine_selection.model_name().to_string(),
-            },
-            spoken_language: Some(language.clone()),
-            task: transcription_job.task,
-            context: RequestContext::default(),
-            timeout: TimeoutPolicy::Upload,
-            cancellation: if retry_generation.is_some() {
-                CancellationToken::from_arc(app.state::<AppState>().should_cancel_recording.clone())
+            let engine =
+                ProviderEngine::from_engine_str(engine_selection.engine_name()).ok_or_else(|| {
+                    format!(
+                        "Unknown transcription engine: {}",
+                        engine_selection.engine_name()
+                    )
+                })?;
+            let initial_prompt = if matches!(engine_selection, ActiveEngineSelection::Whisper { .. })
+            {
+                compile_whisper_initial_prompt(&app, Some(&language))
             } else {
-                CancellationToken::new()
-            },
-            initial_prompt,
-            audio_ctx,
-            speed_mode_override,
-        };
-        transcribe_with_app(&app, request)
-            .await
-            .map_err(upload_error_to_string)?
+                None
+            };
+            let request = TranscriptionRequest {
+                source: TranscriptionSource::AudioFile,
+                audio: TranscriptionAudio::Path {
+                    path: executor_audio_path,
+                    format_hint,
+                    cleanup: CleanupPolicy::CallerOwns,
+                },
+                engine: EngineSelection::Explicit {
+                    engine,
+                    model: engine_selection.model_name().to_string(),
+                },
+                spoken_language: Some(language.clone()),
+                task: transcription_job.task,
+                context: RequestContext::default(),
+                timeout: TimeoutPolicy::Upload,
+                cancellation: if retry_generation.is_some() {
+                    CancellationToken::from_arc(
+                        app.state::<AppState>().should_cancel_recording.clone(),
+                    )
+                } else {
+                    CancellationToken::new()
+                },
+                initial_prompt,
+                audio_ctx,
+                speed_mode_override,
+            };
+            transcribe_with_app(&app, request)
+                .await
+                .map_err(upload_error_to_string)?
+        }
     };
 
     log::info!(
@@ -7990,13 +8043,17 @@ pub(crate) async fn transcribe_audio_file_impl(
             return Err("Retry discarded".into());
         }
     }
-    let writing_result = match crate::writing::process_transcription_at(
-        app.clone(),
-        transcription_result.clone(),
-        upload_generation,
-    )
-    .await
-    {
+    let writing = if diarized_upload {
+        process_diarized_upload(&app, &transcription_result, upload_generation).await
+    } else {
+        crate::writing::process_transcription_at(
+            app.clone(),
+            transcription_result.clone(),
+            upload_generation,
+        )
+        .await
+    };
+    let writing_result = match writing {
         Ok(result) => result,
         Err(crate::writing::WritingError::TranslationFailed {
             target_language, ..
@@ -8043,7 +8100,11 @@ pub(crate) async fn transcribe_audio_file_impl(
     ));
     Ok(UploadTranscription {
         text: writing_result.final_text,
-        words: None,
+        words: if diarized_upload {
+            transcription_result.words
+        } else {
+            None
+        },
         metadata,
     })
 }

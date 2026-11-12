@@ -542,6 +542,23 @@ pub async fn process_transcription_at(
     transcription: TranscriptionResult,
     generation: u64,
 ) -> Result<WritingResult, WritingError> {
+    process_transcription_with_options(app, transcription, generation, false).await
+}
+
+pub(crate) async fn process_diarized_transcription_at(
+    app: AppHandle,
+    transcription: TranscriptionResult,
+    generation: u64,
+) -> Result<WritingResult, WritingError> {
+    process_transcription_with_options(app, transcription, generation, true).await
+}
+
+async fn process_transcription_with_options(
+    app: AppHandle,
+    transcription: TranscriptionResult,
+    generation: u64,
+    preserve_speakers: bool,
+) -> Result<WritingResult, WritingError> {
     let settings = load_writing_settings(&app).map_err(WritingError::Config)?;
     let inputs = read_pipeline_config_inputs(&app).map_err(WritingError::Config)?;
     let ai_enabled = inputs.ai_state.stored_ai_enabled;
@@ -607,8 +624,19 @@ pub async fn process_transcription_at(
         Some(&pipeline_config.final_text_language),
     );
     let needs_output_language_transform = translation_intent.target().is_some();
+    if preserve_speakers && needs_output_language_transform {
+        record_output_language_transform_fallback(
+            &mut warnings,
+            &mut output_language,
+            transcript_language.as_deref(),
+            "diarized_translation_skipped",
+            "Speaker labels preserved; output language was not transformed".to_string(),
+        );
+    }
+    let needs_output_language_transform = needs_output_language_transform && !preserve_speakers;
 
-    let can_run_ai_formatting = pipeline_config.ai_effective
+    let can_run_ai_formatting = !preserve_speakers
+        && pipeline_config.ai_effective
         && pipeline_config.preset != EnhancementPreset::PersonalDictation;
 
     if needs_output_language_transform && !can_run_ai_formatting && !library_result.literal_locked {
@@ -629,6 +657,7 @@ pub async fn process_transcription_at(
     }
 
     if pipeline_config.preset.requires_ai_formatting()
+        && !preserve_speakers
         && !pipeline_config.ai_effective
         && !library_result.literal_locked
     {
