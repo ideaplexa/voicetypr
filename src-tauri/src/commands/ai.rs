@@ -775,12 +775,7 @@ pub async fn test_openai_endpoint(
     run_openai_chat_probe(&client, &base_url, &model, api_key.as_deref(), no_auth)
         .await
         .map_err(|error| {
-            log::error!(
-                "OpenAI-compatible test failed: base_url={} model={} error={}",
-                base_url,
-                model,
-                error
-            );
+            log::error!("OpenAI-compatible endpoint test failed");
             error
         })
 }
@@ -1382,12 +1377,8 @@ fn executor_for_provider<R: tauri::Runtime>(
         )
     };
     if runtime_provider == PROVIDER_CUSTOM {
-        if let Err(reason) = validate_custom_base_url(&openai_compatible_config.base_url) {
-            log::error!(
-                "Refusing to use disallowed custom endpoint ({}): {}",
-                openai_compatible_config.base_url,
-                reason
-            );
+        if validate_custom_base_url(&openai_compatible_config.base_url).is_err() {
+            log::error!("Refusing to use disallowed custom endpoint");
             return Err(AiPolishAttemptError::for_provider(
                 AiProviderError::BadResponse,
                 runtime_provider,

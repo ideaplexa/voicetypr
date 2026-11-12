@@ -83,11 +83,7 @@ pub async fn export_transcriptions(app: AppHandle) -> Result<String, String> {
 
     fs::write(&file_path, json_string).map_err(|e| format!("Failed to write file: {}", e))?;
 
-    log::info!(
-        "Exported {} transcriptions to {:?}",
-        history.len(),
-        file_path
-    );
+    log::info!("Exported {} transcriptions", history.len());
 
     // Return the full path as string
     Ok(file_path.to_string_lossy().to_string())
@@ -102,7 +98,7 @@ pub async fn save_transcript_file(path: String, content: String) -> Result<(), S
         return Err("Nothing to save".to_string());
     }
     std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
-    log::info!("Saved transcript to {}", path);
+    log::info!("Saved transcript file");
     Ok(())
 }
 

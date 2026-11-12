@@ -4,7 +4,6 @@ pub mod audio;
 pub mod audio_feedback;
 pub mod cli_tool;
 pub mod clipboard;
-pub mod debug;
 pub mod device;
 pub(crate) mod dictation_telemetry;
 pub mod distribution;

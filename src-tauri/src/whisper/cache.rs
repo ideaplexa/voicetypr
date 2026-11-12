@@ -65,15 +65,12 @@ impl TranscriberCache {
         model_path: &Path,
         speed_mode: bool,
     ) -> Result<Arc<Transcriber>, String> {
-        log::info!(
-            "[TRANSCRIPTION_DEBUG] get_or_create called with path: {:?}",
-            model_path
-        );
+        log::info!("[TRANSCRIPTION_DEBUG] get_or_create called");
 
         // Check if the model file exists
         if !model_path.exists() {
             let error = format!("Model file does not exist: {:?}", model_path);
-            log::error!("[TRANSCRIPTION_DEBUG] {}", error);
+            log::error!("[TRANSCRIPTION_DEBUG] Model file does not exist");
             return Err(error);
         }
 
@@ -84,7 +81,7 @@ impl TranscriberCache {
 
         // Check if already cached
         if self.map.contains_key(&key) {
-            log::info!("[TRANSCRIPTION_DEBUG] Model found in cache: {}", key);
+            log::info!("[TRANSCRIPTION_DEBUG] Model found in cache");
             // Clone the transcriber before updating LRU
             let transcriber = self.map.get(&key).cloned();
             // Move to end of LRU order
@@ -101,10 +98,7 @@ impl TranscriberCache {
         }
 
         // Load the model
-        log::info!(
-            "[TRANSCRIPTION_DEBUG] Loading new model into cache: {}",
-            key
-        );
+        log::info!("[TRANSCRIPTION_DEBUG] Loading new model into cache");
         let start = std::time::Instant::now();
 
         let transcriber = match Transcriber::new(model_path, speed_mode) {
@@ -117,7 +111,7 @@ impl TranscriberCache {
                 Arc::new(t)
             }
             Err(e) => {
-                log::error!("[TRANSCRIPTION_DEBUG] Failed to load model: {}", e);
+                log::error!("[TRANSCRIPTION_DEBUG] Failed to load model");
                 crate::telemetry::capture_model_load_failure(
                     model_path
                         .file_name()
@@ -151,7 +145,7 @@ impl TranscriberCache {
     /// Evict the least recently used model
     fn evict_lru(&mut self) {
         if let Some(key) = self.lru_order.pop_front() {
-            log::info!("Evicting model from cache: {}", key);
+            log::info!("Evicting model from cache");
 
             // Log model cleanup with context
             log_with_context(
@@ -159,7 +153,6 @@ impl TranscriberCache {
                 "Model cleanup started",
                 &[
                     ("operation", "MODEL_CLEANUP"),
-                    ("model_path", &key),
                     ("reason", "cache_eviction"),
                     ("cache_size", self.map.len().to_string().as_str()),
                 ],
@@ -173,8 +166,7 @@ impl TranscriberCache {
                     "Model cleanup complete",
                     &[
                         ("operation", "MODEL_CLEANUP"),
-                        ("model_path", &key),
-                        ("ref_count_before_drop", ref_count.to_string().as_str()),
+                            ("ref_count_before_drop", ref_count.to_string().as_str()),
                         ("cleanup_result", "success"),
                     ],
                 );
@@ -184,8 +176,7 @@ impl TranscriberCache {
                     "Model cleanup warning",
                     &[
                         ("operation", "MODEL_CLEANUP"),
-                        ("model_path", &key),
-                        ("issue", "model_not_found_in_cache"),
+                            ("issue", "model_not_found_in_cache"),
                     ],
                 );
             }

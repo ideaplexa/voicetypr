@@ -1109,7 +1109,7 @@ pub async fn verify_model(
 
     // Check if file exists
     if !model_path.exists() {
-        log::warn!("Model file does not exist: {:?}", model_path);
+        log::warn!("Model file does not exist");
         return Err(format!("Model file not found: {}", model_name));
     }
 

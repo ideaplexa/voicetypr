@@ -100,7 +100,7 @@ impl DeviceWatcher {
                 let devices = AudioRecorder::get_devices();
 
                 if last_devices.as_deref() != Some(devices.as_slice()) {
-                    log::info!("Audio devices changed: {:?}", devices);
+                    log::info!("Audio devices changed; count: {}", devices.len());
 
                     if let Err(err) = app.emit("audio-devices-updated", &devices) {
                         log::warn!("Failed to emit audio-devices-updated: {}", err);
@@ -136,15 +136,9 @@ impl DeviceWatcher {
                                         );
 
                                         if is_recording {
-                                            log::info!(
-                                                "Selected microphone '{}' removed but recording in progress; deferring auto-fallback",
-                                                current
-                                            );
+                                            log::info!("Selected microphone removed during recording; deferring auto-fallback");
                                         } else {
-                                            log::info!(
-                                                "Selected microphone '{}' removed; falling back to default",
-                                                current
-                                            );
+                                            log::info!("Selected microphone removed; falling back to default");
 
                                             if let Err(err) =
                                                 set_audio_device(app_for_tasks.clone(), None).await

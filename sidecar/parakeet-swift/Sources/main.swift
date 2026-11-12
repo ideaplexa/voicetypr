@@ -1046,7 +1046,7 @@ actor DecodeAheadAsrSession {
             }
             return DecodeAheadDecodeResult(outcome: .success(timings: [], text: text, modelReturnedTimings: false))
         } catch {
-            log("⚠️ decode_ahead: transcribe failed: \(error.localizedDescription)")
+            log("⚠️ decode_ahead: transcribe failed: \(type(of: error))")
             return DecodeAheadDecodeResult(outcome: .failure)
         }
     }
@@ -1922,14 +1922,8 @@ struct ParakeetSidecar {
         let expectedPath = home
             .appendingPathComponent("Library/Application Support/FluidAudio/Models")
             .appendingPathComponent(version.repoFolderName)
-        log("📍 Expected cache path: \(expectedPath.path)")
         log("📂 Path exists: \(FileManager.default.fileExists(atPath: expectedPath.path))")
 
-        if FileManager.default.fileExists(atPath: expectedPath.path) {
-            if let contents = try? FileManager.default.contentsOfDirectory(atPath: expectedPath.path) {
-                log("📄 Cache contents: \(contents.joined(separator: ", "))")
-            }
-        }
 
         if isModelLoaded, !forceDownload, let loadedVersion = loadedModelVersion, loadedVersion == version {
             log("⚡ Model already loaded: \(loadedVersion.modelIdentifier)")
@@ -1974,8 +1968,6 @@ struct ParakeetSidecar {
                 } catch {
                     log("❌ Failed to load \(version.rawValue.uppercased()) from cache")
                     log("❌ Error type: \(type(of: error))")
-                    log("❌ Error details: \(error)")
-                    log("❌ Localized: \(error.localizedDescription)")
                     sendError("model_not_downloaded", message: "Parakeet \(version.rawValue.uppercased()) is not downloaded. Please download it first. Error: \(error.localizedDescription)", encoder: encoder)
                     return
                 }
@@ -2001,8 +1993,6 @@ struct ParakeetSidecar {
         } catch {
             log("❌ FATAL: Failed to load model \(version.rawValue.uppercased())")
             log("❌ Error type: \(type(of: error))")
-            log("❌ Error details: \(error)")
-            log("❌ Localized: \(error.localizedDescription)")
             sendError("model_load_error", message: "Failed to load model: \(error.localizedDescription)", encoder: encoder)
         }
         log("───────────────────────────────────────────────────────")
@@ -2048,9 +2038,9 @@ struct ParakeetSidecar {
             if fileManager.fileExists(atPath: path.path) {
                 do {
                     try fileManager.removeItem(at: path)
-                    log("🗑️  Deleted model files at: \(path.path)")
+                    log("🗑️  Deleted model files")
                 } catch {
-                    log("⚠️  Failed to delete model files at \(path.path): \(error)")
+                    log("⚠️  Failed to delete model files: \(type(of: error))")
                 }
             }
         }
@@ -2182,8 +2172,6 @@ struct ParakeetSidecar {
         } catch {
             log("❌ CTC MODEL DOWNLOAD FAILED")
             log("❌ Error type: \(type(of: error))")
-            log("❌ Error details: \(error)")
-            log("❌ Localized: \(error.localizedDescription)")
             sendError("ctc_model_download_failed", message: "Failed to download CTC models: \(error.localizedDescription)", encoder: encoder)
         }
 
@@ -2307,7 +2295,7 @@ struct ParakeetSidecar {
             if warmed {
                 log("✅ Warmup complete in \(elapsedMs)ms")
             } else if let error {
-                log("⚠️ Warmup skipped/failed after \(elapsedMs)ms: \(error)")
+                log("⚠️ Warmup skipped/failed after \(elapsedMs)ms: \(type(of: error))")
             }
             sendResponse(WarmedResponse(warmed: warmed, ms: elapsedMs, error: error), encoder: encoder)
         }
@@ -2357,7 +2345,7 @@ struct ParakeetSidecar {
             do {
                 try FileManager.default.removeItem(at: warmupURL)
             } catch {
-                log("⚠️ Failed to delete warmup wav: \(error.localizedDescription)")
+                log("⚠️ Failed to delete warmup wav: \(type(of: error))")
             }
         }
 
@@ -2855,7 +2843,7 @@ struct ParakeetSidecar {
                     try await manager.appendAudio(buffer)
                     try await manager.processBufferedAudio()
                     let toks = await manager.getRawTokenStrings()
-                    log("DBG-EOU frames=\(buffer.frameLength) tokens=\(toks.count) sample='\(toks.suffix(5).joined(separator: "|"))'")
+                    log("DBG-EOU frames=\(buffer.frameLength) tokens=\(toks.count)")
                 }
             } catch {
                 sendError("stream_chunk_failed", message: "Failed to process stream chunk: \(error.localizedDescription)", encoder: encoder)
@@ -2960,7 +2948,7 @@ struct ParakeetSidecar {
                 await manager.reset()
             }
         } catch {
-            log("⚠️ Stream cancel cleanup failed: \(error.localizedDescription)")
+            log("⚠️ Stream cancel cleanup failed: \(type(of: error))")
         }
         if let finalizationTask = session.finalizationTask {
             await finalizationTask.value
@@ -3038,10 +3026,9 @@ struct ParakeetSidecar {
         log("───────────────────────────────────────────────────────")
         log("👥 DIARIZATION REQUEST")
         log("───────────────────────────────────────────────────────")
-        log("📄 Audio path: \(audioPath)")
 
         guard FileManager.default.fileExists(atPath: audioPath) else {
-            log("❌ Audio file not found: \(audioPath)")
+            log("❌ Audio file not found")
             sendError("file_not_found", message: "Audio file not found: \(audioPath)", encoder: encoder)
             return
         }
@@ -3062,8 +3049,6 @@ struct ParakeetSidecar {
         } catch {
             log("❌ DIARIZATION FAILED")
             log("❌ Error type: \(type(of: error))")
-            log("❌ Error details: \(error)")
-            log("❌ Localized: \(error.localizedDescription)")
             sendError("diarization_failed", message: "Diarization failed: \(error.localizedDescription)", encoder: encoder)
         }
 
