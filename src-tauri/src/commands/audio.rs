@@ -7715,6 +7715,11 @@ async fn maybe_return_diarized_cloud_upload(
     }?;
 
     let result = if cloud_transcript.words.is_empty() {
+        // The diarized request does not carry the translate task, so only a
+        // plain transcription may be reused; translation goes to the executor.
+        if transcription_job.task != crate::transcription::TranscriptionTask::Transcribe {
+            return Ok(None);
+        }
         TranscriptionResult::new(transcription_job, cloud_transcript.text)
     } else {
         let text = group_words_into_speaker_text(&cloud_transcript.words);
