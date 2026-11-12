@@ -6,9 +6,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+
+// Match the Windows Parakeet downloader's per-network-operation stall window.
+const DOWNLOAD_STALL: Duration = Duration::from_secs(30);
 
 // Type-safe size validation
 #[derive(Debug, Clone, Copy)]
@@ -299,10 +303,11 @@ impl WhisperManager {
 
         // Download the model
         let client = reqwest::Client::new();
-        let response = client
-            .get(&model_info.url)
-            .send()
+        let response = tokio::time::timeout(DOWNLOAD_STALL, client.get(&model_info.url).send())
             .await
+            .map_err(|_| {
+                "Whisper download stalled. Check your connection and try again.".to_string()
+            })?
             .map_err(|e| e.to_string())?;
 
         let total_size = response.content_length().unwrap_or(model_info.size);
@@ -331,7 +336,19 @@ impl WhisperManager {
         let mut last_progress_update = 0u64;
         let update_threshold = total_size / 100; // Update every 1%
 
-        while let Some(chunk) = stream.next().await {
+        let mut deadline = tokio::time::Instant::now() + DOWNLOAD_STALL;
+        loop {
+            let chunk = match tokio::time::timeout_at(deadline, stream.next()).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                Err(_) => {
+                    drop(file);
+                    let _ = fs::remove_file(&output_path).await;
+                    return Err(
+                        "Whisper download stalled. Check your connection and try again.".to_string(),
+                    );
+                }
+            };
             // Check for cancellation
             if let Some(ref flag) = cancel_flag {
                 if flag.load(Ordering::Relaxed) {
@@ -344,6 +361,9 @@ impl WhisperManager {
             }
 
             let chunk = chunk.map_err(|e| e.to_string())?;
+            if !chunk.is_empty() {
+                deadline = tokio::time::Instant::now() + DOWNLOAD_STALL;
+            }
 
             // Prevent downloading more than expected (with 1% tolerance)
             if downloaded + chunk.len() as u64 > (total_size as f64 * 1.01) as u64 {

@@ -1,10 +1,10 @@
 //! Deepgram realtime STT over WebSocket — plan 044.
 //!
-//! A synchronous [`DeepgramStreamHandle`] bridged to an async `wss` task via an
-//! unbounded mpsc channel, mirroring `soniox_ws.rs`. `send_chunk` NEVER blocks, so
-//! it cannot stall the recorder mutex; the unbounded channel also buffers audio
-//! produced before the socket finishes connecting. The task connects with a `Token`
-//! auth header on the WS upgrade request (NEVER logged, marked sensitive), streams
+//! A synchronous [`DeepgramStreamHandle`] bridged to an async `wss` task via a
+//! bounded mpsc channel. `send_chunk` never waits for the socket; overflow
+//! invalidates the stream so REST transcribes the complete recording instead.
+//! The task connects with a `Token` auth header on the WS upgrade request
+//! (NEVER logged, marked sensitive), streams
 //! raw `linear16` binary frames, folds Results messages into committed/tentative
 //! preview text, and on finalize sends `CloseStream` then drains remaining Results
 //! until the server cleanly closes or a hard timeout fires (then REST-on-WAV is the
@@ -16,6 +16,8 @@
 //! close is an incomplete stream → `Err(Network)` so REST fallback owns the result
 //! (Soniox Codex 043b lesson + Codex 044 findings).
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -36,11 +38,13 @@ const RT_ENDPOINT: &str = "wss://api.deepgram.com/v1/listen";
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Deepgram drops idle sockets after ~10-12s; keepalive well under that.
 const KEEPALIVE_EVERY: Duration = Duration::from_secs(5);
+/// Ten seconds absorbs brief network hiccups without retaining a long recording.
+const AUDIO_BUFFER_SECONDS: usize = 10;
+const AUDIO_QUEUE_CAPACITY: usize = 256;
 
 enum Control {
     Chunk(Vec<i16>),
     Finalize,
-    Cancel,
 }
 
 /// Connection parameters. `api_key` is written only into the WS upgrade header and
@@ -57,58 +61,106 @@ pub(crate) struct DeepgramStreamConfig {
 
 /// Sync handle over the async WS task. Mirrors `SonioxStreamHandle`.
 pub(crate) struct DeepgramStreamHandle {
-    tx: mpsc::UnboundedSender<Control>,
+    tx: mpsc::Sender<Control>,
+    queued_samples: Arc<AtomicUsize>,
+    max_samples: usize,
+    failed: AtomicBool,
+    task: tauri::async_runtime::JoinHandle<()>,
     final_rx: Mutex<Option<oneshot::Receiver<Result<String, SttError>>>>,
 }
 
 impl DeepgramStreamHandle {
     /// Enqueue a PCM chunk. Non-blocking: never waits on the socket.
     pub(crate) fn send_chunk(&self, samples: &[i16]) -> Result<(), SttError> {
-        self.tx
-            .send(Control::Chunk(samples.to_vec()))
-            .map_err(|_| SttError::Network)
+        // Report the first failure only; finalize still rejects the entire stream.
+        if self.failed.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        if self
+            .queued_samples
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+                queued
+                    .checked_add(samples.len())
+                    .filter(|&total| total <= self.max_samples)
+            })
+            .is_err()
+        {
+            self.failed.store(true, Ordering::Relaxed);
+            self.task.abort();
+            return Err(SttError::Network);
+        }
+        if self.tx.try_send(Control::Chunk(samples.to_vec())).is_err() {
+            self.queued_samples
+                .fetch_sub(samples.len(), Ordering::Relaxed);
+            self.failed.store(true, Ordering::Relaxed);
+            self.task.abort();
+            return Err(SttError::Network);
+        }
+        Ok(())
     }
 
     /// Request end-of-stream and await the final committed text, bounded by
     /// [`FINALIZE_TIMEOUT`]. On timeout/transport error returns `Err` so the caller
     /// falls back to REST-on-WAV.
     pub(crate) async fn finalize(&self) -> Result<String, SttError> {
-        self.tx
-            .send(Control::Finalize)
-            .map_err(|_| SttError::Network)?;
+        if self.failed.load(Ordering::Relaxed) {
+            return Err(SttError::Network);
+        }
         let Some(rx) = self.final_rx.lock().await.take() else {
             return Err(SttError::BadResponse);
         };
-        match tokio::time::timeout(FINALIZE_TIMEOUT, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(SttError::Network),
-            Err(_) => Err(SttError::Timeout),
+        let result = tokio::time::timeout(FINALIZE_TIMEOUT, async {
+            self.tx
+                .send(Control::Finalize)
+                .await
+                .map_err(|_| SttError::Network)?;
+            rx.await.map_err(|_| SttError::Network)?
+        })
+        .await;
+        match result {
+            Ok(result) => result,
+            Err(_) => {
+                self.task.abort();
+                Err(SttError::Timeout)
+            }
         }
     }
 
     pub(crate) fn cancel(&self) {
-        let _ = self.tx.send(Control::Cancel);
+        self.task.abort();
     }
 }
 
 impl Drop for DeepgramStreamHandle {
     fn drop(&mut self) {
-        let _ = self.tx.send(Control::Cancel);
+        self.task.abort();
     }
 }
 
 /// Spawn the WS task and return the handle immediately. The connect happens inside
-/// the task; chunks produced before it completes buffer in the unbounded channel,
-/// so this never blocks the caller (recorder start).
+/// the task; chunks produced before it completes are bounded, and enqueue never
+/// blocks the caller (recorder start).
 pub(crate) fn open<F>(config: DeepgramStreamConfig, on_partial: F) -> DeepgramStreamHandle
 where
     F: Fn(DeepgramRtPartial) + Send + 'static,
 {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let max_samples = config.sample_rate as usize * config.channels as usize * AUDIO_BUFFER_SECONDS;
+    let queued_samples = Arc::new(AtomicUsize::new(0));
+    let (tx, rx) = mpsc::channel(AUDIO_QUEUE_CAPACITY);
     let (final_tx, final_rx) = oneshot::channel();
-    tauri::async_runtime::spawn(run_task(config, rx, final_tx, on_partial));
+    let task = tauri::async_runtime::spawn(run_task(
+        config,
+        rx,
+        final_tx,
+        on_partial,
+        queued_samples.clone(),
+    ));
     DeepgramStreamHandle {
         tx,
+        queued_samples,
+        max_samples,
+        failed: AtomicBool::new(false),
+        task,
         final_rx: Mutex::new(Some(final_rx)),
     }
 }
@@ -164,9 +216,10 @@ fn finish(
 
 async fn run_task<F>(
     config: DeepgramStreamConfig,
-    mut control_rx: mpsc::UnboundedReceiver<Control>,
+    mut control_rx: mpsc::Receiver<Control>,
     final_tx: oneshot::Sender<Result<String, SttError>>,
     on_partial: F,
+    queued_samples: Arc<AtomicUsize>,
 ) where
     F: Fn(DeepgramRtPartial) + Send + 'static,
 {
@@ -247,11 +300,11 @@ async fn run_task<F>(
         tokio::select! {
             control = control_rx.recv() => match control {
                 Some(Control::Chunk(samples)) => {
-                    if write
+                    let sent = write
                         .send(Message::binary(crate::cloud_stt::common::samples_to_le_bytes(&samples)))
-                        .await
-                        .is_err()
-                    {
+                        .await;
+                    queued_samples.fetch_sub(samples.len(), Ordering::Relaxed);
+                    if sent.is_err() {
                         finish(&mut final_slot, Err(SttError::Network));
                         return;
                     }
@@ -272,7 +325,7 @@ async fn run_task<F>(
                         return;
                     }
                 }
-                Some(Control::Cancel) | None => {
+                None => {
                     // Cancelled: the result must never read as a completed transcript
                     // (authority would paste a truncated prefix), so resolve Err.
                     let _ = write.send(Message::Close(None)).await;
