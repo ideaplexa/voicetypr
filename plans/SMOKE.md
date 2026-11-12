@@ -6,6 +6,30 @@ date, result, and evidence. Development runs help diagnosis but do not establish
 beta-to-beta proof. Do not silently re-implement code-frozen plans; report a
 reproduced failure against the named plan.
 
+Latest published releases: stable **2.0.12** and beta **2.1.0-beta.7**.
+The integration branch is `release/2.1.0-beta.9`; it is not a published build.
+Old candidate names below describe historical checks, not the current release.
+`OBSOLETE` rows preserve historical instructions and are not pending checks.
+
+## Blocks 2.1 stable
+
+Plan 087 §5 requires the packaged plan 083 §13 follow-ups and a Windows
+real-speech pass before stable. Eight unchecked checks block stable:
+
+- [ ] **087-S1** Packaged macOS and Windows: exercise delayed Island readiness and renderer replacement; confirm live recovery and mic-blocker state is revalidated and stale cards do not return.
+- [ ] **087-S2** Packaged Windows: exercise recording timer updates during tray recovery/rebuild and confirm neither deadlocks.
+- [ ] **087-S3** Packaged candidate: unplug the mic, retry a kept recording, and confirm the mic blocker remains visible and retry works.
+- [ ] **087-S4** Real Windows: exercise Whisper full audio context and Island fixes with real speech.
+- [ ] **087-S5** Real Mac: characterize the stable CLI Metal teardown issue and verify correct output and clean exit on the relevant candidate (plan 083 §13).
+- [ ] **087-S6** Packaged candidate: exercise Island hover and interactions and compare compositor frame timing on real hardware.
+- [ ] **087-S7** On a clean Mac, verify that the release DMG has a valid notarization staple and passes Gatekeeper open assessment, and that the app remains valid.
+- [ ] **087-S8** Exercise Soniox v6 realtime and async with consented real speech and verify header authentication without exposing the key.
+
+## Later — historical and other pending checks
+
+These are not identified as pre-stable gates by plan 087 §5. They remain
+unchecked, not passed; failures may still require release triage.
+
 ## 068 — Whisper callback correctness (beta.11 candidate, not released)
 
 - [ ] **068-S1 — Packaged desktop:** Base English on macOS Metal and Windows
@@ -113,7 +137,7 @@ diagnostic consent. macOS first; 060-S4/S7 also require real Windows hardware.
       console. A remaining wall shows the storage error and Sources → Cloud
       cleanup route. A quota retry happens at most once after capacity frees,
       cleanup finishes, or the eight-second wait expires.
-- [ ] 060-S3 With telemetry endpoints reachable, use an invalid test Groq key
+- [ ] **OBSOLETE — GlitchTip/Discord error tracking was replaced by PostHog (`src-tauri/src/product_analytics.rs`, plan 080).** 060-S3 With telemetry endpoints reachable, use an invalid test Groq key
       to trigger a transcription failure. With consent on, verify the
       GlitchTip issue `flow.transcription.failed.<class>`, closed-vocabulary
       engine/model/backend/failure_class tags, redaction, and Discord routing.
@@ -256,7 +280,7 @@ cannot prove.
       cleanly if `save_recordings` on.
 - [ ] 008-S2 Long recording 3+ min → no unbounded memory growth, transcript
       complete.
-- [ ] 008-S3 Stop variants: hotkey stop, Escape cancel → return to Idle, no
+- [ ] **OBSOLETE — silence timeout is now five minutes, not absent (`src-tauri/src/audio/silence_detector.rs`).** 008-S3 Stop variants: hotkey stop, Escape cancel → return to Idle, no
       leftover temp files. (Silence no longer auto-stops — see PORT-S8/S9.)
 - [ ] 008-S4 Device yank: unplug/switch input mid-recording → graceful stop.
       (Safety-critical: misbehavior here is a release blocker.)
@@ -271,7 +295,7 @@ cannot prove.
       pill idle within ~1 s (abort callback).
 - [ ] 015-S4 Parakeet: cancel during transcription → pill idle, next
       recording works (sidecar respawn + model reload).
-- [ ] 015-S5 Force a formatting hard-failure → toast appears, transcript in
+- [ ] **OBSOLETE — the Island replaces the old toast failure UI (`src/pill/feedback.ts`, plan 080).** 015-S5 Force a formatting hard-failure → toast appears, transcript in
       clipboard, entry in history, state returns to idle.
 
 ## Plan 016 — AI polish Rust-native cutover (code at `fb09a61`, NEEDS-SMOKE)
@@ -347,7 +371,7 @@ executor for local + cloud engines (remote stays inline). This integrates plan
 - [ ] 020-S6 Too-short recording (<0.5 s) rejected cleanly pre-dispatch; no
       history row written.
 - [ ] 020-S7 Non-speech/silence → "No speech detected"; no history row.
-- [ ] 020-S8 Forced translation failure (output language ≠ spoken, AI key bad):
+- [ ] **OBSOLETE — translation failure delivers the original instead of withholding it (plan 080, `src-tauri/src/commands/audio.rs`).** 020-S8 Forced translation failure (output language ≠ spoken, AI key bad):
       raw transcript saved to history with a "translation failed" badge, NOT
       pasted (Fix #2 + marker through the integrated path).
 - [ ] 020-S9 Active remote desktop server selected → record → transcript via the
@@ -366,9 +390,9 @@ across local/cloud/remote). Cancellation/too-short never preserved.
       mid-request): a "Transcription failed" row appears in History with the
       recording; "Re-transcribe with current source" on it succeeds after fixing
       the key/network. Pill guides to History.
-- [ ] FP-S2 `save_recordings` OFF + same cloud failure: NO history row, NO
+- [ ] **OBSOLETE — Don't save still keeps failed takes temporarily for retry (plan 087 §4, `src-tauri/src/recording/kept.rs`).** FP-S2 `save_recordings` OFF + same cloud failure: NO history row, NO
       orphaned recording kept (nothing pasted either) — respects the setting.
-- [ ] FP-S3 Remote failure with `save_recordings` OFF: recording is now NOT kept
+- [ ] **OBSOLETE — Don't save still keeps failed takes temporarily for retry (plan 087 §4, `src-tauri/src/recording/kept.rs`).** FP-S3 Remote failure with `save_recordings` OFF: recording is now NOT kept
       (behavior change — previously always kept); with ON, failed remote row +
       recording as before.
 - [ ] FP-S4 Cancel mid-transcription and a too-short clip never create a failed
@@ -405,7 +429,7 @@ Windows build; the rest run via `pnpm tauri:dev` on macOS.
       non-destructive "No audio detected — check your microphone" warning
       (NOT an auto-stop); resume speaking → the warning clears and recording
       continues.
-- [ ] PORT-S9 (silence timeout) Speak then go silent past the 60s timeout →
+- [ ] **OBSOLETE — the silence timeout is five minutes (`src-tauri/src/audio/silence_detector.rs`).** PORT-S9 (silence timeout) Speak then go silent past the 60s timeout →
       the captured speech is transcribed (never-lose-speech). NO speech for the
       full timeout → discard/cancel with "No audio captured".
 - [ ] PORT-S10 (silence gating) Brief taps/blips under ~300ms are not counted as
@@ -563,15 +587,15 @@ Run these checks on the next newly cut signed Beta with the public
 Events and GlitchTip while exercising the desktop app; CI and local debug builds
 cannot prove production ingestion boundaries.
 
-- [ ] 045-S1 Fresh install on macOS and Windows → onboarding shows separate
+- [ ] **OBSOLETE — analytics and diagnostics now share one consent (`src-tauri/src/telemetry.rs`, `src-tauri/src/product_analytics.rs`).** 045-S1 Fresh install on macOS and Windows → onboarding shows separate
       Crash & error reporting and Usage analytics choices, both checked by
       default. Turn only Usage analytics off, finish onboarding, restart, and
       confirm analytics remains off while diagnostics remains on.
-- [ ] 045-S2 Upgrade an existing profile with no `privacy_consent_version` →
+- [ ] **OBSOLETE — the separate consent choices were replaced by one consent (`src-tauri/src/telemetry.rs`).** 045-S2 Upgrade an existing profile with no `privacy_consent_version` →
       no PostHog request occurs before Continue. `Not now` keeps analytics off
       for the process and the prompt returns next launch. Continue persists both
       independent choices; a failed save leaves the prompt recoverable.
-- [ ] 045-S3 With analytics enabled, launch once and complete successful local
+- [ ] **OBSOLETE — event name and telemetry destination changed (`src-tauri/src/product_analytics.rs`).** 045-S3 With analytics enabled, launch once and complete successful local
       recordings with Polish disabled and enabled → PostHog receives only the
       closed journey events (`app.started`, `onboarding.completed` when
       applicable, `recording.started`, `recording.stopped`,
@@ -582,7 +606,7 @@ cannot prove production ingestion boundaries.
       buckets; provider/model values are curated or bucketed; no audio,
       transcript, clipboard, prompt, key, email, path, hostname, target app,
       window title, hotkey, error string, or free-form property is present.
-- [ ] 045-S5 Trigger decode/formatting/delivery failure and cancellation paths,
+- [ ] **OBSOLETE — diagnostics and analytics no longer have independent consent (`src-tauri/src/telemetry.rs`).** 045-S5 Trigger decode/formatting/delivery failure and cancellation paths,
       then disable Usage analytics while events are queued → outcomes stay in
       the closed vocabulary and queued events are dropped. After the command
       returns, no new request starts; a request already handed to the HTTP stack
@@ -619,7 +643,7 @@ construction; they do not prove provider output or upgraded desktop state.
       Dictation when Polish is on and bypasses Polish when it is off. The
       normalized value persists across restart, and App Rules label the bypass
       option `Polish Off`.
-- [ ] 046-S6 Install the update from the previous signed Beta → the one-time
+- [ ] **OBSOLETE — the one-time 2.0.6 update announcement is historical (plan 087; current published releases above).** 046-S6 Install the update from the previous signed Beta → the one-time
       2.0.6 announcement explains automatic Polish migration and confirms which
       settings remain unchanged. Dismiss it, restart, and confirm it does not
       return; existing models, AI setup, hotkeys, corrections, Saved Text, and
@@ -627,14 +651,13 @@ construction; they do not prove provider output or upgraded desktop state.
 
 ## 2.0.5 Beta train — Windows issue triage
 
-Current Beta: `2.0.5-beta.7`. Stable remains `2.0.4`. This signed candidate
-adds tray/upload recovery, paid-license resilience, formatting diagnostics,
-and the dedicated problem-report page to the earlier Windows fixes.
+Historical 2.0.5 beta-train triage follows; it does not describe the current
+published releases or the current integration candidate.
 
 - [x] **BETA-UPD-M1** (macOS ARM64): signed `beta.1` selected Beta, discovered
       `beta.2`, installed it, restarted as `beta.2`, retained Beta, then reported
       latest-version with no update loop.
-- [ ] **BETA-UPD-W1** (Windows): install/update from the previous signed Beta
+- [ ] **OBSOLETE — this specifically targets the superseded 2.0.5-beta.7 update (plan 087).** **BETA-UPD-W1** (Windows): install/update from the previous signed Beta
       to `beta.7`, restart, and confirm Beta persists with no update loop.
 - [ ] **BETA-GPU-W1** (Windows hybrid GPU): Auto prefers discrete NVIDIA/AMD;
       a Vulkan/sidecar failure cannot crash the main app; CPU fallback completes;

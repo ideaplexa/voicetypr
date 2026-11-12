@@ -36,19 +36,19 @@ and the [research entry point](../docs/RESEARCH-AND-RECOVERY.md). These reconcil
 the historical research and plan statuses against the integration application
 baseline `58ec176a` and main `c47e1465`; older rows remain historical context.
 
-Plan 080 — SPEC — Claude 2026-09-30, updated 2026-10-02: UI completion for 2.1.0-beta.4, in two phases. Phase A: focus-safe Morphing Island v3.1 (motion spec `design/prototypes/island-lab.html`), the island stack replacing toasts, tray menu, sidebar fixes, Insights, share card, Settings as a modal. Phase B: icons, dialogs, Windows pass. Also lists 20 product gaps from the Island Lab agents and the pill-coverage audit. See `080-ui-completion.md`.
+Plan 080 — PARTLY IMPLEMENTED / MERGED — beta.4 merge `70c904a1` includes the Island, feedback stack, tray, sidebar, Insights and Settings modal; native focus, Windows visual and interaction checks remain, and later gaps were deferred. See `080-ui-completion.md` and `083-2.1-beta6.md` §13.
 
-Plan 081 — SPEC — Claude 2026-10-02: Polish quality P1, a parallel track: `voicetypr polish` CLI, a golden set and scorecard, the never-answer guard, a zero-wait skip check, the "Keep my words" switch and Show original. See `081-polish-quality-p1.md`.
+Plan 081 — IMPLEMENTED / MERGED — `1eecba6a` includes the Polish CLI/eval and golden set, output guard, clean-text skip, Keep my words, original-copy action and prompt changes; native clipboard/UI and live-provider validation remain. See `081-polish-quality-p1.md`.
 
-Plan 079 — SPEC — Claude 2026-09-29: 2.1 UI redesign — 8-item IA (Home, History · SETUP: Transcription, Polish, Dictionary, Recording · Settings w/ Advanced, Help & feedback), one header/card/row kit, retuned tokens, pill Pasted/Copied states, onboarding; slices S0–S9 on `feat/2.1-ui`. Design: `design/voicetypr-2.1.pen`. See `079-ui-redesign-2-1.md`.
+Plan 079 — IMPLEMENTED / MERGED — beta.3 merge `c8f58512` includes the redesigned navigation, main screens, onboarding and pill; native focus and desktop visual acceptance still need smoke. See `079-ui-redesign-2-1.md`.
 
 Plan 078 — LOCAL CHECKS PASSED / NEEDS PostHog delivery check — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed): one privacy-safe `dictation.completed` PostHog event with typed numbers (stop→text, start latency, transport, outcome, paste, preview) — observability 0.1b for beta.2. See `078-dictation-telemetry.md`.
 
 Plan 077 — SPEC — Claude 2026-09-28: smaller Whisper models (official q8_0/q5_0 ggml: turbo 1.6 GB → 874/574 MB) chosen by a CI model-bench workflow on macOS + Windows. See `077-whisper-quantized-catalog.md`.
 
-Plan 076 — SPIKE — Claude 2026-09-28: Parakeet on Windows via ONNX in-process (`parakeet-rs` on `ort`, int8 TDT v3 ≈ 670 MB); spike measures WER/speed vs the macOS sidecar before integration. See `076-parakeet-on-windows.md`.
+Plan 076 — PARTLY IMPLEMENTED / MERGED — spike followed by Windows x64 Parakeet TDT v3 integration in `d4f2979a` (`feat/parakeet-windows-v3`); CPU admission and dynamically loaded ONNX runtime supersede the original static-runtime proposal. Windows real-speech and installed-app evaluation remain; preview, DirectML and other models are not included. See `076-parakeet-on-windows.md` and plan 087 §6.
 
-Plan 075 — SPEC — Claude 2026-09-27: desktop E2E dictation harness — BlackHole 2ch virtual mic, isolated HOME profile, cliclick hotkeys, TextEdit target, stop→text/WER/first-word metrics. Runs before every 2.1 beta. See `075-desktop-e2e-harness.md`.
+Plan 075 — PARTLY IMPLEMENTED / MERGED — macOS BlackHole harness in `scripts/e2e/dictation-e2e.mjs`, merged in `e8f8cfa6`; preview-event measurement remains unimplemented, real desktop setup and recurring runs remain necessary, and the proposed Windows harness is later. See `075-desktop-e2e-harness.md`.
 
 Plan 074 — LOCAL CHECKS PASSED / NEEDS E2E first-word run — Claude 2026-09-28 (gpt-6-sol implemented, gpt-6-astra reviewed x4): first word not clipped — the "recording" cue waits for the first real audio callback, sink creation never delays capture, duplicate device probe removed, start latency measured. Target 2.1.0-beta.2 after 073. See `074-truthful-recording-start.md`.
 
@@ -72,8 +72,8 @@ Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified 
 |------|-------|----------|--------|------------|--------|
 | 088 | [2.1 stable hardening](088-2.1-stable-hardening.md): master plan Phase 0 in nine slices (spoken punctuation port, log privacy, release gate, upload, settings, streams, sharing, island/tray port, ledger) | P0 | L | `release/2.1.0-beta.9` | IN PROGRESS — claimed Claude 2026-11-13; slices on `p0/*` branches |
 | 087 | [2.1.0-beta.8, beta.9 and stable](087-2.1-beta8-beta9.md): release map and "Only failed" audio | P0 | XL | beta.7 baseline | beta.8 IMPLEMENTED / MERGED on `release/2.1.0-beta.8`; hardware smoke and Windows CI pending; beta.9 OPEN |
-| 085 | [Spoken punctuation commands](085-spoken-punctuation-commands.md), opt-in for 2.1 | P1 | L | Beta.5 baseline; quote and spacing decisions | TODO — scope and trigger approved; not claimed for execution |
-| 086 | [Multilingual text correctness](086-multilingual-text-correctness.md), beta.6 | P0 | XL | Beta.5 baseline; security review for bidi changes | TODO — beta.6 scope approved; not claimed for execution |
+| 085 | [Spoken punctuation commands](085-spoken-punctuation-commands.md), opt-in for 2.1 | P1 | L | Beta.5 baseline; quote and spacing decisions | SHIPPED in stable 2.0.12 (`85de53d0` et al.); port to this line IN PROGRESS in plan 088 slice A, with native smoke outstanding |
+| 086 | [Multilingual text correctness](086-multilingual-text-correctness.md), beta.6 | P0 | XL | Beta.5 baseline; security review for bidi changes | PARTLY IMPLEMENTED / MERGED — `b5c6b17d`: French spacing, translation intent, Hangul leading space, Unicode snippets, language-filtered terms; remaining language, guard, security and provenance work deferred; native/real-speech smoke pending |
 | 013  | *(reserved: close 004/008 smoke blockers — checklist, no plan file yet)* | P1 | S | 004, 008 | RESERVED — no executable plan file yet |
 | 021  | V2 feature track + carried-over work (roadmap index; waves → 022+) | P2 | XL | 2.0.0 smoke gates | TODO — roadmap/index only; Part A Waves 0–8 are release-boundary **B** (fold into 2.0.0); Part B carry-over is noted/uncommitted (opt-in); each wave graduates to its own 022+ plan when claimed |
 | 022  | Wave 1 (F3) — save uploaded transcript to `.txt`/`.md` | P2 | S | 021 | DONE (code) — NEEDS-SMOKE 022-S1 (`82039e8`) |

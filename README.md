@@ -25,7 +25,7 @@ Local transcription is the default. After the trial, a lifetime license keeps lo
 ## Features
 
 - **Dictate anywhere:** system-wide shortcuts, push-to-talk, toggle recording, and automatic insertion at the active cursor.
-- **Local transcription:** Whisper on macOS and Windows, plus Apple Silicon-optimized Parakeet models on macOS.
+- **Local transcription:** Whisper on macOS and Windows, Apple Silicon-optimized Parakeet on macOS, and Parakeet TDT v3 on Windows x64 CPUs that meet its runtime requirements.
 - **Optional cloud speech-to-text:** Soniox, OpenAI, Groq, Deepgram, and Cohere.
 - **AI formatting:** clean up rough dictation with OpenAI, Anthropic, Gemini, or a custom OpenAI-compatible endpoint.
 - **File transcription:** transcribe audio and video files, with supported cloud providers offering speaker diarization.
@@ -120,9 +120,9 @@ Windows can use the bundled CPU transcription path on every supported machine. O
 | Desktop shell | Tauri v2 windowing, menus, updater integration, permissions, and packaging |
 | Frontend | React 19, TypeScript, Tailwind CSS, shadcn/ui, and Zustand |
 | Backend | Rust recording, resampling, transcription orchestration, hotkeys, history, and cursor insertion |
-| Local engines | Whisper on macOS and Windows; Parakeet sidecar on Apple Silicon |
+| Local engines | Whisper on macOS and Windows; Parakeet sidecar on Apple Silicon and Parakeet TDT v3 on supported Windows x64 CPUs |
 | Windows GPU isolation | Optional Vulkan Whisper sidecar; the main executable remains CPU-safe |
-| Network Sharing | Authenticated Voicetypr server/client for remote transcription |
+| Network Sharing | Voicetypr server/client for remote transcription over an unencrypted local connection; password checking is optional for transcription and required for model control |
 
 ## Build from source
 
