@@ -15,12 +15,12 @@ use crate::transcription::TranscriptionResult;
 use crate::whisper::languages::is_language_supported;
 
 use super::{
-    apply_final_restoration_guard, apply_library_rules, apply_spoken_punctuation, category_label, category_prompt_hint,
-    classify, compile_context_for_target, format_for_transcription, load_writing_settings,
-    protected_terms, sanitize_transcript, should_run_format_stage, AiExecutionMetadata,
-    AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint, FormatStageSettings,
-    ProviderContextTarget, WritingError, WritingOperationKind, WritingProfile, WritingResult,
-    WritingSettings, WritingStageTimings, WritingWarning,
+    apply_final_restoration_guard, apply_library_rules, apply_spoken_punctuation, category_label,
+    category_prompt_hint, classify, compile_context_for_target, format_for_transcription,
+    load_writing_settings, protected_terms, sanitize_transcript, should_run_format_stage,
+    AiExecutionMetadata, AppCategory, AppFormattingRule, AppliedWritingOperation, ContextHint,
+    FormatStageSettings, ProviderContextTarget, WritingError, WritingOperationKind, WritingProfile,
+    WritingResult, WritingSettings, WritingStageTimings, WritingWarning,
 };
 
 fn enabled_app_rules(settings: &WritingSettings) -> impl Iterator<Item = &AppFormattingRule> {

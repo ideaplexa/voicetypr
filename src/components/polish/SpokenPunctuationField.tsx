@@ -123,7 +123,8 @@ export function SpokenPunctuationField({ enabled, disabled, onChange }: SpokenPu
           <FieldDescription>
             Say punctuation while dictating in English, German, French, Spanish, Italian,
             Portuguese, Dutch or Polish, for example “comma”, “question mark” or “new paragraph”.
-            Works offline, with or without Polish.
+            Works offline, with or without Polish. Some ordinary words may be mistaken for commands;
+            use the escape word shown below to keep them literal.
           </FieldDescription>
         </FieldContent>
         <Switch

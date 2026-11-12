@@ -1558,14 +1558,17 @@ pub async fn polish_text_typed(
             fast_mode_fallback: false,
         });
     }
-    let prompt = crate::ai::prompts::apply_spoken_punctuation_rule(crate::ai::polish::assemble_prompt(
-        options,
-        output_language,
-        transcript_language,
-        context,
-        app_category_hint,
-        crate::ai::keep_words::read(app),
-    ), spoken_punctuation);
+    let prompt = crate::ai::prompts::apply_spoken_punctuation_rule(
+        crate::ai::polish::assemble_prompt(
+            options,
+            output_language,
+            transcript_language,
+            context,
+            app_category_hint,
+            crate::ai::keep_words::read(app),
+        ),
+        spoken_punctuation,
+    );
     let runtime = prepare_polish_runtime(app, &provider, &model).inspect_err(|error| {
         let provider = crate::telemetry::PROVIDERS
             .iter()
