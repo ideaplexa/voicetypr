@@ -174,14 +174,6 @@ pub(super) async fn cold_spawn_and_collect(
     let mut command = Command::new(binary_path);
     command.args(&safe_argv);
 
-    match input_mode {
-        InputMode::Stdin | InputMode::Acp => {}
-        InputMode::PositionalArg => {
-            // OpenCode 1.x compatibility: known local process-list exposure.
-            // 2.x uses ACP below; never extend positional input to other CLIs.
-            command.arg(input_text);
-        }
-    }
     command.env("PATH", resolved_path(false).await);
     command.env("ZSH_TMUX_AUTOSTART", "false");
     for (name, value) in spec.static_env {
@@ -190,9 +182,7 @@ pub(super) async fn cold_spawn_and_collect(
     apply_claude_effort_env(&mut command, spec, argv);
     apply_no_window(&mut command);
     #[cfg(test)]
-    if input_mode != InputMode::PositionalArg {
-        assert_no_canaries(&command);
-    }
+    assert_no_canaries(&command);
 
     let capture = run_isolated_command(
         command,

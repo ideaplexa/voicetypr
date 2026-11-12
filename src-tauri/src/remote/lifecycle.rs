@@ -362,7 +362,7 @@ impl RemoteServerManager {
 
         let discovery_handle = match app_handle.as_ref() {
             Some(_) => {
-                let machine_id = crate::license::device::get_device_hash()
+                let machine_id = crate::remote::discovery::sharing_machine_id()
                     .unwrap_or_else(|_| "unknown".to_string());
                 match start_discovery_responder(DiscoveryResponderConfig {
                     server_name: server_name.clone(),
