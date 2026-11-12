@@ -40,10 +40,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - name: Require full CI on the release commit
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$GITHUB_SHA"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          runs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&status=success&per_page=100" --jq '.workflow_runs[] | select(.status == "completed" and .conclusion == "success") | .id')
+          for run in $runs; do
+            jobs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100")
+            if jq -e '[.[].jobs[] | select(.status == "completed" and .conclusion == "success") | .name] as $names |
+              all(["changes", "workflow", "frontend", "native / build-macos", "native / build-windows"][]; . as $required | $names | index($required) != null)' <<< "$jobs" > /dev/null; then
+              echo "Full CI run $run passed for $sha."
+              exit 0
+            fi
+          done
+          echo "::error::No successful full CI run with all required jobs for $sha. Dispatch CI on this exact commit and wait for it to pass."
+          exit 1
+
   # ===========================================
   # Prepare: calculate version and validate
   # ===========================================
   prepare:
+    needs: ci-gate
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -72,7 +101,7 @@ jobs:
       - name: Capture base commit
         id: base
         run: |
-          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "sha=${{ needs.ci-gate.outputs.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Check tag doesn't already exist
         if: ${{ !inputs.dry_run }}

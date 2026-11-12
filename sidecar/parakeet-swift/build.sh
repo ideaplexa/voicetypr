@@ -102,10 +102,11 @@ echo "🔗 Symlink created: parakeet-sidecar -> $(basename "$OUTPUT_PATH")"
 
 # Verify binary
 echo "🔍 Verifying binary..."
-if echo '{"type":"status"}' | "$OUTPUT_PATH" 2>/dev/null | grep -q '"type"'; then
+if response=$(echo '{"type":"status"}' | "$OUTPUT_PATH" 2>/dev/null) && grep -q '"type"' <<< "$response"; then
     echo "✅ Binary verification successful!"
 else
-    echo "⚠️  Warning: Binary verification failed (this is OK if not on macOS 14+)"
+    echo "Binary verification failed" >&2
+    exit 1
 fi
 
 # Print size
