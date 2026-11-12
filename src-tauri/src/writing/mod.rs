@@ -42,5 +42,6 @@ pub(crate) use library_rules::{
 };
 #[allow(unused_imports)]
 pub(crate) use pipeline::{
+    process_diarized_transcription_at,
     language_scope_matches, normalize_language_scope, smart_formatting_ai_context,
 };
