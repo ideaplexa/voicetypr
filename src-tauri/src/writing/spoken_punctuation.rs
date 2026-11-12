@@ -1076,13 +1076,17 @@ fn preceding_word(before: &str, language: &Language) -> Preceding {
     }
 }
 
-/// End of the dictation, a recognizer's sentence end or line break, or an
-/// unambiguous command. A speculative period word never qualifies another.
+/// End of the dictation (a recognizer mark may trail: "Punkt,"), a
+/// recognizer's sentence end or line break, or an unambiguous command. A
+/// speculative period word never qualifies another.
 fn at_phrase_end(matcher: &Matcher, text: &str, end: usize) -> bool {
     let pos = skip_spaces(text, end);
     match text[pos..].chars().next() {
         None | Some('.' | '?' | '!' | '…' | '\n') => true,
         Some(_) => {
+            if skip_following_mark(text, pos, ENGINE_MARKS) == text.len() {
+                return true;
+            }
             let pos = skip_following_mark(text, pos, &[',']);
             matcher.command_at(text, pos).is_some_and(|next| {
                 matches!(next.trigger, Trigger::Always | Trigger::NotBetweenDigits)
