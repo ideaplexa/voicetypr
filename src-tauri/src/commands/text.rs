@@ -426,6 +426,8 @@ fn insert_via_clipboard(
     let clipboard =
         Clipboard::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
 
+    // Only the non-macOS path mutates the captured clipboard handle.
+    #[cfg_attr(target_os = "macos", allow(unused_mut))]
     let mut paste = || {
         // A registered hotkey never authorizes injection into a protected field.
         // Keep words for deliberate manual paste, with no automatic restore.

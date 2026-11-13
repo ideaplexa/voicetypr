@@ -21,7 +21,7 @@ struct Range {
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> u8;
-    fn AXUIElementCreateSystemWide() -> Ref;
+    fn AXUIElementCreateApplication(pid: i32) -> Ref;
     fn AXUIElementSetMessagingTimeout(element: Ref, timeout: f32) -> i32;
     fn AXUIElementGetPid(element: Ref, pid: *mut i32) -> i32;
     fn AXUIElementCopyAttributeValue(element: Ref, attribute: Ref, value: *mut Ref) -> i32;
@@ -310,14 +310,13 @@ fn frontmost(budget: &Budget<'_>) -> Result<(i32, String), Status> {
 fn snapshot(budget: &Budget<'_>) -> Result<Target, Status> {
     budget.security()?;
     let (pid, bundle) = frontmost(budget)?;
-    // SAFETY: Create returns an owned AX system element.
-    let system = Owned::new(budget.call(|| unsafe { AXUIElementCreateSystemWide() })?)?;
-    let app = budget.attribute(&system, c"AXFocusedApplication")?;
-    if budget.pid(&app)? != pid {
-        return Err(Status::TargetChanged);
-    }
+    // Ask the frontmost application's own AX element. The system-wide element
+    // answers kAXErrorCannotComplete for focus queries under a short messaging
+    // timeout (observed with TextEdit), which would make every capture time out.
+    // SAFETY: Create returns an owned AX application element for a live pid.
+    let app = Owned::new(budget.call(|| unsafe { AXUIElementCreateApplication(pid) })?)?;
     let window = budget.attribute(&app, c"AXFocusedWindow")?;
-    let element = budget.attribute(&system, c"AXFocusedUIElement")?;
+    let element = budget.attribute(&app, c"AXFocusedUIElement")?;
     if budget.pid(&element)? != pid {
         return Err(Status::TargetChanged);
     }
