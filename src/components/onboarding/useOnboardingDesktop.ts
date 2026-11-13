@@ -684,7 +684,7 @@ export function useOnboardingDesktop({
     requestPermission,
     local: {
       localModelNames,
-      recommendedModel: preparation.recommended,
+      recommendedModel: preparation.bestMatch,
       models,
       downloadProgress,
       verifyingModels,

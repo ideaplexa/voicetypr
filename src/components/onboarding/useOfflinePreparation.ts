@@ -52,10 +52,9 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
     if (localStorage.getItem(LANGUAGE_CHOSEN)) return;
     const suggestion = suggestedSpeechLanguage(settings.speech_language, navigator.languages);
     if (suggestion === language) return;
-    setSavingLanguage(true);
     void updateSettings({ speech_language: suggestion, ...languageModelPatch(management, settings.current_model, suggestion) }).catch(() => {
       toast.error("Could not save your language. Try again.");
-    }).finally(() => setSavingLanguage(false));
+    });
   }, [settings, language, updateSettings, management]);
 
   const compatible = management.modelOrder.filter((name) => {
@@ -63,9 +62,10 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
     return model && isLocalModel(model) && supportsSpokenLanguage(model, language);
   });
   const selected = settings?.current_model;
-  const recommended = (selected && compatible.includes(selected) ? selected : undefined)
-    ?? compatible.find((name) => management.models[name].recommended)
-    ?? compatible[0];
+  // The best match for the language, shown as "Recommended"; an already
+  // selected compatible model still wins for what Continue prepares.
+  const bestMatch = compatible.find((name) => management.models[name].recommended);
+  const recommended = (selected && compatible.includes(selected) ? selected : undefined) ?? bestMatch ?? compatible[0];
   const name = target ?? recommended;
   const model = name ? management.models[name] : undefined;
   const ready = Boolean(model?.downloaded && !model.requires_setup && name &&
@@ -88,7 +88,7 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
   };
 
   return {
-    language, savingLanguage, recommended, name, model, ready, warningModel,
+    language, savingLanguage, recommended, bestMatch, name, model, ready, warningModel,
     changeLanguage: async (value: string) => {
       setSavingLanguage(true);
       try {

@@ -258,7 +258,8 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const ctl = machine.recording && !machine.pending && !pick;
     HC.to = ctl ? 72 : 0; HC.snap();
     ctlEl.hidden = !ctl;
-    dom.get<HTMLButtonElement>('.cancel').style.opacity = hovering ? '' : '0';
+    // An invisible Cancel beside Stop must not be clickable: one stray click would discard the take.
+    const cancelEl = dom.get<HTMLButtonElement>('.cancel'); cancelEl.style.opacity = hovering ? '' : '0'; cancelEl.inert = !hovering;
     dom.get<HTMLElement>('.opening-label').hidden = !machine.pending || !openingLabel;
     timerEl.hidden = machine.pending;
     W.to = machine.width;

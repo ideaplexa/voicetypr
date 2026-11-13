@@ -2,10 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 
+type Status = "opening" | "listening" | "heard" | "quiet" | "error" | "paused";
+
 export function useMicrophoneTest(deviceName: string | undefined) {
   const [visible, setVisible] = useState(true);
-  const [level, setLevel] = useState(0);
-  const [status, setStatus] = useState<"opening" | "listening" | "heard" | "quiet" | "error" | "paused">("opening");
+  // Readings belong to one capture run; a new microphone or a reopened window
+  // starts from "opening" without resetting state inside the effect.
+  const run = `${deviceName ?? ""}|${visible}`;
+  const [reading, setReading] = useState<{ run: string; level: number; status: Status }>({ run, level: 0, status: "opening" });
+  const current = reading.run === run ? reading : { run, level: 0, status: "opening" as Status };
   useEffect(() => {
     let disposed = false;
     const listener = listen<boolean>("main-window-visibility-changed", ({ payload }) => {
@@ -19,8 +24,9 @@ export function useMicrophoneTest(deviceName: string | undefined) {
     let sessionId: string | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let heard = false;
-    setStatus("opening");
-    setLevel(0);
+    const base = { run, level: 0, status: "opening" as Status };
+    const setLevel = (level: number) => setReading((value) => ({ ...(value.run === run ? value : base), level }));
+    const setStatus = (status: Status) => setReading((value) => ({ ...(value.run === run ? value : base), status }));
     const listener = listen<{ session_id: string; level: number; ended?: boolean; failed?: boolean }>("microphone-test-level", ({ payload }) => {
       if (disposed || payload.session_id !== sessionId) return;
       if (payload.ended) {
@@ -52,6 +58,6 @@ export function useMicrophoneTest(deviceName: string | undefined) {
       void listener.then((unlisten) => unlisten()).catch(() => undefined);
       if (sessionId) void invoke("stop_microphone_test", { sessionId }).catch(() => undefined);
     };
-  }, [deviceName, visible]);
-  return { level: visible ? level : 0, status, visible };
+  }, [deviceName, visible, run]);
+  return { level: visible ? current.level : 0, status: current.status, visible };
 }

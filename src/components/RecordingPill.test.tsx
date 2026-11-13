@@ -49,8 +49,9 @@ describe('Morphing RecordingPill', () => {
   });
   it('uses native pointer coordinates to reveal controls without DOM mousemove', async () => {
     await mount(); h.emit('recording-started'); await h.settle(); // The mac island is anchored bottom-centre at (231, 425): a 236 x 34 shape spans x 113..349, y 391..425.
-    h.emit('pill-pointer',{inside:true,x:200,y:400}); await h.settle(); expect(h.get('.ctl').inert).toBe(false);
-    h.emit('pill-pointer',{inside:true,x:400,y:400}); await h.settle(); expect(h.get('.ctl').inert).toBe(true);
+    // Stop is always available while recording; the native pointer reveals only Cancel.
+    h.emit('pill-pointer',{inside:true,x:200,y:400}); await h.settle(); expect(h.get('.cancel').inert).toBe(false);
+    h.emit('pill-pointer',{inside:true,x:400,y:400}); await h.settle(); expect(h.get('.cancel').inert).toBe(true); expect(h.get('.ctl').inert).toBe(false);
   });
   it('opens peek after dwell and folds 400 ms after leaving', async () => {
     await mount(); h.emit('pill-pointer',{inside:true}); await h.settle(449); expect(state()).toBe('idle'); await h.settle(1); expect(state()).toBe('peek');

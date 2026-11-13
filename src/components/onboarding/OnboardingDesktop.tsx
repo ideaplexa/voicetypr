@@ -157,7 +157,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               <p className="text-center text-sm leading-[normal] text-muted-foreground">
                 {isMacOS
                   ? "Two permissions, then you're ready to try it."
-                  : "Speak to check your microphone. Nothing is saved."}
+                  : "Speak to check your microphone."}
               </p>
               {isMacOS && (
                 <PermissionsStep
