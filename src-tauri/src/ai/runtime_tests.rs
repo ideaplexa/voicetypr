@@ -441,13 +441,16 @@ mod tests {
             let encoded = input.user_data();
             let data: serde_json::Value = serde_json::from_str(&encoded).unwrap();
             let reference = input.reference.as_ref().unwrap();
-            assert_eq!(data, json!({
-                "transcript": input.input_text,
-                "reference": {
-                    "before_cursor": reference.before_cursor,
-                    "selection": reference.selection,
-                },
-            }));
+            assert_eq!(
+                data,
+                json!({
+                    "transcript": input.input_text,
+                    "reference": {
+                        "before_cursor": reference.before_cursor,
+                        "selection": reference.selection,
+                    },
+                })
+            );
             let cap = if case.id == PROVIDER_CUSTOM {
                 256
             } else {
@@ -518,7 +521,11 @@ mod tests {
             let body: serde_json::Value = serde_json::from_slice(&received[0].body).unwrap();
             let (user, system) = http_user_and_system(&body);
             assert_eq!(user, input.input_text, "plain transcript for {}", case.id);
-            assert_eq!(system, input.prompt, "unchanged system prompt for {}", case.id);
+            assert_eq!(
+                system, input.prompt,
+                "unchanged system prompt for {}",
+                case.id
+            );
         }
     }
 

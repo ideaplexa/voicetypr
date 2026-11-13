@@ -170,16 +170,7 @@ pub(crate) async fn measure(
             keep_words,
         );
         timings.prompt = elapsed_ms(prompt_start);
-        match execute_prompt(
-            runtime,
-            text,
-            prompt,
-            reference,
-            &mut timings,
-            false,
-        )
-        .await
-        {
+        match execute_prompt(runtime, text, prompt, reference, &mut timings, false).await {
             Ok(result) => (result.output_text, PolishOutcome::Polished, None),
             Err(error) => (
                 raw_fallback(text),
