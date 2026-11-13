@@ -193,6 +193,7 @@ fn stop_owned<R: Runtime>(
     generation: u64,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
+    crate::context_capture::discard(generation);
     state.capture_interrupts.interrupt(generation);
     let recorder_state = app.state::<RecorderState>();
     let result = recorder_state

@@ -39,7 +39,7 @@ impl OpenAiCompatibleRuntime {
             "model": request.model_id,
             "messages": [
                 { "role": "system", "content": request.prompt },
-                { "role": "user", "content": request.input_text }
+                { "role": "user", "content": request.user_data() }
             ],
             "temperature": 0.2,
             "max_tokens": output_token_cap_for_input(request.input_text.len(), 0, None),

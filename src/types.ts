@@ -120,6 +120,7 @@ export interface ActiveStreamCapabilities {
 // commands, not this bulk settings payload. Generic saves must preserve them.
 export interface AppSettings {
   polish_keep_words?: boolean;
+  polish_context_enabled?: boolean; // default true; surrounding text is captured only with Polish on
   hotkey: string;
   current_model: string;
   speech_language: string;

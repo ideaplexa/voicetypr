@@ -980,6 +980,7 @@ pub(crate) fn begin_recording_generation() -> u64 {
         crate::commands::pill_feedback::advance_recording_generation(&RECORDING_GENERATION);
     crate::observability::begin(generation);
     super::ai_lifecycle::begin_recording(generation);
+    crate::context_capture::reset(generation);
     generation
 }
 
@@ -5083,6 +5084,7 @@ pub(crate) async fn start_recording_with_permit<R: RecordingRuntime>(
     let should_show_pill = config.show_pill_widget && config.pill_indicator_mode != "never";
     let early_pill = should_show_pill.then(|| EarlyPillShow::spawn(&app, recording_generation));
     if let Some(native_app) = R::native(&app) {
+        crate::context_capture::begin(native_app, recording_generation);
         start_prefetch::spawn(
             native_app,
             &config,
@@ -5454,6 +5456,7 @@ async fn stop_recording_with_mode_at(
     ) {
         return Ok(String::new());
     }
+    crate::context_capture::stop(current_recording_generation());
     if queue_stop_during_start(
         state_before_queue,
         &app_state.pending_stop_after_start,
@@ -5473,6 +5476,7 @@ async fn stop_recording_with_mode_at(
     if expected_generation.is_some_and(|expected| expected != task_generation) {
         return Ok(String::new());
     }
+    let context_finish = crate::context_capture::Finish(task_generation);
 
     // Update state to stopping
     log_state_transition("RECORDING", "recording", "stopping", true, None);
@@ -6269,6 +6273,7 @@ async fn stop_recording_with_mode_at(
         crate::whisper::transcriber::ATTEMPT_BACKEND.scope(
             std::cell::Cell::new(None),
             async move {
+        let _context_finish = context_finish;
         let _capture_files = capture_files;
         dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Cancelled;
         let mut speech_evidence_attempt = speech_evidence_attempt_for_task;

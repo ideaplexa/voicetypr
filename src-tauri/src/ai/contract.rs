@@ -26,9 +26,37 @@ pub struct AiPolishRequest {
     pub reasoning_level: Option<String>,
     pub fast_mode: bool,
     pub input_text: String,
+    pub dictionary: Option<String>,
+    pub reference: Option<super::context_reference::ContextReference>,
     pub needs_output_language_transform: bool,
     pub prompt: String,
     pub timeout_ms: u64,
+}
+
+impl AiPolishRequest {
+    /// Provider payload only. This projection is not request metadata.
+    pub(crate) fn user_data(&self) -> String {
+        #[derive(Serialize)]
+        struct Reference<'a> {
+            before_cursor: &'a str,
+            selection: &'a str,
+        }
+        #[derive(Serialize)]
+        struct UserData<'a> {
+            transcript: &'a str,
+            dictionary: Option<&'a str>,
+            reference: Option<Reference<'a>>,
+        }
+        serde_json::to_string(&UserData {
+            transcript: &self.input_text,
+            dictionary: self.dictionary.as_deref(),
+            reference: self.reference.as_ref().map(|reference| Reference {
+                before_cursor: &reference.before_cursor,
+                selection: &reference.selection,
+            }),
+        })
+        .expect("string-only user data is serializable")
+    }
 }
 
 /// Error from a polish attempt. `fast_mode_fallback` is true when the

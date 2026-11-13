@@ -74,7 +74,7 @@ impl AnthropicCurrentRuntime {
         let mut payload = json!({
             "model": request.model_id,
             "system": request.prompt,
-            "messages": [{"role": "user", "content": request.input_text}],
+            "messages": [{"role": "user", "content": request.user_data()}],
             "max_tokens": max_tokens,
             "thinking": thinking,
         });

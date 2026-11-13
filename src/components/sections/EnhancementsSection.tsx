@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
 import { KeepWordsSetting } from "@/components/polish/KeepWordsSetting";
+import { PolishContextSetting } from "@/components/polish/PolishContextSetting";
 import { SettingsPage } from "@/components/settings/settings-ui";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
@@ -159,6 +160,8 @@ export function EnhancementsSection() {
 
       <KeepWordsSetting checked={settings?.polish_keep_words ?? false}
         onCheckedChange={(checked) => void updateSettings({ polish_keep_words: checked })} />
+      <PolishContextSetting checked={settings?.polish_context_enabled ?? true}
+        onCheckedChange={(checked) => void updateSettings({ polish_context_enabled: checked })} />
 
           <EnhancementSettingsPanel
             preset={enhancementOptions.preset}

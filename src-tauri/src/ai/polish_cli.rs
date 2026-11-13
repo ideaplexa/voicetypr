@@ -70,6 +70,9 @@ impl Category {
 pub struct PolishArgs {
     #[arg(long)]
     pub text: Option<String>,
+    /// Private JSON file containing before_cursor and selection; never captures the desktop.
+    #[arg(long, hide = true)]
+    pub reference_input: Option<std::path::PathBuf>,
     #[arg(long, value_enum)]
     pub style: Option<Style>,
     #[arg(long, value_enum)]
@@ -139,6 +142,26 @@ pub(crate) fn runtime(
     })
 }
 
+fn read_reference(
+    path: &std::path::Path,
+    local: bool,
+) -> Result<super::context_reference::ContextReference, &'static str> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ReferenceInput {
+        before_cursor: String,
+        selection: String,
+    }
+    let input = std::fs::read(path).map_err(|_| "Cannot read private reference input")?;
+    let input: ReferenceInput =
+        serde_json::from_slice(&input).map_err(|_| "Invalid private reference input JSON")?;
+    Ok(super::context_reference::ContextReference::bounded(
+        &input.before_cursor,
+        &input.selection,
+        local,
+    ))
+}
+
 pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), Box<dyn Error>> {
     let text = match args.text {
         Some(text) => text,
@@ -166,6 +189,9 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
             .map_err(|_| "Invalid saved Polish style")?,
     };
     let (provider, model) = selection(app, args.provider.as_deref(), args.model.as_deref())?;
+    let reference = args.reference_input.as_deref()
+        .map(|path| read_reference(path, provider == super::providers::PROVIDER_CUSTOM))
+        .transpose()?;
     let result = if !options.preset.requires_ai_formatting()
         || super::skip::should_skip(&text, options.preset, args.language.as_deref())
     {
@@ -192,6 +218,7 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
             context.as_deref(),
             hint.as_deref(),
             super::keep_words::enabled(store.get("polish_keep_words").as_ref(), args.keep_words),
+            reference,
         )
         .await
     };
@@ -201,4 +228,33 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
         print!("{}", result.output);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn private_reference_file_is_bounded_and_parse_errors_are_content_free() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let input = serde_json::json!({
+            "before_cursor": format!("{}nearest", "界".repeat(1_100)),
+            "selection": format!("selected{}", "\u{01}".repeat(1_100)),
+        });
+        file.write_all(input.to_string().as_bytes()).unwrap();
+        for (local, chars) in [(true, 256), (false, 1_000)] {
+            let reference = read_reference(file.path(), local).unwrap();
+            assert_eq!(reference.before_cursor.chars().count(), chars);
+            assert_eq!(reference.selection.chars().count(), chars);
+            assert!(reference.before_cursor.ends_with("nearest"));
+            assert!(reference.selection.starts_with("selected"));
+        }
+        file.as_file_mut().set_len(0).unwrap();
+        file.write_all(b"PRIVATE INVALID JSON").unwrap();
+        assert_eq!(
+            read_reference(file.path(), false).unwrap_err(),
+            "Invalid private reference input JSON"
+        );
+    }
 }

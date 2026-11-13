@@ -55,31 +55,9 @@ where
     Ok(())
 }
 
-pub(crate) async fn persist_generic_settings<R: tauri::Runtime>(
-    store: &tauri_plugin_store::Store<R>,
-) -> Result<(), String> {
-    // Native Polish maps are owned by ai::native_settings and the AISettings
-    // payload, not Settings. Bulk settings saves must leave those keys intact.
-    let _guard = crate::commands::telemetry::CONSENT_MUTATION_LOCK
-        .lock()
-        .await;
-    // Consent belongs to its dedicated command. Generic saves migrate stored
-    // choices rather than overwriting them from a potentially stale form.
-    let consent = crate::telemetry::migrated_consent(Some(&json!({
-        "telemetry_enabled":store.get("telemetry_enabled"),
-        "analytics_enabled":store.get("analytics_enabled"),
-        "crash_reporting_enabled":store.get("crash_reporting_enabled"),
-    })));
-    crate::telemetry::save_consent_values(store, consent, false);
-    crate::cloud_stt::migrate_soniox_model(store);
-    if let Err(error) = store.save() {
-        // Reload remains inside the same consent transaction.
-        let _ = store.reload();
-        return Err(error.to_string());
-    }
-    crate::commands::ai_lifecycle::invalidate();
-    Ok(())
-}
+#[path = "settings_store.rs"]
+mod settings_store;
+pub(crate) use settings_store::persist_generic_settings;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Settings {
@@ -92,6 +70,8 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub polish_keep_words: bool,
+    #[serde(default = "default_true")]
+    pub polish_context_enabled: bool,
     // Settings disclosure mode. Post-cutover this is always "recommended".
     #[serde(default = "default_settings_mode")]
     pub settings_mode: String,
@@ -172,6 +152,7 @@ impl Default for Settings {
             final_text_language: FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string(),
             theme: "system".to_string(),
             polish_keep_words: false,
+            polish_context_enabled: true,
             settings_mode: default_settings_mode(),
             transcription_cleanup_days: None, // None means keep forever
             pill_position: None,              // No saved position initially
@@ -536,6 +517,7 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             store.get("polish_keep_words").as_ref(),
             false,
         ),
+        polish_context_enabled: settings_store::load_polish_context(&store),
         hotkey: store
             .get("hotkey")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -967,6 +949,7 @@ pub async fn save_settings(
         json!(&normalized_transcription_acceleration),
     );
     store.set("polish_keep_words", json!(settings.polish_keep_words));
+    settings_store::save_polish_context(&store, settings.polish_context_enabled);
     store.set("whisper_speed_mode", json!(settings.whisper_speed_mode));
     store.set("transcription_mode", json!(&normalized_transcription_mode));
     store.set(

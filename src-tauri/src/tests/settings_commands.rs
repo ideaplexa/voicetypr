@@ -40,6 +40,7 @@ mod tests {
         assert!(settings.transcript_paragraphs);
         assert!(!settings.transcript_remove_fillers);
         assert!(settings.island_live_words);
+        assert!(settings.polish_context_enabled);
     }
 
     #[test]
@@ -62,9 +63,25 @@ mod tests {
     }
 
     #[test]
+    fn test_polish_context_defaults_on_for_old_stores_and_preserves_opt_out() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("polish_context_enabled");
+        let restored: Settings = serde_json::from_value(value.clone()).unwrap();
+        assert!(restored.polish_context_enabled);
+        value["polish_context_enabled"] = json!(false);
+        let opted_out: Settings = serde_json::from_value(value).unwrap();
+        assert!(!opted_out.polish_context_enabled);
+        assert_eq!(
+            serde_json::to_value(opted_out).unwrap()["polish_context_enabled"],
+            false
+        );
+    }
+
+    #[test]
     fn test_settings_serialization() {
         let settings = Settings {
             polish_keep_words: false,
+            polish_context_enabled: false,
             telemetry_enabled: true,
             hotkey: "CommandOrControl+A".to_string(),
             current_model: "base".to_string(),
@@ -162,6 +179,7 @@ mod tests {
     fn test_settings_clone() {
         let settings = Settings {
             polish_keep_words: false,
+            polish_context_enabled: true,
             telemetry_enabled: true,
             hotkey: "CommandOrControl+B".to_string(),
             current_model: "tiny".to_string(),
@@ -931,6 +949,7 @@ mod tests {
     fn test_settings_full_round_trip() {
         let original = Settings {
             polish_keep_words: false,
+            polish_context_enabled: false,
             telemetry_enabled: true,
             hotkey: "CommandOrControl+Alt+V".to_string(),
             current_model: "large-v3".to_string(),
@@ -978,6 +997,10 @@ mod tests {
         let restored: Settings = serde_json::from_str(&json).unwrap();
 
         assert_eq!(restored.hotkey, original.hotkey);
+        assert_eq!(
+            restored.polish_context_enabled,
+            original.polish_context_enabled
+        );
         assert_eq!(restored.current_model, original.current_model);
         assert_eq!(restored.current_model_engine, original.current_model_engine);
         assert_eq!(restored.speech_language, original.speech_language);
