@@ -1,6 +1,7 @@
 pub mod decode;
 pub mod device_watcher;
 pub mod level_meter;
+pub mod mic_test;
 pub mod normalizer;
 pub mod recorder;
 pub mod recorder_watchdog;

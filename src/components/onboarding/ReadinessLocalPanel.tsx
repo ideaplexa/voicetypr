@@ -7,6 +7,7 @@ import type { ModelInfo, TranscriptionAcceleration } from "@/types";
 
 export interface ReadinessLocalPanelProps {
   localModelNames: string[];
+  recommendedModel: string | undefined;
   models: Record<string, ModelInfo>;
   downloadProgress: Record<string, number>;
   verifyingModels: Set<string>;
@@ -27,6 +28,7 @@ export interface ReadinessLocalPanelProps {
 
 export function ReadinessLocalPanel({
   localModelNames,
+  recommendedModel,
   models,
   downloadProgress,
   verifyingModels,
@@ -71,7 +73,7 @@ export function ReadinessLocalPanel({
                       : ready
                         ? "Downloaded"
                         : `${Math.round((model.size ?? 0) / (1024 * 1024))} MB`}
-                    {model.recommended ? " · Recommended" : ""}
+                    {name === recommendedModel ? " · Recommended" : ""}
                   </span>
                 </button>
                 {verifyingModels.has(name) ? (

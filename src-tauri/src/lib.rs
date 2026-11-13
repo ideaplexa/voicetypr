@@ -1352,6 +1352,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             open_accessibility_settings,
             open_microphone_settings,
             check_microphone_permission,
+            audio::mic_test::get_microphone_permission_status,
+            audio::mic_test::start_microphone_test,
+            audio::mic_test::stop_microphone_test,
             request_microphone_permission,
             test_automation_permission,
             check_license_status,
@@ -1475,6 +1478,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Only hide the window instead of closing it (except for pill)
                 if window.label() == "main" {
+                    audio::mic_test::stop_all();
                     // Close-to-tray ONLY when a tray icon exists. If tray creation
                     // failed at startup, prevent_close + hide would strand the app as a
                     // background process with no way back -> let the close proceed (quit).

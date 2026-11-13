@@ -9,6 +9,10 @@ import { isMacOS } from "@/lib/platform";
 import { useTestDictation } from "@/components/tabs/overview/useTestDictation";
 import { CircleCheck } from "lucide-react";
 import { useState, useEffect, useRef, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { RecordingStatePayload } from "@/types";
+import { toast } from "sonner";
 
 export function SuccessStep({
   editor,
@@ -33,6 +37,22 @@ export function SuccessStep({
 }) {
   const [text, setText] = useState("");
   const trialRef = useRef<HTMLTextAreaElement>(null);
+  const [recording, setRecording] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let revision = 0;
+    const unlisten = listen<RecordingStatePayload>("recording-state-changed", ({ payload }) => {
+      revision++;
+      if (!disposed) setRecording(payload.state === "recording" || payload.state === "starting");
+    });
+    void unlisten.then(async () => {
+      const observed = revision;
+      const current = await invoke<RecordingStatePayload>("get_current_recording_state");
+      if (!disposed && revision === observed) setRecording(current.state === "recording" || current.state === "starting");
+    }).catch(() => undefined);
+    return () => { disposed = true; void unlisten.then((stop) => stop()); };
+  }, []);
   const editing = Boolean(editor);
   useEffect(() => {
     if (!editing) trialRef.current?.focus();
@@ -48,6 +68,13 @@ export function SuccessStep({
         {holdToTalk ? "Hold" : "Press"} <KeyCaps caps={caps} size="onboarding" />
         {holdToTalk ? "and say anything, then let go." : "and say anything. Press again to stop."}
       </p>
+      {recording && !editor && (
+        <Button disabled={stopping} onClick={() => {
+          setStopping(true);
+          void invoke("stop_recording").catch(() => toast.error("Could not stop dictation. Try again."))
+            .finally(() => setStopping(false));
+        }}>Stop</Button>
+      )}
       {editor}
       <div
         className={

@@ -234,6 +234,7 @@ impl StartRequest<'_> {
             if state.get_current_state() != RecordingState::Starting {
                 return Err("Cannot start recording in current state".to_string());
             }
+            crate::audio::mic_test::stop_all();
             Ok(Some((generation, interrupt)))
         })
         .unwrap_or(Ok(None))

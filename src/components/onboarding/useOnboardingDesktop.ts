@@ -25,6 +25,7 @@ import type {
   ShortcutSettings,
 } from "@/types/shortcuts";
 import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
+import { useOfflinePreparation } from "@/components/onboarding/useOfflinePreparation";
 
 // Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
 const DEFAULT_HOTKEY = isMacOS ? "Alt+Space" : "Control+Space";
@@ -40,8 +41,9 @@ export function useOnboardingDesktop({
   previewPhase,
 }: OnboardingDesktopProps) {
   const { settings, updateSettings } = useSettings();
+  const preparation = useOfflinePreparation(modelManagement);
   const {
-    hasPermission: hasMicPermission,
+    permissionStatus: microphonePermissionStatus,
     checkPermission: checkMicPermission,
     requestPermission: requestMicPermission,
   } = useMicrophonePermission({ checkOnMount: false });
@@ -65,7 +67,6 @@ export function useOnboardingDesktop({
     downloadProgress,
     verifyingModels,
     downloadErrors = NO_DOWNLOAD_ERRORS,
-    downloadModel,
     cancelDownload,
     deleteModel,
     repairModel,
@@ -90,6 +91,7 @@ export function useOnboardingDesktop({
   const [isEditingHotkey, setIsEditingHotkey] = useState(false);
   const [capturedBareModifier, setCapturedBareModifier] = useState<BareModifierSpec | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState<string | null>(null);
+  const [accessibilityRequested, setAccessibilityRequested] = useState(false);
   const [checkingPermissions, setCheckingPermissions] = useState<Set<string>>(new Set());
   const [remoteServers, setRemoteServers] = useState<SavedConnection[]>([]);
   const [activeRemoteServerId, setActiveRemoteServerId] = useState<string | null>(null);
@@ -138,11 +140,12 @@ export function useOnboardingDesktop({
 
   const permissions = {
     microphone: {
-      status: hasMicPermission === null ? "checking" : hasMicPermission ? "granted" : "denied",
+      status: microphonePermissionStatus,
     } as PermissionState,
     accessibility: {
       status:
-        hasAccessPermission === null ? "checking" : hasAccessPermission ? "granted" : "denied",
+        hasAccessPermission === null ? "checking" : hasAccessPermission ? "granted"
+          : accessibilityRequested ? "denied" : "not_determined",
     } as PermissionState,
   };
 
@@ -173,8 +176,8 @@ export function useOnboardingDesktop({
     [activeRemoteServerId, remoteServers],
   );
   const isModelReady = useCallback(
-    (name: string) => models[name]?.downloaded === true && !models[name]?.requires_setup,
-    [models],
+    (name: string) => models[name]?.downloaded === true && !models[name]?.requires_setup && !verifyingModels.has(name),
+    [models, verifyingModels],
   );
   const handleDeleteModel = useCallback(
     async (modelName: string) => {
@@ -190,6 +193,7 @@ export function useOnboardingDesktop({
     selectedModelName &&
     selectedModel &&
     isLocalModel(selectedModel) &&
+    settings?.current_model_engine === selectedModel.engine &&
     isModelReady(selectedModelName),
   );
   const cloudReady = Boolean(
@@ -347,15 +351,13 @@ export function useOnboardingDesktop({
     setIsRequestingPermission(type);
     try {
       if (type === "microphone") {
-        const granted = await requestMicPermission();
-        if (!granted) {
-          await invoke("open_microphone_settings");
-        }
+        if (microphonePermissionStatus === "not_determined") await requestMicPermission();
+        else await invoke("open_microphone_settings");
       } else {
-        const granted = await requestAccessPermission();
-        if (!granted) {
-          await invoke("open_accessibility_settings");
-        }
+        if (!accessibilityRequested) {
+          setAccessibilityRequested(true);
+          await requestAccessPermission();
+        } else await invoke("open_accessibility_settings");
       }
     } catch (error) {
       log.error(`Failed to request ${type} permission:`, error);
@@ -380,7 +382,6 @@ export function useOnboardingDesktop({
     });
   };
 
-  const selectLocalModel = (modelName: string) => selectModel(modelName, "local");
 
   const selectCloudModel = (modelName: string) => selectModel(modelName, "cloud");
 
@@ -593,7 +594,15 @@ export function useOnboardingDesktop({
       }
 
       if (currentStep === "source") {
-        setCurrentStep("readiness");
+        if (preparation.savingLanguage) return;
+        sourceChosenByUser.current = true;
+        if (sourceType === "local") {
+          if (!preparation.recommended) return;
+          await invoke("set_active_remote_server", { serverId: null });
+          setActiveRemoteServerId(null);
+          await preparation.prepare(preparation.recommended);
+          setCurrentStep(isMacOS ? "permissions" : "hotkey");
+        } else setCurrentStep("readiness");
         return;
       }
 
@@ -612,6 +621,7 @@ export function useOnboardingDesktop({
       }
 
       if (currentStep === "hotkey") {
+        if (!sourceReady) return;
         await saveHotkeySettings();
         setCurrentStep("success");
         return;
@@ -623,6 +633,11 @@ export function useOnboardingDesktop({
   };
 
   const handleBack = () => {
+    if (sourceType === "local" &&
+      (currentStep === "permissions" || (currentStep === "hotkey" && !isMacOS))) {
+      setCurrentStep("source");
+      return;
+    }
     const previousIndex = currentIndex - 1;
     if (previousIndex >= 0) {
       setCurrentStep(steps[previousIndex]);
@@ -632,7 +647,7 @@ export function useOnboardingDesktop({
   const canProceed = () => {
     switch (currentStep) {
       case "source":
-        return true;
+        return !preparation.savingLanguage && (sourceType !== "local" || Boolean(preparation.recommended));
       case "permissions":
         if (!isMacOS) return true;
         return (
@@ -640,9 +655,9 @@ export function useOnboardingDesktop({
           permissions.accessibility.status === "granted"
         );
       case "readiness":
-        return sourceReady;
+        return sourceType === "local" ? Boolean(preparation.name) : sourceReady;
       case "hotkey":
-        return !isEditingHotkey;
+        return !isEditingHotkey && sourceReady;
       default:
         return true;
     }
@@ -655,6 +670,9 @@ export function useOnboardingDesktop({
     currentIndex,
     steps,
     sourceType,
+    preparation,
+    sourceReady,
+    openModelChoices: () => { confirmSource("local"); setCurrentStep("readiness"); },
     confirmSource,
     handleBack,
     handleNext,
@@ -666,6 +684,7 @@ export function useOnboardingDesktop({
     requestPermission,
     local: {
       localModelNames,
+      recommendedModel: preparation.recommended,
       models,
       downloadProgress,
       verifyingModels,
@@ -675,11 +694,10 @@ export function useOnboardingDesktop({
       hasDownloadedLocalModel,
       localReady,
       transcriptionAcceleration: settings?.transcription_acceleration,
-      onDownload: (name: string) => {
-        void downloadModel(name);
-      },
+      onDownload: preparation.download,
       onSelectLocal: (name: string) => {
-        void selectLocalModel(name);
+        confirmSource("local");
+        void preparation.prepare(name);
       },
       onCancelDownload: (name: string) => {
         void cancelDownload(name);
