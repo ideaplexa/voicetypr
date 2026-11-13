@@ -30,7 +30,8 @@ if (root) {
       return () => handlers.set(event,(handlers.get(event) ?? []).filter(entry => entry !== wrapped));
     },
     // Freeze the 800 ms start-card and terminal deadlines for export fixtures.
-    setTimeout: (fn, ms) => ms === 450 ? window.setTimeout(fn, ms) : 0,
+    // Real timers only for the hover dwell (450) and the opening-microphone label (150).
+    setTimeout: (fn, ms) => ms === 450 || ms === 150 ? window.setTimeout(fn, ms) : 0,
     clearTimeout: () => {},
   });
   const emit = (name: string,payload?: unknown) => handlers.get(name)?.forEach(handler => handler({payload}));
