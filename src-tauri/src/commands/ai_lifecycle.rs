@@ -214,13 +214,6 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
     }
 }
 
-pub(crate) async fn warm_selected(app: AppHandle) {
-    let epoch = hot_spare_generation();
-    if let Some(request) = selected_request(&app).await {
-        warm(app, request, epoch, CancellationToken::new()).await;
-    }
-}
-
 async fn selected_request(app: &AppHandle) -> Option<AiPolishRequest> {
     let ai = super::ai::get_ai_settings(app.clone()).await.ok()?;
     if !eligible(ai.enabled, &ai.provider, true) {

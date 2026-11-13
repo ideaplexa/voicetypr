@@ -71,8 +71,8 @@ Windows run Rust tests with `src-tauri/run-tests.ps1`.
 - Failing to detect speech is not proof of silence; new pre-engine gates start
   in shadow mode.
 - CLI local and remote transcription use the shared writing pipeline (vocabulary,
-  library rules and optional Polish). CLI/file jobs share the selected desktop agent
-  owner when running; standalone CLI jobs stay cold.
+  library rules and optional Polish). CLI Polish stays cold; the warm session
+  owner is desktop-internal.
 - Base UI, not Radix: tests mock pointer capture and `getAnimations`.
 - `dist/` folders are gitignored; a new Windows worktree needs the Vulkan
   sidecar built or copied.

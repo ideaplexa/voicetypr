@@ -1,4 +1,4 @@
-//! One desktop-owned warm slot. No daemon is started by short-lived CLI calls.
+//! One desktop-internal warm slot. CLI Polish always uses isolated cold spawns.
 use super::*;
 use tauri_plugin_store::StoreExt;
 use tokio_util::sync::CancellationToken;
@@ -19,14 +19,12 @@ struct State {
 }
 
 pub(crate) fn initialize(app: tauri::AppHandle) {
-    let _ = APP.set(app.clone());
-    warm_ipc::start(app);
+    let _ = APP.set(app);
 }
 
 pub(crate) fn shutdown() {
     CLOSED.store(true, Ordering::SeqCst);
     invalidate_hot_spare();
-    warm_ipc::stop();
 }
 
 pub(super) fn invalidate() {
@@ -47,36 +45,9 @@ pub(super) fn selected(provider: &str, model: &str) -> bool {
         && store.get("ai_model").and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default() == model
 }
 
-pub(super) fn status() -> serde_json::Value {
-    let Some(app) = APP.get() else { return serde_json::json!({"status":"desktop_unavailable"}); };
-    let Ok(store) = app.store("settings") else { return serde_json::json!({"status":"unavailable"}); };
-    let provider = store.get("ai_provider").and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
-    let enabled = store.get("ai_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-    #[cfg(target_os = "macos")]
-    let mut ready = {
-        let mut state = STATE.lock();
-        if state.idle.as_mut().is_some_and(|rpc| !rpc.is_alive()) { state.idle.take(); }
-        state.idle.is_some()
-    };
-    #[cfg(not(target_os = "macos"))]
-    let mut ready = false;
-    if provider == PROVIDER_CLAUDE_CODE { ready = CLAUDE_SPARE.is_ready(); }
-    let reason = match provider.as_str() {
-        PROVIDER_CODEX => "isolated_exec_only",
-        PROVIDER_OPENCODE => "server_persistence_not_isolated",
-        PROVIDER_OMP => "rpc_startup_and_cache_isolation_unverified",
-        PROVIDER_PI | PROVIDER_CLAUDE_CODE if cfg!(target_os = "macos") => "supported",
-        _ => "unsupported",
-    };
-    serde_json::json!({"status": if !enabled {"disabled"} else if ready {"warm"} else {"cold"}, "provider":provider, "warm_support":reason, "idle_timeout_seconds":600})
-}
-
 pub(super) async fn run(
     provider: &str, model: &str, binary: &Path, argv: &[String], input: &str, help: &[u8], budget: Duration,
 ) -> Option<Result<String, MappedAiProviderError>> {
-    if APP.get().is_none() {
-        return warm_ipc::polish(provider, model, binary, argv, input, budget).await;
-    }
     if !selected(provider, model) { return None; }
     let started = Instant::now();
     let _serial = tokio::time::timeout(budget, SERIAL.lock()).await.ok()?;

@@ -12,7 +12,6 @@ static BASE_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
 
 /// Set before any GUI/CLI Polish work. Filesystem cleanup never blocks startup.
 pub(crate) fn initialize(local_data_directory: PathBuf) {
-    warm_ipc::configure(&local_data_directory);
     let base = local_data_directory.join("agent-input");
     if BASE_DIRECTORY.set(base.clone()).is_err() {
         return;

@@ -25,6 +25,7 @@ pub(crate) fn hot_spare_generation() -> u64 {
 /// Prepare only the selected, enabled provider's complete request configuration.
 pub(crate) async fn warm_hot_spare_if_current(request: &AiPolishRequest, generation: u64) {
     if !cfg!(target_os = "macos") { return; }
+    if !warm_session::selected(&request.provider_id, &request.model_id) { return; }
     let spare_generation = CLAUDE_SPARE.generation();
     if generation != hot_spare_generation() {
         return;
@@ -93,9 +94,6 @@ struct Prepared {
 }
 
 impl HotSpare {
-    pub(super) fn is_ready(&self) -> bool {
-        self.shared.lock().spare.as_ref().is_some_and(|spare| spare.created.elapsed() < IDLE_EXPIRY)
-    }
     #[cfg(all(test, unix))]
     async fn take_and_run(
         &self,

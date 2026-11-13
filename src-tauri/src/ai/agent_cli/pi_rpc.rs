@@ -146,8 +146,3 @@ impl Drop for PiRpc {
 }
 fn failure() -> MappedAiProviderError { MappedAiProviderError::new(AiProviderError::BadResponse) }
 
-impl PiRpc {
-    pub(super) fn is_alive(&mut self) -> bool {
-        matches!(self.child.inner().try_wait(), Ok(None))
-    }
-}

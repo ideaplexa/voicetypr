@@ -37,7 +37,6 @@ mod private_input;
 mod memory_prompt;
 #[cfg(target_os = "macos")]
 mod pi_rpc;
-pub(crate) mod warm_ipc;
 pub(crate) mod warm_session;
 use private_input::cold_spawn_and_collect;
 pub(crate) use private_input::initialize as initialize_private_input;
