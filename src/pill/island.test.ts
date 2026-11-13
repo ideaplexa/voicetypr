@@ -25,8 +25,8 @@ describe('Island state machine', () => {
     const m = new IslandMachine(); m.arm(0); m.rest(); expect(m.state).toBe('rest'); expect(m.pending).toBe(false); expect(m.layers).toEqual([]);
     m.arm(10); m.work('transcribing', 400); expect(m.pending).toBe(false); expect(m.frozenSeconds).toBe(0);
   });
-  it('lets a start-card context that arrives while pending take effect', () => {
-    const m = new IslandMachine(); m.arm(0); m.contextEvent({ ...emptyContext(), generation: 1, show_start_card: true }); expect(m.state).toBe('start'); expect(m.pending).toBe(true);
+  it('defers start-card details received while pending until capture is ready', () => {
+    const m = new IslandMachine(); m.arm(0); m.contextEvent({ ...emptyContext(), generation: 1, show_start_card: true }); expect(m.state).toBe('listening'); expect(m.pending).toBe(true);
     m.start(300); expect(m.state).toBe('start'); expect(m.pending).toBe(false);
   });
   it('cannot be overwritten by an uncorrelated paste outcome while pending', () => { const m = new IslandMachine(); m.arm(0); expect(m.outcome({ outcome: 'pasted', words: 2, polished: false })).toBe(false); expect(m.pending).toBe(true); });

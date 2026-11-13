@@ -36,7 +36,7 @@ button { font:inherit }
 .mono { font-family:"Geist Mono Variable",monospace;font-size:12px;color:var(--t2);font-variant-numeric:tabular-nums }
 .dim { color:var(--t2) }
 .start { top:0;bottom:auto;flex-direction:column;align-items:stretch;gap:10px;padding:12px 14px;right:0;width:auto }
-.start-row { height:28px;display:flex;align-items:center;justify-content:space-between }
+.start-row { height:28px;display:flex;align-items:center;justify-content:space-between;padding-right:72px }
 .start-row>span:first-child { width:28px }
 .chips { display:flex;gap:4px;min-width:0;justify-content:space-between }
 .chip { display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.07);border-radius:8px;padding:4px 6px;font-size:11px;color:rgba(255,255,255,.75);border:0;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;flex:none }
@@ -47,11 +47,14 @@ button { font:inherit }
 .listening-row { padding:0 12px 0 42px }
 .wslot { flex:1;min-width:0 }
 .pill-timer { flex:none }
-/* Starting: the island is up but the mic is not open yet, so the clock waits at 0:00. */
-.pill-root[data-starting="true"] .pill-timer { opacity:.55 }
+/* Pending capture has neither a clock nor audio-driven motion. */
+.opening-label { white-space:nowrap }
 .listening-row { position:relative }
-.ctl { position:absolute;top:0;bottom:0;display:inline-flex;align-items:center;gap:4px }
-.ctl .round:first-child { margin-left:6px }
+.ctl { position:absolute;height:32px;display:inline-flex;align-items:center;gap:4px }
+.ctl .round { width:32px;height:32px;border-radius:16px }
+.ctl .stop { background:rgba(143,209,168,.18);color:var(--sage) }
+.ctl .cancel { background:transparent;color:var(--t2) }
+.ctl .cancel:focus-visible { opacity:1!important }
 .round { width:26px;height:26px;border-radius:13px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:0;color:rgba(255,255,255,.92);cursor:pointer;padding:0;flex:none;font-size:16px;line-height:1 }
 .round:hover,.round.hov { background:rgba(255,255,255,.2) }
 .round:disabled,.act:disabled { opacity:.4;cursor:default }

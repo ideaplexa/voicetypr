@@ -42,7 +42,7 @@ export class IslandMachine {
       case 'nospeech': case 'too_short': return ['note'];
     }
   }
-  /** 236 px holds from listening through work; hover controls grow outside that row. */
+  /** Listening keeps this width when Stop and the secondary Cancel are revealed. */
   get width() { return this.state === 'rest' ? 12 : this.state === 'start' || this.state === 'peek' || this.state === 'live' ? 300 : this.state === 'copied' || this.state === 'no_permission' ? 300 : 236; }
   get height() { return this.state === 'rest' ? 12 : this.state === 'start' ? 85 : this.state === 'peek' ? 64 : this.state === 'copied' || this.state === 'no_permission' ? 70 : this.state === 'live' ? 64 : 34; }
   contextEvent(context: DictationContext) {
@@ -52,7 +52,7 @@ export class IslandMachine {
     // Late context hydrates chips/icons, but cannot interrupt words or reopen a stopped take.
     if (this.recording) {
       this.consumedContext = context.generation;
-      if (context.show_start_card && this.state === 'listening' && !this.sawLiveWords) this.state = 'start';
+      if (!this.pending && context.show_start_card && this.state === 'listening' && !this.sawLiveWords) this.state = 'start';
     }
     return true;
   }
@@ -80,6 +80,7 @@ export class IslandMachine {
       if (generation !== undefined) this.activeTakeGeneration = generation;
       // Recording began: the clock and the bars start now, not at the keypress.
       this.pending = false; this.startedAt = now; this.frozenSeconds = 0;
+      if (this.context.generation === this.takeGeneration && this.context.show_start_card) this.state = 'start';
       return true;
     }
     if (this.recording && (generation === undefined || generation <= this.takeGeneration)) return false;
