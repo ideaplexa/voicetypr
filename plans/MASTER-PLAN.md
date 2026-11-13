@@ -391,8 +391,11 @@ Goal: Core users get good cleanup with no key and no network. Plan
    how many dictations are allowed before the trial starts.
 3. Starter cloud credit per trial (minutes or dollars).
 4. Decided 2026-11-13: work in `voicetypr-web` is approved, on worktrees with
-   small mergeable branches and no deploys. Still to find out: which
-   deployment answers `api.voicetypr.com`.
+   small mergeable branches and no deploys. `api.voicetypr.com` answers as
+   the shared Hono app (`packages/api-core`, health body `voicetypr-api`),
+   which `docs/coolify-api-deploy.md` there deploys from `Dockerfile.api` on
+   Coolify behind Cloudflare; the website is on Vercel. Cloudflare hides the
+   origin, so the Coolify part is from the repo's docs, not observed.
 5. Plus: device limit and yearly price ($79 or $90).
 6. Core price once mobile exists ($59–69 for 2 devices).
 7. Opt-in recording donation (Phase 1.5).
