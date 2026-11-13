@@ -1061,7 +1061,8 @@ async fn retry<R: crate::commands::recording_runtime::RecordingRuntime>(
     let alt_engine_kind = engine
         .as_deref()
         .map(|id| {
-            if id.starts_with("parakeet") || id.starts_with("nemotron") {
+            if id.starts_with("parakeet") || id.starts_with("nemotron") || id.starts_with("phonon")
+            {
                 "parakeet"
             } else {
                 "whisper"

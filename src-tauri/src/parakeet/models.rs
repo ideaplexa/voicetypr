@@ -8,6 +8,8 @@ pub enum ParakeetModelKind {
     TdtV3,
     UnifiedEnglish640,
     NemotronMultilingual1120,
+    Phonon2,
+    Phonon25,
 }
 
 #[derive(Debug, Clone)]
@@ -60,8 +62,7 @@ pub fn get_available_models() -> Vec<&'static ParakeetModelDefinition> {
         return vec![];
     }
 
-    // On Apple Silicon, return all available models
-    AVAILABLE_MODELS.iter().collect()
+    mac_models(host_macos_major())
 }
 
 /// Catalog policy kept independent of cfg so every target can test Windows exposure.
@@ -80,10 +81,31 @@ pub(crate) fn catalog_with_cpu(
         return vec![];
     }
     match (os, arch) {
-        ("macos", "aarch64") => AVAILABLE_MODELS.iter().collect(),
+        ("macos", "aarch64") => mac_models(host_macos_major()),
         ("windows", "x86_64") => vec![&ONNX_V3],
         _ => vec![],
     }
+}
+
+fn host_macos_major() -> Option<u32> {
+    sysinfo::System::os_version()?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// Phonon's compressed encoders use Core ML operations that need macOS 15.
+fn mac_models(macos_major: Option<u32>) -> Vec<&'static ParakeetModelDefinition> {
+    AVAILABLE_MODELS
+        .iter()
+        .filter(|model| {
+            !matches!(
+                model.kind,
+                ParakeetModelKind::Phonon2 | ParakeetModelKind::Phonon25
+            ) || macos_major.is_none_or(|major| major >= 15)
+        })
+        .collect()
 }
 
 pub static ONNX_V3: Lazy<ParakeetModelDefinition> = Lazy::new(|| {
@@ -236,6 +258,71 @@ pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
             ],
             estimated_size: 665_000_000,
             kind: ParakeetModelKind::NemotronMultilingual1120,
+            apple_silicon_only: false,
+        },
+        ParakeetModelDefinition {
+            id: "phonon-2",
+            display_name: "Phonon 2 (English)",
+            repo_id: "FluidInference/phonon-2-coreml",
+            cache_subdir: "phonon-2",
+            description: "Smaller English model based on Parakeet V3",
+            languages: &["en"],
+            recommended: false,
+            speed_score: 9,
+            accuracy_score: 8,
+            files: &[
+                ParakeetModelFile {
+                    filename: "Preprocessor.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "Encoder.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "Decoder.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "JointDecisionv3.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "parakeet_vocab.json",
+                },
+            ],
+            estimated_size: 378_000_000,
+            kind: ParakeetModelKind::Phonon2,
+            apple_silicon_only: false,
+        },
+        ParakeetModelDefinition {
+            id: "phonon-2.5",
+            display_name: "Phonon 2.5",
+            repo_id: "Muesli-HQ/phonon-2.5-coreml",
+            cache_subdir: "phonon-2.5",
+            description: "Smaller 25-language model based on Parakeet V3",
+            languages: &[
+                "en", "es", "fr", "de", "bg", "hr", "cs", "da", "nl", "et", "fi", "el", "hu", "it",
+                "lv", "lt", "mt", "pl", "pt", "ro", "sk", "sl", "sv", "ru", "uk",
+            ],
+            recommended: false,
+            speed_score: 9,
+            accuracy_score: 8,
+            files: &[
+                ParakeetModelFile {
+                    filename: "Preprocessor.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "Encoder.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "Decoder.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "JointDecisionv3.mlmodelc",
+                },
+                ParakeetModelFile {
+                    filename: "parakeet_vocab.json",
+                },
+            ],
+            estimated_size: 290_000_000,
+            kind: ParakeetModelKind::Phonon25,
             apple_silicon_only: false,
         },
     ]
