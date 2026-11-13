@@ -983,6 +983,7 @@ async fn activate_license_internal(
 /// Deactivate the current license
 #[tauri::command]
 pub async fn deactivate_license(app: AppHandle) -> Result<(), String> {
+    crate::commands::ai_lifecycle::invalidate();
     log::info!("Deactivating license");
     let validation_lock = app.state::<AppState>().license_validation_lock.clone();
     let _validation_guard = validation_lock.lock().await;

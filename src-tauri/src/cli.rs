@@ -44,6 +44,8 @@ struct Cli {
 enum CliCommand {
     /// Verify clipboard delivery without opening the desktop app.
     Clipboard(crate::writing::clipboard_transaction::cli::ClipboardArgs),
+    /// Warm or inspect the selected desktop agent CLI session.
+    Agent(crate::ai::agent_cli::warm_ipc::AgentArgs),
     /// Diagnose shortcuts without opening a GUI or capturing input.
     Hotkey(crate::trigger::cli::HotkeyArgs),
     /// Measure advisory Silero VAD without initializing the desktop app.
@@ -75,6 +77,7 @@ impl CliCommand {
     fn wants_json(&self) -> bool {
         match self {
             CliCommand::Clipboard(a) => a.wants_json(),
+            CliCommand::Agent(a) => a.wants_json(),
             CliCommand::Hotkey(a) => a.wants_json(),
             CliCommand::Vad(a) => a.wants_json(),
             CliCommand::Context(a) => a.wants_json(),
@@ -199,6 +202,7 @@ pub fn maybe_run_from_env_with_context(
         && !matches!(
             first_arg,
             "status"
+                | "agent"
                 | "hotkey"
                 | "models"
                 | "transcribe"
@@ -297,7 +301,7 @@ pub fn maybe_run_from_env_with_context(
             return Ok(true);
         }
     }
-    let measurement = matches!(command, CliCommand::Polish(_) | CliCommand::PolishEval(_));
+    let measurement = matches!(command, CliCommand::Polish(_) | CliCommand::PolishEval(_) | CliCommand::Agent(_));
     let wants_json = command.wants_json();
     if let CliCommand::Transcribe(args) = &command {
         // Before app setup, license checks and our own startup expiry sweep.
@@ -324,6 +328,7 @@ pub fn maybe_run_from_env_with_context(
                 CliCommand::Context(_) => {
                     unreachable!("context runs before desktop initialization")
                 }
+                CliCommand::Agent(args) => crate::ai::agent_cli::warm_ipc::run(args).await?,
                 CliCommand::Polish(args) => crate::ai::polish_cli::run(&app_handle, args).await?,
                 CliCommand::PolishEval(args) => {
                     crate::ai::polish_eval::run_live(&app_handle, args).await?

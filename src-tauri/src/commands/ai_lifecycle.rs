@@ -131,7 +131,7 @@ pub(crate) fn remember_request(request: &AiPolishRequest) {
 }
 
 fn eligible(enabled: bool, provider: &str, ready: bool) -> bool {
-    enabled && provider == PROVIDER_CLAUDE_CODE && ready
+    enabled && matches!(provider, PROVIDER_CLAUDE_CODE | crate::ai::providers::PROVIDER_PI) && ready
 }
 
 fn warm_is_current(cancelled: bool, captured_epoch: u64, current_epoch: u64) -> bool {
@@ -150,7 +150,7 @@ fn current_configuration(app: &AppHandle, request: &AiPolishRequest) -> bool {
         .get("ai_provider")
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default();
-    enabled && provider == request.provider_id && provider == PROVIDER_CLAUDE_CODE
+    enabled && provider == request.provider_id
 }
 
 async fn warm(
@@ -202,42 +202,43 @@ fn take_replenishment(
 }
 
 pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
-    // Snapshot the runtime barrier before reading settings or awaiting anything.
     let epoch = hot_spare_generation();
-    let (generation, cancellation) = {
-        let Ok(recording) = RECORDING.lock() else {
-            return;
-        };
-        let Some(recording) = recording
-            .as_ref()
-            .filter(|r| r.generation == expected_generation)
-        else {
-            return;
-        };
-        (
-            recording.generation,
-            recording.prefetch_cancellation.clone(),
-        )
+    let cancellation = {
+        let Ok(recording) = RECORDING.lock() else { return; };
+        let Some(recording) = recording.as_ref().filter(|r| r.generation == expected_generation) else { return; };
+        recording.prefetch_cancellation.clone()
     };
-    let Ok(ai) = super::ai::get_ai_settings(app.clone()).await else {
-        return;
-    };
-    if !ai.enabled || ai.provider != PROVIDER_CLAUDE_CODE {
-        return;
+    if let Some(request) = selected_request(&app).await {
+        if super::audio::recording_generation_is_stale(expected_generation) { return; }
+        warm(app, request, epoch, cancellation).await;
+    }
+}
+
+pub(crate) async fn warm_selected(app: AppHandle) {
+    let epoch = hot_spare_generation();
+    if let Some(request) = selected_request(&app).await {
+        warm(app, request, epoch, CancellationToken::new()).await;
+    }
+}
+
+async fn selected_request(app: &AppHandle) -> Option<AiPolishRequest> {
+    let ai = super::ai::get_ai_settings(app.clone()).await.ok()?;
+    if !eligible(ai.enabled, &ai.provider, true) {
+        return None;
     }
     let ready = crate::ai::agent_cli::probe(&ai.provider, false).await.state
         == crate::ai::agent_cli::AgentCliProbeState::Ready;
     if !eligible(ai.enabled, &ai.provider, ready) {
-        return;
+        return None;
     }
     let Ok(settings) = super::settings::get_settings(app.clone()).await else {
-        return;
+        return None;
     };
     let Ok(config) = crate::writing::effective_pipeline_config(&app) else {
-        return;
+        return None;
     };
     let Ok(writing) = crate::writing::load_writing_settings(&app) else {
-        return;
+        return None;
     };
     let transcript_language = if settings.transcription_task
         == super::settings::TRANSCRIPTION_TASK_TRANSLATE_TO_ENGLISH
@@ -278,7 +279,7 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
         writing.spoken_punctuation,
     );
     let Ok(runtime) = super::ai::prepare_polish_runtime(&app, &ai.provider, &ai.model) else {
-        return;
+        return None;
     };
     let request = AiPolishRequest {
         provider_id: runtime.provider,
@@ -291,10 +292,7 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
         prompt,
         timeout_ms: runtime.timeout_ms,
     };
-    if super::audio::recording_generation_is_stale(generation) {
-        return;
-    }
-    warm(app, request, epoch, cancellation).await;
+    Some(request)
 }
 
 #[cfg(test)]
@@ -378,11 +376,14 @@ mod tests {
         });
     }
     #[test]
-    fn warm_eligibility_requires_enabled_selected_ready_claude() {
+    fn warm_eligibility_requires_enabled_selected_ready_transport() {
         assert!(eligible(true, PROVIDER_CLAUDE_CODE, true));
         assert!(!eligible(false, PROVIDER_CLAUDE_CODE, true));
         assert!(!eligible(true, PROVIDER_CLAUDE_CODE, false));
-        for provider in ["", "openai", "codex", "pi"] {
+        assert!(eligible(true, crate::ai::providers::PROVIDER_PI, true));
+        assert!(!eligible(false, crate::ai::providers::PROVIDER_PI, true));
+        assert!(!eligible(true, crate::ai::providers::PROVIDER_PI, false));
+        for provider in ["", "openai", "codex", "omp", "opencode"] {
             assert!(!eligible(true, provider, true));
         }
     }
