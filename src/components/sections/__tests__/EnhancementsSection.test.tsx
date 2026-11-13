@@ -1279,6 +1279,32 @@ describe("EnhancementsSection", () => {
     });
   });
 
+  it("defaults nearby text on for old settings and saves opt-out and opt-in", async () => {
+    aiSettingsResponse = enabledAISettings;
+    enhancementOptionsResponse = { preset: "CleanDictation" };
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+    const user = userEvent.setup();
+    renderWithProviders();
+    await openModes(user);
+
+    const toggle = screen.getByRole("switch", { name: "Use nearby text" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await user.click(toggle);
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("save_settings", {
+        settings: expect.objectContaining({ polish_context_enabled: false }),
+      });
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+    });
+    await user.click(toggle);
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("save_settings", {
+        settings: expect.objectContaining({ polish_context_enabled: true }),
+      });
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+    });
+  });
+
   it("renders the task-led Polish hierarchy", async () => {
     const user = userEvent.setup();
     renderWithProviders();

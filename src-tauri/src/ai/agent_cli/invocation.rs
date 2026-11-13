@@ -60,10 +60,11 @@ impl AgentCliRuntime {
         };
 
         let prompt = request.prompt.clone();
+        let user_data = request.user_data();
         let input_text = if spec.system_prompt == SystemPromptPolicy::None {
-            compose_cli_input(&prompt, &request.input_text)
+            compose_cli_input(&prompt, &user_data)
         } else {
-            request.input_text.clone()
+            user_data
         };
         let input_mode = spec.input_mode;
         let output = spec.output;

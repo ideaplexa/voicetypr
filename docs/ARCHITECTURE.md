@@ -132,6 +132,18 @@ Secrets (cloud keys, license, remote passwords) go through `secure_store`
 (`secure_set` / `secure_get`); `settings` only records flags such as
 `has_password`.
 
+Nearby-text context is independently controlled by `polish_context_enabled`
+(default on, effective only with Polish on). `context_capture/` owns ephemeral,
+generation-keyed macOS AX snapshots: one outstanding native worker, 250 ms capture
+budget, ≤50 ms per AX IPC, and target revalidation before a provider request.
+`ai/context_reference.rs` keeps reference data separate from trusted instructions
+and dictionary terms. It never enters `WritingResult`, ContextHint, History or
+telemetry. Custom/local endpoints use the stricter 256/256-character budget;
+cloud/agent providers use 1,000/1,000, with encoded-byte caps in both cases.
+Windows reports `unsupported`; insertion-boundary behavior is unchanged.
+`voicetypr context capture --dry-run --json` exposes only status/timing/counts
+unless `--include-text` explicitly requests private stdout text.
+
 ## Telemetry
 
 - PostHog EU is the single tool for coded errors and content-free usage events.

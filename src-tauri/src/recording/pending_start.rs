@@ -228,9 +228,8 @@ impl StartRequest<'_> {
             state.clear_cancellation();
             audio::clear_pending_stop_after_start(&state);
             let interrupt = state.capture_interrupts.begin(generation);
-            if R::native(app).is_some() {
-                state.capture_recording_app_context(crate::writing::capture_active_app_context);
-            }
+            // Native hint capture is dispatched after the early island is scheduled.
+            let _ = state.take_recording_app_context();
             crate::update_recording_state(app, RecordingState::Starting, None);
             if state.get_current_state() != RecordingState::Starting {
                 return Err("Cannot start recording in current state".to_string());

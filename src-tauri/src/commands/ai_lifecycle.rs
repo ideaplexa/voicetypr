@@ -38,6 +38,7 @@ pub(crate) fn begin_recording(generation: u64) {
 }
 
 pub(crate) fn cancel_recording() {
+    crate::context_capture::cancel();
     if let Ok(mut recording) = RECORDING.lock() {
         if let Some(recording) = recording.take() {
             recording.cancellation.cancel();
@@ -48,6 +49,7 @@ pub(crate) fn cancel_recording() {
 }
 
 pub(crate) fn invalidate() {
+    crate::context_capture::cancel();
     // Serialize against remembering a request and queuing replacement warmup.
     if let Ok(mut recording) = RECORDING.lock() {
         invalidate_hot_spare();
@@ -73,7 +75,7 @@ pub(crate) async fn recording_polish<F: Future>(generation: u64, future: F) -> F
         }
     }
     POLISH_GENERATION
-        .scope((generation, hot_spare_generation()), future)
+        .scope((generation, hot_spare_generation()), crate::context_capture::scope(generation, future))
         .await
 }
 
@@ -114,6 +116,8 @@ pub(crate) fn remember_request(request: &AiPolishRequest) {
                         reasoning_level: request.reasoning_level.clone(),
                         fast_mode: request.fast_mode,
                         input_text: String::new(),
+                        dictionary: None,
+                        reference: None,
                         needs_output_language_transform: request.needs_output_language_transform,
                         prompt: request.prompt.clone(),
                         timeout_ms: request.timeout_ms,
@@ -280,6 +284,8 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
         reasoning_level: runtime.reasoning_level,
         fast_mode: runtime.fast_mode,
         input_text: String::new(),
+        dictionary: None,
+        reference: None,
         needs_output_language_transform: false,
         prompt,
         timeout_ms: runtime.timeout_ms,
@@ -301,6 +307,10 @@ mod tests {
             reasoning_level: None,
             fast_mode: false,
             input_text: "must not be retained".to_string(),
+            dictionary: Some("private dictionary".to_string()),
+            reference: Some(crate::ai::context_reference::ContextReference::bounded(
+                "private preceding text", "private selection", false,
+            )),
             needs_output_language_transform: false,
             prompt: "polish".to_string(),
             timeout_ms: 1000,
@@ -330,6 +340,8 @@ mod tests {
             assert!(take_replenishment(6, Some(true), false).is_none());
             let (_, remembered, _) = take_replenishment(7, Some(true), false).unwrap();
             assert!(remembered.input_text.is_empty());
+            assert!(remembered.dictionary.is_none());
+            assert!(remembered.reference.is_none());
             assert_eq!(remembered.prompt, "polish");
             assert!(take_replenishment(7, Some(true), false).is_none());
             cancel_recording();

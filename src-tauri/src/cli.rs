@@ -46,6 +46,8 @@ enum CliCommand {
     Hotkey(crate::trigger::cli::HotkeyArgs),
     /// Measure advisory Silero VAD without initializing the desktop app.
     Vad(crate::audio::vad_cli::VadArgs),
+    /// Inspect nearby text without insertion; output is metadata-only by default.
+    Context(crate::context_capture::cli::ContextArgs),
     /// Polish stdin or --text using the desktop Polish pipeline.
     Polish(crate::ai::polish_cli::PolishArgs),
     #[command(hide = true, name = "polish-eval")]
@@ -72,6 +74,7 @@ impl CliCommand {
         match self {
             CliCommand::Hotkey(a) => a.wants_json(),
             CliCommand::Vad(a) => a.wants_json(),
+            CliCommand::Context(a) => a.wants_json(),
             CliCommand::Polish(a) => a.json,
             CliCommand::PolishEval(_) => false,
             CliCommand::Status(a) => a.json,
@@ -201,6 +204,7 @@ pub fn maybe_run_from_env_with_context(
                 | "polish"
                 | "polish-eval"
                 | "vad"
+                | "context"
         )
     {
         return Ok(false);
@@ -228,7 +232,7 @@ pub fn maybe_run_from_env_with_context(
             }
             // A real usage error: in --json mode emit a parseable object so agents can read
             // why parsing failed; otherwise use clap's human-readable usage output.
-            if matches!(first_arg, "polish" | "polish-eval" | "vad") {
+            if matches!(first_arg, "polish" | "polish-eval" | "vad" | "context") {
                 eprintln!(
                     "{}",
                     format_cli_error(
@@ -248,6 +252,13 @@ pub fn maybe_run_from_env_with_context(
     let Some(command) = cli.command else {
         return Ok(false);
     };
+    if let CliCommand::Context(args) = &command {
+        if let Err(error) = tauri::async_runtime::block_on(crate::context_capture::cli::run(args)) {
+            eprintln!("{}", format_cli_error(error, args.wants_json()));
+            std::process::exit(1);
+        }
+        return Ok(true);
+    }
     if let CliCommand::Vad(args) = &command {
         if let Err(error) = crate::audio::vad_cli::run(args) {
             eprintln!("{}", format_cli_error(error, args.wants_json()));
@@ -293,6 +304,7 @@ pub fn maybe_run_from_env_with_context(
                     unreachable!("headless hotkey route returned before setup")
                 }
                 CliCommand::Vad(_) => unreachable!("VAD runs before desktop initialization"),
+                CliCommand::Context(_) => unreachable!("context runs before desktop initialization"),
                 CliCommand::Polish(args) => crate::ai::polish_cli::run(&app_handle, args).await?,
                 CliCommand::PolishEval(args) => {
                     crate::ai::polish_eval::run_live(&app_handle, args).await?

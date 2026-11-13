@@ -73,7 +73,7 @@ impl GenaiRuntime {
         let model_str = namespaced_model(&request.provider_id, &request.model_id);
         let model = ModelIden::new(adapter_kind, model_str);
         let chat_request =
-            ChatRequest::from_user(request.input_text.clone()).with_system(request.prompt.clone());
+            ChatRequest::from_user(request.user_data()).with_system(request.prompt.clone());
         let chat_options = Some(chat_options(request, standard_after_fast_refusal));
 
         let response = self

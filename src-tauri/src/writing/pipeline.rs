@@ -566,7 +566,7 @@ async fn process_transcription_with_options(
     let mut active_app = app
         .try_state::<crate::state::AppState>()
         .and_then(|state| state.take_recording_app_context())
-        .or_else(capture_active_app_context);
+        .or_else(|| (generation == 0).then(capture_active_app_context).flatten());
     let pipeline_config = resolve_pipeline_config(
         &settings,
         inputs.global_preset,
