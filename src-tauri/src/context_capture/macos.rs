@@ -280,7 +280,11 @@ fn app_policy(bundle: &str) -> Result<(), Status> {
         | "com.microsoft.VSCode" | "com.microsoft.VSCodeInsiders" | "com.todesktop.230313mzl4w4u92"
         | "com.tinyspeck.slackmacgap" | "com.hnc.Discord" | "com.microsoft.teams2"
         | "com.microsoft.Word" | "com.microsoft.Outlook" | "com.apple.Notes"
-        | "notion.id" | "md.obsidian" | "com.sublimetext.4" | "com.panic.Nova" => Ok(()),
+        | "notion.id" | "md.obsidian" | "com.sublimetext.4" | "com.panic.Nova"
+        | "dev.zed.Zed" | "com.apple.MobileSMS" | "net.whatsapp.WhatsApp"
+        // AI assistants and agent apps: where prompts are dictated.
+        | "com.openai.chat" | "com.openai.codex" | "com.anthropic.claudefordesktop"
+        | "com.conductor.app" | "so.stencil.tern" | "at.studio.AsideBrowser" => Ok(()),
         _ => Err(Status::Denied),
     }
 }
