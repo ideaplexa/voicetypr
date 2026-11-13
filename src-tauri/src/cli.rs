@@ -42,6 +42,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum CliCommand {
+    /// Verify clipboard delivery without opening the desktop app.
+    Clipboard(crate::writing::clipboard_transaction::cli::ClipboardArgs),
     /// Diagnose shortcuts without opening a GUI or capturing input.
     Hotkey(crate::trigger::cli::HotkeyArgs),
     /// Measure advisory Silero VAD without initializing the desktop app.
@@ -70,6 +72,7 @@ impl CliCommand {
     /// as a parseable error object too.
     fn wants_json(&self) -> bool {
         match self {
+            CliCommand::Clipboard(a) => a.wants_json(),
             CliCommand::Hotkey(a) => a.wants_json(),
             CliCommand::Vad(a) => a.wants_json(),
             CliCommand::Polish(a) => a.json,
@@ -201,6 +204,7 @@ pub fn maybe_run_from_env_with_context(
                 | "polish"
                 | "polish-eval"
                 | "vad"
+                | "clipboard"
         )
     {
         return Ok(false);
@@ -228,7 +232,7 @@ pub fn maybe_run_from_env_with_context(
             }
             // A real usage error: in --json mode emit a parseable object so agents can read
             // why parsing failed; otherwise use clap's human-readable usage output.
-            if matches!(first_arg, "polish" | "polish-eval" | "vad") {
+            if matches!(first_arg, "polish" | "polish-eval" | "vad" | "clipboard") {
                 eprintln!(
                     "{}",
                     format_cli_error(
@@ -248,6 +252,13 @@ pub fn maybe_run_from_env_with_context(
     let Some(command) = cli.command else {
         return Ok(false);
     };
+    if let CliCommand::Clipboard(args) = &command {
+        if let Err(error) = crate::writing::clipboard_transaction::cli::run(args) {
+            eprintln!("{}", format_cli_error(error, args.wants_json()));
+            std::process::exit(1);
+        }
+        return Ok(true);
+    }
     if let CliCommand::Vad(args) = &command {
         if let Err(error) = crate::audio::vad_cli::run(args) {
             eprintln!("{}", format_cli_error(error, args.wants_json()));
@@ -293,6 +304,7 @@ pub fn maybe_run_from_env_with_context(
                     unreachable!("headless hotkey route returned before setup")
                 }
                 CliCommand::Vad(_) => unreachable!("VAD runs before desktop initialization"),
+                CliCommand::Clipboard(_) => unreachable!("clipboard verification runs before setup"),
                 CliCommand::Polish(args) => crate::ai::polish_cli::run(&app_handle, args).await?,
                 CliCommand::PolishEval(args) => {
                     crate::ai::polish_eval::run_live(&app_handle, args).await?

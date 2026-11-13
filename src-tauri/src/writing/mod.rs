@@ -1,4 +1,5 @@
 mod app_category;
+pub(crate) mod clipboard_transaction;
 mod format;
 mod library_rules;
 #[cfg(test)]
