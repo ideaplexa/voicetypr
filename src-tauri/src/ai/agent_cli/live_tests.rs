@@ -16,7 +16,6 @@ async fn real_configured_agent_cli_round_trip() {
         reasoning_level: Some("low".to_string()),
         fast_mode: false,
         input_text: "reply okay".to_string(),
-        dictionary: None,
         reference: None,
         needs_output_language_transform: false,
         prompt: "Return exactly OK. Do not use tools.".to_string(),
@@ -43,7 +42,6 @@ async fn real_claude_code_cold_spawn_round_trip() {
         reasoning_level: Some("low".to_string()),
         fast_mode: false,
         input_text: "uhh so basically like um lets fix the bug".to_string(),
-        dictionary: None,
         reference: None,
         needs_output_language_transform: false,
         prompt:
@@ -71,7 +69,6 @@ async fn real_pi_cold_spawn_round_trip() {
         reasoning_level: Some("off".to_string()),
         fast_mode: false,
         input_text: "uhh so basically like um lets fix the bug".to_string(),
-        dictionary: None,
         reference: None,
         needs_output_language_transform: false,
         prompt:
@@ -98,7 +95,6 @@ async fn real_omp_cold_spawn_round_trip() {
         reasoning_level: Some("off".to_string()),
         fast_mode: false,
         input_text: "hello; echo $HOME $(whoami)".to_string(),
-        dictionary: None,
         reference: None,
         needs_output_language_transform: false,
         prompt:

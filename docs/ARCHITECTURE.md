@@ -140,6 +140,10 @@ budget, ≤50 ms per AX IPC, and target revalidation before a provider request.
 and dictionary terms. It never enters `WritingResult`, ContextHint, History or
 telemetry. Custom/local endpoints use the stricter 256/256-character budget;
 cloud/agent providers use 1,000/1,000, with encoded-byte caps in both cases.
+Without nearby text, provider prompts and user messages retain their existing
+format unchanged, including the Known terms prompt block. Only requests with a
+reference append trusted reference-handling guidance and send JSON user data
+with separate `transcript` and `reference` fields.
 Windows reports `unsupported`; insertion-boundary behavior is unchanged.
 `voicetypr context capture --dry-run --json` exposes only status/timing/counts
 unless `--include-text` explicitly requests private stdout text.

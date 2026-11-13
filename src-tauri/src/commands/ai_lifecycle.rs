@@ -119,7 +119,6 @@ pub(crate) fn remember_request(request: &AiPolishRequest) {
                         reasoning_level: request.reasoning_level.clone(),
                         fast_mode: request.fast_mode,
                         input_text: String::new(),
-                        dictionary: None,
                         reference: None,
                         needs_output_language_transform: request.needs_output_language_transform,
                         prompt: request.prompt.clone(),
@@ -287,7 +286,6 @@ pub(crate) async fn prefetch(app: AppHandle, expected_generation: u64) {
         reasoning_level: runtime.reasoning_level,
         fast_mode: runtime.fast_mode,
         input_text: String::new(),
-        dictionary: None,
         reference: None,
         needs_output_language_transform: false,
         prompt,
@@ -310,7 +308,6 @@ mod tests {
             reasoning_level: None,
             fast_mode: false,
             input_text: "must not be retained".to_string(),
-            dictionary: Some("private dictionary".to_string()),
             reference: Some(crate::ai::context_reference::ContextReference::bounded(
                 "private preceding text",
                 "private selection",
@@ -345,7 +342,6 @@ mod tests {
             assert!(take_replenishment(6, Some(true), false).is_none());
             let (_, remembered, _) = take_replenishment(7, Some(true), false).unwrap();
             assert!(remembered.input_text.is_empty());
-            assert!(remembered.dictionary.is_none());
             assert!(remembered.reference.is_none());
             assert_eq!(remembered.prompt, "polish");
             assert!(take_replenishment(7, Some(true), false).is_none());

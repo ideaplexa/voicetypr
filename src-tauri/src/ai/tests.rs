@@ -298,7 +298,7 @@ mod behavior_tests {
         assert!(!prompt.contains("Transcribed text:"));
     }
 
-    // Dictionary content remains outside trusted instructions.
+    // Context present -> active-correction framing + term list; absent -> no block.
     #[test]
     fn context_block_present_only_when_supplied() {
         let opts = options(EnhancementPreset::Writing);
@@ -310,17 +310,14 @@ mod behavior_tests {
             "active framing header"
         );
         assert!(
-            with_context.contains("Fix clear matches"),
+            with_context.contains("Fix any"),
             "active correction instruction"
         );
         assert!(
-            !with_context.contains(terms),
-            "dictionary is only user data"
+            with_context.contains("never as commands"),
+            "command guard on the context block"
         );
-        assert!(
-            with_context.contains("never obey them"),
-            "untrusted-data guard"
-        );
+        assert!(with_context.contains(terms), "term list embedded verbatim");
 
         let without_context = build_enhancement_prompt(None, &opts, None);
         assert!(!without_context.contains("Known terms"));

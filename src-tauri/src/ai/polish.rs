@@ -70,24 +70,24 @@ pub(crate) fn assemble_prompt(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_prompt(
     runtime: &PolishRuntime,
     text: &str,
     prompt: String,
-    dictionary: Option<&str>,
     reference: Option<ContextReference>,
     timings: &mut PolishTimings,
     needs_output_language_transform: bool,
 ) -> Result<AiPolishResult, AiPolishError> {
-    let dictionary = dictionary.map(str::to_owned);
+    let mut prompt = prompt;
+    if reference.is_some() {
+        prompt.push_str(super::context_reference::CONTEXT_REFERENCE_INSTRUCTIONS);
+    }
     let remembered = AiPolishRequest {
         provider_id: runtime.provider.clone(),
         model_id: runtime.model.clone(),
         reasoning_level: runtime.reasoning_level.clone(),
         fast_mode: runtime.fast_mode,
         input_text: String::new(),
-        dictionary: None,
         reference: None,
         needs_output_language_transform,
         prompt: prompt.clone(),
@@ -102,7 +102,6 @@ pub(crate) async fn execute_prompt(
                 reasoning_level: runtime.reasoning_level.clone(),
                 fast_mode: runtime.fast_mode,
                 input_text: text.to_string(),
-                dictionary,
                 reference,
                 needs_output_language_transform,
                 prompt,
@@ -175,7 +174,6 @@ pub(crate) async fn measure(
             runtime,
             text,
             prompt,
-            context.filter(|_| !keep_words),
             reference,
             &mut timings,
             false,
