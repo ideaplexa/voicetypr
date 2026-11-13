@@ -2,6 +2,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::writing::ContextHint;
 
+/// Curated AI assistant and agent app tokens. Checked first: text dictated
+/// here is a prompt, not a chat message.
+const AI_APPS: &[&str] = &[
+    "chatgpt",
+    "claude",
+    "gemini",
+    "copilot",
+    "perplexity",
+    "grok",
+    "deepseek",
+    "le chat",
+    "poe",
+    "codex",
+    "opencode",
+    "conductor",
+    "windsurf",
+    "t3 chat",
+    "lm studio",
+    "ollama",
+    "msty",
+    "tern",
+    "aside",
+];
+
 /// Curated Chat substrings.
 const CHAT: &[&str] = &[
     "slack", "discord", "telegram", "whatsapp", "messages", "signal", "teams",
@@ -69,6 +93,7 @@ const BROWSER: &[&str] = &["safari", "chrome", "firefox", "arc", "edge", "brave"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppCategory {
+    AiApps,
     Chat,
     Email,
     Docs,
@@ -83,6 +108,7 @@ pub enum AppCategory {
 impl AppCategory {
     pub const fn analytics_label(self) -> &'static str {
         match self {
+            Self::AiApps => "ai_apps",
             Self::Chat => "chat",
             Self::Email => "email",
             Self::Docs => "docs",
@@ -146,6 +172,9 @@ fn token_occurs_whole_word(name: &str, token: &str) -> bool {
 /// Categories are checked in priority order: specific behavioral categories
 /// first, neutral `Browser` last. Returns `None` when nothing matches.
 fn classify_name(name: &str) -> Option<AppCategory> {
+    if matches_any(name, AI_APPS) {
+        return Some(AppCategory::AiApps);
+    }
     if matches_any(name, CHAT) {
         return Some(AppCategory::Chat);
     }
@@ -215,6 +244,7 @@ pub fn classify(hint: &ContextHint) -> AppCategory {
 /// [`AppCategory::Other`]) so no nudge is added.
 pub fn category_prompt_hint(category: AppCategory) -> Option<&'static str> {
     match category {
+        AppCategory::AiApps => Some("This is a prompt for an AI assistant. Keep every instruction, constraint and detail the speaker gave; do not answer it, summarize it or shorten it. Keep file names, identifiers, commands and product names exactly as spoken. Use plain sentences and start a new paragraph when the topic changes."),
         AppCategory::Chat => Some("Keep it casual and conversational. For a short single sentence, omit the trailing period. Preserve emoji and @mentions."),
         AppCategory::Email => Some("Structure as clear prose with proper punctuation. Keep it professional but natural."),
         AppCategory::Docs => Some("Write well-structured prose with full punctuation. Add paragraph breaks where the speaker paused."),
@@ -230,6 +260,7 @@ pub fn category_prompt_hint(category: AppCategory) -> Option<&'static str> {
 /// Human-readable label for a category (e.g. for the history badge).
 pub fn category_label(category: AppCategory) -> &'static str {
     match category {
+        AppCategory::AiApps => "AI apps",
         AppCategory::Chat => "Chat",
         AppCategory::Email => "Email",
         AppCategory::Docs => "Docs",
@@ -291,6 +322,20 @@ mod tests {
             )),
             AppCategory::Code
         );
+    }
+
+    #[test]
+    fn classify_maps_ai_assistants_and_agents() {
+        assert_eq!(classify(&hint(Some("ChatGPT"), None)), AppCategory::AiApps);
+        assert_eq!(classify(&hint(Some("Claude"), None)), AppCategory::AiApps);
+        assert_eq!(classify(&hint(Some("Grok Bot"), None)), AppCategory::AiApps);
+        assert_eq!(
+            classify(&hint(None, Some("/Applications/Tern.app"))),
+            AppCategory::AiApps
+        );
+        // Whole-word only: "Lantern" and "Poetry" are not AI apps.
+        assert_eq!(classify(&hint(Some("Lantern"), None)), AppCategory::Other);
+        assert_eq!(classify(&hint(Some("Poetry"), None)), AppCategory::Other);
     }
 
     #[test]
