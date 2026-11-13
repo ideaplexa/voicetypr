@@ -43,6 +43,7 @@ pub(crate) use hot_spare::{hot_spare_generation, invalidate_hot_spare, warm_hot_
 pub use invocation::AgentCliRuntime;
 
 mod catalog_refresh;
+mod early_result;
 use catalog_refresh::{
     apply_claude_effort_env, curated_claude_models, parse_omp_default_model,
     parse_pi_default_model, validate_discovered_selection,
@@ -685,6 +686,9 @@ struct ProcessCapture {
     /// Per-stream capture ceiling this run was drained with.
     max_capture_bytes: usize,
     stderr: Vec<u8>,
+    /// stdout held a complete result, so the child was stopped without
+    /// waiting for its own shutdown; `status` then reflects that kill.
+    result_before_exit: bool,
 }
 
 impl ProcessCapture {
@@ -714,10 +718,22 @@ enum ProcessFailure {
 /// Run a configured command from a unique temporary cwd. The `TempDir` stays
 /// alive until the child has been reaped and both drain tasks have completed.
 async fn run_isolated_command(
+    command: Command,
+    stdin_bytes: Option<&[u8]>,
+    timeout: Duration,
+    max_capture_bytes: usize,
+) -> Result<ProcessCapture, ProcessFailure> {
+    run_isolated_command_until(command, stdin_bytes, timeout, max_capture_bytes, None).await
+}
+
+/// As [`run_isolated_command`], but when `stdout_complete` accepts the
+/// captured stdout the child is stopped at once instead of being awaited.
+async fn run_isolated_command_until(
     mut command: Command,
     stdin_bytes: Option<&[u8]>,
     timeout: Duration,
     max_capture_bytes: usize,
+    stdout_complete: Option<fn(&[u8]) -> bool>,
 ) -> Result<ProcessCapture, ProcessFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
     let temp_dir = TempDir::new().map_err(ProcessFailure::Io)?;
@@ -750,7 +766,16 @@ async fn run_isolated_command(
             )));
         }
     };
-    let mut stdout_task = Some(tokio::spawn(drain_bounded(stdout, max_capture_bytes)));
+    let result_ready = std::sync::Arc::new(tokio::sync::Notify::new());
+    let mut stdout_task = Some(match stdout_complete {
+        Some(complete) => tokio::spawn(early_result::drain_bounded_signalling(
+            stdout,
+            max_capture_bytes,
+            complete,
+            result_ready.clone(),
+        )),
+        None => tokio::spawn(drain_bounded(stdout, max_capture_bytes)),
+    });
     let mut stderr_task = Some(tokio::spawn(drain_bounded(stderr, max_capture_bytes)));
 
     if let Some(input) = stdin_bytes {
@@ -781,6 +806,17 @@ async fn run_isolated_command(
         drop(stdin);
     }
 
+    let result_before_exit = tokio::select! {
+        biased;
+        _ = child.wait() => false,
+        _ = result_ready.notified() => true,
+        _ = tokio::time::sleep_until(deadline) => false,
+    };
+    if result_before_exit {
+        // The result is already complete; killing the group closes the pipes
+        // so both drains finish. The exit status no longer says anything.
+        let _ = child.start_kill();
+    }
     let status = match tokio::time::timeout_at(deadline, child.wait()).await {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => {
@@ -860,6 +896,7 @@ async fn run_isolated_command(
         stdout_truncated,
         max_capture_bytes,
         stderr,
+        result_before_exit,
     })
 }
 

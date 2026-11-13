@@ -184,16 +184,17 @@ pub(super) async fn cold_spawn_and_collect(
     #[cfg(test)]
     assert_no_canaries(&command);
 
-    let capture = run_isolated_command(
+    let capture = run_isolated_command_until(
         command,
         (input_mode == InputMode::Stdin).then_some(input_text.as_bytes()),
         cold_spawn_timeout(spec.provider_id),
         MAX_CAPTURE_BYTES,
+        early_result::complete_for(output),
     )
     .await
     .map_err(map_process_failure)?;
 
-    if !capture.status.success() {
+    if !capture.result_before_exit && !capture.status.success() {
         let detail = extract_process_error(output, &capture.stdout, &capture.stderr);
         log::warn!(
             "agent-cli polish exited non-zero ({}); returning bounded CLI error",
