@@ -211,7 +211,7 @@ cursor (beta.9 adds it) and knows nothing about the user's tone.
 | # | Work | Proof of done |
 |---|---|---|
 | 3.1 | **Context:** text before and after the cursor, selected text, the kind of field, the app, vocabulary. Collected with permission, sent only to the Polish provider the user chose, never logged | Hard-word accuracy and accepted-without-edit go up on the set |
-| 3.2 | **Destination shapes:** chat message, email, document, code comment, commit message, terminal command, prompt for an AI agent. Each has rules for length, structure and what must stay literal. Add an "AI assistant or agent" app category first: today ChatGPT, Claude and agent apps classify as Other and get no hint, and an agent running in a terminal gets the "literal command line" hint, which is wrong for a prompt (`writing/app_category.rs`). All 654 clips in the founder set are this destination | Per-destination cases in the set pass |
+| 3.2 | **Destination shapes:** chat message, email, document, code comment, commit message, terminal command, prompt for an AI agent. Each has rules for length, structure and what must stay literal. Add an "AI apps" category first (founder's name for it, 2026-11-13): today ChatGPT, Claude and agent apps classify as Other and get no hint, and an agent running in a terminal gets the "literal command line" hint, which is wrong for a prompt (`writing/app_category.rs`). All 654 clips in the founder set are this destination | Per-destination cases in the set pass |
 | 3.3 | **Tone:** learned per app from what the user keeps and what they fix after insertion; stored locally; visible and resettable. "Keep my words" stays as the opt-out | The same sentence comes out in the user's register in two different apps |
 | 3.4 | **Guards:** never change meaning, never answer; skip Polish when the text is already clean; one key swaps back to the raw transcript | Zero meaning-change errors on the set |
 | 3.5 | **Vocabulary engine:** terms with spoken aliases and scope (global, app, project); short relevance-ranked lists per dictation; recognition-time biasing per engine; learn a fix when the user retypes a word, with undo | Hard-word accuracy per engine before and after |
@@ -387,20 +387,21 @@ Goal: Core users get good cleanup with no key and no network. Plan
 ## Decisions needed from the founder
 
 1. Discord invite URL for Report a problem and the beta community.
-2. Trial length (3 days today), and how many dictations are allowed before
-   the trial starts.
+2. Decided 2026-11-13: the trial is 7 days and starts on a click. Still open:
+   how many dictations are allowed before the trial starts.
 3. Starter cloud credit per trial (minutes or dollars).
-4. OK to work in `voicetypr-web` (backend cleanup, accounts, trial), and how
-   it is deployed today: the audit could not tell which deployment answers
-   `api.voicetypr.com`.
+4. Decided 2026-11-13: work in `voicetypr-web` is approved, on worktrees with
+   small mergeable branches and no deploys. Still to find out: which
+   deployment answers `api.voicetypr.com`.
 5. Plus: device limit and yearly price ($79 or $90).
 6. Core price once mobile exists ($59–69 for 2 devices).
 7. Opt-in recording donation (Phase 1.5).
 8. Base model for Phase 8: plan 084 chose a small Liquid model; confirm, or
    let the Phase 1 scoreboard pick among models of 1B or under.
-9. OK to send the founder dictation set to a cloud engine and a model to
-   draft its labels (Phase 1.1), and people to record Bangla and mixed
-   Bangla–English.
+9. Decided 2026-11-13: the founder dictation set is labelled locally only
+   (Parakeet V2 text from history against Whisper Large v3 Turbo; the founder
+   corrects the clips where they disagree). Still open: people to record
+   Bangla and mixed Bangla–English.
 10. Decided 2026-11-13: branches are published only once the fixes are done;
     until then everything stays local.
 
