@@ -21,6 +21,7 @@ real-speech pass before stable. Eight unchecked checks block stable:
 - [ ] **087-S3** Packaged candidate: unplug the mic, retry a kept recording, and confirm the mic blocker remains visible and retry works.
 - [ ] **087-S4** Real Windows: exercise Whisper full audio context and Island fixes with real speech.
 - [ ] **087-S5** Real Mac: characterize the stable CLI Metal teardown issue and verify correct output and clean exit on the relevant candidate (plan 083 §13).
+  - Evidence 2026-11-14, M4 Pro, macOS 27.2, Whisper Large v3 Turbo on Metal, real speech clips under 20 s: debug CLI of `release/2.1.0-beta.9` at `21f4c0bf` exited 0 with text on 25 of 25 runs; the packaged 2.1.0-beta.6 CLI exited 0 on 10 of 10 with no `GGML_ASSERT`. Not reproduced on stable 2.0.x (not installed here) and not run on a packaged beta.9, so this stays unchecked.
 - [ ] **087-S6** Packaged candidate: exercise Island hover and interactions and compare compositor frame timing on real hardware.
 - [ ] **087-S7** On a clean Mac, verify that the release DMG has a valid notarization staple and passes Gatekeeper open assessment, and that the app remains valid.
 - [ ] **087-S8** Exercise Soniox v6 realtime and async with consented real speech and verify header authentication without exposing the key.
