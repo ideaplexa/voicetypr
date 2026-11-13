@@ -11,6 +11,45 @@ The integration branch is `release/2.1.0-beta.9`; it is not a published build.
 Old candidate names below describe historical checks, not the current release.
 `OBSOLETE` rows preserve historical instructions and are not pending checks.
 
+## Local candidate 2.1.0-beta.9 (2026-11-14)
+
+Built on the founder's Mac from `release/2.1.0-beta.9` at `45daf347`, Apple
+Silicon only, signed with the Ideaplexa Developer ID, **not notarized, not
+published**. Location (outside the repo):
+`oss/voicetypr-candidates/2.1.0-beta.9-45daf347/Voicetypr.app`. A copy of the
+beta.6 app data without models is next to it in
+`app-data-backup-2026-11-14-beta6/`.
+
+Run through the packaged binary's CLI on that Mac (M4 Pro, macOS 27.2). The app
+window was never opened and nothing was dictated into a microphone:
+
+| Check | Result |
+|---|---|
+| Signature | `codesign --verify --deep --strict` passes; same team and identifier as the installed app |
+| Whisper Large v3 Turbo, 25 real clips under 20 s | 25 of 25 exit 0 with text, no `GGML_ASSERT` |
+| Parakeet V2, real clips | exit 0 with text |
+| Parakeet V2 live preview (`stream-bench`, 13 s public clip) | first words at 0.97 s, final text correct at 13.4 s |
+| Soniox `stt-async-v6`, one public LibriSpeech clip | exit 0, correct text in 4 s, nothing key-like on stderr |
+| Polish through Claude Code, 3 runs of one invented sentence | all polished correctly in 1.7 to 2.1 s |
+| `clipboard verify` | "restored"; clipboard text unchanged afterwards |
+| `context capture --dry-run`, `vad analyze --shadow`, `status`, `models` | all answer |
+
+### Mac script for the founder (about 30 minutes)
+
+Quit Voicetypr, drag the candidate app over the one in Applications, open it.
+
+1. Dictate five times in a row into Notes. The pill says "Opening microphone…", then listens; Stop is always visible; Cancel appears only on hover and discards the take. (087-S6, first run and pill)
+2. Quit, reopen, and start dictating the moment the app is up. No stale card, no stuck pill. (087-S1)
+3. Say nothing for a take so it is kept. Unplug or switch off the microphone, press Retry in Home, plug it back, retry again. The mic warning stays visible and the retry works. (087-S3)
+4. With the kept take still in Home: quit, reopen, confirm it is still there, then Delete audio. ("Only failed" saving)
+5. Turn Polish on with Claude Code. Dictate into Notes, Slack and a ChatGPT or Claude window. Text is cleaned, not answered. Repeat with "Use nearby text" off.
+6. Copy an image, dictate into a text field, then paste: the image is still on the clipboard.
+7. Select Soniox with Real-time words on and dictate. (087-S8, realtime half)
+8. Hover and click around the pill while music plays or a build runs; note any stutter. (087-S6)
+
+Not possible on this Mac: a clean first run (needs a second user account or
+Mac), 087-S7 (needs the notarized release DMG), 087-S2 and 087-S4 (Windows).
+
 ## Blocks 2.1 stable
 
 Plan 087 §5 requires the packaged plan 083 §13 follow-ups and a Windows
@@ -21,10 +60,11 @@ real-speech pass before stable. Eight unchecked checks block stable:
 - [ ] **087-S3** Packaged candidate: unplug the mic, retry a kept recording, and confirm the mic blocker remains visible and retry works.
 - [ ] **087-S4** Real Windows: exercise Whisper full audio context and Island fixes with real speech.
 - [ ] **087-S5** Real Mac: characterize the stable CLI Metal teardown issue and verify correct output and clean exit on the relevant candidate (plan 083 §13).
-  - Evidence 2026-11-14, M4 Pro, macOS 27.2, Whisper Large v3 Turbo on Metal, real speech clips under 20 s: debug CLI of `release/2.1.0-beta.9` at `21f4c0bf` exited 0 with text on 25 of 25 runs; the packaged 2.1.0-beta.6 CLI exited 0 on 10 of 10 with no `GGML_ASSERT`. Not reproduced on stable 2.0.x (not installed here) and not run on a packaged beta.9, so this stays unchecked.
+  - Evidence 2026-11-14, M4 Pro, macOS 27.2, Whisper Large v3 Turbo on Metal, real speech clips under 20 s: the packaged local candidate 2.1.0-beta.9 (`45daf347`) exited 0 with text on 25 of 25 runs, as did the debug CLI at `21f4c0bf`; the packaged 2.1.0-beta.6 CLI exited 0 on 10 of 10. No `GGML_ASSERT` in any run. The original failure on stable 2.0.x was not reproduced (not installed here), so its cause is not characterized and this stays unchecked.
 - [ ] **087-S6** Packaged candidate: exercise Island hover and interactions and compare compositor frame timing on real hardware.
 - [ ] **087-S7** On a clean Mac, verify that the release DMG has a valid notarization staple and passes Gatekeeper open assessment, and that the app remains valid.
 - [ ] **087-S8** Exercise Soniox v6 realtime and async with consented real speech and verify header authentication without exposing the key.
+  - Evidence 2026-11-14: async half run on the packaged local candidate with one public LibriSpeech clip (see the table above). Realtime and the header check were not run.
 
 ## Later — historical and other pending checks
 
