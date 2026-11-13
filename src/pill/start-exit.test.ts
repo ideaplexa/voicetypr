@@ -35,6 +35,7 @@ it('clears the outgoing freeze on re-entry even if the exit fade has not finishe
   h.emit('recording-state-changed',{state:'idle',generation:1,error:null});
   h.emit('recording-state-changed',{state:'starting',generation:2,error:null});
   h.context({generation:2,show_start_card:true});
+  h.emit('recording-state-changed',{state:'recording',generation:2,error:null});
   expect(start().style.width).toBe(''); expect(start().style.height).toBe('');
   expect(width(start())).toBe(298);
 });
@@ -50,6 +51,8 @@ it('measures incoming start height at its intended width before laying out the s
     return this.style.width==='298px'?83:110;
   });
   h.context({generation:1,show_start_card:true});
+  expect(measured).toEqual([]); // Details cannot replace microphone-opening feedback.
+  h.emit('recording-state-changed',{state:'recording',generation:1,error:null});
   expect(measured.length).toBeGreaterThan(0); expect(new Set(measured)).toEqual(new Set(['298px']));
   expect(h.get('.pill-content').style.height).toBe('83px');
   expect(start().style.width).toBe(''); expect(start().style.height).toBe('');

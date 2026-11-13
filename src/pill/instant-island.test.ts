@@ -11,15 +11,39 @@ const recording = () => h.emit('recording-state-changed', { state: 'recording', 
 const timer = () => h.get('.pill-timer').textContent;
 
 describe('instant island on keypress', () => {
-  it('shows the starting look at Starting: listening layout, clock at 0:00, never a live take', async () => {
+  it('opens the capsule immediately, then labels a pending mic without showing a clock or waveform', async () => {
     await mount();
     expect(surface().hidden).toBe(true);
     starting();
     expect(surface().hidden).toBe(false);
     expect(rootData().state).toBe('listening'); expect(rootData().starting).toBe('true');
+    expect(h.get('.opening-label').hidden).toBe(true);
+    expect(h.get('.pill-timer').hidden).toBe(true);
+    expect(h.get('.glyph').hidden).toBe(true);
+    await h.settle(150);
+    expect(h.get('.opening-label').hidden).toBe(false);
+    expect(h.get('.pill-announcement').textContent).toBe('Opening microphone…');
     await h.settle(3000);
     expect(timer()).toBe('0:00');
     expect(h.get('[data-layer="row"]').getAttribute('aria-hidden')).toBe('false');
+  });
+  it('skips the opening label for a fast capture and announces real readiness', async () => {
+    await mount();
+    starting(); await h.settle(100); recording();
+    expect(h.get('.pill-announcement').textContent).toBe('Listening');
+    expect(h.get('.pill-timer').hidden).toBe(false);
+    expect(h.get('.glyph').hidden).toBe(false);
+    await h.settle(200);
+    expect(h.get('.opening-label').hidden).toBe(true);
+    expect(h.get('.pill-announcement').textContent).toBe('Listening');
+  });
+  it('does not announce opening after a pending capture was cancelled', async () => {
+    await mount();
+    starting(); await h.settle(50);
+    h.emit('recording-state-changed', { state: 'idle', error: null });
+    await h.settle(200);
+    expect(h.get('.opening-label').hidden).toBe(true);
+    expect(h.get('.pill-announcement').textContent).not.toBe('Opening microphone…');
   });
   it('shows no recording look before Recording: levels are ignored and the bars stay empty', async () => {
     await mount();

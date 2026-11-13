@@ -28,6 +28,8 @@ import { applyPillGeometry, type PillGeometry } from '@/pill-geometry';
 
 /** Same gap as the native and in-app toggle throttles: one double-click is one toggle. */
 const TOGGLE_DEBOUNCE_MS = 300;
+// Delay only the opening copy, never readiness: quick captures skip a label flash.
+const OPENING_LABEL_DELAY_MS = 150;
 
 export interface RendererDeps {
   staticPreview?: boolean;
@@ -65,6 +67,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let destroyed = false, frame: number | undefined, last = 0, hovering = false, top = false;
   let finishing = false, finishingTimer: number | undefined;
   let copiedTimer: number | undefined, pickTimer: number | undefined;
+  let openingTimer: number | undefined, openingLabel = false;
   let lastState = machine.state, startTimer: number | undefined, feedbackTimer: number | undefined, hoverTimer: number | undefined;
   let slowSince = 0;
   let perf: PerfProbe | undefined; // debug-only measurement (VOICETYPR_PERF=1); undefined otherwise
@@ -82,7 +85,8 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   // The Pasted card's own outline is its 2.4 s countdown (it pauses while hovered).
   const pastedClock = new OutlineClock('sage'); dom.get('.done').append(pastedClock.el);
   const rowLayers = ['row', 'work', 'note'].map(name => layers.entries[name as 'row' | 'work' | 'note'].el);
-  const timers = () => { for (const id of [startTimer, feedbackTimer, hoverTimer, copiedTimer, finishingTimer, pickTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hoverTimer = copiedTimer = finishingTimer = pickTimer = undefined; finishing = false; };
+  const clearOpening = () => { if (openingTimer !== undefined) deps.clearTimeout(openingTimer); openingTimer = undefined; openingLabel = false; };
+  const timers = () => { clearOpening(); for (const id of [startTimer, feedbackTimer, hoverTimer, copiedTimer, finishingTimer, pickTimer]) if (id !== undefined) deps.clearTimeout(id); startTimer = feedbackTimer = hoverTimer = copiedTimer = finishingTimer = pickTimer = undefined; finishing = false; };
   const text = (selector: string, value: string) => { const el = dom.get<HTMLElement>(selector); if (el.textContent !== value) el.textContent = value; if (el.matches('.done-label,.note-text')) el.title = value; };
   const inlineWidth = (selector: string) => {
     const range = document.createRange(); range.selectNodeContents(dom.get(selector));
@@ -110,14 +114,14 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   };
   const wake = () => { actionRegionsDirty = true; if (!deps.staticPreview && !destroyed && frame === undefined) { last = performance.now(); frame = requestAnimationFrame(tick); } };
   const syncTime = (now: number) => {
-    if (machine.recording) waveSeconds = Math.max(0, (now - machine.startedAt) / 1000);
-    // While starting the clock waits at 0:00; the bars idle on the same time base.
+    if (machine.recording && !machine.pending) waveSeconds = Math.max(0, (now - machine.startedAt) / 1000);
+    // Capture readiness, not keypress, starts the clock and the audio time base.
     const seconds = machine.pending ? 0 : Math.floor(machine.recording ? waveSeconds : machine.frozenSeconds);
     if (seconds === displayedSeconds) return; displayedSeconds = seconds;
     const t = elapsed(seconds); timerText = t;
     for (const el of timerElements) if (el.textContent !== t) el.textContent = t;
     // A longer time (10:00) narrows the wave's zone so the gap to the timer stays the same.
-    if (machine.recording && machine.state !== 'start') { const w = waveZone(machine.width, t).width; if (GW.to !== w) { GW.to = w; if (reduced) GW.snap(); } }
+    if (machine.recording && !machine.pending && machine.state !== 'start') { const w = waveZone(machine.width - 72, t).width; if (GW.to !== w) { GW.to = w; if (reduced) GW.snap(); } }
   };
   // ---- Geometry (plan 082 F6) ----
   // `layout()` runs on state change only: it sizes the fixed target box that holds the content and places
@@ -162,7 +166,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.canvas.style.width = '260px'; dom.canvas.style.height = '24px';
     pastedClock.size(targetPose.w, targetPose.h, R.to);
     rowEl.style.width = `${Math.max(0, W.to - 2)}px`; rowEl.style.paddingRight = `${12 + HC.to}px`;
-    ctlEl.style.left = `${Math.max(0, W.to - HC.to - 14)}px`; ctlEl.inert = HC.to === 0;
+    ctlEl.style.left = `${Math.max(0, W.to - 74)}px`; ctlEl.style.top = `${iconCentreY(targetPose) - 16}px`; ctlEl.inert = HC.to === 0;
     const edge = rowEdge(targetPose);
     for (const el of rowLayers) { el.style.left = `${targetPose.ix - 21}px`; el.style[top ? 'top' : 'bottom'] = `${edge}px`; el.style[top ? 'bottom' : 'top'] = ''; }
     if (panel) {
@@ -193,7 +197,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     put(dom.icon, 'scale', String(size / iconSide)); dom.icon.style.opacity = String(clamp(size / 18));
     dom.icon.hidden = size < .1 || boxPanel;
     nudge(dom.canvas, nowPose.gx - targetPose.gx, glyphTop(nowPose) - glyphTop(targetPose));
-    ctlEl.style.opacity = String(clamp(HC.x / 62));
+    nudge(ctlEl, 0, iconCentreY(nowPose) - iconCentreY(targetPose));
   };
   function tick(now: number) {
     frame = undefined;
@@ -211,7 +215,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     const fading = crossfade.step(dt);
     targetsMoving = fading || targetsMoving; moving = fading || moving;
     if (!machine.recording && layers.entries.words.alpha === 0) words.clear();
-    if (machine.recording) { syncTime(now); glyph.wave.advance(waveSeconds, dt); }
+    if (machine.recording && !machine.pending) { syncTime(now); glyph.wave.advance(waveSeconds, dt); }
     moving = glyph.step(dt, reduced) || moving;
     const size = Math.max(0, IS.x), badgeY = Math.max(IY.x - size / 2 - 2, 8);
     moving = badge.step(dt, IX.x + size / 2 - 4, top ? badgeY - 6 : H.x - 2 - badgeY - 6, reduced, badgeFromX, badgeFromY) || moving;
@@ -251,9 +255,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.root.dataset.visible = String(!dom.surface.hidden);
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
     dom.get<HTMLElement>('.core').classList.toggle('bad', !machine.context.mic.ok);
-    const ctl = hovering && state === 'listening' && !stopPending;
-    HC.to = ctl ? 62 : 0;
-    W.to = machine.width + (ctl ? 62 : 0);
+    const ctl = machine.recording && !machine.pending && !pick;
+    HC.to = ctl ? 72 : 0; HC.snap();
+    ctlEl.hidden = !ctl;
+    dom.get<HTMLButtonElement>('.cancel').style.opacity = hovering ? '' : '0';
+    dom.get<HTMLElement>('.opening-label').hidden = !machine.pending || !openingLabel;
+    timerEl.hidden = machine.pending;
+    W.to = machine.width;
     const showDoneActions = state === 'pasted' && polished && hovering && !!deps.actions.original;
     H.to = showDoneActions ? 70 : machine.height;
     dom.get<HTMLElement>('.done-actions').hidden = !showDoneActions;
@@ -261,13 +269,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     IS.to = rest ? 0 : state === 'start' ? 28 : 18;
     IX.to = rest ? 5 : state === 'start' ? 28 : 21;
     IY.to = rest ? 5 : 16;
-    const zone = waveZone(machine.width, timerText);
+    const zone = waveZone(machine.width - (ctl ? 72 : 0), timerText);
     GX.to = state === 'start' ? 52 : machine.recording ? zone.x : ZONE.glyphMin; GY.to = 4;
-    GW.to = machine.recording ? state === 'start' ? machine.width - 105 : zone.width : 22;
+    GW.to = machine.recording ? state === 'start' ? machine.width - 177 : zone.width : 22;
     layers.target(pick ? ['pick'] : machine.layers); glyph.target(state, true);
     badge.target(machine.context, machine.recording && state !== 'start' || machine.processing, fromStart);
     if (machine.committed || machine.tentative || layers.entries.words.alpha === 0) words.update(machine.committed, machine.tentative, reduced);
-    dom.canvas.dataset.state = state; dom.canvas.hidden = !!pick || state === 'peek';
+    dom.canvas.dataset.state = state; dom.canvas.hidden = !!pick || state === 'peek' || machine.pending;
     if (pick) dom.badge.hidden = true;
     const label = finishing && machine.processing ? 'Finishing…' : state === 'polishing' ? `Polishing${machine.context.polish.style ? ` · ${styleName(machine.context)}` : ''}` : 'Transcribing';
     if (machine.processing) layers.swapText(dom.get('.work-label'), label);
@@ -301,7 +309,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       start.style.width = `${Math.max(0,W.to - 2)}px`;
       H.to = start.scrollHeight ? start.scrollHeight + 2 : machine.height;
       start.style.width = oldWidth;
-      GW.to = Math.max(0,W.to - 105);
+      GW.to = Math.max(0,W.to - 177);
     } else if (state === 'copied' || state === 'no_permission') {
       const titleWidth = inlineWidth('.notice-title'), countWidth = inlineWidth('.notice-count');
       if (titleWidth) {
@@ -382,7 +390,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     // Context is published after capture readiness; kept-file retries synthesize Recording without it.
     if (!machine.pending && machine.context.generation > 0 && machine.context.generation === machine.takeGeneration && machine.context.mic.ok) stack.resolveMicStatus('recording',machine.takeGeneration);
   };
-  /** Keypress: Starting was published, the mic is not open yet. Show the idle listening layout at 0:00. */
+  /** Keypress opens the capsule; only Recording confirms that capture is ready. */
   const starting = (generation?: number) => {
     if (machine.recording && (generation === undefined || generation <= machine.takeGeneration)) return;
     if (generation !== undefined && !machine.observeGeneration(generation)) return;
@@ -397,6 +405,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     stack.tuck(true);
     if (!machine.arm(performance.now(), generation)) return;
     timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
+    openingTimer = deps.setTimeout(() => {
+      openingTimer = undefined;
+      if (!machine.pending) return;
+      openingLabel = true; announce('Opening microphone…'); sync();
+    }, OPENING_LABEL_DELAY_MS);
     sync();
     perf?.begin();
   };
@@ -405,7 +418,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       // Recording began. Clock and bars go live from here; a context that already arrived keeps its start card.
       if (!machine.start(performance.now(), generation)) return;
       resolveCapturedMic();
-      glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('');
+      clearOpening(); glyph.wave.reset(); waveSeconds = 0; displayedSeconds = -1; announce('Listening');
       if (machine.state === 'start') foldStart();
       sync();
       return;
@@ -423,7 +436,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     stack.tuck(true);
     if (!machine.start(performance.now(), generation)) return;
     resolveCapturedMic();
-    timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; announce('');
+    timers(); cancelPending = stopPending = false; glyph.wave.reset(); waveSeconds = 0; announce('Listening');
     if (machine.state === 'start') foldStart(); sync();
     perf?.begin();
   };
@@ -549,13 +562,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   dom.surface.onclick = e => {
     const target = e.target as HTMLElement;
     if (pick || target.closest('.chip')) return;
-    if (machine.recording) {
-      if (!target.closest('button') && !stopPending) {
-        stopPending = true; sync();
-        void deps.actions.stop().catch(() => { if (!destroyed) { stopPending = false; sync(); } });
-      }
-      return;
-    }
+    if (machine.recording) return;
     if (machine.state !== 'rest' && machine.state !== 'peek') return;
     const now = performance.now();
     if (now - entered < 120 || now - lastToggleAt < TOGGLE_DEBOUNCE_MS) return;
@@ -569,6 +576,9 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     });
   };
   const motionChanged = () => { reduced = media.matches; sync(); };
+  // Prevent webview mouse focus without changing the native non-activating panel.
+  const preventPointerFocus = (e: MouseEvent) => { if ((e.target as HTMLElement).closest('.ctl button')) e.preventDefault(); };
+  dom.surface.addEventListener('mousedown', preventPointerFocus);
   if (!deps.staticPreview) media.addEventListener('change', motionChanged);
   applyPillGeometry(dom.root, geometry); contextText(); sync();
   return {
@@ -647,6 +657,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       endTake();
       const hint=stack.stack.items.find(item=>item.key===`escape_hint:${machine.takeGeneration}`);
       stack.dropLive(); pick = undefined;
+      clearOpening();
       if (startTimer !== undefined) deps.clearTimeout(startTimer); startTimer = undefined;
       machine.work(state, performance.now());
       if(hint && (hint.expiresAt ?? 0)>performance.now()) stack.push({...hint,title:'Press Esc again to discard'},undefined,false);
