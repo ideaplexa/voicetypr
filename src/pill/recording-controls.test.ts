@@ -28,14 +28,19 @@ it('keeps Stop visible without hover and reserves the same listening width on ho
   expect(h.get<HTMLButtonElement>('.stop').disabled).toBe(true);
 });
 
-it('keeps Cancel separate and does not stop from a capsule click', async () => {
+it('keeps Cancel separate from Stop without triggering the capsule stop action', async () => {
   await ready();
-  h.get('.pill-surface').click();
-  expect(h.invoke).not.toHaveBeenCalledWith('stop_recording');
   h.emit('pill-pointer', { inside: true });
   h.get<HTMLButtonElement>('.cancel').click();
   expect(h.invoke).toHaveBeenCalledWith('cancel_recording');
   expect(h.invoke).not.toHaveBeenCalledWith('stop_recording');
+});
+
+it('preserves the existing next-capsule-click stop action during recording', async () => {
+  await ready();
+  h.get('.pill-surface').click();
+  expect(h.invoke).toHaveBeenCalledWith('stop_recording');
+  expect(h.invoke).not.toHaveBeenCalledWith('cancel_recording');
 });
 
 it('prevents mouse focus on Stop while retaining its keyboard button semantics', async () => {

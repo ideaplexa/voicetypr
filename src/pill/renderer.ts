@@ -562,7 +562,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   dom.surface.onclick = e => {
     const target = e.target as HTMLElement;
     if (pick || target.closest('.chip')) return;
-    if (machine.recording) return;
+    if (machine.recording) {
+      if (!target.closest('button') && !stopPending) {
+        stopPending = true; sync();
+        void deps.actions.stop().catch(() => { if (!destroyed) { stopPending = false; sync(); } });
+      }
+      return;
+    }
     if (machine.state !== 'rest' && machine.state !== 'peek') return;
     const now = performance.now();
     if (now - entered < 120 || now - lastToggleAt < TOGGLE_DEBOUNCE_MS) return;
