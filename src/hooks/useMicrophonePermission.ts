@@ -14,16 +14,20 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
   const { checkOnMount = true } = options || {};
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<"checking" | "granted" | "not_determined" | "denied" | "restricted">("checking");
 
   const checkPermission = useCallback(async () => {
     setIsChecking(true);
     try {
-      const result = await invoke<boolean>("check_microphone_permission");
+      const status = await invoke<"granted" | "not_determined" | "denied" | "restricted">("get_microphone_permission_status");
+      const result = status === "granted";
+      setPermissionStatus(status);
       setHasPermission(result);
       return result;
     } catch (error) {
       log.error("Failed to check microphone permission:", error);
       setHasPermission(false);
+      setPermissionStatus("denied");
       return false;
     } finally {
       setIsChecking(false);
@@ -34,6 +38,7 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
     try {
       const result = await invoke<boolean>("request_microphone_permission");
       setHasPermission(result);
+      setPermissionStatus(result ? "granted" : "denied");
       return result;
     } catch (error) {
       log.error("Failed to request microphone permission:", error);
@@ -55,11 +60,13 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
     const unlistenGranted = listen("microphone-granted", () => {
       log.info("[useMicrophonePermission] Permission granted event received");
       setHasPermission(true);
+      setPermissionStatus("granted");
     });
 
     const unlistenDenied = listen("microphone-denied", () => {
       log.info("[useMicrophonePermission] Permission denied event received");
       setHasPermission(false);
+      setPermissionStatus("denied");
     });
 
     return () => {
@@ -71,6 +78,7 @@ export function useMicrophonePermission(options?: MicrophonePermissionOptions) {
 
   return {
     hasPermission,
+    permissionStatus,
     isChecking,
     checkPermission,
     requestPermission,

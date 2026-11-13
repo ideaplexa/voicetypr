@@ -16,7 +16,7 @@ export interface OnboardingDesktopProps {
 export type Step = "welcome" | "source" | "permissions" | "readiness" | "hotkey" | "success";
 
 export type SourceType = "local" | "cloud" | "remote";
-export type PermissionStatus = "checking" | "granted" | "denied" | "error";
+export type PermissionStatus = "checking" | "granted" | "not_determined" | "denied" | "restricted" | "error";
 
 export interface PermissionState {
   status: PermissionStatus;

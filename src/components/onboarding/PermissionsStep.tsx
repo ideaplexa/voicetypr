@@ -40,11 +40,14 @@ export function PermissionsStep({
                   ? "So Voicetypr can hear you."
                   : "So your words can be typed into any app."}
               </p>
+              {type === "accessibility" && !allowed && (
+                <p className="mt-1 text-xs text-muted-foreground">Switch on Voicetypr in the list, then come back.</p>
+              )}
             </div>
             {allowed ? (
               <button
                 type="button"
-                className="flex items-center gap-[5px] rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] font-medium text-muted-foreground"
+                className="flex items-center gap-[5px] rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
                 disabled={checkingPermissions.has(type)}
                 onClick={() => void onCheck(type)}
                 aria-label={`Allowed — recheck ${type}`}
@@ -55,10 +58,13 @@ export function PermissionsStep({
             ) : (
               <Button
                 className="h-auto rounded-[10px] px-4 py-[9px] text-sm"
-                disabled={isRequestingPermission === type || checkingPermissions.has(type)}
+                disabled={permissions[type].status === "checking" || isRequestingPermission === type || checkingPermissions.has(type)}
                 onClick={() => void onRequest(type)}
               >
-                {permissions[type].status === "checking" ? "Checking…" : "Open System Settings"}
+                {permissions[type].status === "checking" ? "Checking…"
+                  : type === "accessibility" ? (permissions[type].status === "not_determined" ? "Enable Accessibility" : "Open System Settings")
+                  : permissions[type].status === "not_determined" ? "Allow microphone"
+                  : "Open System Settings"}
               </Button>
             )}
           </div>

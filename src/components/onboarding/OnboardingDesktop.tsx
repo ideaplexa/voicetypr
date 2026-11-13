@@ -13,12 +13,16 @@ import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel
 import { ReadinessRemotePanel } from "@/components/onboarding/ReadinessRemotePanel";
 import { type OnboardingDesktopProps } from "@/components/onboarding/onboardingTypes";
 import { useOnboardingDesktop } from "@/components/onboarding/useOnboardingDesktop";
+import { OfflinePreparationStatus } from "@/components/onboarding/OfflinePreparationStatus";
 
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
   const {
     currentStep,
 
     sourceType,
+    preparation,
+    sourceReady,
+    openModelChoices,
     confirmSource,
     handleBack,
     handleNext,
@@ -63,21 +67,15 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
       preparingShortcut.current = false;
       return;
     }
-    if (phase !== 3 || editingShortcut || preparingShortcut.current) return;
+    if (phase !== 3 || editingShortcut || preparingShortcut.current || !sourceReady) return;
     preparingShortcut.current = true;
     setSavingShortcut(true);
     void handleNext().finally(() => {
       setEditingShortcut(true);
       setSavingShortcut(false);
     });
-  }, [currentStep, phase, editingShortcut, handleNext]);
-  const recommendedName =
-    local.localModelNames.find((name) => local.models[name]?.recommended) ??
-    local.localModelNames[0];
-  const modelName =
-    local.currentModel && local.models[local.currentModel]?.kind === "local"
-      ? local.currentModel
-      : recommendedName;
+  }, [currentStep, phase, editingShortcut, handleNext, sourceReady]);
+  const modelName = preparation.recommended;
   const model = modelName ? local.models[modelName] : undefined;
   const modelSize = model?.size ? `${Math.round(model.size / (1024 * 1024))} MB` : null;
   const needsDownload = model && !model.downloaded;
@@ -90,9 +88,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           ? "Continue — connect another computer"
           : "Continue";
   const phaseOneNext = async () => {
-    if (currentStep === "source") {
-      if (sourceType === "local" && needsDownload && modelName) local.onDownload(modelName);
-    }
     await handleNext();
   };
   const enterTry = async () => {
@@ -125,6 +120,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                   sourceType={sourceType}
                   onConfirmSource={confirmSource}
                   modelSize={modelSize}
+                  language={preparation.language}
+                  onLanguageChange={(value) => void preparation.changeLanguage(value)}
                 />
               ) : (
                 <div className="w-full">
@@ -147,6 +144,9 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                   {currentStep === "readiness" ? "Continue" : continueLabel}
                 </Button>
               </div>
+              {(currentStep === "source" || currentStep === "welcome") && sourceType === "local" && (
+                <Button variant="ghost" onClick={openModelChoices}>Choose a different model</Button>
+              )}
             </>
           )}
           {phase === 2 && (
@@ -157,7 +157,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               <p className="text-center text-sm leading-[normal] text-muted-foreground">
                 {isMacOS
                   ? "Two permissions, then you're ready to try it."
-                  : "Choose a microphone. You'll test it in the next step."}
+                  : "Speak to check your microphone. Nothing is saved."}
               </p>
               {isMacOS && (
                 <PermissionsStep
@@ -168,14 +168,14 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                   onRequest={requestPermission}
                 />
               )}
-              <MicrophoneCheck />
+              {(!isMacOS || permissions.microphone.status === "granted") && <MicrophoneCheck />}
               <div className="flex gap-[10px]">
                 <Button variant="outline" className={actionClass} onClick={handleBack}>
                   Back
                 </Button>
                 <Button
                   className="h-auto rounded-[10px] px-4 py-[9px] border-0 text-sm leading-4"
-                  disabled={nextDisabled || savingShortcut}
+                  disabled={(isMacOS ? nextDisabled : !sourceReady) || savingShortcut}
                   onClick={() => void (isMacOS ? handleNext() : enterTry())}
                 >
                   Continue
@@ -183,8 +183,30 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               </div>
             </>
           )}
+          {sourceType === "local" && currentStep !== "welcome" && currentStep !== "source" && (
+            <OfflinePreparationStatus
+              ready={local.localReady}
+              verifying={Boolean(preparation.name && local.verifyingModels.has(preparation.name))}
+              progress={preparation.name ? local.downloadProgress[preparation.name] : undefined}
+              failed={Boolean(preparation.name && local.downloadErrors[preparation.name])}
+              onCancel={() => { if (preparation.name) local.onCancelDownload(preparation.name); }}
+              onRetry={() => { if (preparation.name) local.onDownload(preparation.name); }}
+              onChoose={openModelChoices}
+            />
+          )}
+          {preparation.warningModel && (
+            <div role="alert" className="flex flex-col items-center gap-3 text-sm">
+              <p>This model does not support your chosen language. Download it without selecting it?</p>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
+                <Button onClick={preparation.confirmDownload}>Download anyway</Button>
+              </div>
+            </div>
+          )}
           {phase === 3 && currentStep === "hotkey" && !editingShortcut && (
-            <p className="text-sm text-muted-foreground">Preparing your shortcut…</p>
+            <p role="status" className="text-sm text-muted-foreground">
+              {sourceReady ? "Preparing your shortcut…" : "Offline dictation must be ready before you can try it."}
+            </p>
           )}
           {phase === 3 && (currentStep === "success" || editingShortcut) && (
             <SuccessStep

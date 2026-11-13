@@ -2,18 +2,27 @@ import { ChoiceCard } from "@/components/settings/settings-ui";
 import type { SourceType } from "@/components/onboarding/onboardingTypes";
 import { isMacOS } from "@/lib/platform";
 import { Cloud, Laptop, Network } from "lucide-react";
+import { LanguageSelection } from "@/components/LanguageSelection";
 
 export function SourceStep({
   sourceType,
   onConfirmSource,
   modelSize,
+  language,
+  onLanguageChange,
 }: {
   sourceType: SourceType;
   onConfirmSource: (source: SourceType) => void;
   modelSize: string | null;
+  language: string;
+  onLanguageChange: (value: string) => void;
 }) {
   return (
     <div className="flex w-full flex-col gap-[10px]">
+      <div className="mb-2 flex items-center justify-center gap-3 text-sm">
+        <span>I speak</span>
+        <LanguageSelection value={language} onValueChange={onLanguageChange} />
+      </div>
       <ChoiceCard
         layout="row"
         label={isMacOS ? "On this Mac" : "On this PC"}
