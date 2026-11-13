@@ -186,6 +186,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           {sourceType === "local" && currentStep !== "welcome" && currentStep !== "source" && (
             <OfflinePreparationStatus
               ready={local.localReady}
+              hideWhenReady={phase === 3}
               verifying={Boolean(preparation.name && local.verifyingModels.has(preparation.name))}
               progress={preparation.name ? local.downloadProgress[preparation.name] : undefined}
               failed={Boolean(preparation.name && local.downloadErrors[preparation.name])}
