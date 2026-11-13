@@ -34,7 +34,10 @@ pub(crate) fn run(args: &ClipboardArgs) -> Result<(), &'static str> {
     if args.wants_json() {
         println!("{result}");
     } else {
-        println!("Clipboard verification: {}", result["outcome"].as_str().unwrap_or("failed"));
+        println!(
+            "Clipboard verification: {}",
+            result["outcome"].as_str().unwrap_or("failed")
+        );
     }
     if result["outcome"] == "unsupported" {
         return Err("Clipboard receipt verification is unsupported on this platform");

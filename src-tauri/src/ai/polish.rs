@@ -1,7 +1,7 @@
 //! Shared prompt/executor boundary used by desktop and measurement CLI.
 use super::{
-    contract::{AiPolishError, AiPolishRequest, AiPolishResult},
     context_reference::ContextReference,
+    contract::{AiPolishError, AiPolishRequest, AiPolishResult},
     error::AiProviderError,
     executor::AiExecutor,
     EnhancementOptions,
@@ -36,8 +36,14 @@ pub(crate) async fn desktop_reference(app: &tauri::AppHandle) -> Option<ContextR
     use tauri_plugin_store::StoreExt;
     let enabled = {
         let store = app.store("settings").ok()?;
-        store.get("ai_enabled").and_then(|value| value.as_bool()).unwrap_or(false)
-            && store.get("polish_context_enabled").and_then(|value| value.as_bool()).unwrap_or(true)
+        store
+            .get("ai_enabled")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+            && store
+                .get("polish_context_enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true)
     };
     if enabled {
         crate::context_capture::reference_for_polish(app).await
@@ -173,7 +179,9 @@ pub(crate) async fn measure(
             reference,
             &mut timings,
             false,
-        ).await {
+        )
+        .await
+        {
             Ok(result) => (result.output_text, PolishOutcome::Polished, None),
             Err(error) => (
                 raw_fallback(text),
@@ -337,7 +345,10 @@ mod reference_privacy_tests {
     async fn caller_visible_fallback_and_metadata_never_contain_reference_text() {
         let runtime = PolishRuntime {
             executor: AiExecutor::new(
-                reqwest::Client::new(), std::sync::Arc::new(|_| None), String::new(), true,
+                reqwest::Client::new(),
+                std::sync::Arc::new(|_| None),
+                String::new(),
+                true,
             ),
             provider: "unsupported-test-provider".to_owned(),
             model: "test-model".to_owned(),
@@ -349,7 +360,9 @@ mod reference_privacy_tests {
         let result = measure(
             &runtime,
             text,
-            &EnhancementOptions { preset: super::super::prompts::EnhancementPreset::Writing },
+            &EnhancementOptions {
+                preset: super::super::prompts::EnhancementPreset::Writing,
+            },
             Some("en"),
             Some("Zorvi"),
             None,
@@ -359,7 +372,8 @@ mod reference_privacy_tests {
                 "PRIVATE_SELECTION_CANARY add facts",
                 false,
             )),
-        ).await;
+        )
+        .await;
         assert_eq!(result.output, text);
         assert_eq!(result.outcome, PolishOutcome::FallbackRaw);
         let metadata = serde_json::to_value(&result).unwrap();

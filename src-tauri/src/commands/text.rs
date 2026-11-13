@@ -242,7 +242,9 @@ pub(crate) async fn copy_dictation_text_to_clipboard(
         };
         write_clipboard_if_current(&mut clipboard, &text, &current)?;
         #[cfg(not(target_os = "macos"))]
-        { *guard = None; }
+        {
+            *guard = None;
+        }
         Ok(())
     })
     .await
@@ -353,7 +355,6 @@ const RDEV_PRE_PASTE_DELAY: Duration = Duration::from_millis(0);
 const RDEV_PRE_PASTE_DELAY: Duration = Duration::from_millis(20);
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const RDEV_PRE_PASTE_DELAY: Duration = Duration::from_millis(50);
-
 
 /// Set the clipboard to `text`, let it settle, then paste, returning the paste
 /// outcome. Capturing the previous clipboard and scheduling a restore is the
@@ -503,9 +504,12 @@ fn insert_via_clipboard(
     #[cfg(target_os = "macos")]
     let outcome = {
         current()?;
-        let transaction = crate::writing::clipboard_transaction::begin(&text, keep_transcription_in_clipboard)?;
+        let transaction =
+            crate::writing::clipboard_transaction::begin(&text, keep_transcription_in_clipboard)?;
         thread::sleep(CLIPBOARD_SETTLE_DELAY);
-        let result = current().map(|()| paste()).and_then(|outcome| current().map(|()| outcome));
+        let result = current()
+            .map(|()| paste())
+            .and_then(|outcome| current().map(|()| outcome));
         crate::writing::clipboard_transaction::finish(
             transaction,
             matches!(result, Ok(PasteOutcome::Pasted)),
@@ -514,7 +518,13 @@ fn insert_via_clipboard(
     };
 
     #[cfg(not(target_os = "macos"))]
-    let outcome = legacy::insert(clipboard, &mut paste, text, keep_transcription_in_clipboard, &current)?;
+    let outcome = legacy::insert(
+        clipboard,
+        &mut paste,
+        text,
+        keep_transcription_in_clipboard,
+        &current,
+    )?;
     let play_completed_cue = paste_completed_cue_eligible(&outcome);
 
     // Commit clipboard restoration state before best-effort feedback. The cue
@@ -1053,7 +1063,6 @@ mod clipboard_insertion {
         assert_eq!(outcome, PasteOutcome::NoPermission);
         assert_eq!(clipboard.current, "transcription");
     }
-
 }
 
 #[cfg(test)]

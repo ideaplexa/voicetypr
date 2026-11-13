@@ -267,9 +267,7 @@ pub fn maybe_run_from_env_with_context(
         return Ok(true);
     }
     if let CliCommand::Context(args) = &command {
-        if let Err(error) =
-            tauri::async_runtime::block_on(crate::context_capture::cli::run(args))
-        {
+        if let Err(error) = tauri::async_runtime::block_on(crate::context_capture::cli::run(args)) {
             eprintln!("{}", format_cli_error(error, args.wants_json()));
             std::process::exit(1);
         }

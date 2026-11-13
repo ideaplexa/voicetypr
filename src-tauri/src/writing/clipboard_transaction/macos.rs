@@ -85,13 +85,20 @@ impl Transactions {
         let before = board.changeCount();
         let original = if keep {
             None
-        } else if let Some(pending) = self.pending.as_ref().filter(|p| p.change_count == before && p.original.is_some()) {
+        } else if let Some(pending) = self
+            .pending
+            .as_ref()
+            .filter(|p| p.change_count == before && p.original.is_some())
+        {
             pending.original.clone()
         } else {
             snapshot(board).map(Arc::new)
         };
         let item = NSPasteboardItem::new();
-        if !item.setString_forType(&NSString::from_str(text), ns_string!("public.utf8-plain-text")) {
+        if !item.setString_forType(
+            &NSString::from_str(text),
+            ns_string!("public.utf8-plain-text"),
+        ) {
             return Err("Clipboard text unavailable".into());
         }
         // Snapshotting may invoke another app's slow provider. Never overwrite
@@ -102,9 +109,11 @@ impl Transactions {
         self.generation = self.generation.wrapping_add(1);
         self.pending = None;
         let owned = board.clearContents();
-        if board.changeCount() != owned || !board.writeObjects(&NSArray::from_slice(&[
-            ProtocolObject::<dyn NSPasteboardWriting>::from_ref(&*item),
-        ])) || board.changeCount() != owned
+        if board.changeCount() != owned
+            || !board.writeObjects(&NSArray::from_slice(&[ProtocolObject::<
+                dyn NSPasteboardWriting,
+            >::from_ref(&*item)]))
+            || board.changeCount() != owned
         {
             return Err("Clipboard copy failed or ownership changed".into());
         }
@@ -145,35 +154,49 @@ impl Transactions {
         if now.saturating_duration_since(dispatched) < RESTORE_DELAY {
             return "waiting";
         }
-        let restored = pending.original.as_ref().is_some_and(|original| {
-            restore(board, original, pending.change_count)
-        });
+        let restored = pending
+            .original
+            .as_ref()
+            .is_some_and(|original| restore(board, original, pending.change_count));
         self.pending = None;
-        if restored { "restored" } else { "left_in_clipboard" }
+        if restored {
+            "restored"
+        } else {
+            "left_in_clipboard"
+        }
     }
 }
 
 pub(crate) fn begin(text: &str, keep: bool) -> Result<u64, String> {
     objc2::rc::autoreleasepool(|_| {
-        TRANSACTIONS.lock().unwrap_or_else(|e| e.into_inner()).begin(
-            &NSPasteboard::generalPasteboard(), text, keep,
-        )
+        TRANSACTIONS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .begin(&NSPasteboard::generalPasteboard(), text, keep)
     })
 }
 
 pub(crate) fn finish(generation: u64, pasted: bool) {
-    if !TRANSACTIONS.lock().unwrap_or_else(|e| e.into_inner()).finish(generation, pasted) {
+    if !TRANSACTIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .finish(generation, pasted)
+    {
         return;
     }
     // Failure to spawn leaves eager transcript data, not an immediate restore.
-    let _ = thread::Builder::new().name("clipboard-restore".into()).spawn(move || {
-        thread::sleep(RESTORE_DELAY);
-        objc2::rc::autoreleasepool(|_| {
-            TRANSACTIONS.lock().unwrap_or_else(|e| e.into_inner()).poll(
-                &NSPasteboard::generalPasteboard(), generation, Instant::now(),
-            );
+    let _ = thread::Builder::new()
+        .name("clipboard-restore".into())
+        .spawn(move || {
+            thread::sleep(RESTORE_DELAY);
+            objc2::rc::autoreleasepool(|_| {
+                TRANSACTIONS.lock().unwrap_or_else(|e| e.into_inner()).poll(
+                    &NSPasteboard::generalPasteboard(),
+                    generation,
+                    Instant::now(),
+                );
+            });
         });
-    });
 }
 
 /// Uses real native pasteboard data on a private board, not the user's clipboard.
@@ -183,7 +206,9 @@ pub(crate) fn verify_slow_reader() -> Result<serde_json::Value, &'static str> {
         let board = NSPasteboard::pasteboardWithUniqueName();
         let result = verify_board(&board);
         // SAFETY: This private named pasteboard is owned exclusively by us.
-        unsafe { let _: () = objc2::msg_send![&*board, releaseGlobally]; }
+        unsafe {
+            let _: () = objc2::msg_send![&*board, releaseGlobally];
+        }
         result
     })
 }
@@ -198,7 +223,8 @@ fn verify_board(board: &NSPasteboard) -> Result<serde_json::Value, &'static str>
     }
     let before = snapshot(board).ok_or("fixture_snapshot_failed")?;
     let mut transactions = Transactions::default();
-    let generation = transactions.begin(board, "controlled-fixture", false)
+    let generation = transactions
+        .begin(board, "controlled-fixture", false)
         .map_err(|_| "fixture_publish_failed")?;
     transactions.finish(generation, true);
     thread::sleep(Duration::from_millis(250));
@@ -207,24 +233,32 @@ fn verify_board(board: &NSPasteboard) -> Result<serde_json::Value, &'static str>
     let outcome = transactions.poll(board, generation, Instant::now());
     let restored = snapshot(board).is_some_and(|s| s == before);
 
-    let stale = transactions.begin(board, "controlled-fixture", false)
+    let stale = transactions
+        .begin(board, "controlled-fixture", false)
         .map_err(|_| "fixture_publish_failed")?;
     transactions.finish(stale, true);
-    let latest = transactions.begin(board, "controlled-fixture", false)
+    let latest = transactions
+        .begin(board, "controlled-fixture", false)
         .map_err(|_| "fixture_publish_failed")?;
     transactions.finish(latest, true);
-    let superseded = transactions.poll(board, stale, Instant::now() + RESTORE_DELAY) == "superseded";
+    let superseded =
+        transactions.poll(board, stale, Instant::now() + RESTORE_DELAY) == "superseded";
     let carried = transactions.poll(board, latest, Instant::now() + RESTORE_DELAY) == "restored"
         && snapshot(board).is_some_and(|s| s == before);
 
-    let copied = transactions.begin(board, "controlled-fixture", false)
+    let copied = transactions
+        .begin(board, "controlled-fixture", false)
         .map_err(|_| "fixture_publish_failed")?;
     transactions.finish(copied, true);
     // A real same-text user copy increments the OS token; text equality must
     // never authorize restoration over that newer copy.
-    let copy = vec![vec![("public.utf8-plain-text".into(), b"controlled-fixture".to_vec())]];
+    let copy = vec![vec![(
+        "public.utf8-plain-text".into(),
+        b"controlled-fixture".to_vec(),
+    )]];
     restore(board, &copy, board.changeCount());
-    let protected_copy = transactions.poll(board, copied, Instant::now() + RESTORE_DELAY) == "ownership_lost"
+    let protected_copy = transactions.poll(board, copied, Instant::now() + RESTORE_DELAY)
+        == "ownership_lost"
         && read_fixture(board);
     Ok(serde_json::json!({
         "platform": "macos", "fixture": "slow-reader", "policy": "eager_timer_fallback",
@@ -238,7 +272,8 @@ fn verify_board(board: &NSPasteboard) -> Result<serde_json::Value, &'static str>
 }
 
 fn read_fixture(board: &NSPasteboard) -> bool {
-    board.stringForType(ns_string!("public.utf8-plain-text"))
+    board
+        .stringForType(ns_string!("public.utf8-plain-text"))
         .is_some_and(|s| s.to_string() == "controlled-fixture")
 }
 

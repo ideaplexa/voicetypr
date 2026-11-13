@@ -1,8 +1,8 @@
 pub mod agent_cli;
 mod anthropic_current;
 pub mod catalog;
-pub mod contract;
 pub mod context_reference;
+pub mod contract;
 pub mod error;
 pub mod executor;
 pub mod genai_runtime;

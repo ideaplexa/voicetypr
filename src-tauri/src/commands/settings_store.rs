@@ -1,9 +1,7 @@
 //! Store adapters for the surrounding-text preference.
 use serde_json::json;
 
-pub(super) fn load_polish_context<R: tauri::Runtime>(
-    store: &tauri_plugin_store::Store<R>,
-) -> bool {
+pub(super) fn load_polish_context<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) -> bool {
     store
         .get("polish_context_enabled")
         .and_then(|value| value.as_bool())
@@ -28,9 +26,10 @@ mod tests {
             .plugin(tauri_plugin_store::Builder::default().build())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
-        let store = tauri_plugin_store::StoreBuilder::new(app.handle(), dir.path().join("settings"))
-            .build()
-            .unwrap();
+        let store =
+            tauri_plugin_store::StoreBuilder::new(app.handle(), dir.path().join("settings"))
+                .build()
+                .unwrap();
         assert!(load_polish_context(&store));
         store.set("polish_context_enabled", json!("invalid"));
         assert!(load_polish_context(&store));

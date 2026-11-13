@@ -75,7 +75,10 @@ pub(crate) async fn recording_polish<F: Future>(generation: u64, future: F) -> F
         }
     }
     POLISH_GENERATION
-        .scope((generation, hot_spare_generation()), crate::context_capture::scope(generation, future))
+        .scope(
+            (generation, hot_spare_generation()),
+            crate::context_capture::scope(generation, future),
+        )
         .await
 }
 
@@ -309,7 +312,9 @@ mod tests {
             input_text: "must not be retained".to_string(),
             dictionary: Some("private dictionary".to_string()),
             reference: Some(crate::ai::context_reference::ContextReference::bounded(
-                "private preceding text", "private selection", false,
+                "private preceding text",
+                "private selection",
+                false,
             )),
             needs_output_language_transform: false,
             prompt: "polish".to_string(),

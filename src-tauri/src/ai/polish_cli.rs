@@ -189,7 +189,9 @@ pub(crate) async fn run(app: &tauri::AppHandle, args: PolishArgs) -> Result<(), 
             .map_err(|_| "Invalid saved Polish style")?,
     };
     let (provider, model) = selection(app, args.provider.as_deref(), args.model.as_deref())?;
-    let reference = args.reference_input.as_deref()
+    let reference = args
+        .reference_input
+        .as_deref()
         .map(|path| read_reference(path, provider == super::providers::PROVIDER_CUSTOM))
         .transpose()?;
     let result = if !options.preset.requires_ai_formatting()

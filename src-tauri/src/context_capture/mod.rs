@@ -25,7 +25,9 @@ pub(crate) enum Status {
 /// terminal path, including aborting the future before polling it.
 pub(crate) struct Finish(pub(crate) u64);
 impl Drop for Finish {
-    fn drop(&mut self) { discard(self.0); }
+    fn drop(&mut self) {
+        discard(self.0);
+    }
 }
 
 pub(crate) const BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
@@ -39,8 +41,15 @@ struct Worker;
 #[cfg(target_os = "macos")]
 impl Worker {
     fn claim() -> Option<Self> {
-        WORKER.compare_exchange(false, true, std::sync::atomic::Ordering::AcqRel,
-            std::sync::atomic::Ordering::Acquire).ok().map(|_| Self)
+        WORKER
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .ok()
+            .map(|_| Self)
     }
 }
 #[cfg(target_os = "macos")]

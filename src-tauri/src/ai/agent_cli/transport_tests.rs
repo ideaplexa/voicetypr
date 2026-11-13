@@ -18,7 +18,8 @@ fn typed_user_data() -> String {
         needs_output_language_transform: false,
         prompt: String::new(),
         timeout_ms: 1_000,
-    }.user_data()
+    }
+    .user_data()
 }
 
 #[cfg(unix)]

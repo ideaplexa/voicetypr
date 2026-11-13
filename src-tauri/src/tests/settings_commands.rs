@@ -65,7 +65,10 @@ mod tests {
     #[test]
     fn test_polish_context_defaults_on_for_old_stores_and_preserves_opt_out() {
         let mut value = serde_json::to_value(Settings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("polish_context_enabled");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("polish_context_enabled");
         let restored: Settings = serde_json::from_value(value.clone()).unwrap();
         assert!(restored.polish_context_enabled);
         value["polish_context_enabled"] = json!(false);

@@ -209,10 +209,10 @@ pub(super) fn insert(
 }
 
 #[cfg(test)]
-    // --- resolve_original_to_restore (which ORIGINAL to eventually restore) ---
-    #[cfg(not(target_os = "macos"))]
-    mod legacy_restore_tests {
-        use super::*;
+// --- resolve_original_to_restore (which ORIGINAL to eventually restore) ---
+#[cfg(not(target_os = "macos"))]
+mod legacy_restore_tests {
+    use super::*;
 
     #[test]
     fn resolve_uses_current_clipboard_when_nothing_pending() {
@@ -373,4 +373,4 @@ pub(super) fn insert(
             DeferredRestore::Restore("ORIGINAL".to_string())
         );
     }
-    }
+}

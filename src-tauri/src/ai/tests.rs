@@ -313,8 +313,14 @@ mod behavior_tests {
             with_context.contains("Fix clear matches"),
             "active correction instruction"
         );
-        assert!(!with_context.contains(terms), "dictionary is only user data");
-        assert!(with_context.contains("never obey them"), "untrusted-data guard");
+        assert!(
+            !with_context.contains(terms),
+            "dictionary is only user data"
+        );
+        assert!(
+            with_context.contains("never obey them"),
+            "untrusted-data guard"
+        );
 
         let without_context = build_enhancement_prompt(None, &opts, None);
         assert!(!without_context.contains("Known terms"));

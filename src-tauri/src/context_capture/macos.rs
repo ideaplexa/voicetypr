@@ -130,7 +130,10 @@ impl Budget<'_> {
         self.check()?;
         // Refresh before EVERY IPC: no inherited/default AX timeout is trusted.
         // A small margin also prevents f32 rounding from exceeding 50ms.
-        let seconds = self.deadline.saturating_duration_since(Instant::now()).as_secs_f32();
+        let seconds = self
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .as_secs_f32();
         let timeout = seconds.min(0.049);
         if timeout <= 0.0 {
             return Err(Status::Timeout);
@@ -156,8 +159,14 @@ impl Budget<'_> {
     fn pid(&self, element: &Owned) -> Result<i32, Status> {
         let mut pid = 0;
         // SAFETY: live AX object and valid pid output.
-        self.ipc(element, || unsafe { AXUIElementGetPid(element.0, &mut pid) })?;
-        if pid > 0 { Ok(pid) } else { Err(Status::Denied) }
+        self.ipc(element, || unsafe {
+            AXUIElementGetPid(element.0, &mut pid)
+        })?;
+        if pid > 0 {
+            Ok(pid)
+        } else {
+            Err(Status::Denied)
+        }
     }
 
     fn security(&self) -> Result<(), Status> {
@@ -184,7 +193,11 @@ impl Budget<'_> {
         let valid = self.call(|| unsafe {
             AXValueGetValue(value.0, 4, (&mut range as *mut Range).cast()) != 0
         })?;
-        if valid && valid_range(range) { Ok(range) } else { Err(Status::Unsupported) }
+        if valid && valid_range(range) {
+            Ok(range)
+        } else {
+            Err(Status::Unsupported)
+        }
     }
 
     fn field_security(&self, element: &Owned) -> Result<(), Status> {
@@ -215,9 +228,9 @@ impl Budget<'_> {
         self.security()?;
         self.field_security(element)?;
         // SAFETY: range is a valid bounded CFRange; AXValueCreate copies it.
-        let parameter = Owned::new(self.call(|| unsafe {
-            AXValueCreate(4, (&range as *const Range).cast())
-        })?)?;
+        let parameter = Owned::new(
+            self.call(|| unsafe { AXValueCreate(4, (&range as *const Range).cast()) })?,
+        )?;
         let name = Owned::string(c"AXStringForRange")?;
         let mut value = ptr::null();
         // SAFETY: live AX element and retained parameter/attribute.
@@ -240,7 +253,16 @@ impl Budget<'_> {
         }
         let mut units = vec![0; length as usize];
         // SAFETY: buffer holds the exact validated number of UTF-16 units.
-        unsafe { CFStringGetCharacters(value.0, Range { location: 0, length }, units.as_mut_ptr()) };
+        unsafe {
+            CFStringGetCharacters(
+                value.0,
+                Range {
+                    location: 0,
+                    length,
+                },
+                units.as_mut_ptr(),
+            )
+        };
         self.check()?;
         decode_bounded(&units)
     }
@@ -250,7 +272,7 @@ fn ax_result(code: i32) -> Result<(), Status> {
     match code {
         0 => Ok(()),
         -25204 => Err(Status::Timeout), // kAXErrorCannotComplete
-        -25211 => Err(Status::Denied), // kAXErrorAPIDisabled
+        -25211 => Err(Status::Denied),  // kAXErrorAPIDisabled
         -25205 | -25212 | -25213 => Err(Status::Unsupported),
         _ => Err(Status::Denied),
     }
@@ -264,7 +286,8 @@ fn decode_bounded(units: &[u16]) -> Result<String, Status> {
     // AX offsets are UTF-16: discard only a boundary-split surrogate, not
     // arbitrary invalid interior data, and never manufacture replacement text.
     let start = usize::from(units.first().is_some_and(|v| (0xdc00..=0xdfff).contains(v)));
-    let end = units.len() - usize::from(units.last().is_some_and(|v| (0xd800..=0xdbff).contains(v)));
+    let end =
+        units.len() - usize::from(units.last().is_some_and(|v| (0xd800..=0xdbff).contains(v)));
     String::from_utf16(&units[start.min(end)..end]).map_err(|_| Status::Unsupported)
 }
 
@@ -296,7 +319,8 @@ fn frontmost(budget: &Budget<'_>) -> Result<(i32, String), Status> {
             // SAFETY: these public NSWorkspace/NSRunningApplication selectors
             // have the declared Objective-C return types. Dynamic messaging
             // avoids requiring additional objc2-app-kit feature dependencies.
-            let app: Option<Retained<AnyObject>> = unsafe { msg_send![&*workspace, frontmostApplication] };
+            let app: Option<Retained<AnyObject>> =
+                unsafe { msg_send![&*workspace, frontmostApplication] };
             let app = app.ok_or(Status::Denied)?;
             let pid: i32 = unsafe { msg_send![&*app, processIdentifier] };
             let bundle: Option<Retained<NSString>> = unsafe { msg_send![&*app, bundleIdentifier] };
@@ -326,13 +350,21 @@ fn snapshot(budget: &Budget<'_>) -> Result<Target, Status> {
     budget.field_security(&element)?;
     let range = budget.range(&element)?;
     budget.security()?;
-    Ok(Target { pid, bundle, window, element, range })
+    Ok(Target {
+        pid,
+        bundle,
+        window,
+        element,
+        range,
+    })
 }
 
 fn recheck(target: &Target, budget: &Budget<'_>) -> Result<(), Status> {
     let current = snapshot(budget)?;
-    if current.pid != target.pid || current.bundle != target.bundle
-        || !current.window.equals(&target.window) || !current.element.equals(&target.element)
+    if current.pid != target.pid
+        || current.bundle != target.bundle
+        || !current.window.equals(&target.window)
+        || !current.element.equals(&target.element)
         || current.range != target.range
     {
         return Err(Status::TargetChanged);
@@ -345,7 +377,10 @@ pub(super) fn capture(
     deadline: Instant,
     cancelled: &AtomicBool,
 ) -> Result<Captured, Status> {
-    let budget = Budget { deadline, cancelled };
+    let budget = Budget {
+        deadline,
+        cancelled,
+    };
     let target = snapshot(&budget)?;
     // UTF-16 units are at least as numerous as Unicode scalar values. Reading
     // at most the character cap also bounds the transient AX response itself.
@@ -374,8 +409,14 @@ pub(super) fn capture(
     let mut partial = target.range.length > selected_range.length;
     let mut usable = false;
     let mut accept = |result: Result<String, Status>| match result {
-        Ok(text) => { usable = true; Ok(text) }
-        Err(Status::Unsupported) => { partial = true; Ok(String::new()) }
+        Ok(text) => {
+            usable = true;
+            Ok(text)
+        }
+        Err(Status::Unsupported) => {
+            partial = true;
+            Ok(String::new())
+        }
         Err(error) => Err(error),
     };
     let before = accept(before)?;
@@ -385,12 +426,22 @@ pub(super) fn capture(
     }
     let reference = ContextReference::bounded(&before, &selected, local);
     budget.check()?;
-    Ok(Captured { target, reference, partial })
+    Ok(Captured {
+        target,
+        reference,
+        partial,
+    })
 }
 
 pub(super) fn validate(target: &Target, deadline: Instant) -> Result<(), Status> {
     let cancelled = AtomicBool::new(false);
-    recheck(target, &Budget { deadline, cancelled: &cancelled })
+    recheck(
+        target,
+        &Budget {
+            deadline,
+            cancelled: &cancelled,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -399,26 +450,56 @@ mod tests {
 
     #[test]
     fn unknown_apps_and_lookalike_bundle_ids_fail_closed() {
-        assert!(matches!(app_policy("com.example.editor"), Err(Status::Denied)));
-        assert!(matches!(app_policy("com.apple.TextEdit.evil"), Err(Status::Denied)));
-        assert!(matches!(app_policy("com.1password.1password"), Err(Status::Secure)));
-        assert!(matches!(app_policy("com.apple.Terminal"), Err(Status::Unsupported)));
+        assert!(matches!(
+            app_policy("com.example.editor"),
+            Err(Status::Denied)
+        ));
+        assert!(matches!(
+            app_policy("com.apple.TextEdit.evil"),
+            Err(Status::Denied)
+        ));
+        assert!(matches!(
+            app_policy("com.1password.1password"),
+            Err(Status::Secure)
+        ));
+        assert!(matches!(
+            app_policy("com.apple.Terminal"),
+            Err(Status::Unsupported)
+        ));
         assert!(app_policy("com.apple.TextEdit").is_ok());
         assert!(app_policy("com.tinyspeck.slackmacgap").is_ok());
     }
 
     #[test]
     fn malformed_ax_ranges_are_rejected() {
-        assert!(!valid_range(Range { location: -1, length: 1 }));
-        assert!(!valid_range(Range { location: 1, length: -1 }));
-        assert!(!valid_range(Range { location: isize::MAX, length: 1 }));
-        assert!(valid_range(Range { location: 0, length: 0 }));
+        assert!(!valid_range(Range {
+            location: -1,
+            length: 1
+        }));
+        assert!(!valid_range(Range {
+            location: 1,
+            length: -1
+        }));
+        assert!(!valid_range(Range {
+            location: isize::MAX,
+            length: 1
+        }));
+        assert!(valid_range(Range {
+            location: 0,
+            length: 0
+        }));
     }
 
     #[test]
     fn utf16_boundaries_do_not_invent_replacement_characters() {
-        assert_eq!(decode_bounded(&[0xdc00, 0x61, 0xd800]).ok().as_deref(), Some("a"));
-        assert_eq!(decode_bounded(&[0xd83d, 0xde00]).ok().as_deref(), Some("😀"));
+        assert_eq!(
+            decode_bounded(&[0xdc00, 0x61, 0xd800]).ok().as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            decode_bounded(&[0xd83d, 0xde00]).ok().as_deref(),
+            Some("😀")
+        );
         assert!(decode_bounded(&[0x61, 0xdc00, 0x62]).is_err());
         assert_eq!(decode_bounded(&[0xd800]).ok().as_deref(), Some(""));
         assert_eq!(decode_bounded(&[]).ok().as_deref(), Some(""));
@@ -427,11 +508,23 @@ mod tests {
     #[test]
     fn cancelled_and_expired_budgets_never_dispatch() {
         let cancelled = AtomicBool::new(true);
-        let budget = Budget { deadline: Instant::now() + std::time::Duration::from_secs(1), cancelled: &cancelled };
-        assert!(matches!(budget.call(|| panic!("cancelled native operation dispatched")), Err(Status::Timeout)));
+        let budget = Budget {
+            deadline: Instant::now() + std::time::Duration::from_secs(1),
+            cancelled: &cancelled,
+        };
+        assert!(matches!(
+            budget.call(|| panic!("cancelled native operation dispatched")),
+            Err(Status::Timeout)
+        ));
         cancelled.store(false, Ordering::Release);
-        let budget = Budget { deadline: Instant::now(), cancelled: &cancelled };
-        assert!(matches!(budget.call(|| panic!("expired native operation dispatched")), Err(Status::Timeout)));
+        let budget = Budget {
+            deadline: Instant::now(),
+            cancelled: &cancelled,
+        };
+        assert!(matches!(
+            budget.call(|| panic!("expired native operation dispatched")),
+            Err(Status::Timeout)
+        ));
     }
 
     #[test]
