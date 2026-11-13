@@ -522,7 +522,6 @@ export function useOnboardingDesktop({
         recording_mode: holdToTalk ? "push_to_talk" : "toggle",
         current_model: selectedModelName || "",
         current_model_engine: selectedModel?.engine ?? "whisper",
-        speech_language: "en",
         onboarding_completed: false,
       });
     } else {
@@ -547,7 +546,6 @@ export function useOnboardingDesktop({
         recording_mode: holdToTalk ? "push_to_talk" : "toggle",
         current_model: selectedModelName || "",
         current_model_engine: selectedModel?.engine ?? "whisper",
-        speech_language: "en",
         onboarding_completed: false,
       });
     }
