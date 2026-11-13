@@ -17,7 +17,7 @@
 const { spawnSync } = require('node:child_process');
 
 if (process.platform !== 'win32') {
-  for (const pattern of ['[t]arget/debug/voicetypr', '[p]arakeet-sidecar']) {
+  for (const pattern of ['[t]arget/debug/voicetypr', '[t]arget/debug/parakeet-sidecar']) {
     try {
       spawnSync('pkill', ['-f', pattern], { stdio: 'ignore' });
     } catch {
