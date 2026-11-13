@@ -26,7 +26,7 @@ export function formatLicenseStatus(status: LicenseStatus | null, isLoading: boo
         ? status.trial_days_left > 0
           ? `Trial - ${status.trial_days_left} day${status.trial_days_left > 1 ? "s" : ""}`
           : "Trial expires today"
-        : "Trial (3-day limit)";
+        : "Trial";
     case "expired":
       return "Trial Expired";
     case "none":
