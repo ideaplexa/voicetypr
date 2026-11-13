@@ -899,8 +899,8 @@ fn validated_dynamic_properties(event: &Event) -> Option<Vec<(&'static str, Valu
                 || !allowed(
                     app_category,
                     &[
-                        "chat", "email", "docs", "code", "terminal", "social", "notes", "browser",
-                        "other",
+                        "ai_apps", "chat", "email", "docs", "code", "terminal", "social", "notes",
+                        "browser", "other",
                     ],
                 )
             {

@@ -33,6 +33,7 @@ impl Style {
 #[derive(Debug, Clone, Copy, ValueEnum, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Category {
+    AiApps,
     Chat,
     Email,
     Docs,
@@ -45,6 +46,7 @@ impl Category {
     pub(crate) fn hint(self) -> Option<String> {
         use crate::writing::AppCategory as A;
         let category = match self {
+            Self::AiApps => A::AiApps,
             Self::Chat => A::Chat,
             Self::Email => A::Email,
             Self::Docs => A::Docs,
