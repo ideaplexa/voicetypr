@@ -77,3 +77,7 @@ sidecar/whisper-vulkan/target/
 
 # Private Polish recordings; never commit real dictations or provider outputs.
 /perf-corpus/polish/local/
+
+# Harness reports hold transcripts and reference text.
+perf-report.json
+perf-report.md
