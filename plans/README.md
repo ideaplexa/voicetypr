@@ -70,6 +70,7 @@ Plan 063 — VM QA COMPLETE — Codex 2026-09-06: six reproduced fixes verified 
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
+| 090 | [2.1 launch, wider audience and pricing changes](090-2.1-launch-and-pricing.md): message, audiences including Dragon users, launch sequence, order of pricing changes | P1 | L | 2.1.0 stable | PLAN; six founder decisions open |
 | 088 | [2.1 stable hardening](088-2.1-stable-hardening.md): master plan Phase 0 in nine slices (spoken punctuation port, log privacy, release gate, upload, settings, streams, sharing, island/tray port, ledger) | P0 | L | `release/2.1.0-beta.9` | LOCAL CHECKS PASSED / NEEDS-SMOKE — Claude 2026-11-13; all slices merged into `release/2.1.0-beta.9`; smoke list in the plan |
 | 087 | [2.1.0-beta.8, beta.9 and stable](087-2.1-beta8-beta9.md): release map and "Only failed" audio | P0 | XL | beta.7 baseline | beta.8 IMPLEMENTED / MERGED on `release/2.1.0-beta.8`; hardware smoke and Windows CI pending; beta.9 C and F built for macOS on `release/2.1.0-beta.9` (Claude 2026-11-13), NEEDS-SMOKE, Windows parts not built; D built on `b9/warm-agent` and held back |
 | 085 | [Spoken punctuation commands](085-spoken-punctuation-commands.md), opt-in for 2.1 | P1 | L | Beta.5 baseline; quote and spacing decisions | SHIPPED in stable 2.0.12 (`85de53d0` et al.); ported to `release/2.1.0-beta.9` by plan 088 slice A, native smoke outstanding |
