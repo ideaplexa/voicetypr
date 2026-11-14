@@ -229,6 +229,33 @@ cursor (beta.9 adds it) and knows nothing about the user's tone.
 | 4.5 | **Network sharing over TLS** with a pinned key, body-size limits before the upload is buffered, and the host context lock no longer held for a whole transcription (`remote/client.rs:255`, `remote/http.rs:203`, `:765`) | Password and audio not readable on the LAN; needed before a phone can use a Mac as its engine |
 | 4.6 | Live preview for the remaining engines, in the order from the archived plan's table | Preview text matches the final text's normalization |
 
+Measured 2026-11-14 on the founder set (654 English dictations, M4 Pro, local
+only; details in the set's `*-results.md`). No clip has a human reference yet,
+so "differs from Whisper" is disagreement, not accuracy:
+
+| Model | Runtime | Failed / empty | Mean words differing from Whisper | Speed | Live words on Mac |
+|---|---|---|---:|---:|---|
+| Parakeet V2 (today's default) | shipped sidecar | n/a | 12.6% | n/a | yes |
+| Parakeet Ultra | MLX community conversion | 0 / 4 | 13.5% | 77× | as V3 (decode-ahead) |
+| Fluid Speech Pro | MLX | 0 / 3 | 13.6% | 48× | as V3 |
+| Qwen3-ASR 1.7B | MLX, 8-bit | 0 / 0 | 13.0% | 19× | no |
+| Cohere Transcribe 03-2026 | PyTorch MPS, full precision | 1 / 0 | 17.7% (median 8.8%) | 20× | no |
+| Nemotron 3.5 (shipped) | shipped sidecar | 0 / 4 | 20.1% | 58× | yes |
+
+- The founder's own corrections, recovered by matching dictations to the
+  messages he sent (ThreadLens, `sent_match.py`): 435 clips matched, 386 sent
+  unchanged, 49 edited. Nearly all edits are product names and jargon. Of 28
+  such words Parakeet V2 misheard, Cohere got 14 right, Whisper 12, Fluid 11,
+  Ultra 10, Qwen 10, Nemotron 5. Small and biased against V2 by construction.
+- Decisions: Nemotron stays a streaming choice for languages Parakeet lacks,
+  not an English recommendation. Fluid Speech Pro is not adopted (a
+  competitor's model, no measured gain); Parakeet Ultra is the neutral
+  equivalent if labels show a gain. Qwen and Cohere could only be "final text
+  only" engines and need a new runtime; decide after labels.
+- Ideas from the founder, not scheduled: a personal dictionary seeded from his
+  corrected words; an opt-in "dictated, may be misheard" note appended in AI
+  apps.
+
 ### Indic track
 
 Bangla and other Indic users get poor results from most dictation apps.
