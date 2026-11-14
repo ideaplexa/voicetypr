@@ -50,12 +50,55 @@ Quit Voicetypr, drag the candidate app over the one in Applications, open it.
 Not possible on this Mac: a clean first run (needs a second user account or
 Mac), 087-S7 (needs the notarized release DMG), 087-S2 and 087-S4 (Windows).
 
+### Driven run on the installed candidate (2026-11-14)
+
+The candidate replaced beta.6 in `/Applications` (beta.6 app and app data are
+backed up next to the candidate in `installed-beta6-app/` and
+`app-data-backup-pre-beta9-install/`). An agent drove the real app with
+cua-driver. This is not a human pass:
+
+- Speech was the founder's own recorded dictations played into the virtual
+  BlackHole input, so no physical microphone was exercised.
+- The driver cannot press a lone modifier, so Left ⌥ was never pressed. Takes
+  used a temporary ⌃⌥F9 shortcut, the tray and the pill; the founder's
+  settings were restored afterwards.
+- The pill is hidden from screen capture, so its state was read from the
+  accessibility tree, never seen as pixels.
+
+| Script step | Result |
+|---|---|
+| 1. Five takes in a row into Notes | Pass: 5 of 5 pasted, Notes stayed frontmost, start took 160 to 230 ms, pill showed timer, Stop and "Listening". "Opening microphone…" was never observed. Esc twice and the pill's Cancel both discarded the take with no History entry; Cancel appeared only while the pointer was over the pill. |
+| 2. Quit, reopen, dictate at once | Pass, twice: recording started 1.2 s after launch, pill filled within about 1.2 s, live words shown, text pasted, pill hidden afterwards. |
+| 3. Mic unplugged, Retry | Not run (needs a physical microphone). A silent take showed "A recording was kept · No speech heard. Audio kept temporarily for 30 seconds"; "Transcribe anyway" gave "Parakeet V2 couldn't transcribe this" with Retry again, Try another model and Delete audio. |
+| 4. Kept take survives a restart | Not proven: the silent-take card above was gone after a relaunch about 35 s later, which matches its 30-second message. No genuinely failed take was produced. |
+| 5. Polish with Claude Code | Pass in Notes and in the ChatGPT desktop app (detected as `ai_apps`), with "Use nearby text" on and off: 5 takes cleaned in 1.6 to 2.8 s, 94 to 100% of final words came from the raw transcript, none answered. Slack not run. |
+| 6. Image on clipboard | Pass: PNG still on the clipboard after a pasted dictation. |
+| 7. Soniox v6, Real-time words | Pass, 2 takes: live words in the pill, final text pasted within 2 s of stop, nothing key-like in the log. The request headers were not inspected. |
+| 8. Pill hover and stutter | Hover, Cancel, Stop and Dismiss work with a real pointer and do not take focus. Stutter not judged. |
+
+Findings to triage:
+
+- A "Copied — press ⌘V · Notes didn't accept the paste" card stayed on the
+  pill, on screen while idle, through about ten later successful dictations
+  and a cancel, until Dismiss was clicked.
+- That card came from "Paste deferred: native menu or focus unavailable",
+  logged on every take stopped shortly after the driver had clicked a
+  Voicetypr window through accessibility. Takes that used only the shortcut
+  pasted, including after tray use and after opening the main window, so this
+  is probably an automation artifact; not resolved.
+- Tray Start then tray Stop leaves the text on the clipboard instead of
+  pasting (the menu is open at paste time). Tray Start with a shortcut stop
+  pasted.
+- While another app's password prompt held Secure Input, the shortcut could
+  not fire; the CLI reported the tray and pill fallback.
+
 ## Blocks 2.1 stable
 
 Plan 087 §5 requires the packaged plan 083 §13 follow-ups and a Windows
 real-speech pass before stable. Eight unchecked checks block stable:
 
 - [ ] **087-S1** Packaged macOS and Windows: exercise delayed Island readiness and renderer replacement; confirm live recovery and mic-blocker state is revalidated and stale cards do not return.
+  - Evidence 2026-11-14, macOS half only: see "Driven run on the installed candidate", steps 2 and the stuck "Copied" card finding. Stays unchecked.
 - [ ] **087-S2** Packaged Windows: exercise recording timer updates during tray recovery/rebuild and confirm neither deadlocks.
 - [ ] **087-S3** Packaged candidate: unplug the mic, retry a kept recording, and confirm the mic blocker remains visible and retry works.
 - [ ] **087-S4** Real Windows: exercise Whisper full audio context and Island fixes with real speech.
@@ -65,6 +108,7 @@ real-speech pass before stable. Eight unchecked checks block stable:
 - [ ] **087-S7** On a clean Mac, verify that the release DMG has a valid notarization staple and passes Gatekeeper open assessment, and that the app remains valid.
 - [ ] **087-S8** Exercise Soniox v6 realtime and async with consented real speech and verify header authentication without exposing the key.
   - Evidence 2026-11-14: async half run on the packaged local candidate with one public LibriSpeech clip (see the table above). Realtime and the header check were not run.
+  - Evidence 2026-11-14: realtime half run through the installed candidate with the founder's own recorded speech (driven run, step 7). Header authentication not inspected.
 
 ## Later — historical and other pending checks
 
