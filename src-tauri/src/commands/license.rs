@@ -538,9 +538,21 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
     log::info!("Checking trial status");
     let api_client = LicenseApiClient::new()?;
 
-    match api_client.check_trial(&device_hash).await {
+    match api_client.trial_status(&device_hash).await {
         Ok(response) => {
-            if response.data.is_expired {
+            if !response.data.started {
+                // The trial starts only when the user asks for it (`start_trial`).
+                log::info!("Trial not started");
+                Ok(LicenseStatus {
+                    status: LicenseState::None,
+                    trial_days_left: None,
+                    license_type: None,
+                    license_key: None,
+                    expires_at: None,
+                    verification_state: None,
+                    verification_expires_at: None,
+                })
+            } else if response.data.is_expired {
                 log::info!("Trial has expired");
                 let status = LicenseStatus {
                     status: LicenseState::Expired,
@@ -1119,6 +1131,18 @@ async fn clear_license_status_cache(app: &AppHandle) {
 pub async fn revalidate_license(app: AppHandle) -> Result<LicenseStatus, String> {
     let validation_lock = app.state::<AppState>().license_validation_lock.clone();
     let _validation_guard = validation_lock.lock().await;
+    clear_license_status_cache(&app).await;
+    perform_license_status_check(&app).await
+}
+
+/// Start the free trial for this device. Only a user action calls this; the
+/// status check never starts a trial.
+#[tauri::command]
+pub async fn start_trial(app: AppHandle) -> Result<LicenseStatus, String> {
+    let validation_lock = app.state::<AppState>().license_validation_lock.clone();
+    let _validation_guard = validation_lock.lock().await;
+    let device_hash = device::get_device_hash()?;
+    LicenseApiClient::new()?.start_trial(&device_hash).await?;
     clear_license_status_cache(&app).await;
     perform_license_status_check(&app).await
 }

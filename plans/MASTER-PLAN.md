@@ -311,6 +311,18 @@ email, has no CI and is deployed by hand.
 Offline and enterprise buyers must still be able to activate without the
 sign-in flow; keep a license-key path for them.
 
+Status of 5.4 (2026-11-14, branch `feat/trial-click-start`, not merged): the
+desktop half is built without accounts. The app reads `/trial/status` and
+never starts a trial on its own; a device without one is `none`, which already
+blocks dictation. "Start free trial" is on the last setup step and on the
+License page and calls `/trial/start`; the pill and the tray say the trial has
+not started instead of "Trial ended". This is not 5.3: nothing can be dictated
+before the click, and there is no email. It must not ship before the
+`voicetypr-web` branch `feat/trial-7-days-click-start` is deployed, because the
+app has no fallback to the old `/trial/check`. `NEEDS-SMOKE`: the click in the
+real app window (checked only in the UI preview and, for the two routes,
+through the Rust client against a local copy of the API).
+
 ### Licensing: Polar decides, our API stays thin (decided 2026-11-13)
 
 Polar already decides whether a key is valid and how many devices it may

@@ -73,11 +73,27 @@ impl LicenseApiClient {
         })
     }
 
-    /// Check trial status for a device
-    pub async fn check_trial(&self, device_hash: &str) -> Result<TrialCheckResponse, String> {
-        let url = format!("{}/trial/check", self.base_url);
+    /// Read the device's trial. Never starts one.
+    pub async fn trial_status(&self, device_hash: &str) -> Result<TrialCheckResponse, String> {
+        self.post_trial("status", device_hash, "Failed to check trial status")
+            .await
+    }
 
-        // Trial check doesn't need OS info, keeping it simple
+    /// Start the device's trial. The server leaves an existing trial, active
+    /// or expired, unchanged.
+    pub async fn start_trial(&self, device_hash: &str) -> Result<TrialCheckResponse, String> {
+        self.post_trial("start", device_hash, "Failed to start trial")
+            .await
+    }
+
+    async fn post_trial(
+        &self,
+        action: &str,
+        device_hash: &str,
+        fallback_error: &str,
+    ) -> Result<TrialCheckResponse, String> {
+        let url = format!("{}/trial/{}", self.base_url, action);
+
         let response = self
             .client
             .post(&url)
@@ -97,7 +113,7 @@ impl LicenseApiClient {
             let error: ApiError = response.json().await.unwrap_or(ApiError {
                 success: false,
                 error: Some("unknown_error".to_string()),
-                message: "Failed to check trial status".to_string(),
+                message: fallback_error.to_string(),
             });
             Err(error.message)
         }
@@ -442,5 +458,52 @@ mod tests {
         assert_eq!(error.kind, LicenseValidationFailureKind::Rejected);
         assert_eq!(error.message, "License revoked");
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    fn trial_reply(started: bool) -> warp::reply::Json {
+        warp::reply::json(&json!({
+            "success": true,
+            "data": {
+                "started": started,
+                "isExpired": false,
+                "daysLeft": if started { 7 } else { 0 },
+                "expiresAt": started.then_some("2026-11-21T12:00:00.000Z"),
+            },
+            "message": "Success"
+        }))
+    }
+
+    /// The trial clock starts on the user's click only: reading the status
+    /// leaves a device without a trial until `start_trial` is called.
+    #[tokio::test]
+    async fn reading_trial_status_never_starts_the_trial() {
+        let server_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let read = Arc::clone(&server_started);
+        let status = warp::path!("trial" / "status")
+            .and(warp::post())
+            .map(move || trial_reply(read.load(Ordering::SeqCst)));
+        let write = Arc::clone(&server_started);
+        let start = warp::path!("trial" / "start")
+            .and(warp::post())
+            .map(move || {
+                write.store(true, Ordering::SeqCst);
+                trial_reply(true)
+            });
+        let (address, server) = warp::serve(status.or(start)).bind_ephemeral(([127, 0, 0, 1], 0));
+        let server_task = tokio::spawn(server);
+        let client = test_client(format!("http://{}", address));
+        let device = "0000000000000000000000000000000000000000000000000000000000000000";
+
+        let before = client.trial_status(device).await.unwrap().data;
+        let started_by_reading = server_started.load(Ordering::SeqCst);
+        let begun = client.start_trial(device).await.unwrap().data;
+        let after = client.trial_status(device).await.unwrap().data;
+
+        server_task.abort();
+        assert!(!before.started);
+        assert!(!started_by_reading);
+        assert!(begun.started);
+        assert_eq!(begun.days_left, Some(7));
+        assert!(after.started);
     }
 }

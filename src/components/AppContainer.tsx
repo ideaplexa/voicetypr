@@ -7,6 +7,7 @@ import { OnboardingDesktop } from "@/components/onboarding/OnboardingDesktop";
 import { UpdateAnnouncementDialog } from "@/components/UpdateAnnouncementDialog";
 import { PrivacyConsentDialog } from "@/components/PrivacyConsentDialog";
 import { useReadiness } from "@/contexts/ReadinessContext";
+import { useLicense } from "@/contexts/LicenseContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useInAppRecordingHotkey } from "@/hooks/useInAppRecordingHotkey";
 import { useDownloadProgress, useModelManagementContext } from "@/contexts/ModelManagementContext";
@@ -52,6 +53,7 @@ export function AppContainer() {
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
   const { settings, refreshSettings } = useSettings();
   const { checkAccessibilityPermission, checkMicrophonePermission } = useReadiness();
+  const { status: licenseStatus, startTrial } = useLicense();
   const modelAvailability = useModelAvailabilityContext();
 
   // Use the model management context for onboarding
@@ -117,6 +119,7 @@ export function AppContainer() {
             refreshSettings();
             void modelAvailability.checkModels();
           }}
+          onStartTrial={licenseStatus?.status === "none" ? startTrial : undefined}
           modelManagement={{ ...modelManagement, downloadProgress }}
         />
       </AppErrorBoundary>

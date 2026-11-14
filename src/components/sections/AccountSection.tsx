@@ -12,6 +12,7 @@ export function AccountSection({ embedded = false }: { embedded?: boolean } = {}
     isLoading,
     checkStatus,
     revalidateLicense,
+    startTrial,
     activateLicense,
     deactivateLicense,
     openPurchasePage,
@@ -61,6 +62,9 @@ export function AccountSection({ embedded = false }: { embedded?: boolean } = {}
         isLoading={isLoading}
         onCheckStatus={checkStatus}
         onRevalidate={revalidateLicense}
+        onStartTrial={() => {
+          void startTrial();
+        }}
         onDeactivate={() => {
           void handleDeactivate();
         }}

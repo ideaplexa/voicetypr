@@ -22,6 +22,7 @@ interface LicenseContextValue {
   isLoading: boolean;
   checkStatus: () => Promise<void>;
   revalidateLicense: () => Promise<void>;
+  startTrial: () => Promise<void>;
   restoreLicense: () => Promise<void>;
   activateLicense: (key: string) => Promise<void>;
   deactivateLicense: () => Promise<void>;
@@ -157,6 +158,25 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const startTrial = useCallback(async () => {
+    const checkId = ++latestCheckStatusId.current;
+    try {
+      setIsLoading(true);
+      const licenseStatus = await invoke<LicenseStatus>("start_trial");
+      if (checkId !== latestCheckStatusId.current) return;
+      setStatus(licenseStatus);
+      if (licenseStatus.status === "trial") toast.success("Your free trial has started");
+    } catch (error: unknown) {
+      if (checkId !== latestCheckStatusId.current) return;
+      log.error("Failed to start trial:", error);
+      toast.error("Couldn’t start your trial. Check your connection and try again.");
+    } finally {
+      if (checkId === latestCheckStatusId.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
   const restoreLicense = useCallback(async () => {
     try {
       const licenseStatus = await invoke<LicenseStatus>("restore_license");
@@ -209,6 +229,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
       isLoading,
       checkStatus,
       revalidateLicense,
+      startTrial,
       restoreLicense,
       activateLicense,
       deactivateLicense,
@@ -219,6 +240,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
       isLoading,
       checkStatus,
       revalidateLicense,
+      startTrial,
       restoreLicense,
       activateLicense,
       deactivateLicense,

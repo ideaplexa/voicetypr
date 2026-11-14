@@ -6,7 +6,7 @@ export type IslandAction =
   | "open_settings" | "recheck_license" | "open_license" | "open_models" | "open_cloud_keys"
   | "open_storage" | "open_mic_settings" | "choose_mic" | "open_accessibility";
 export type BlockedKind =
-  | "license_check_failed" | "license_verify_required" | "trial_ended" | "no_engine"
+  | "license_check_failed" | "license_verify_required" | "trial_ended" | "trial_not_started" | "no_engine"
   | "cloud_key_missing" | "cloud_key_rejected" | "soniox_storage_full"
   | "mic_permission_denied" | "mic_missing" | "mic_busy" | "accessibility_off" | "starting_up";
 export interface DictationRecovery {

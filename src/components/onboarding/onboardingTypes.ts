@@ -10,6 +10,8 @@ export interface OnboardingDesktopProps {
   onCompletionStart?: () => void;
   onCompletionError?: () => void;
   onComplete: () => void;
+  /** Set only while this device has no trial yet; starts it on the user's click. */
+  onStartTrial?: () => Promise<void>;
   modelManagement: ReturnType<typeof useModelManagement>;
 }
 

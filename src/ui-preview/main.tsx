@@ -16,6 +16,7 @@ const options: PreviewOptions = {
   empty: query.get("empty") === "1",
   sidebar: query.get("sidebar") === "rail" ? "rail" : "expanded",
   onboarding: onboardingPhase,
+  trialNotStarted: query.get("license") === "none",
 };
 document.cookie = `sidebar_state=${options.sidebar !== "rail"}; path=/`;
 installPreviewPlatform(options.platform);

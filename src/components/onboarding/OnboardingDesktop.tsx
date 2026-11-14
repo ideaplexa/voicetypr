@@ -218,6 +218,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               isSavingCompletion={isSavingCompletion || savingShortcut || currentStep !== "success"}
               onTelemetryChange={onTelemetryChange}
               onComplete={completeOnboarding}
+              onStartTrial={props.onStartTrial}
               onChangeShortcut={() => {
                 setEditingShortcut(true);
                 handleBack();

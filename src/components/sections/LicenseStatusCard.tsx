@@ -10,6 +10,7 @@ interface LicenseStatusCardProps {
   isLoading: boolean;
   onCheckStatus: () => void;
   onRevalidate: () => void;
+  onStartTrial: () => void;
   onDeactivate: () => void;
 }
 export function LicenseStatusCard({
@@ -17,9 +18,11 @@ export function LicenseStatusCard({
   isLoading,
   onCheckStatus,
   onRevalidate,
+  onStartTrial,
   onDeactivate,
 }: LicenseStatusCardProps) {
   const licensed = status?.status === "licensed";
+  const trialNotStarted = !isLoading && status?.status === "none";
   return (
     <section>
       <SettingsPaneRow
@@ -40,10 +43,17 @@ export function LicenseStatusCard({
               ? "Couldn’t verify your license. Connect to the internet, then recheck."
               : status?.status === "trial"
                 ? `${status.trial_days_left ?? 0} days remaining in your trial`
-                : undefined
+                : trialNotStarted
+                  ? "Your free trial begins when you start it."
+                  : undefined
         }
       />
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+        {trialNotStarted && (
+          <Button size="sm" onClick={onStartTrial}>
+            Start free trial
+          </Button>
+        )}
         <Button
           variant="secondary"
           size="sm"

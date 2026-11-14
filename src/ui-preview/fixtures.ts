@@ -15,6 +15,8 @@ export type PreviewOptions = {
   empty: boolean;
   sidebar?: "expanded" | "rail";
   onboarding?: 1 | 2 | 3;
+  /** `?license=none`: a device whose free trial has not been started. */
+  trialNotStarted?: boolean;
 };
 
 const demoText = [
@@ -280,12 +282,14 @@ export function createFixtures(options: PreviewOptions) {
             };
       })
     : demoModels;
-  const license: LicenseStatus = {
-    status: "licensed",
-    license_type: "pro",
-    trial_days_left: 0,
-    verification_state: "verified",
-  };
+  const license: LicenseStatus = options.trialNotStarted
+    ? { status: "none" }
+    : {
+        status: "licensed",
+        license_type: "pro",
+        trial_days_left: 0,
+        verification_state: "verified",
+      };
   const shortcuts: ShortcutSettings = {
     bindings: [
       {
@@ -364,6 +368,7 @@ export function createFixtures(options: PreviewOptions) {
     save_settings: null,
     check_license_status: license,
     revalidate_license: license,
+    start_trial: { status: "trial", trial_days_left: 7 } satisfies LicenseStatus,
     get_model_status: { models: onboardingModels },
     get_recognition_availability_snapshot: {
       whisper_available: false,

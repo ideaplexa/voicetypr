@@ -24,6 +24,7 @@ export function SuccessStep({
   isSavingCompletion,
   onTelemetryChange,
   onComplete,
+  onStartTrial,
 }: {
   editor?: ReactNode;
   onChangeShortcut: () => void;
@@ -34,6 +35,7 @@ export function SuccessStep({
   isSavingCompletion: boolean;
   onTelemetryChange: (checked: boolean) => void;
   onComplete: () => void | Promise<void>;
+  onStartTrial?: () => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const trialRef = useRef<HTMLTextAreaElement>(null);
@@ -54,20 +56,42 @@ export function SuccessStep({
     return () => { disposed = true; void unlisten.then((stop) => stop()); };
   }, []);
   const editing = Boolean(editor);
+  // Dictation needs a trial or a license, so the practice box waits for the click.
+  const trialGate = Boolean(onStartTrial) && !editing;
+  const [startingTrial, setStartingTrial] = useState(false);
   useEffect(() => {
-    if (!editing) trialRef.current?.focus();
-  }, [editing]);
-  const { feedback, contentChanged } = useTestDictation(!editor);
+    if (!editing && !trialGate) trialRef.current?.focus();
+  }, [editing, trialGate]);
+  const { feedback, contentChanged } = useTestDictation(!editing && !trialGate);
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
   return (
     <section className="flex w-full flex-col items-center gap-[22px]">
-      <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Try it now</h2>
-      <p className="flex flex-wrap items-center justify-center gap-[10px] text-base text-muted-foreground">
-        {holdToTalk ? "Hold" : "Press"} <KeyCaps caps={caps} size="onboarding" />
-        {holdToTalk ? "and say anything, then let go." : "and say anything. Press again to stop."}
-      </p>
+      <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
+        {trialGate ? "Start your free trial" : "Try it now"}
+      </h2>
+      {trialGate ? (
+        <>
+          <p className="text-center text-base text-muted-foreground">
+            Your trial begins when you start it. Have a license key? Finish setup, then enter it under License.
+          </p>
+          <Button
+            disabled={startingTrial}
+            onClick={() => {
+              setStartingTrial(true);
+              void onStartTrial?.().finally(() => setStartingTrial(false));
+            }}
+          >
+            {startingTrial ? <Spinner /> : null}Start free trial
+          </Button>
+        </>
+      ) : (
+        <p className="flex flex-wrap items-center justify-center gap-[10px] text-base text-muted-foreground">
+          {holdToTalk ? "Hold" : "Press"} <KeyCaps caps={caps} size="onboarding" />
+          {holdToTalk ? "and say anything, then let go." : "and say anything. Press again to stop."}
+        </p>
+      )}
       {recording && !editor && (
         <Button disabled={stopping} onClick={() => {
           setStopping(true);
@@ -78,7 +102,7 @@ export function SuccessStep({
       {editor}
       <div
         className={
-          editor
+          editor || trialGate
             ? "hidden"
             : "flex h-[150px] w-full flex-col gap-[10px] rounded-[14px] outline-[1.5px] outline-sage outline-offset-[-0.75px] bg-card p-[18px]"
         }

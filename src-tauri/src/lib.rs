@@ -1359,6 +1359,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             test_automation_permission,
             check_license_status,
             revalidate_license,
+            start_trial,
             restore_license,
             activate_license,
             deactivate_license,

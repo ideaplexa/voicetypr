@@ -66,6 +66,7 @@ fn problem(kind: BlockedKind) -> &'static str {
         BlockedKind::LicenseCheckFailed => "License check failed",
         BlockedKind::LicenseVerifyRequired => "License verification required",
         BlockedKind::TrialEnded => "Trial ended",
+        BlockedKind::TrialNotStarted => "Trial not started",
         BlockedKind::NoEngine => "No engine available",
         BlockedKind::CloudKeyMissing => "Cloud key missing",
         BlockedKind::CloudKeyRejected => "Cloud key rejected",

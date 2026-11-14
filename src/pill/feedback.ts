@@ -10,6 +10,7 @@ export function blockedCard(e: DictationBlocked, mac: boolean): FeedbackCard {
   const settings = mac ? 'Open System Settings' : 'Open Privacy settings';
   const table = {
     trial_ended: ['Trial ended','Activate Voicetypr to keep dictating','Activate'],
+    trial_not_started: ['Start your free trial','Start it in Voicetypr to dictate','Open'],
     license_check_failed: ["Couldn't verify your license",'Connect to the internet, then recheck','Recheck'],
     license_verify_required: ["Couldn't verify your license",'Connect to the internet, then recheck','Recheck'],
     no_engine: ['No voice engine set up','Download a model or add a cloud key','Set up'],
