@@ -166,7 +166,8 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.canvas.style.width = '260px'; dom.canvas.style.height = '24px';
     pastedClock.size(targetPose.w, targetPose.h, R.to);
     rowEl.style.width = `${Math.max(0, W.to - 2)}px`; rowEl.style.paddingRight = `${12 + HC.to}px`;
-    ctlEl.style.left = `${Math.max(0, W.to - 74)}px`; ctlEl.style.top = `${iconCentreY(targetPose) - 16}px`; ctlEl.inert = HC.to === 0;
+    // 24px controls sit 3px inside the 30px inner height, and the same 3px from the end, so Stop is concentric with the cap.
+    ctlEl.style.left = `${Math.max(0, W.to - 57)}px`; ctlEl.style.top = `${iconCentreY(targetPose) - 12}px`; ctlEl.inert = HC.to === 0;
     const edge = rowEdge(targetPose);
     for (const el of rowLayers) { el.style.left = `${targetPose.ix - 21}px`; el.style[top ? 'top' : 'bottom'] = `${edge}px`; el.style[top ? 'bottom' : 'top'] = ''; }
     if (panel) {
@@ -256,7 +257,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
     dom.get<HTMLElement>('.pill-rest-dot').hidden = !rest;
     dom.get<HTMLElement>('.core').classList.toggle('bad', !machine.context.mic.ok);
     const ctl = machine.recording && !machine.pending && !pick;
-    HC.to = ctl ? 72 : 0; HC.snap();
+    HC.to = ctl ? 56 : 0; HC.snap();
     ctlEl.hidden = !ctl;
     // An invisible Cancel beside Stop must not be clickable: one stray click would discard the take.
     const cancelEl = dom.get<HTMLButtonElement>('.cancel'); cancelEl.style.opacity = hovering ? '' : '0'; cancelEl.inert = !hovering;

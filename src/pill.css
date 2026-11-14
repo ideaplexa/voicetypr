@@ -50,8 +50,8 @@ button { font:inherit }
 /* Pending capture has neither a clock nor audio-driven motion. */
 .opening-label { white-space:nowrap }
 .listening-row { position:relative }
-.ctl { position:absolute;height:32px;display:inline-flex;align-items:center;gap:4px }
-.ctl .round { width:32px;height:32px;border-radius:16px }
+.ctl { position:absolute;height:24px;display:inline-flex;align-items:center;gap:4px }
+.ctl .round { width:24px;height:24px;border-radius:12px }
 .ctl .stop { background:rgba(143,209,168,.18);color:var(--sage) }
 .ctl .cancel { background:transparent;color:var(--t2) }
 .ctl .cancel:focus-visible { opacity:1!important }
