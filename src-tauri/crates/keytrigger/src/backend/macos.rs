@@ -57,6 +57,8 @@ struct TapState {
 impl TapState {
     fn observe_secure_input(&self, enabled: bool, tx: &Sender<Msg>) -> bool {
         if self.secure.replace(enabled) != enabled {
+            // Secure Input can hide key-downs from the tap entirely.
+            crate::note_text_key_down();
             let _ = tx.send(Msg::Control(Control::SecureInput(enabled)));
         }
         // Keep only previously swallowed keys quarantined across either edge.

@@ -11,7 +11,7 @@ const COMMANDS: [say: string, does: string][] = [
   ["new line", "Starts a new line"],
   ["new paragraph", "Starts a new paragraph"],
   ["undo that", "Undoes the last change"],
-  ["delete that", "Takes back the dictation you just made, if you haven't typed or switched windows since"],
+  ["delete that", "Undoes the dictation you just made, if you haven't typed or switched windows since"],
   ["select all", "Selects everything in the field"],
   ["send", "Presses Return to send"],
 ];

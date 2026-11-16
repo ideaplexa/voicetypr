@@ -507,6 +507,8 @@ fn insert_via_clipboard(
             .as_ref()
             .and_then(|app| crate::writing::load_writing_settings(app).ok())
             .is_some_and(|settings| settings.editing_commands);
+    crate::insertion::voice_keys::forget_insertion();
+    let before_paste = remember_for_commands.then(crate::insertion::voice_keys::before_paste);
 
     #[cfg(target_os = "macos")]
     let outcome = {
@@ -532,10 +534,8 @@ fn insert_via_clipboard(
         keep_transcription_in_clipboard,
         &current,
     )?;
-    if remember_for_commands && outcome == PasteOutcome::Pasted {
-        crate::insertion::voice_keys::remember_insertion();
-    } else {
-        crate::insertion::voice_keys::forget_insertion();
+    if let Some(before_paste) = before_paste.filter(|_| outcome == PasteOutcome::Pasted) {
+        crate::insertion::voice_keys::remember_insertion(before_paste);
     }
     let play_completed_cue = paste_completed_cue_eligible(&outcome);
 

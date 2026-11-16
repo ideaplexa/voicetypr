@@ -2,12 +2,14 @@
 //! last dictation it pasted, so "delete that" removes exactly it.
 //!
 //! "Delete that" trusts only Voicetypr's own record of the paste, never the
-//! target app's accessibility tree. The record is valid while nothing that
-//! could move the caret or change the text has happened since: no key-down
-//! reached any app (counted by the trigger engine's event tap or hook), the
-//! same app and window are still in front, and less than a minute has passed.
-//! Mouse clicks are not observed (no existing hook sees them), so removal uses
-//! the app's own undo, which takes back the paste wherever the caret is.
+//! target app's accessibility tree. The record is valid while no key-down
+//! reached any app since the paste (counted by the trigger engine's event tap
+//! or hook, and bumped on Secure Input changes and tap gaps), the same app and
+//! window are still in front, and less than a minute has passed. Removal is
+//! the app's own undo, so a click that only moved the caret does not matter.
+//! Mouse clicks are not observed (no existing hook sees them), so a click into
+//! another field of the same window is not seen and its undo runs there; and
+//! an app that ignored the paste gets its previous edit undone.
 //! Only a count, a process id, a window id and a time are kept, in memory;
 //! no text is stored or logged.
 
@@ -89,13 +91,34 @@ fn frontmost() -> Option<Focus> {
         })
 }
 
-/// Remember the dictation just pasted into the frontmost app.
-pub(crate) fn remember_insertion() {
-    let insertion = frontmost().map(|focus| LastInsertion {
+/// The front window and key-down count right before a paste.
+pub(crate) struct BeforePaste {
+    focus: Option<Focus>,
+    key_downs: u64,
+}
+
+pub(crate) fn before_paste() -> BeforePaste {
+    let focus = frontmost();
+    BeforePaste {
         focus,
         key_downs: keytrigger::text_key_downs(),
-        at: Instant::now(),
-    });
+    }
+}
+
+/// Remember the dictation just pasted, only if no key and no window change
+/// happened around the paste, so the record never covers another edit.
+pub(crate) fn remember_insertion(before: BeforePaste) {
+    let focus = frontmost();
+    let insertion = before
+        .focus
+        .filter(|before_focus| {
+            Some(before_focus) == focus.as_ref() && keytrigger::text_key_downs() == before.key_downs
+        })
+        .map(|focus| LastInsertion {
+            focus,
+            key_downs: before.key_downs,
+            at: Instant::now(),
+        });
     *LAST_INSERTION.lock().unwrap_or_else(|e| e.into_inner()) = insertion;
 }
 
@@ -151,28 +174,28 @@ pub(crate) fn perform(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
-    if command == VoiceCommand::DeleteThat {
+    let recheck = |watching: bool| {
+        // Front window first: a key arriving during that query still counts.
+        let focus = frontmost();
         check_record(
             last.as_ref(),
             watching,
             keytrigger::text_key_downs(),
             Instant::now(),
-            frontmost().as_ref(),
+            focus.as_ref(),
         )
-        .map_err(CommandError::Skipped)?;
+        .map_err(CommandError::Skipped)
+    };
+    if command == VoiceCommand::DeleteThat {
+        recheck(watching)?;
     }
-    let key_downs = keytrigger::text_key_downs();
     for (key, modifier) in presses_for(command) {
         current()?;
         wait_for_modifiers_released(current)?;
-        // Waiting for modifiers can take a while; recheck before the undo.
-        if command == VoiceCommand::DeleteThat
-            && (keytrigger::text_key_downs() != key_downs
-                || frontmost().as_ref() != last.as_ref().map(|last| &last.focus))
-        {
-            return Err(CommandError::Failed(
-                "Input changed while deleting".to_string(),
-            ));
+        // Waiting for modifiers can take a while; check again against the
+        // record itself right before the undo.
+        if command == VoiceCommand::DeleteThat {
+            recheck(watching)?;
         }
         press(key, modifier)?;
     }
