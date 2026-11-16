@@ -616,7 +616,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       stack.push(card, origin, announce);
       if (handoff && !machine.recording) rest();
     },
-    blocked(value: DictationBlocked) { if (machine.observeGeneration(value.generation)) this.feedback(blockedCard(value,deps.mac),value.kind !== 'starting_up',!(value.kind==='accessibility_off' && machine.state==='no_permission')); },
+    blocked(value: DictationBlocked) {
+      if (!machine.observeGeneration(value.generation)) return;
+      if (value.kind === 'accessibility_off') copiedGeneration = Math.max(copiedGeneration, value.generation);
+      this.feedback(blockedCard(value,deps.mac),value.kind !== 'starting_up',!(value.kind==='accessibility_off' && machine.state==='no_permission'));
+    },
     recovery(value: DictationRecovery) {
       // Retained clips outlive their take. Their id/lease, not the active-take watermark, owns the action.
       if (!value.id || !(value.expires_in_ms > 0)) return;
@@ -671,9 +675,13 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       if(hint && (hint.expiresAt ?? 0)>performance.now()) stack.push({...hint,title:'Press Esc again to discard'},undefined,false);
       sync();
     },
+    /** A later take that pasted retires the sticky Copied and Accessibility cards, even when a newer recording hides its outcome. */
+    retirePasted(generation?: number) {
+      if (generation !== undefined && generation <= copiedGeneration) return;
+      for (const key of ['copied', 'no_permission', 'blocked:accessibility_off']) stack.remove(key);
+    },
     outcome(value: PasteOutcomePayload) {
-      // A later take that pasted retires the sticky Copied card, even when a newer recording hides that outcome.
-      if (value.outcome === 'pasted' && (value.generation === undefined || value.generation > copiedGeneration)) { stack.remove('copied'); stack.remove('no_permission'); }
+      if (value.outcome === 'pasted') this.retirePasted(value.generation);
       if (machine.terminal && machine.state === value.outcome && machine.words === value.words) return;
       if (!machine.outcome(value)) return;
       if (value.outcome !== 'pasted') copiedGeneration = value.generation ?? machine.generation;

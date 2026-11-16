@@ -215,6 +215,7 @@ export function createRecordingPill(root: HTMLElement, deps: RecordingPillDeps =
   subscribeFeedback<{id:string}>('kept-dictation-expired', value => island.expired(value.id));
   subscribeFeedback<{kind: IslandNotice['kind']}>('island-notice-clear', value => island.clearNotice(value.kind));
   subscribeFeedback<PasteOutcomePayload>('paste-outcome', value => island.outcome(value));
+  subscribeFeedback<{generation:number}>('paste-retire', value => island.retirePasted(value.generation));
   subscribe('settings-changed', () => { void readSettings(); void readQuick(); });
   for (const event of ['model-changed', 'audio-device-changed', 'polish-options-changed', 'ai-enabled-changed', 'sharing-status-changed', 'shortcut-settings-changed']) subscribe(event, () => { void readQuick(); });
   subscribe('island-escape', () => island.closeQuick());
