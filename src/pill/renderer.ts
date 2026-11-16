@@ -47,7 +47,7 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
   let pick: { kind: QuickKind; from: 'peek' | 'start'; y: number; height: number; selected: number; width: number } | undefined;
   let quickPending = false, lastToggleAt = -Infinity, toggleSeq = 0;
   const pickGuard = new PickGuard();
-  let polished = false, pastedLeft = 2400, pastedSince = 0;
+  let polished = false, pastedLeft = 2400, pastedSince = 0, copiedGeneration = 0;
   const stack = new StackView(dom.root, {
     wake: () => wake(), changed: () => sync(),
     call: c => deps.actions.card?.(c) ?? Promise.reject(new Error('Unavailable')),
@@ -672,8 +672,11 @@ export function createIsland(host: HTMLElement, deps: RendererDeps) {
       sync();
     },
     outcome(value: PasteOutcomePayload) {
+      // A later take that pasted retires the sticky Copied card, even when a newer recording hides that outcome.
+      if (value.outcome === 'pasted' && (value.generation === undefined || value.generation > copiedGeneration)) { stack.remove('copied'); stack.remove('no_permission'); }
       if (machine.terminal && machine.state === value.outcome && machine.words === value.words) return;
       if (!machine.outcome(value)) return;
+      if (value.outcome !== 'pasted') copiedGeneration = value.generation ?? machine.generation;
       stack.dropLive(value.generation ?? machine.generation);
       pick = undefined;
       polished = value.polished === true; pastedLeft=2400;pastedSince=performance.now();text('.done-label','Pasted');
