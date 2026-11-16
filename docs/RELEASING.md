@@ -110,7 +110,7 @@
   fresh VM without VC++ stays NEEDS-SMOKE (`plans/082`, B.2).
 - The manual `scripts/release-windows.ps1` path runs those installer, Vulkan
   import, lazy-ORT import/MAP and Ivy Bridge checks before signing or uploading.
-  It requires PowerShell 7 (`pwsh`), `dumpbin`, network access for pinned Intel
+  It requires PowerShell 7 (`pwsh`), `dumpbin`, 7-Zip (`7z`) on PATH, network access for pinned Intel
   SDE and the speech sample, and a Windows x64 build with its linker MAP.
   `-SkipBuild` still runs the checks and requires the staged installer to match
   the current build output; the installed executable must match the checked
