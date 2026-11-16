@@ -640,6 +640,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let exit_code = builder
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+            recording::file_jobs::initialize_temp_dir(&app.config().identifier);
             app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
