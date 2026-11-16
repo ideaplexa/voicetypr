@@ -2,7 +2,8 @@ import { Button } from "@/components/settings/SettingsButton";
 import { SettingsPaneRow } from "@/components/settings/settings-ui";
 import { Check } from "lucide-react";
 import { isMacOS } from "@/lib/platform";
-import type { LicenseStatus } from "@/types";
+import type { LicenseStatus, TrialStartError } from "@/types";
+import { TrialStartForm } from "@/components/TrialStartForm";
 import { formatLicenseStatus } from "@/components/sections/accountLicenseUtils";
 
 interface LicenseStatusCardProps {
@@ -10,7 +11,7 @@ interface LicenseStatusCardProps {
   isLoading: boolean;
   onCheckStatus: () => void;
   onRevalidate: () => void;
-  onStartTrial: () => void;
+  onStartTrial: (name: string, email: string) => Promise<TrialStartError | null>;
   onDeactivate: () => void;
 }
 export function LicenseStatusCard({
@@ -22,7 +23,7 @@ export function LicenseStatusCard({
   onDeactivate,
 }: LicenseStatusCardProps) {
   const licensed = status?.status === "licensed";
-  const trialNotStarted = !isLoading && status?.status === "none";
+  const trialNotStarted = status?.status === "none";
   return (
     <section>
       <SettingsPaneRow
@@ -44,16 +45,12 @@ export function LicenseStatusCard({
               : status?.status === "trial"
                 ? `${status.trial_days_left ?? 0} days remaining in your trial`
                 : trialNotStarted
-                  ? "Your free trial begins when you start it."
+                  ? "All of Voicetypr, free for 7 days. No card. The clock starts when you click, not before."
                   : undefined
         }
       />
+      {trialNotStarted && <TrialStartForm onStart={onStartTrial} className="items-start pb-3" />}
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-        {trialNotStarted && (
-          <Button size="sm" onClick={onStartTrial}>
-            Start free trial
-          </Button>
-        )}
         <Button
           variant="secondary"
           size="sm"

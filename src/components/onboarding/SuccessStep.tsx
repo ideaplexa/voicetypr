@@ -11,7 +11,8 @@ import { CircleCheck } from "lucide-react";
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { RecordingStatePayload } from "@/types";
+import type { RecordingStatePayload, TrialStartError } from "@/types";
+import { TrialStartForm } from "@/components/TrialStartForm";
 import { toast } from "sonner";
 
 export function SuccessStep({
@@ -35,7 +36,7 @@ export function SuccessStep({
   isSavingCompletion: boolean;
   onTelemetryChange: (checked: boolean) => void;
   onComplete: () => void | Promise<void>;
-  onStartTrial?: () => Promise<void>;
+  onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
 }) {
   const [text, setText] = useState("");
   const trialRef = useRef<HTMLTextAreaElement>(null);
@@ -58,7 +59,6 @@ export function SuccessStep({
   const editing = Boolean(editor);
   // Dictation needs a trial or a license, so the practice box waits for the click.
   const trialGate = Boolean(onStartTrial) && !editing;
-  const [startingTrial, setStartingTrial] = useState(false);
   useEffect(() => {
     if (!editing && !trialGate) trialRef.current?.focus();
   }, [editing, trialGate]);
@@ -69,22 +69,17 @@ export function SuccessStep({
   return (
     <section className="flex w-full flex-col items-center gap-[22px]">
       <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        {trialGate ? "Start your free trial" : "Try it now"}
+        {trialGate ? "You’re set. Start your 7 days." : "Try it now"}
       </h2>
-      {trialGate ? (
+      {trialGate && onStartTrial ? (
         <>
           <p className="text-center text-base text-muted-foreground">
-            Your trial begins when you start it. Have a license key? Finish setup, then enter it under License.
+            All of Voicetypr, free for 7 days. No card. The clock starts when you click, not before.
           </p>
-          <Button
-            disabled={startingTrial}
-            onClick={() => {
-              setStartingTrial(true);
-              void onStartTrial?.().finally(() => setStartingTrial(false));
-            }}
-          >
-            {startingTrial ? <Spinner /> : null}Start free trial
-          </Button>
+          <TrialStartForm onStart={onStartTrial} />
+          <p className="text-center text-[12.5px] text-muted-foreground">
+            Have a license key? Finish setup, then enter it under License.
+          </p>
         </>
       ) : (
         <p className="flex flex-wrap items-center justify-center gap-[10px] text-base text-muted-foreground">

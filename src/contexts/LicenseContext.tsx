@@ -9,20 +9,27 @@ import {
   ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { LicenseStatus } from "@/types";
+import type { LicenseStatus, TrialStartError } from "@/types";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/utils/error";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("license");
 const LICENSE_COMMAND_TIMEOUT_MS = 60_000;
+const TRIAL_START_ERRORS: readonly TrialStartError[] = [
+  "trial_unreachable",
+  "trial_invalid_name",
+  "trial_invalid_email",
+  "trial_rate_limited",
+  "trial_failed",
+];
 
 interface LicenseContextValue {
   status: LicenseStatus | null;
   isLoading: boolean;
   checkStatus: () => Promise<void>;
   revalidateLicense: () => Promise<void>;
-  startTrial: () => Promise<void>;
+  startTrial: (name: string, email: string) => Promise<TrialStartError | null>;
   restoreLicense: () => Promise<void>;
   activateLicense: (key: string) => Promise<void>;
   deactivateLicense: () => Promise<void>;
@@ -158,18 +165,18 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const startTrial = useCallback(async () => {
+  const startTrial = useCallback(async (name: string, email: string): Promise<TrialStartError | null> => {
     const checkId = ++latestCheckStatusId.current;
     try {
       setIsLoading(true);
-      const licenseStatus = await invoke<LicenseStatus>("start_trial");
-      if (checkId !== latestCheckStatusId.current) return;
-      setStatus(licenseStatus);
+      const licenseStatus = await invoke<LicenseStatus>("start_trial", { name, email });
+      if (checkId === latestCheckStatusId.current) setStatus(licenseStatus);
       if (licenseStatus.status === "trial") toast.success("Your free trial has started");
+      return null;
     } catch (error: unknown) {
-      if (checkId !== latestCheckStatusId.current) return;
-      log.error("Failed to start trial:", error);
-      toast.error("Couldn’t start your trial. Check your connection and try again.");
+      const code = TRIAL_START_ERRORS.find((known) => known === error) ?? "trial_failed";
+      log.error("Failed to start trial:", code);
+      return code;
     } finally {
       if (checkId === latestCheckStatusId.current) {
         setIsLoading(false);

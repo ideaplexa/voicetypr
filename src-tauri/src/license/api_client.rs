@@ -55,6 +55,28 @@ impl LicenseValidationError {
     }
 }
 
+/// Why a trial did not start. `code()` is what the app maps to copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrialStartError {
+    Unreachable,
+    InvalidName,
+    InvalidEmail,
+    RateLimited,
+    Failed,
+}
+
+impl TrialStartError {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Unreachable => "trial_unreachable",
+            Self::InvalidName => "trial_invalid_name",
+            Self::InvalidEmail => "trial_invalid_email",
+            Self::RateLimited => "trial_rate_limited",
+            Self::Failed => "trial_failed",
+        }
+    }
+}
+
 pub struct LicenseApiClient {
     client: reqwest::Client,
     base_url: String,
@@ -75,24 +97,7 @@ impl LicenseApiClient {
 
     /// Read the device's trial. Never starts one.
     pub async fn trial_status(&self, device_hash: &str) -> Result<TrialCheckResponse, String> {
-        self.post_trial("status", device_hash, "Failed to check trial status")
-            .await
-    }
-
-    /// Start the device's trial. The server leaves an existing trial, active
-    /// or expired, unchanged.
-    pub async fn start_trial(&self, device_hash: &str) -> Result<TrialCheckResponse, String> {
-        self.post_trial("start", device_hash, "Failed to start trial")
-            .await
-    }
-
-    async fn post_trial(
-        &self,
-        action: &str,
-        device_hash: &str,
-        fallback_error: &str,
-    ) -> Result<TrialCheckResponse, String> {
-        let url = format!("{}/trial/{}", self.base_url, action);
+        let url = format!("{}/trial/status", self.base_url);
 
         let response = self
             .client
@@ -113,9 +118,59 @@ impl LicenseApiClient {
             let error: ApiError = response.json().await.unwrap_or(ApiError {
                 success: false,
                 error: Some("unknown_error".to_string()),
-                message: fallback_error.to_string(),
+                message: "Failed to check trial status".to_string(),
             });
             Err(error.message)
+        }
+    }
+
+    /// Start the device's trial with the user's name and email. The server
+    /// leaves an existing trial, active or expired, unchanged.
+    pub async fn start_trial(
+        &self,
+        device_hash: &str,
+        name: &str,
+        email: &str,
+    ) -> Result<TrialCheckResponse, TrialStartError> {
+        let url = format!("{}/trial/start", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&json!({
+                "deviceHash": device_hash,
+                "name": name,
+                "email": email
+            }))
+            .send()
+            .await
+            .map_err(|_| TrialStartError::Unreachable)?;
+
+        let status = response.status();
+        if status.is_success() {
+            return response
+                .json::<TrialCheckResponse>()
+                .await
+                .map_err(|_| TrialStartError::Failed);
+        }
+        match status.as_u16() {
+            429 => Err(TrialStartError::RateLimited),
+            502..=504 => Err(TrialStartError::Unreachable),
+            400 => {
+                let message = response
+                    .json::<ApiError>()
+                    .await
+                    .map(|error| error.message)
+                    .unwrap_or_default();
+                Err(if message.starts_with("name:") {
+                    TrialStartError::InvalidName
+                } else if message.starts_with("email:") {
+                    TrialStartError::InvalidEmail
+                } else {
+                    TrialStartError::Failed
+                })
+            }
+            _ => Err(TrialStartError::Failed),
         }
     }
 
@@ -483,9 +538,13 @@ mod tests {
             .and(warp::post())
             .map(move || trial_reply(read.load(Ordering::SeqCst)));
         let write = Arc::clone(&server_started);
+        let sent = Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+        let sent_for_route = Arc::clone(&sent);
         let start = warp::path!("trial" / "start")
             .and(warp::post())
-            .map(move || {
+            .and(warp::body::json())
+            .map(move |body: serde_json::Value| {
+                *sent_for_route.lock().unwrap() = body;
                 write.store(true, Ordering::SeqCst);
                 trial_reply(true)
             });
@@ -496,7 +555,11 @@ mod tests {
 
         let before = client.trial_status(device).await.unwrap().data;
         let started_by_reading = server_started.load(Ordering::SeqCst);
-        let begun = client.start_trial(device).await.unwrap().data;
+        let begun = client
+            .start_trial(device, "Priya Raman", "priya@example.com")
+            .await
+            .unwrap()
+            .data;
         let after = client.trial_status(device).await.unwrap().data;
 
         server_task.abort();
@@ -505,5 +568,72 @@ mod tests {
         assert!(begun.started);
         assert_eq!(begun.days_left, Some(7));
         assert!(after.started);
+        assert_eq!(
+            *sent.lock().unwrap(),
+            json!({ "deviceHash": device, "name": "Priya Raman", "email": "priya@example.com" })
+        );
+    }
+
+    async fn start_against(
+        status: u16,
+        message: &str,
+    ) -> Result<TrialCheckResponse, TrialStartError> {
+        let body = json!({ "success": false, "error": "x", "message": message });
+        let route = warp::path!("trial" / "start")
+            .and(warp::post())
+            .map(move || {
+                warp::reply::with_status(
+                    warp::reply::json(&body),
+                    warp::http::StatusCode::from_u16(status).unwrap(),
+                )
+            });
+        let (address, server) = warp::serve(route).bind_ephemeral(([127, 0, 0, 1], 0));
+        let server_task = tokio::spawn(server);
+        let result = test_client(format!("http://{}", address))
+            .start_trial(&"0".repeat(64), "Priya Raman", "priya@example.com")
+            .await;
+        server_task.abort();
+        result
+    }
+
+    /// A failed start says why, so the app never reports an unreachable
+    /// server as an ended trial.
+    #[tokio::test]
+    async fn failed_trial_start_reports_the_reason() {
+        assert_eq!(
+            start_against(400, "email: That email doesn’t look right")
+                .await
+                .unwrap_err(),
+            TrialStartError::InvalidEmail
+        );
+        assert_eq!(
+            start_against(400, "name: Enter your name")
+                .await
+                .unwrap_err(),
+            TrialStartError::InvalidName
+        );
+        assert_eq!(
+            start_against(429, "Too many attempts").await.unwrap_err(),
+            TrialStartError::RateLimited
+        );
+        assert_eq!(
+            start_against(503, "Service unavailable").await.unwrap_err(),
+            TrialStartError::Unreachable
+        );
+        assert_eq!(
+            start_against(500, "An internal error occurred")
+                .await
+                .unwrap_err(),
+            TrialStartError::Failed
+        );
+
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = closed.local_addr().unwrap();
+        drop(closed);
+        let unreachable = test_client(format!("http://{}", address))
+            .start_trial(&"0".repeat(64), "Priya Raman", "priya@example.com")
+            .await
+            .unwrap_err();
+        assert_eq!(unreachable, TrialStartError::Unreachable);
     }
 }

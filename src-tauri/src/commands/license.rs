@@ -1135,14 +1135,25 @@ pub async fn revalidate_license(app: AppHandle) -> Result<LicenseStatus, String>
     perform_license_status_check(&app).await
 }
 
-/// Start the free trial for this device. Only a user action calls this; the
-/// status check never starts a trial.
+/// Start the free trial for this device with the user's name and email. Only a
+/// user action calls this; the status check never starts a trial. Errors are
+/// the `TrialStartError` codes; the name and email are never logged.
 #[tauri::command]
-pub async fn start_trial(app: AppHandle) -> Result<LicenseStatus, String> {
+pub async fn start_trial(
+    app: AppHandle,
+    name: String,
+    email: String,
+) -> Result<LicenseStatus, String> {
     let validation_lock = app.state::<AppState>().license_validation_lock.clone();
     let _validation_guard = validation_lock.lock().await;
     let device_hash = device::get_device_hash()?;
-    LicenseApiClient::new()?.start_trial(&device_hash).await?;
+    if let Err(error) = LicenseApiClient::new()?
+        .start_trial(&device_hash, name.trim(), email.trim())
+        .await
+    {
+        log::warn!("Trial start failed: {}", error.code());
+        return Err(error.code().to_string());
+    }
     clear_license_status_cache(&app).await;
     perform_license_status_check(&app).await
 }

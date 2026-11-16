@@ -3,6 +3,7 @@ import type { SavedConnection } from "@/components/RemoteServerCard";
 import type { useModelManagement } from "@/hooks/useModelManagement";
 import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import { isMacOS } from "@/lib/platform";
+import type { TrialStartError } from "@/types";
 
 export interface OnboardingDesktopProps {
   /** Screenshot fixtures only; production onboarding always starts at welcome. */
@@ -11,7 +12,7 @@ export interface OnboardingDesktopProps {
   onCompletionError?: () => void;
   onComplete: () => void;
   /** Set only while this device has no trial yet; starts it on the user's click. */
-  onStartTrial?: () => Promise<void>;
+  onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
   modelManagement: ReturnType<typeof useModelManagement>;
 }
 
