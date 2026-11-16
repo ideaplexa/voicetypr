@@ -8,6 +8,9 @@ use crate::writing::{corrected_words, CorrectedWord, WritingSettings};
 const SUGGESTIONS_STORE: &str = "dictionary_suggestions";
 const SUGGESTIONS_KEY: &str = "suggestions";
 const MAX_STORED: usize = 200;
+/// Every read-modify-save of the suggestions store holds this, so two quick
+/// clicks or an edit beside a dismissal cannot overwrite each other.
+static STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,11 +35,10 @@ fn same(left: &str, right: &str) -> bool {
 fn already_in_dictionary(settings: &WritingSettings, found: &CorrectedWord) -> bool {
     settings.custom_words.iter().any(|entry| {
         entry.phrase == found.word
-            && (same(&found.heard, &found.word)
-                || entry
-                    .spoken_form
-                    .as_deref()
-                    .is_some_and(|spoken| same(spoken, &found.heard)))
+            && entry
+                .spoken_form
+                .as_deref()
+                .is_some_and(|spoken| same(spoken, &found.heard))
     }) || settings
         .replacements
         .iter()
@@ -114,8 +116,42 @@ fn save<R: tauri::Runtime>(
         .map_err(|_| "Could not save dictionary suggestions".to_string())
 }
 
+/// Words that change between two texts, kept only when the engine really heard
+/// them: a polished entry is compared against its raw transcript too, because
+/// the Dictionary's sounds-like rules run before Polish.
+fn heard_corrections(before: &str, raw: Option<&str>, edited: &str) -> Vec<CorrectedWord> {
+    let mut found = corrected_words(before, edited);
+    if let Some(raw) = raw.filter(|raw| *raw != before) {
+        let raw_words: Vec<String> = raw
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect();
+        found.retain(|c| {
+            let heard: Vec<String> = c.heard.split(' ').map(str::to_lowercase).collect();
+            raw_words
+                .windows(heard.len())
+                .any(|window| window == heard.as_slice())
+        });
+    }
+    found
+}
+
+fn offer_from_edit<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    found: Vec<CorrectedWord>,
+) -> Result<Vec<DictionarySuggestion>, String> {
+    let settings = crate::writing::load_writing_settings(app)?;
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut stored = load(app)?;
+    let offered = offer(&mut stored, found, &settings);
+    save(app, &stored)?;
+    Ok(offered)
+}
+
 /// Saves the user's edit of one History entry. Returns whether the text changed
-/// and the corrected words it offers for the Dictionary.
+/// and the corrected words it offers for the Dictionary. The edit is kept even
+/// when suggestions cannot be read or saved.
 fn edit_history_entry<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     id: &str,
@@ -146,19 +182,26 @@ fn edit_history_entry<R: tauri::Runtime>(
     if before == edited {
         return Ok((false, Vec::new()));
     }
+    let raw = entry
+        .get("writing")
+        .and_then(|writing| writing.get("original_text"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
     entry["text"] = edited.into();
     store.set(id, entry);
     store.save().map_err(|_| "Could not save history")?;
 
-    let found = corrected_words(&before, edited);
+    let found = heard_corrections(&before, raw.as_deref(), edited);
     if found.is_empty() {
         return Ok((true, Vec::new()));
     }
-    let settings = crate::writing::load_writing_settings(app)?;
-    let mut stored = load(app)?;
-    let offered = offer(&mut stored, found, &settings);
-    save(app, &stored)?;
-    Ok((true, offered))
+    match offer_from_edit(app, found) {
+        Ok(offered) => Ok((true, offered)),
+        Err(_) => {
+            log::warn!("Could not store dictionary suggestions after a history edit");
+            Ok((true, Vec::new()))
+        }
+    }
 }
 
 #[tauri::command]
@@ -193,6 +236,7 @@ pub async fn set_dictionary_suggestion_status(
     id: String,
     status: SuggestionStatus,
 ) -> Result<(), String> {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut stored = load(&app)?;
     let suggestion = stored
         .iter_mut()
@@ -273,6 +317,31 @@ mod tests {
         )
         .unwrap();
         assert!(!changed && offered.is_empty());
+    }
+
+    #[test]
+    fn a_polished_dictation_only_offers_what_the_engine_heard() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_with_history(
+            &dir,
+            serde_json::json!({
+                "text": "Ask voice typer and cloud code to review it.",
+                "model": "parakeet-tdt-0.6b-v2",
+                "status": "completed",
+                "writing": { "original_text": "so ask voice taper and uh cloud code to review it" },
+            }),
+        );
+        let (_, offered) = edit_history_entry(
+            app.handle(),
+            "2026-11-16T09:00:00Z",
+            "Ask Voicetypr and Claude Code to review it.",
+        )
+        .unwrap();
+        let offered: Vec<_> = offered
+            .iter()
+            .map(|s| (s.heard.as_str(), s.word.as_str()))
+            .collect();
+        assert_eq!(offered, vec![("cloud code", "Claude Code")]);
     }
 
     #[test]

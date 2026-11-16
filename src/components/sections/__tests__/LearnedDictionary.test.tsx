@@ -125,4 +125,46 @@ describe("Dictionary learns from corrections", () => {
     undoLastToast();
     expect(await screen.findByRole("region", { name: "Suggested words" })).toBeInTheDocument();
   });
+it("keeps a capitals-only fix as a sounds-like form so every engine spells it", async () => {
+    const user = userEvent.setup();
+    pending = [{ id: "s2", heard: "github", word: "GitHub", status: "pending" }];
+    render(<DictionarySection />);
+    await user.click(await screen.findByRole("button", { name: "Add GitHub to Dictionary" }));
+    await waitFor(() =>
+      expect(useWritingSettings.getState().settings.custom_words).toEqual([
+        { phrase: "GitHub", spoken_form: "github", language: null, enabled: true },
+      ]),
+    );
+  });
+
+  it("leaves the suggestion waiting when the Dictionary can't be saved", async () => {
+    const user = userEvent.setup();
+    pending = [voicetypr];
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "get_writing_settings") return defaultWritingSettings;
+      if (command === "list_dictionary_suggestions") return pending;
+      if (command === "update_writing_settings") throw new Error("disk full");
+      return null;
+    });
+    render(<DictionarySection />);
+    await user.click(await screen.findByRole("button", { name: "Add Voicetypr to Dictionary" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(useWritingSettings.getState().settings.custom_words).toEqual([]);
+    expect(invoke).not.toHaveBeenCalledWith("set_dictionary_suggestion_status", expect.anything());
+    expect(screen.getByRole("region", { name: "Suggested words" })).toBeInTheDocument();
+  });
+
+  it("undo removes the learned word even after the row was edited", async () => {
+    const user = userEvent.setup();
+    pending = [voicetypr];
+    render(<DictionarySection />);
+    await user.click(await screen.findByRole("button", { name: "Add Voicetypr to Dictionary" }));
+    await screen.findByRole("cell", { name: "Voicetypr" });
+    await user.click(screen.getByRole("button", { name: "Edit row 1" }));
+    await user.type(screen.getByLabelText("Language"), "en");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(useWritingSettings.getState().settings.custom_words[0]?.language).toBe("en");
+    undoLastToast();
+    await waitFor(() => expect(useWritingSettings.getState().settings.custom_words).toEqual([]));
+  });
 });

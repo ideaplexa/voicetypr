@@ -15,45 +15,49 @@ export interface DictionarySuggestion {
 
 type Change = {
   apply: Partial<WritingSettings>;
+  /** Whether the learned spelling is in the Dictionary, found by its fields so later edits to the row still count. */
+  present: (current: WritingSettings) => boolean;
+  /** Removes only the learned spelling and keeps any other change made since. */
   undo: (current: WritingSettings) => Partial<WritingSettings>;
 };
 
+const learnedWord = (entry: CustomWord, { heard, word }: DictionarySuggestion) =>
+  entry.phrase === word && entry.spoken_form?.toLowerCase() === heard.toLowerCase();
+
 // A corrected word becomes a Dictionary word with what was heard as its
-// "sounds like" form. If the word already has a different one, the fix is
-// kept as an exact correction instead.
-function learn(settings: WritingSettings, { heard, word }: DictionarySuggestion): Change {
-  const caseOnly = heard.toLowerCase() === word.toLowerCase();
+// "sounds like" form, so the spelling is fixed after every engine. If the word
+// already has a different sounds-like form, the fix is kept as a correction.
+function learn(settings: WritingSettings, suggestion: DictionarySuggestion): Change {
+  const { heard, word } = suggestion;
   const existing = settings.custom_words.find((entry) => entry.phrase === word && !entry.language);
-  if (!existing) {
-    const added: CustomWord = {
-      phrase: word,
-      spoken_form: caseOnly ? null : heard,
-      language: null,
-      enabled: true,
-    };
-    return {
-      apply: { custom_words: [...settings.custom_words, added] },
-      undo: (current) => ({
-        custom_words: current.custom_words.filter((entry) => entry !== added),
-      }),
-    };
-  }
-  if (caseOnly) return { apply: {}, undo: () => ({}) };
-  if (!existing.spoken_form) {
-    const updated: CustomWord = { ...existing, spoken_form: heard };
+  if (!existing || !existing.spoken_form) {
+    const added: CustomWord = { phrase: word, spoken_form: heard, language: null, enabled: true };
     return {
       apply: {
-        custom_words: settings.custom_words.map((entry) => (entry === existing ? updated : entry)),
+        custom_words: existing
+          ? settings.custom_words.map((entry) =>
+              entry === existing ? { ...existing, spoken_form: heard } : entry,
+            )
+          : [...settings.custom_words, added],
       },
+      present: (current) => current.custom_words.some((entry) => learnedWord(entry, suggestion)),
       undo: (current) => ({
-        custom_words: current.custom_words.map((entry) => (entry === updated ? existing : entry)),
+        custom_words: existing
+          ? current.custom_words.map((entry) =>
+              learnedWord(entry, suggestion) ? { ...entry, spoken_form: null } : entry,
+            )
+          : current.custom_words.filter((entry) => !learnedWord(entry, suggestion)),
       }),
     };
   }
-  const rule: TextReplacementRule = { from: heard, to: word, language: null, enabled: true };
+  const learnedRule = (rule: TextReplacementRule) =>
+    rule.to === word && rule.from.toLowerCase() === heard.toLowerCase();
   return {
-    apply: { replacements: [...settings.replacements, rule] },
-    undo: (current) => ({ replacements: current.replacements.filter((entry) => entry !== rule) }),
+    apply: {
+      replacements: [...settings.replacements, { from: heard, to: word, language: null, enabled: true }],
+    },
+    present: (current) => current.replacements.some(learnedRule),
+    undo: (current) => ({ replacements: current.replacements.filter((rule) => !learnedRule(rule)) }),
   };
 }
 
@@ -104,14 +108,17 @@ export const useDictionarySuggestions = create<DictionarySuggestionsState>((set,
         toast.error("Couldn't open your Dictionary");
         return;
       }
+      const change = learn(useWritingSettings.getState().settings, suggestion);
+      writing.update(change.apply);
+      await writing.flush();
+      if (!change.present(useWritingSettings.getState().settings)) return;
       try {
         await setStatus(suggestion, "accepted");
       } catch (error) {
+        writing.update(change.undo(useWritingSettings.getState().settings));
         toast.error(getErrorMessage(error, "Couldn't add the word"));
         return;
       }
-      const change = learn(useWritingSettings.getState().settings, suggestion);
-      writing.update(change.apply);
       toast.success(`Added “${suggestion.word}” to your Dictionary`, {
         action: {
           label: "Undo",

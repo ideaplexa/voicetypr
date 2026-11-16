@@ -1,5 +1,6 @@
 //! Finds the words a user fixed when they edited a dictation, so they can be
 //! offered for the Dictionary. Pure text comparison: nothing here logs or stores.
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CorrectedWord {
@@ -21,12 +22,23 @@ struct Token<'a> {
     starts_sentence: bool,
 }
 
+/// Same spelling, same bytes: composed accents and straight quotes.
+fn normalized(text: &str) -> String {
+    text.nfc()
+        .map(|c| match c {
+            '\u{2018}' | '\u{2019}' | '\u{02bc}' => '\'',
+            '\u{201c}' | '\u{201d}' => '"',
+            other => other,
+        })
+        .collect()
+}
+
 fn tokens(text: &str) -> Vec<Token<'_>> {
     let mut tokens = Vec::new();
     for line in text.lines() {
         let mut starts_sentence = true;
         for raw in line.split_whitespace() {
-            let core = raw.trim_matches(|c: char| !c.is_alphanumeric());
+            let core = raw.trim_matches(|c: char| !(c.is_alphanumeric() || is_combining_mark(c)));
             if core.is_empty() {
                 continue;
             }
@@ -50,10 +62,25 @@ fn joined(tokens: &[Token<'_>]) -> String {
         .join(" ")
 }
 
+/// A single ordinary lowercase word replaced by another ("remote" → "remove",
+/// "increase" → "decrease") is a typo or a change of mind, and as a global rule
+/// it would rewrite that real word everywhere. Names, jargon and split words are
+/// what the Dictionary is for.
+fn looks_like_a_term(heard: &[Token<'_>], word: &[Token<'_>]) -> bool {
+    heard.len() > 1
+        || word.len() > 1
+        || word.iter().any(|token| {
+            token
+                .core
+                .chars()
+                .any(|c| c.is_uppercase() || c.is_numeric())
+        })
+}
+
 fn similarity(left: &str, right: &str) -> f32 {
     let letters = |text: &str| -> Vec<char> {
         text.chars()
-            .filter(|c| c.is_alphanumeric())
+            .filter(|c| c.is_alphanumeric() || is_combining_mark(*c))
             .flat_map(char::to_lowercase)
             .collect()
     };
@@ -103,7 +130,7 @@ fn candidate(heard: &[Token<'_>], word: &[Token<'_>]) -> Option<CorrectedWord> {
                         && new.core.chars().next().is_some_and(char::is_uppercase)))
         })
     } else {
-        similarity(&heard_text, &word_text) >= MIN_SIMILARITY
+        looks_like_a_term(heard, word) && similarity(&heard_text, &word_text) >= MIN_SIMILARITY
     };
     keep.then_some(CorrectedWord {
         heard: heard_text,
@@ -112,9 +139,11 @@ fn candidate(heard: &[Token<'_>], word: &[Token<'_>]) -> Option<CorrectedWord> {
 }
 
 /// Words the user replaced between `before` and `after`, in reading order.
-/// Added or removed text, long rewrites and rewordings are ignored.
+/// Added or removed text, long rewrites, punctuation and ordinary-word changes
+/// are ignored.
 pub(crate) fn corrected_words(before: &str, after: &str) -> Vec<CorrectedWord> {
-    let (before, after) = (tokens(before), tokens(after));
+    let (before, after) = (normalized(before), normalized(after));
+    let (before, after) = (tokens(&before), tokens(&after));
     let prefix = before
         .iter()
         .zip(&after)
@@ -218,6 +247,9 @@ mod tests {
     #[test]
     fn rewording_added_and_removed_text_are_ignored() {
         assert!(pairs("that was a good idea", "that was a great idea").is_empty());
+        assert!(pairs("we should increase it", "we should decrease it").is_empty());
+        assert!(pairs("remote the file", "remove the file").is_empty());
+        assert!(pairs("I\u{2019}m sure", "I'm sure").is_empty());
         assert!(pairs("send it today", "send it to the team today").is_empty());
         assert!(pairs("um send it today please", "send it today").is_empty());
         assert!(pairs(
@@ -225,6 +257,17 @@ mod tests {
             "let us revisit this next week instead"
         )
         .is_empty());
+    }
+
+    #[test]
+    fn accents_and_combining_marks_stay_part_of_the_word() {
+        assert_eq!(
+            pairs("ask jose today", "ask Jose\u{301} today"),
+            vec![pair("jose", "Jos\u{e9}")]
+        );
+        assert!(pairs("Jose\u{301} said", "Jos\u{e9} said").is_empty());
+        let tamil = "\u{b95}\u{bae}\u{bb2}\u{bcd}";
+        assert_eq!(tokens(&format!("{tamil}.")).first().unwrap().core, tamil);
     }
 
     #[test]
