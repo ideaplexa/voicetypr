@@ -532,7 +532,7 @@ fn insert_via_clipboard(
         &mut paste,
         text,
         keep_transcription_in_clipboard,
-        &current,
+        current,
     )?;
     if let Some(before_paste) = before_paste.filter(|_| outcome == PasteOutcome::Pasted) {
         crate::insertion::voice_keys::remember_insertion(before_paste);
