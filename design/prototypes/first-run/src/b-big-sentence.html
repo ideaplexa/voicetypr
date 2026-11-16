@@ -146,8 +146,9 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
       <h2 class="stmt" id="trial-stmt" data-split>That’s Voicetypr.<br>Keep it for 7 days, free.</h2>
       <div class="week" id="week" data-rise="7" aria-hidden="true"></div>
       <p class="whisper" id="trial-whisper" data-rise="8">No card. The 7 days start when you click, not before.</p>
+      <div id="fields-slot" data-rise="8" style="width:min(560px,100%)"></div>
       <div class="acts" data-rise="9" id="trial-acts">
-        <button type="button" class="btn lg" id="trial-btn" data-autofocus>Start 7-day trial</button>
+        <button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button>
         <button type="button" class="btn ghost" data-go="use">Back</button>
       </div>
       <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
@@ -256,7 +257,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     else VT.pill.idle();
     if (id === "setup") paintAx();
     if (id === "use") paintUse();
-    if (id === "trial") paintWeek();
+    if (id === "trial") { paintWeek(); if (!$("#f-name") && !VT.state.trial) { $("#fields-slot").innerHTML = VT.fieldsHTML(); $("#f-name").focus({ preventScroll: true }); } }
     VT.paint();
   };
 
@@ -288,6 +289,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     $("#use-skip").addEventListener("click", function () { VT.state.use = null; VT.go("trial"); });
     $("#trial-btn").addEventListener("click", function (e) {
       var b = e.currentTarget;
+      if (!VT.checkFields()) return;
       $("#trial-err").hidden = true;
       b.setAttribute("aria-busy", "true");
       b.innerHTML = '<span class="spin"></span>Starting your trial';
@@ -297,7 +299,8 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
         paintWeek();
         $("#progress").style.width = "100%";
         $("#consent").hidden = true;
-        $("#trial-whisper").innerHTML = "Voicetypr is yours until " + VT.trialEnds + ". <span data-verb></span> <span data-caps></span> in any app and talk." + (VT.copyOnly() ? " Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you." : "");
+        $("#fields-slot").hidden = true;
+        $("#trial-whisper").innerHTML = esc(VT.firstName()) + ", Voicetypr is yours until " + VT.trialEnds + ". <span data-verb></span> <span data-caps></span> in any app and talk." + (VT.copyOnly() ? " Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you." : "");
         $("#trial-acts").innerHTML = '<button type="button" class="btn lg" id="finish">Start using Voicetypr</button>';
         $("#finish").addEventListener("click", function () { VT.toast("The prototype ends here. In the app, Home opens next."); });
         $("#finish").focus({ preventScroll: true });

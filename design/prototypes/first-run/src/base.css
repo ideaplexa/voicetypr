@@ -23,13 +23,13 @@ button:disabled{cursor:default}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 
 /* Buttons, as SettingsButton */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:500;line-height:16px;background:var(--primary);color:var(--primary-foreground);white-space:nowrap;transition:transform .12s var(--ease-out),opacity .15s ease,background-color .15s ease}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:500;line-height:16px;background:var(--primary);color:var(--primary-foreground);white-space:nowrap;transition:transform .12s var(--ease-out),opacity .15s ease,background-color .15s ease}
 .btn:hover{opacity:.9}.btn:active{transform:scale(.97)}
 .btn.outline{background:var(--card);color:var(--foreground);box-shadow:inset 0 0 0 1px var(--border)}
 .btn.outline:hover{background:var(--secondary);opacity:1}
 .btn.ghost{background:transparent;color:var(--muted-foreground)}
 .btn.ghost:hover{background:var(--secondary);color:var(--foreground);opacity:1}
-.btn.lg{padding:13px 22px;font-size:15px;border-radius:12px}
+.btn.lg{padding:11px 20px;font-size:14px;border-radius:10px}
 .btn.sm{padding:6px 11px;font-size:13px;border-radius:8px}
 .btn[aria-busy="true"]{pointer-events:none;opacity:.8}
 .btn svg{width:16px;height:16px;flex:none}
@@ -168,3 +168,20 @@ s{text-decoration-thickness:1px}
 .legal{margin:0;font-size:12.5px;color:var(--muted-foreground)}
 .legal .link{font-size:inherit}
 h1:focus,h2:focus{outline:none}
+
+/* App icon with the Polish badge, as Island v3.1 in design/voicetypr-2.1.pen */
+.pill .pico{position:relative;width:20px;height:20px;border-radius:6px;background:#2A2D31;color:#fff;display:flex;align-items:center;justify-content:center;flex:none;margin-left:-4px}
+.pill .pico svg{width:13px;height:13px}
+.pill .pico i{position:absolute;right:-3px;bottom:-3px;width:10px;height:10px;border-radius:50%;background:var(--psage);box-shadow:0 0 0 2px #121316;color:#17271d;font-style:normal;font-size:7px;line-height:10px;text-align:center;font-weight:700}
+
+/* Trial details: name and email, both required */
+.fields{display:flex;gap:10px;width:100%}
+.fld{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left}
+.fld label{font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
+.fld input{height:38px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--foreground);font:inherit;font-size:14px;padding:0 12px;transition:border-color .15s ease,box-shadow .15s ease}
+.fld input::placeholder{color:var(--text-3)}
+.fld input:focus{outline:none;border-color:var(--sage);box-shadow:0 0 0 3px var(--sage-bg)}
+.fld input[aria-invalid="true"]{border-color:var(--destructive)}
+.fld .msg{font-size:12px;color:var(--destructive);min-height:0}
+.fld .msg:empty{display:none}
+@media (max-width:560px){.fields{flex-direction:column}}

@@ -32,13 +32,13 @@ button:disabled{cursor:default}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 
 /* Buttons, as SettingsButton */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:500;line-height:16px;background:var(--primary);color:var(--primary-foreground);white-space:nowrap;transition:transform .12s var(--ease-out),opacity .15s ease,background-color .15s ease}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:500;line-height:16px;background:var(--primary);color:var(--primary-foreground);white-space:nowrap;transition:transform .12s var(--ease-out),opacity .15s ease,background-color .15s ease}
 .btn:hover{opacity:.9}.btn:active{transform:scale(.97)}
 .btn.outline{background:var(--card);color:var(--foreground);box-shadow:inset 0 0 0 1px var(--border)}
 .btn.outline:hover{background:var(--secondary);opacity:1}
 .btn.ghost{background:transparent;color:var(--muted-foreground)}
 .btn.ghost:hover{background:var(--secondary);color:var(--foreground);opacity:1}
-.btn.lg{padding:13px 22px;font-size:15px;border-radius:12px}
+.btn.lg{padding:11px 20px;font-size:14px;border-radius:10px}
 .btn.sm{padding:6px 11px;font-size:13px;border-radius:8px}
 .btn[aria-busy="true"]{pointer-events:none;opacity:.8}
 .btn svg{width:16px;height:16px;flex:none}
@@ -177,6 +177,23 @@ s{text-decoration-thickness:1px}
 .legal{margin:0;font-size:12.5px;color:var(--muted-foreground)}
 .legal .link{font-size:inherit}
 h1:focus,h2:focus{outline:none}
+
+/* App icon with the Polish badge, as Island v3.1 in design/voicetypr-2.1.pen */
+.pill .pico{position:relative;width:20px;height:20px;border-radius:6px;background:#2A2D31;color:#fff;display:flex;align-items:center;justify-content:center;flex:none;margin-left:-4px}
+.pill .pico svg{width:13px;height:13px}
+.pill .pico i{position:absolute;right:-3px;bottom:-3px;width:10px;height:10px;border-radius:50%;background:var(--psage);box-shadow:0 0 0 2px #121316;color:#17271d;font-style:normal;font-size:7px;line-height:10px;text-align:center;font-weight:700}
+
+/* Trial details: name and email, both required */
+.fields{display:flex;gap:10px;width:100%}
+.fld{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left}
+.fld label{font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
+.fld input{height:38px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--foreground);font:inherit;font-size:14px;padding:0 12px;transition:border-color .15s ease,box-shadow .15s ease}
+.fld input::placeholder{color:var(--text-3)}
+.fld input:focus{outline:none;border-color:var(--sage);box-shadow:0 0 0 3px var(--sage-bg)}
+.fld input[aria-invalid="true"]{border-color:var(--destructive)}
+.fld .msg{font-size:12px;color:var(--destructive);min-height:0}
+.fld .msg:empty{display:none}
+@media (max-width:560px){.fields{flex-direction:column}}
 
 
 /* ===== B · Big sentence: no cards. The words are the interface, and they clean themselves up in place. ===== */
@@ -318,8 +335,9 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
       <h2 class="stmt" id="trial-stmt" data-split>That’s Voicetypr.<br>Keep it for 7 days, free.</h2>
       <div class="week" id="week" data-rise="7" aria-hidden="true"></div>
       <p class="whisper" id="trial-whisper" data-rise="8">No card. The 7 days start when you click, not before.</p>
+      <div id="fields-slot" data-rise="8" style="width:min(560px,100%)"></div>
       <div class="acts" data-rise="9" id="trial-acts">
-        <button type="button" class="btn lg" id="trial-btn" data-autofocus>Start 7-day trial</button>
+        <button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button>
         <button type="button" class="btn ghost" data-go="use">Back</button>
       </div>
       <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
@@ -350,16 +368,16 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     windows: [["Ctrl", "Space"], ["Right Alt"], ["F9"]],
   };
   VT.USES = [
-    { id: "messages", label: "Messages and email", does: "Starts you on tidy sentences in your own wording." },
-    { id: "ai", label: "Prompts for AI", does: "Starts you on clean-up-and-clarify for the AI apps you use." },
-    { id: "code", label: "Code and tech notes", does: "Starts you with developer words, so names like useEffect and kubectl come out right." },
-    { id: "docs", label: "Notes and documents", does: "Starts you on longer text broken into paragraphs." },
-    { id: "clinical", label: "Medical or legal work", does: "Starts you with medical and legal words." },
-    { id: "mix", label: "A bit of everything", does: "Starts you on the defaults, shaped by the app you are in." },
+    { id: "messages", label: "Messages and email", does: "Starts you on the Message style: tidy sentences in your own wording." },
+    { id: "ai", label: "Prompts for AI", does: "Starts you on Clean, with clean-up-and-clarify for AI apps (planned for 2.1)." },
+    { id: "code", label: "Code and tech notes", does: "Starts you on the Code style, with developer words like useEffect and kubectl." },
+    { id: "docs", label: "Notes and documents", does: "Starts you on the Writing style for longer text." },
+    { id: "clinical", label: "Medical or legal work", does: "Starts you on Clean, with medical and legal words." },
+    { id: "mix", label: "A bit of everything", does: "Starts you on Clean, the default." },
   ];
   VT.trialEnds = "Monday 23 November";
   function fresh(platform) {
-    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, axSkipped: false, use: null, trial: false };
+    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, axSkipped: false, use: null, trial: false, name: "", email: "" };
   }
   VT.state = fresh(/Win/i.test(navigator.platform || "") ? "windows" : "mac");
   VT.caps = function () { return HOTKEYS[VT.state.platform][VT.state.hotkey]; };
@@ -399,7 +417,8 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     var w0 = el.offsetWidth, h0 = el.offsetHeight;
     el.dataset.state = state;
     el.className = "pill" + (cls ? " " + cls : "");
-    el.innerHTML = '<div class="pill-body">' + html + "</div>";
+    var ico = /^(listening|work|done)$/.test(state) ? '<span class="pico" aria-hidden="true">' + MARK + "<i>✦</i></span>" : "";
+    el.innerHTML = '<div class="pill-body">' + ico + html + "</div>";
     el.style.transition = "none"; el.style.width = "auto"; el.style.height = "auto";
     var w1 = el.offsetWidth, h1 = el.offsetHeight;
     el.style.width = w0 + "px"; el.style.height = h0 + "px";
@@ -616,6 +635,22 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
   }
   VT.paintEngine = paintEngine;
 
+  VT.fieldsHTML = function () {
+    return '<div class="fields" data-trial-fields><div class="fld"><label for="f-name">Name</label><input id="f-name" data-autofocus autocomplete="name" placeholder="Priya Raman" aria-describedby="f-name-msg" required><span class="msg" id="f-name-msg" role="alert"></span></div><div class="fld"><label for="f-email">Email</label><input id="f-email" type="email" autocomplete="email" placeholder="priya@example.com" aria-describedby="f-email-msg" required><span class="msg" id="f-email-msg" role="alert"></span></div></div>';
+  };
+  VT.checkFields = function () {
+    var n = $("#f-name"), m = $("#f-email"), bad = [];
+    var name = n.value.trim(), email = m.value.trim();
+    var set = function (el, msg) { el.setAttribute("aria-invalid", msg ? "true" : "false"); $("#" + el.id + "-msg").textContent = msg; if (msg) bad.push(el); };
+    set(n, name ? "" : "Enter your name");
+    set(m, !email ? "Enter your email" : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "" : "That email doesn’t look right");
+    if (bad.length) { bad[0].focus(); return false; }
+    VT.state.name = name; VT.state.email = email;
+    return true;
+  };
+  VT.firstName = function () { return VT.state.name.split(/\s+/)[0]; };
+  document.addEventListener("input", function (e) { if (e.target.closest && e.target.closest("[data-trial-fields]") && e.target.getAttribute("aria-invalid") === "true") { e.target.setAttribute("aria-invalid", "false"); $("#" + e.target.id + "-msg").textContent = ""; } });
+  document.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.closest && e.target.closest("[data-trial-fields]")) { e.preventDefault(); var b = $("#trial-btn"); if (b) b.click(); } });
   VT.startTrial = function () {
     return new Promise(function (res, rej) {
       VT.later(function () { if (VT.failTrial) rej(new Error("offline")); else { VT.state.trial = true; res(); } }, 1100);
@@ -1024,7 +1059,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     else VT.pill.idle();
     if (id === "setup") paintAx();
     if (id === "use") paintUse();
-    if (id === "trial") paintWeek();
+    if (id === "trial") { paintWeek(); if (!$("#f-name") && !VT.state.trial) { $("#fields-slot").innerHTML = VT.fieldsHTML(); $("#f-name").focus({ preventScroll: true }); } }
     VT.paint();
   };
 
@@ -1056,6 +1091,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     $("#use-skip").addEventListener("click", function () { VT.state.use = null; VT.go("trial"); });
     $("#trial-btn").addEventListener("click", function (e) {
       var b = e.currentTarget;
+      if (!VT.checkFields()) return;
       $("#trial-err").hidden = true;
       b.setAttribute("aria-busy", "true");
       b.innerHTML = '<span class="spin"></span>Starting your trial';
@@ -1065,7 +1101,8 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
         paintWeek();
         $("#progress").style.width = "100%";
         $("#consent").hidden = true;
-        $("#trial-whisper").innerHTML = "Voicetypr is yours until " + VT.trialEnds + ". <span data-verb></span> <span data-caps></span> in any app and talk." + (VT.copyOnly() ? " Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you." : "");
+        $("#fields-slot").hidden = true;
+        $("#trial-whisper").innerHTML = esc(VT.firstName()) + ", Voicetypr is yours until " + VT.trialEnds + ". <span data-verb></span> <span data-caps></span> in any app and talk." + (VT.copyOnly() ? " Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you." : "");
         $("#trial-acts").innerHTML = '<button type="button" class="btn lg" id="finish">Start using Voicetypr</button>';
         $("#finish").addEventListener("click", function () { VT.toast("The prototype ends here. In the app, Home opens next."); });
         $("#finish").focus({ preventScroll: true });

@@ -82,6 +82,10 @@ h2{margin:0;font-size:26px;line-height:normal;font-weight:600;letter-spacing:-.5
 
 /* trial */
 .sum{width:100%;padding:6px 18px}
+.scene[data-id="trial"]{padding-top:56px}
+.scene[data-id="trial"] .col{gap:14px;padding-bottom:24px}
+.scene[data-id="trial"] .sum li{padding:7px 0}
+.legalrow{display:flex;flex-direction:column;align-items:center;gap:6px}
 .sum li{display:flex;align-items:center;gap:10px;padding:9px 0;font-size:14px;border-bottom:1px solid var(--border)}
 .sum ul{list-style:none;margin:0;padding:0}.sum li:last-child{border-bottom:0}
 .sum li svg{width:16px;height:16px;color:var(--sage);flex:none}
@@ -172,18 +176,18 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       <h2 data-rise>You’re set. Start your 7 days.</h2>
       <p class="lede" data-rise>All of Voicetypr, free for 7 days. No card. The clock starts when you click, not before.</p>
       <div class="card sum" data-rise><ul id="sum"></ul></div>
-      <button type="button" class="btn lg" id="trial-btn" data-rise data-autofocus>Start 7-day trial</button>
+      <div id="fields-slot" data-rise style="width:100%"></div>
+      <button type="button" class="btn lg" id="trial-btn" data-rise>Start 7-day trial</button>
       <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
-      <label class="consent" data-rise><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label>
-      <p class="legal" data-rise><button type="button" class="link" data-shared>What’s shared</button></p>
-      <p class="fine" data-rise>By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p>
+      <div class="legalrow" data-rise><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label>
+      <p class="fine"><button type="button" class="link" data-shared>What’s shared</button> · By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p></div>
     </div>
   </section>
 
   <section class="scene" data-id="done" hidden>
     <div class="col">
       <div class="bigtick" data-rise><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg></div>
-      <h2 data-rise>Trial started</h2>
+      <h2 data-rise id="done-title">Trial started</h2>
       <p class="lede" data-rise>Voicetypr is yours until <b id="ends"></b>. <span data-verb></span> <span data-caps></span> in any app and talk.<span data-degraded hidden> Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you.</span></p>
       <button type="button" class="btn lg" id="finish" data-rise data-autofocus>Start using Voicetypr</button>
     </div>
@@ -356,12 +360,13 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     var li = function (html) { return "<li>" + ICON.check + html + "</li>"; };
     $("#sum").innerHTML =
       li('<span data-engine></span>') +
-      li("Microphone<small>heard you</small>") +
+      
       li((VT.copyOnly() ? "Copies your words for you to paste with ⌘V<small>Accessibility is off</small>" : "Types at your cursor, in any app")) +
       li("Shortcut<small>" + VT.capsHTML() + " " + (s.hold ? "hold to talk" : "press to start and stop") + "</small>") +
       (use ? li("Starting point<small>" + esc(use.label) + "</small>") : "");
     VT.paintEngine();
     $("#ends").textContent = VT.trialEnds;
+    if (!$("#f-name")) { $("#fields-slot").innerHTML = VT.fieldsHTML(); $("#f-name").focus({ preventScroll: true }); }
   }
 
   var ICON = {
@@ -400,10 +405,11 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#use-next").addEventListener("click", function () { VT.go("trial"); });
     $("#trial-btn").addEventListener("click", function (e) {
       var b = e.currentTarget;
+      if (!VT.checkFields()) return;
       $("#trial-err").hidden = true;
       b.setAttribute("aria-busy", "true");
       b.innerHTML = '<span class="spin"></span>Starting your trial';
-      VT.startTrial().then(function () { VT.go("done"); }, function () {
+      VT.startTrial().then(function () { $("#done-title").textContent = "You’re in, " + VT.firstName(); VT.go("done"); }, function () {
         b.removeAttribute("aria-busy"); b.textContent = "Try again";
         $("#trial-err").hidden = false;
       });

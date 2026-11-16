@@ -18,16 +18,16 @@
     windows: [["Ctrl", "Space"], ["Right Alt"], ["F9"]],
   };
   VT.USES = [
-    { id: "messages", label: "Messages and email", does: "Starts you on tidy sentences in your own wording." },
-    { id: "ai", label: "Prompts for AI", does: "Starts you on clean-up-and-clarify for the AI apps you use." },
-    { id: "code", label: "Code and tech notes", does: "Starts you with developer words, so names like useEffect and kubectl come out right." },
-    { id: "docs", label: "Notes and documents", does: "Starts you on longer text broken into paragraphs." },
-    { id: "clinical", label: "Medical or legal work", does: "Starts you with medical and legal words." },
-    { id: "mix", label: "A bit of everything", does: "Starts you on the defaults, shaped by the app you are in." },
+    { id: "messages", label: "Messages and email", does: "Starts you on the Message style: tidy sentences in your own wording." },
+    { id: "ai", label: "Prompts for AI", does: "Starts you on Clean, with clean-up-and-clarify for AI apps (planned for 2.1)." },
+    { id: "code", label: "Code and tech notes", does: "Starts you on the Code style, with developer words like useEffect and kubectl." },
+    { id: "docs", label: "Notes and documents", does: "Starts you on the Writing style for longer text." },
+    { id: "clinical", label: "Medical or legal work", does: "Starts you on Clean, with medical and legal words." },
+    { id: "mix", label: "A bit of everything", does: "Starts you on Clean, the default." },
   ];
   VT.trialEnds = "Monday 23 November";
   function fresh(platform) {
-    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, axSkipped: false, use: null, trial: false };
+    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, axSkipped: false, use: null, trial: false, name: "", email: "" };
   }
   VT.state = fresh(/Win/i.test(navigator.platform || "") ? "windows" : "mac");
   VT.caps = function () { return HOTKEYS[VT.state.platform][VT.state.hotkey]; };
@@ -67,7 +67,8 @@
     var w0 = el.offsetWidth, h0 = el.offsetHeight;
     el.dataset.state = state;
     el.className = "pill" + (cls ? " " + cls : "");
-    el.innerHTML = '<div class="pill-body">' + html + "</div>";
+    var ico = /^(listening|work|done)$/.test(state) ? '<span class="pico" aria-hidden="true">' + MARK + "<i>✦</i></span>" : "";
+    el.innerHTML = '<div class="pill-body">' + ico + html + "</div>";
     el.style.transition = "none"; el.style.width = "auto"; el.style.height = "auto";
     var w1 = el.offsetWidth, h1 = el.offsetHeight;
     el.style.width = w0 + "px"; el.style.height = h0 + "px";
@@ -284,6 +285,22 @@
   }
   VT.paintEngine = paintEngine;
 
+  VT.fieldsHTML = function () {
+    return '<div class="fields" data-trial-fields><div class="fld"><label for="f-name">Name</label><input id="f-name" data-autofocus autocomplete="name" placeholder="Priya Raman" aria-describedby="f-name-msg" required><span class="msg" id="f-name-msg" role="alert"></span></div><div class="fld"><label for="f-email">Email</label><input id="f-email" type="email" autocomplete="email" placeholder="priya@example.com" aria-describedby="f-email-msg" required><span class="msg" id="f-email-msg" role="alert"></span></div></div>';
+  };
+  VT.checkFields = function () {
+    var n = $("#f-name"), m = $("#f-email"), bad = [];
+    var name = n.value.trim(), email = m.value.trim();
+    var set = function (el, msg) { el.setAttribute("aria-invalid", msg ? "true" : "false"); $("#" + el.id + "-msg").textContent = msg; if (msg) bad.push(el); };
+    set(n, name ? "" : "Enter your name");
+    set(m, !email ? "Enter your email" : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "" : "That email doesn’t look right");
+    if (bad.length) { bad[0].focus(); return false; }
+    VT.state.name = name; VT.state.email = email;
+    return true;
+  };
+  VT.firstName = function () { return VT.state.name.split(/\s+/)[0]; };
+  document.addEventListener("input", function (e) { if (e.target.closest && e.target.closest("[data-trial-fields]") && e.target.getAttribute("aria-invalid") === "true") { e.target.setAttribute("aria-invalid", "false"); $("#" + e.target.id + "-msg").textContent = ""; } });
+  document.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.closest && e.target.closest("[data-trial-fields]")) { e.preventDefault(); var b = $("#trial-btn"); if (b) b.click(); } });
   VT.startTrial = function () {
     return new Promise(function (res, rej) {
       VT.later(function () { if (VT.failTrial) rej(new Error("offline")); else { VT.state.trial = true; res(); } }, 1100);

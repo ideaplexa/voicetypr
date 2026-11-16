@@ -63,6 +63,7 @@
 .reply:hover{background:var(--secondary)}.reply:active{transform:scale(.97)}
 .reply.quiet{background:transparent;box-shadow:none;color:var(--muted-foreground)}
 .trial{padding:18px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.trial .fields{margin:2px 0}
 .trial h3{margin:0;font-size:19px;font-weight:600;letter-spacing:-.3px}
 .trial p{margin:0;font-size:14px;color:var(--muted-foreground)}
 .trial .err{color:var(--destructive)}
@@ -230,15 +231,16 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
   /* 4. the trial click */
   function trial() {
     return until(function (done) {
-      var c = add('<div class="card trial block"><h3>7 days of Voicetypr, free</h3><p>Everything is included. No card. The clock starts when you click, not before.</p><button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button><p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label><p class="legal"><button type="button" class="link" data-shared>What’s shared</button> · By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p></div>');
-      $("#trial-btn").focus({ preventScroll: true });
+      var c = add('<div class="card trial block"><h3>7 days of Voicetypr, free</h3><p>Everything is included. No card. The clock starts when you click, not before.</p>' + VT.fieldsHTML() + '<button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button><p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label><p class="legal"><button type="button" class="link" data-shared>What’s shared</button> · By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p></div>');
+      $("#f-name").focus({ preventScroll: true });
       $("#trial-btn").addEventListener("click", function (e) {
         var b = e.currentTarget;
+        if (!VT.checkFields()) return;
         $("#trial-err").hidden = true;
         b.setAttribute("aria-busy", "true");
         b.innerHTML = '<span class="spin"></span>Starting your trial';
         VT.startTrial().then(function () {
-          c.innerHTML = '<div class="started"><i>' + I.tick + "</i><div><h3>Trial started</h3><p>Voicetypr is yours until " + VT.trialEnds + ".</p></div></div>";
+          c.innerHTML = '<div class="started"><i>' + I.tick + "</i><div><h3>Trial started, " + esc(VT.firstName()) + "</h3><p>Voicetypr is yours until " + VT.trialEnds + ".</p></div></div>";
           done();
         }, function () { b.removeAttribute("aria-busy"); b.textContent = "Try again"; $("#trial-err").hidden = false; });
       });
