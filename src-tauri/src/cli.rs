@@ -382,21 +382,37 @@ fn format_cli_error(message: &str, json: bool) -> String {
 /// Attach this (GUI-subsystem) process to the parent terminal's console so CLI output is
 /// visible on Windows. No-op when there is no parent console (e.g. a double-click launch).
 ///
-/// Only streams the shell left unset are pointed at the console, so any redirection is
-/// preserved: `voicetypr ... > out.json`, `... 2> err.txt`, and
-/// `echo pw | voicetypr --password-stdin` keep their file/pipe handles, and stdin is never
-/// overridden. MUST run before the first println!/eprintln!: Rust resolves the std handles
-/// lazily on first use, so re-pointing them afterwards would be too late.
+/// Only streams the caller left unset are pointed at the console, so any redirection is
+/// preserved: `voicetypr ... > out.json`, `... 2> err.txt`, `cmd /c voicetypr ... | findstr`
+/// and `echo pw | voicetypr --password-stdin` keep their file/pipe handles. AttachConsole
+/// replaces every std handle with the console's, so the inherited ones are read first and
+/// restored afterwards. MUST run before the first println!/eprintln!: Rust resolves the std
+/// handles lazily on first use, so re-pointing them afterwards would be too late.
 #[cfg(windows)]
 fn attach_parent_console() {
     use std::fs::OpenOptions;
     use std::mem;
     use std::os::windows::io::AsRawHandle;
-    use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{GetFileType, FILE_TYPE_UNKNOWN};
     use windows::Win32::System::Console::{
         AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
-        STD_HANDLE, STD_OUTPUT_HANDLE,
+        STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
     };
+
+    // An inherited stream is usable when it names a real file, pipe or console; a GUI-subsystem
+    // process gets NULL for streams nobody set, and GetFileType rejects NULL and stale handles.
+    let inherited = |which: STD_HANDLE| -> Option<HANDLE> {
+        // SAFETY: kernel32 FFI on this process's own std handle table.
+        let handle = unsafe { GetStdHandle(which) }.ok()?;
+        (!handle.is_invalid() && unsafe { GetFileType(handle) } != FILE_TYPE_UNKNOWN)
+            .then_some(handle)
+    };
+    let streams = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+        .map(|which| (which, inherited(which)));
+    if streams.iter().all(|(_, handle)| handle.is_some()) {
+        return;
+    }
 
     // SAFETY: kernel32 FFI; ATTACH_PARENT_PROCESS is the documented sentinel process id.
     unsafe {
@@ -405,36 +421,26 @@ fn attach_parent_console() {
         }
     }
 
-    // A stream needs the console screen buffer only when the shell did not already wire it to
-    // a file/pipe; GetStdHandle returns NULL for an unset stream on a GUI-subsystem process.
-    let needs_console = |which: STD_HANDLE| -> bool {
-        // SAFETY: kernel32 FFI.
-        match unsafe { GetStdHandle(which) } {
-            Ok(h) => h.0.is_null() || h == INVALID_HANDLE_VALUE,
-            Err(_) => true,
-        }
-    };
-
-    let out_unset = needs_console(STD_OUTPUT_HANDLE);
-    let err_unset = needs_console(STD_ERROR_HANDLE);
-    if !out_unset && !err_unset {
-        return;
-    }
-
-    // Point only the unset write streams at the console screen buffer; redirected streams keep
-    // their inherited handle. We leak the File (mem::forget) because SetStdHandle does not
-    // duplicate the handle and we need it for the process lifetime.
-    if let Ok(file) = OpenOptions::new().write(true).open("CONOUT$") {
-        let handle = HANDLE(file.as_raw_handle());
-        // SAFETY: valid console handle held for the process lifetime via mem::forget.
+    // Restore what the caller wired up; point only unset write streams at the console screen
+    // buffer. AttachConsole already gave an unset stdin the console input. We leak the File
+    // (mem::forget) because SetStdHandle does not duplicate the handle and we need it for the
+    // process lifetime.
+    let console = OpenOptions::new().write(true).open("CONOUT$").ok();
+    for (which, handle) in streams {
+        let target = match handle {
+            Some(handle) => handle,
+            None if which == STD_INPUT_HANDLE => continue,
+            None => match console.as_ref() {
+                Some(file) => HANDLE(file.as_raw_handle()),
+                None => continue,
+            },
+        };
+        // SAFETY: an inherited handle or a console handle held for the process lifetime.
         unsafe {
-            if out_unset {
-                let _ = SetStdHandle(STD_OUTPUT_HANDLE, handle);
-            }
-            if err_unset {
-                let _ = SetStdHandle(STD_ERROR_HANDLE, handle);
-            }
+            let _ = SetStdHandle(which, target);
         }
+    }
+    if let Some(file) = console {
         mem::forget(file);
     }
 }
