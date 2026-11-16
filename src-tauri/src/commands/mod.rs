@@ -34,6 +34,8 @@ pub mod window;
 
 pub mod original;
 
+pub mod dictionary_suggestions;
+
 pub(crate) mod island_notice;
 
 pub mod release_notes;

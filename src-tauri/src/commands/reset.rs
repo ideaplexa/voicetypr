@@ -203,6 +203,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     for (name, item) in [
         ("settings", "Settings store"),
         ("transcriptions", "Transcriptions store"),
+        ("dictionary_suggestions", "Dictionary suggestions"),
     ] {
         match app.store(name) {
             Ok(store) => {
