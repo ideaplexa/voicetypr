@@ -45,6 +45,11 @@ $sde = Join-Path $root 'sde-external-10.13.1-2026-07-28-win/sde.exe'
 if (-not (Test-Path -LiteralPath $sde)) { throw 'Missing Intel SDE executable' }
 $exe = $env:VOICETYPR_EXECUTABLE
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Missing built app executable' }
+# A console parent (cmd.exe, SDE) must not swallow CLI output that the caller redirected.
+$piped = Invoke-Bounded -Label 'cmd-pipe' -File $env:ComSpec -Arguments @('/d', '/c', $exe, '--version') -Seconds 60
+if ($piped.ExitCode -ne 0 -or $piped.Output.Trim() -notmatch '^voicetypr \S+$') {
+  throw "cmd /c --version did not reach the caller's pipe: exit $($piped.ExitCode)"
+}
 
 $jfk = Join-Path $root 'jfk.wav'
 Invoke-WebRequest -Uri $env:JFK_URL -OutFile $jfk -TimeoutSec 60
