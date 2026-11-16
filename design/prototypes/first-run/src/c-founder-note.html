@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voicetypr first run · C · A note from the founder</title>
+<style>
+/*BASE_CSS*/
+
+/* ===== C · A note from the founder: a short thread you answer by voice. Setup arrives as replies. ===== */
+.status{position:fixed;right:22px;top:28px;z-index:5}
+.thread{position:fixed;left:0;right:0;top:0;bottom:64px;overflow-y:auto;display:flex;justify-content:center;scrollbar-width:thin;mask-image:linear-gradient(to bottom,transparent 0,#000 32px)}
+.thread::-webkit-scrollbar{display:none}
+.inner{width:min(600px,calc(100vw - 40px));display:flex;flex-direction:column;gap:12px;padding:72px 0 28px;min-height:100%;height:max-content}
+.inner>:first-child{margin-top:auto}
+.msg{display:flex;gap:12px;align-items:flex-start;animation:rise .55s var(--ease-out) both}
+.msg .av{width:30px;height:30px;border-radius:9px;background:var(--sage-bg);color:var(--sage);display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px}
+.msg .av svg{width:18px;height:18px}
+.msg .av.none{visibility:hidden;height:0}
+.msg.m p{margin:0;font-size:17px;line-height:27px;max-width:500px;text-wrap:pretty}
+.msg.m p .caps{margin:0 3px}
+.msg.m .who{display:block;font-size:12px;line-height:16px;color:var(--muted-foreground);font-family:var(--mono);margin-bottom:3px}
+.msg.gap{margin-top:10px}
+.dots3{display:inline-flex;gap:4px;padding:11px 0}
+.dots3 i{width:6px;height:6px;border-radius:50%;background:var(--text-3);animation:blip 1s ease-in-out infinite}
+.dots3 i:nth-child(2){animation-delay:.15s}.dots3 i:nth-child(3){animation-delay:.3s}
+@keyframes blip{0%,60%,100%{opacity:.25;transform:none}30%{opacity:1;transform:translateY(-2px)}}
+.msg.u{flex-direction:column;align-items:flex-end;gap:6px;margin:8px 0}
+.bubble{background:var(--card);box-shadow:inset 0 0 0 1px var(--border);border-radius:16px 16px 5px 16px;padding:11px 16px;font-size:16.5px;line-height:25px;max-width:440px}
+.bubble.voice{box-shadow:inset 0 0 0 1.5px var(--sage)}
+.rawline{margin:0;font-family:var(--mono);font-size:12px;line-height:19px;color:var(--muted-foreground);max-width:440px;text-align:right;animation:rise .6s .35s var(--ease-out) both}
+.rawline b{font-weight:500;color:var(--text-3);margin-right:8px}
+.card{background:var(--card);border-radius:14px;box-shadow:inset 0 0 0 1px var(--border)}
+.block{margin-left:42px;animation:rise .55s var(--ease-out) both}
+
+/* composer */
+.composer{margin:10px 0 0 42px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;transition:box-shadow .3s ease;animation:rise .55s var(--ease-out) both}
+.composer.live,.composer.ready{box-shadow:inset 0 0 0 1.5px var(--sage)}
+.composer .field{font-size:16.5px;line-height:25px;min-height:25px;color:var(--text-3);transition:color .5s ease}
+.composer .field.polished{color:var(--foreground)}
+.composer .ph{color:var(--muted-foreground)}
+.composer.live .field::after{content:"";display:inline-block;width:1.5px;height:17px;margin-left:2px;vertical-align:-3px;background:var(--sage);animation:caret 1s steps(1) infinite}
+@keyframes caret{50%{opacity:0}}
+.composer .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--muted-foreground)}
+.composer .bar .acts{display:flex;gap:8px;align-items:center}
+.warnline{margin:0 0 0 42px;font-size:14px;color:var(--warn);background:var(--warn-bg);border-radius:12px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;animation:rise .4s var(--ease-out) both}
+
+/* setup rows */
+.rows{padding:4px 16px}
+.r{display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:1px solid var(--border)}
+.r:last-of-type{border-bottom:0}
+.r .ico{width:34px;height:34px;border-radius:9px;background:var(--secondary);color:var(--muted-foreground);display:flex;align-items:center;justify-content:center;flex:none;transition:background-color .3s ease,color .3s ease}
+.r.ok .ico{background:var(--sage-bg);color:var(--sage)}
+.r .ico svg{width:17px;height:17px}
+.r .txt{flex:1;min-width:0}
+.r .txt b{display:block;font-size:14.5px;font-weight:600}
+.r .txt>span{display:block;font-size:13px;color:var(--muted-foreground)}
+.r .act{display:flex;align-items:center;gap:10px;flex:none}
+.badge{animation:pop .3s var(--ease-out) both}
+.foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 0 12px;border-top:1px solid var(--border)}
+.replies{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin:6px 0 0 42px;animation:rise .55s var(--ease-out) both}
+.reply{border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--border);border-radius:999px;padding:8px 15px;font-size:14.5px;transition:background-color .2s ease,transform .12s var(--ease-out)}
+.reply:hover{background:var(--secondary)}.reply:active{transform:scale(.97)}
+.reply.quiet{background:transparent;box-shadow:none;color:var(--muted-foreground)}
+.trial{padding:18px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.trial .fields{margin:2px 0}
+.trial h3{margin:0;font-size:19px;font-weight:600;letter-spacing:-.3px}
+.trial p{margin:0;font-size:14px;color:var(--muted-foreground)}
+.trial .err{color:var(--destructive)}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--muted-foreground);cursor:pointer}
+.consent input{accent-color:var(--sage);margin:2px 0 0;width:15px;height:15px;flex:none}
+.started{display:flex;align-items:center;gap:12px}
+.started i{width:38px;height:38px;border-radius:50%;background:var(--sage-bg);color:var(--sage);display:flex;align-items:center;justify-content:center;animation:pop .5s var(--spring) both;flex:none}
+.started svg{width:20px;height:20px}
+.started path{stroke-dasharray:20;stroke-dashoffset:20;animation:draw .5s .25s var(--ease-out) forwards}
+@media (max-width:560px){.block,.composer,.replies,.warnline{margin-left:0}.status{display:none}}
+</style>
+</head>
+<body>
+<!--
+Voicetypr first run · C · A note from the founder
+One screen, a thread: founder says the promise and asks a question → you answer by voice (the microphone prompt arrives on that first hold; the reply cleans itself
+up in the composer; you press Send; your raw words stay under your message) → setup card (Accessibility on Mac + shortcut) → optional quick replies
+(what you mostly dictate) → trial card (Start 7-day trial) → sign-off and "Start using Voicetypr"
+State: VT.state { platform, hotkey, hold, mic, micDenied, ax, use, trial }; the thread is an async script that waits on each action
+Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a click speaks for you). The macOS prompt and System Settings are drawn.
+       Trial start is a 1.1 s timeout; "Trial server: offline" in the review controls (bottom left) makes it fail.
+-->
+<div id="app">
+  <div class="status" data-engine></div>
+  <div class="thread" id="thread"><div class="inner" id="inner" aria-live="polite"></div></div>
+</div>
+<div class="pillzone"><div class="pill" id="pill" data-state="idle"></div></div>
+<div class="sr" id="pill-live" aria-live="polite"></div>
+<script>
+/*BASE_JS*/
+(function () {
+  "use strict";
+  var $ = VT.$, $$ = VT.$$, esc = VT.esc;
+  var TOKENS = [
+    { r: "uh" }, { r: "i", p: "I" }, { r: "had", p: "had" }, { r: "um" }, { r: "eggs" }, { r: "no" }, { r: "wait" }, { r: "it" }, { r: "was" }, { r: "oatmeal", p: "oatmeal" },
+    { r: "with" }, { r: "with", p: "with" }, { r: "banana", p: "banana" }, { r: "and", p: "and" }, { r: "like" }, { r: "way", p: "way" }, { r: "too", p: "too" }, { r: "much", p: "much" }, { r: "coffee", p: "coffee." },
+  ];
+  var MARK = VT.icons.mark;
+  var I = {
+    mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+    keys: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>',
+    cmd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg>',
+    tick: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+  };
+  var lastWho = "", sentence = null, dict = null;
+
+  function add(html, who) {
+    var d = document.createElement("div");
+    d.innerHTML = html;
+    var el = d.firstElementChild;
+    if (who && lastWho && who !== lastWho) el.classList.add("gap");
+    if (who) lastWho = who;
+    $("#inner").appendChild(el);
+    VT.paint();
+    requestAnimationFrame(function () { var t = $("#thread"); t.scrollTo({ top: t.scrollHeight, behavior: VT.reduce ? "auto" : "smooth" }); });
+    return el;
+  }
+  function moin(html, ms) {
+    var first = lastWho !== "m";
+    var av = '<div class="av' + (first ? "" : " none") + '">' + (first ? MARK : "") + "</div>";
+    var t = add('<div class="msg m">' + av + '<div><span class="dots3"><i></i><i></i><i></i></span></div></div>', "m");
+    return VT.wait(ms || 620).then(function () {
+      t.lastElementChild.innerHTML = (first ? '<span class="who">Moin, who makes Voicetypr · written ahead of time</span>' : "") + "<p>" + html + "</p>";
+      VT.paint();
+      return VT.wait(260);
+    });
+  }
+  function you(text) { return add('<div class="msg u"><div class="bubble">' + esc(text) + "</div></div>", "u"); }
+  function until(wire) { return new Promise(wire); }
+
+  /* 1. the first dictation, as a reply */
+  function composer() {
+    return until(function (done) {
+      var c = add('<div class="card composer" id="composer"><div class="field" id="field"><span class="ph"><span data-verb></span> <span data-caps></span> and talk</span></div><div class="bar" id="cbar"><span>A practice reply. It stays in this window; Moin doesn’t receive it.</span><span class="acts"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></span></div></div>');
+      var warn = null;
+      var micWarn = function () {
+        if (warn) { warn.remove(); warn = null; }
+        if (!VT.state.micDenied) return;
+        warn = add('<p class="warnline"><span>The microphone is off for Voicetypr, so I can’t hear you yet.</span><button type="button" class="btn sm">Open System Settings</button></p>');
+        $("button", warn).addEventListener("click", function () { VT.openSettings("mic").then(function (ok) { micWarn(); if (ok) VT.pill.hint(); }); });
+      };
+      var idle = function () {
+        c.className = "card composer";
+        $("#field").className = "field";
+        $("#field").innerHTML = '<span class="ph"><span data-verb></span> <span data-caps></span> and talk</span>';
+        $("#cbar").innerHTML = '<span>A practice reply. It stays in this window; Moin doesn’t receive it.</span><span class="acts"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></span>';
+        VT.paint(); dict.reset(); VT.pill.hint();
+      };
+      dict = new VT.Dictation({
+        tokens: TOKENS,
+        onStart: function () { c.className = "card composer live"; $("#field").innerHTML = ""; sentence = new VT.Sentence($("#field"), TOKENS); },
+        onWord: function (i) { sentence.add(i); },
+        onShort: idle,
+        onMic: function (ok) { micWarn(); if (ok) VT.pill.hint(); else VT.pill.note("Microphone access is off"); },
+        onPhase: function (p) { c.className = "card composer"; if (p === "preparing") $("#cbar").firstElementChild.textContent = "Getting offline dictation ready, then this cleans up…"; if (p === "polishing") sentence.polish(); },
+        onCancel: idle,
+        onDone: function (n, secs) {
+          VT.announce("Voicetypr typed: " + VT.polishedText(TOKENS));
+          VT.later(function () {
+            c.className = "card composer ready";
+            $("#cbar").innerHTML = "<span>" + n + ' words, cleaned up ' + secs + ' s after you let go</span><span class="acts"><button type="button" class="btn ghost sm" id="redo">Say it again</button><button type="button" class="btn sm" id="send">Send</button></span>';
+            $("#redo").addEventListener("click", idle);
+            $("#send").addEventListener("click", function () {
+              VT.talk = null;
+              var from = c.getBoundingClientRect();
+              c.remove();
+              var m = add('<div class="msg u"><div class="bubble voice">' + esc(VT.polishedText(TOKENS)) + '</div><p class="rawline"><b>you said</b>' + VT.rawHTML(TOKENS) + "</p></div>", "u");
+              var b = $(".bubble", m), to = b.getBoundingClientRect();
+              if (!VT.reduce) b.animate([{ transform: "translate(" + (from.left - to.left) + "px," + (from.top - to.top) + "px)", opacity: 0.6 }, { transform: "none", opacity: 1 }], { duration: 520, easing: "cubic-bezier(.16,1,.3,1)" });
+              done();
+            });
+            $("#send").focus({ preventScroll: true });
+          }, 1150);
+        },
+      });
+      dict.arm();
+      VT.pill.hint();
+    });
+  }
+
+  /* 2. permission and shortcut, as one card */
+  function setup() {
+    return until(function (done) {
+      var mac = VT.state.platform === "mac";
+      var c = add('<div class="card rows block">' +
+        (mac ? '<div class="r" id="ax-row"><div class="ico">' + I.keys + '</div><div class="txt"><b>Accessibility</b><span id="ax-sub">So your words land at your cursor, in any app.</span></div><div class="act" id="ax-act"><button type="button" class="btn sm" id="ax-btn">Allow</button></div></div>' : "") +
+        '<div class="r ok"><div class="ico">' + I.cmd + '</div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to <span data-result></span>.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>' +
+        '<div class="foot">' + (mac ? '<button type="button" class="btn ghost sm" id="ax-skip">Skip, I’ll paste myself</button>' : "") + '<button type="button" class="btn sm" id="setup-ok"' + (mac ? " disabled" : "") + ">" + (mac ? "Continue" : "Looks good") + "</button></div></div>");
+      var finish = function () { $(".foot", c).remove(); done(); };
+      if (mac) {
+        $("#ax-btn").addEventListener("click", function () {
+          VT.openSettings("ax").then(function (ok) {
+            VT.state.axSkipped = VT.state.axSkipped && !ok;
+            if (!ok) { $("#ax-sub").textContent = "Still off. Without it, Voicetypr copies the text and you paste it."; return; }
+            $("#ax-row").classList.add("ok");
+            $("#ax-act").innerHTML = '<span class="badge"><i></i>Allowed</span>';
+            VT.paint();
+            if (!$("#setup-ok")) return;
+            $("#ax-skip").hidden = true;
+            $("#setup-ok").disabled = false;
+            $("#setup-ok").focus({ preventScroll: true });
+          });
+        });
+        $("#ax-skip").addEventListener("click", function () { VT.state.axSkipped = true; VT.paint(); finish(); });
+      }
+      $("#hk-btn").addEventListener("click", function (e) { VT.editHotkey(e.currentTarget); });
+      $("#setup-ok").addEventListener("click", finish);
+    });
+  }
+
+  /* 3. the optional question, as quick replies */
+  function use() {
+    return until(function (done) {
+      var r = add('<div class="replies" role="group" aria-label="What you mostly dictate">' + VT.USES.map(function (u) { return '<button type="button" class="reply" data-use="' + u.id + '">' + esc(u.label) + "</button>"; }).join("") + '<button type="button" class="reply quiet" data-use="">Skip</button></div>');
+      r.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-use]");
+        if (!b) return;
+        VT.state.use = b.dataset.use || null;
+        r.remove();
+        done(VT.USES.filter(function (u) { return u.id === VT.state.use; })[0]);
+      });
+    });
+  }
+
+  /* 4. the trial click */
+  function trial() {
+    return until(function (done) {
+      var c = add('<div class="card trial block"><h3>7 days of Voicetypr, free</h3><p>Everything is included. No card. The clock starts when you click, not before.</p>' + VT.fieldsHTML() + '<button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button><p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers — never your words, audio or app content.</span></label><p class="legal"><button type="button" class="link" data-shared>What’s shared</button> · By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p></div>');
+      $("#f-name").focus({ preventScroll: true });
+      $("#trial-btn").addEventListener("click", function (e) {
+        var b = e.currentTarget;
+        if (!VT.checkFields()) return;
+        $("#trial-err").hidden = true;
+        b.setAttribute("aria-busy", "true");
+        b.innerHTML = '<span class="spin"></span>Starting your trial';
+        VT.startTrial().then(function () {
+          c.innerHTML = '<div class="started"><i>' + I.tick + "</i><div><h3>Trial started, " + esc(VT.firstName()) + "</h3><p>Voicetypr is yours until " + VT.trialEnds + ".</p></div></div>";
+          done();
+        }, function () { b.removeAttribute("aria-busy"); b.textContent = "Try again"; $("#trial-err").hidden = false; });
+      });
+    });
+  }
+
+  VT.boot("Prototype C · A note from the founder", function () {
+    lastWho = "";
+    var mac = VT.state.platform === "mac";
+    VT.wait(350)
+      .then(function () { return moin("Hi, I’m Moin. I make Voicetypr.", 500); })
+      .then(function () { return moin("It does one thing. You talk the way people actually talk, and it types what you meant."); })
+      .then(function () { return moin("Don’t take my word for it. <span data-verb></span> <span data-caps></span> and tell me what you had for breakfast. Ramble. Change your mind halfway.", 760); })
+      .then(composer)
+      .then(function () { return VT.wait(500); })
+      .then(function () { return moin("Oatmeal, good call. Look under your message: that’s what you actually said.", 800); })
+      .then(function () { return moin("It dropped the ums, kept your change of mind, and added nothing you didn’t say."); })
+      .then(function () { return moin(mac ? "Two small things so it works outside this window." : "One small thing so it suits your hands.", 700); })
+      .then(setup)
+      .then(function () { return moin(VT.copyOnly() ? "Fine. It will copy your words and you paste them with ⌘V. You can switch Accessibility on later in Settings." : "Good. From now on it types wherever your cursor is.", 520); })
+      .then(function () { return moin("One optional question. What will you mostly dictate?"); })
+      .then(use)
+      .then(function (u) {
+        if (!u) return moin("No problem. The defaults are sensible.", 480);
+        you(u.label);
+        return VT.wait(300).then(function () { return moin("Noted. " + esc(u.does)); });
+      })
+      .then(function () { return moin("That’s the whole setup."); })
+      .then(trial)
+      .then(function () { return moin("You’re in. If anything gets in your way, reply to any email from me. I read every one.", 700); })
+      .then(function () {
+        var f = add('<div class="block"><button type="button" class="btn lg" id="finish">Start using Voicetypr</button></div>');
+        $("#finish").addEventListener("click", function () { VT.toast("The prototype ends here. In the app, Home opens next."); });
+        $("#finish").focus({ preventScroll: true });
+      });
+  });
+})();
+</script>
+</body>
+</html>
