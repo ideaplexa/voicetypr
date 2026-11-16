@@ -228,6 +228,7 @@ export interface LicenseStatus {
 /** Why `start_trial` failed; mirrors `TrialStartError::code` in Rust. */
 export type TrialStartError =
   | "trial_unreachable"
+  | "trial_email_used"
   | "trial_invalid_name"
   | "trial_invalid_email"
   | "trial_rate_limited"

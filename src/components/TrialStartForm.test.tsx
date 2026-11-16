@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { TrialStartForm } from "@/components/TrialStartForm";
 import type { TrialStartError } from "@/types";
 
+const opened = vi.hoisted(() => vi.fn());
+vi.mock("@/components/sections/accountLicenseUtils", () => ({ openExternalLink: opened }));
+
 function setup(onStart = vi.fn(async (): Promise<TrialStartError | null> => null)) {
   render(<TrialStartForm onStart={onStart} />);
   return {
@@ -100,6 +103,28 @@ describe("TrialStartForm", () => {
 
     expect(await screen.findByText("That email doesn’t look right")).toBeInTheDocument();
     expect(email).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("says plainly that the email will be used for tips, updates and offers, with no box to tick", () => {
+    setup();
+
+    expect(screen.getByText("We’ll email you tips for your trial, product updates and the occasional offer. Unsubscribe any time.")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("explains a used email and offers to buy or write to us", async () => {
+    const { user, start, name, email } = setup(vi.fn(async () => "trial_email_used" as const));
+    await user.type(name, "Priya Raman");
+    await user.type(email, "priya@example.com");
+
+    await user.click(start);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This email has already been used for a trial");
+    await user.click(screen.getByRole("button", { name: "Buy Voicetypr" }));
+    await user.click(screen.getByRole("button", { name: "Write to us" }));
+    expect(opened).toHaveBeenNthCalledWith(1, "https://voicetypr.com/#pricing");
+    expect(opened).toHaveBeenNthCalledWith(2, "mailto:support@voicetypr.com");
+    expect(start).toBeEnabled();
   });
 
   it("tells the user to wait when the server is rate limiting", async () => {

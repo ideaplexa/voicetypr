@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import type { TrialStartError } from "@/types";
 import { cn } from "@/lib/utils";
+import { TRIAL_NOTICE } from "@/lib/trial-notice";
+import { openExternalLink } from "@/components/sections/accountLicenseUtils";
 
 const NAME_MAX_LENGTH = 100;
 const EMAIL_MAX_LENGTH = 254;
@@ -13,7 +15,7 @@ const CONTROL_CHARACTERS = /\p{Cc}/u;
 
 type FieldErrors = { name?: string; email?: string };
 
-const SERVER_MESSAGES: Record<Exclude<TrialStartError, "trial_invalid_name" | "trial_invalid_email">, string> = {
+const SERVER_MESSAGES: Record<Exclude<TrialStartError, "trial_invalid_name" | "trial_invalid_email" | "trial_email_used">, string> = {
   trial_unreachable: "Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.",
   trial_rate_limited: "Too many attempts, so your trial hasn’t started. Wait a few minutes, then try again.",
   trial_failed: "We couldn’t confirm your trial. Try again in a moment; pressing again never starts a second trial.",
@@ -44,6 +46,7 @@ export function TrialStartForm({
   const [email, setEmail] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
+  const [emailUsed, setEmailUsed] = useState(false);
   const [starting, setStarting] = useState(false);
 
   const submit = async (event: FormEvent) => {
@@ -54,6 +57,7 @@ export function TrialStartForm({
     const found = validateTrialContact(trimmedName, trimmedEmail);
     setErrors(found);
     setServerError(null);
+    setEmailUsed(false);
     if (found.name) return nameRef.current?.focus();
     if (found.email) return emailRef.current?.focus();
     pending.current = true;
@@ -66,6 +70,8 @@ export function TrialStartForm({
       } else if (error === "trial_invalid_email") {
         setErrors({ email: "That email doesn’t look right" });
         emailRef.current?.focus();
+      } else if (error === "trial_email_used") {
+        setEmailUsed(true);
       } else if (error) {
         setServerError(SERVER_MESSAGES[error]);
       }
@@ -111,6 +117,23 @@ export function TrialStartForm({
       <Button type="submit" disabled={starting} aria-busy={starting}>
         {starting ? <Spinner /> : null}Start 7-day trial
       </Button>
+      <p className="max-w-[460px] text-center text-[12.5px] text-muted-foreground">{TRIAL_NOTICE}</p>
+      {emailUsed ? (
+        <div role="alert" className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[13px]">
+          <p className="font-medium text-foreground">This email has already been used for a trial</p>
+          <p className="text-muted-foreground">
+            To keep using Voicetypr, buy a license. If you think this is a mistake, write to support@voicetypr.com.
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" onClick={() => void openExternalLink("https://voicetypr.com/#pricing")}>
+              Buy Voicetypr
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => void openExternalLink("mailto:support@voicetypr.com")}>
+              Write to us
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {serverError ? (
         <p role="alert" className="max-w-[460px] text-center text-[13px] text-destructive">{serverError}</p>
       ) : null}

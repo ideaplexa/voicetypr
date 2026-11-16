@@ -59,6 +59,7 @@ impl LicenseValidationError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrialStartError {
     Unreachable,
+    EmailUsed,
     InvalidName,
     InvalidEmail,
     RateLimited,
@@ -69,6 +70,7 @@ impl TrialStartError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Unreachable => "trial_unreachable",
+            Self::EmailUsed => "trial_email_used",
             Self::InvalidName => "trial_invalid_name",
             Self::InvalidEmail => "trial_invalid_email",
             Self::RateLimited => "trial_rate_limited",
@@ -131,6 +133,7 @@ impl LicenseApiClient {
         device_hash: &str,
         name: &str,
         email: &str,
+        notice_version: &str,
     ) -> Result<TrialCheckResponse, TrialStartError> {
         let url = format!("{}/trial/start", self.base_url);
 
@@ -140,7 +143,8 @@ impl LicenseApiClient {
             .json(&json!({
                 "deviceHash": device_hash,
                 "name": name,
-                "email": email
+                "email": email,
+                "noticeVersion": notice_version
             }))
             .send()
             .await
@@ -154,6 +158,7 @@ impl LicenseApiClient {
                 .map_err(|_| TrialStartError::Failed);
         }
         match status.as_u16() {
+            409 => Err(TrialStartError::EmailUsed),
             429 => Err(TrialStartError::RateLimited),
             502..=504 => Err(TrialStartError::Unreachable),
             400 => {
@@ -556,7 +561,7 @@ mod tests {
         let before = client.trial_status(device).await.unwrap().data;
         let started_by_reading = server_started.load(Ordering::SeqCst);
         let begun = client
-            .start_trial(device, "Priya Raman", "priya@example.com")
+            .start_trial(device, "Priya Raman", "priya@example.com", "notice-1")
             .await
             .unwrap()
             .data;
@@ -570,7 +575,12 @@ mod tests {
         assert!(after.started);
         assert_eq!(
             *sent.lock().unwrap(),
-            json!({ "deviceHash": device, "name": "Priya Raman", "email": "priya@example.com" })
+            json!({
+                "deviceHash": device,
+                "name": "Priya Raman",
+                "email": "priya@example.com",
+                "noticeVersion": "notice-1"
+            })
         );
     }
 
@@ -590,7 +600,12 @@ mod tests {
         let (address, server) = warp::serve(route).bind_ephemeral(([127, 0, 0, 1], 0));
         let server_task = tokio::spawn(server);
         let result = test_client(format!("http://{}", address))
-            .start_trial(&"0".repeat(64), "Priya Raman", "priya@example.com")
+            .start_trial(
+                &"0".repeat(64),
+                "Priya Raman",
+                "priya@example.com",
+                "notice-1",
+            )
             .await;
         server_task.abort();
         result
@@ -613,6 +628,12 @@ mod tests {
             TrialStartError::InvalidName
         );
         assert_eq!(
+            start_against(409, "This email has already been used for a trial.")
+                .await
+                .unwrap_err(),
+            TrialStartError::EmailUsed
+        );
+        assert_eq!(
             start_against(429, "Too many attempts").await.unwrap_err(),
             TrialStartError::RateLimited
         );
@@ -631,7 +652,12 @@ mod tests {
         let address = closed.local_addr().unwrap();
         drop(closed);
         let unreachable = test_client(format!("http://{}", address))
-            .start_trial(&"0".repeat(64), "Priya Raman", "priya@example.com")
+            .start_trial(
+                &"0".repeat(64),
+                "Priya Raman",
+                "priya@example.com",
+                "notice-1",
+            )
             .await
             .unwrap_err();
         assert_eq!(unreachable, TrialStartError::Unreachable);

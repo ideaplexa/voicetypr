@@ -13,11 +13,13 @@ import type { LicenseStatus, TrialStartError } from "@/types";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/utils/error";
 import { createLogger } from "@/lib/logger";
+import { TRIAL_NOTICE_VERSION } from "@/lib/trial-notice";
 
 const log = createLogger("license");
 const LICENSE_COMMAND_TIMEOUT_MS = 60_000;
 const TRIAL_START_ERRORS: readonly TrialStartError[] = [
   "trial_unreachable",
+  "trial_email_used",
   "trial_invalid_name",
   "trial_invalid_email",
   "trial_rate_limited",
@@ -169,7 +171,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     const checkId = ++latestCheckStatusId.current;
     try {
       setIsLoading(true);
-      const licenseStatus = await invoke<LicenseStatus>("start_trial", { name, email });
+      const licenseStatus = await invoke<LicenseStatus>("start_trial", { name, email, noticeVersion: TRIAL_NOTICE_VERSION });
       if (checkId === latestCheckStatusId.current) setStatus(licenseStatus);
       if (licenseStatus.status === "trial") toast.success("Your free trial has started");
       return null;

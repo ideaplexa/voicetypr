@@ -1143,12 +1143,13 @@ pub async fn start_trial(
     app: AppHandle,
     name: String,
     email: String,
+    notice_version: String,
 ) -> Result<LicenseStatus, String> {
     let validation_lock = app.state::<AppState>().license_validation_lock.clone();
     let _validation_guard = validation_lock.lock().await;
     let device_hash = device::get_device_hash()?;
     let started = match LicenseApiClient::new()?
-        .start_trial(&device_hash, name.trim(), email.trim())
+        .start_trial(&device_hash, name.trim(), email.trim(), &notice_version)
         .await
     {
         Ok(response) => response.data,
