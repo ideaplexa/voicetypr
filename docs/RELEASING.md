@@ -20,9 +20,10 @@
     native jobs is not enough. The gate uses the default `GITHUB_TOKEN` with
     `actions: read` and `contents: read`; there is no override.
     `native-ci.yml` supplies the two reusable native jobs; `windows-check.yml`
-    is optional and does not replace the full Windows installer lane. CI only
-    auto-runs on main and hotfix pushes; manually dispatch CI for other release
-    branches and wait for all required jobs to succeed before dispatching release.
+    is optional and does not replace the full Windows installer lane. CI runs
+    on pushes to main, `hotfix/**` and `release/**` and on pull requests into
+    them; dispatch CI manually for any other branch and wait for all required
+    jobs to succeed before dispatching release.
     If the commit changes, rerun CI for the new SHA.
   - Stable pushes the version bump and tag to the dispatched branch (`main` or
     `hotfix/*`); beta pushes only the tag, leaving the branch unchanged.
@@ -109,7 +110,7 @@
   fresh VM without VC++ stays NEEDS-SMOKE (`plans/082`, B.2).
 - The manual `scripts/release-windows.ps1` path runs those installer, Vulkan
   import, lazy-ORT import/MAP and Ivy Bridge checks before signing or uploading.
-  It requires PowerShell 7 (`pwsh`), `dumpbin`, network access for pinned Intel
+  It requires PowerShell 7 (`pwsh`), `dumpbin`, 7-Zip (`7z`) on PATH, network access for pinned Intel
   SDE and the speech sample, and a Windows x64 build with its linker MAP.
   `-SkipBuild` still runs the checks and requires the staged installer to match
   the current build output; the installed executable must match the checked
