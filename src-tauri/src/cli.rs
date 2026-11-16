@@ -386,8 +386,8 @@ fn format_cli_error(message: &str, json: bool) -> String {
 /// preserved: `voicetypr ... > out.json`, `... 2> err.txt`, `cmd /c voicetypr ... | findstr`
 /// and `echo pw | voicetypr --password-stdin` keep their file/pipe handles. AttachConsole
 /// replaces every std handle with the console's, so the inherited ones are read first and
-/// restored afterwards. MUST run before the first println!/eprintln!: Rust resolves the std
-/// handles lazily on first use, so re-pointing them afterwards would be too late.
+/// restored afterwards. The attach still happens when every stream is redirected, so console
+/// Ctrl+C keeps ending the process. MUST run before the first println!/eprintln!.
 #[cfg(windows)]
 fn attach_parent_console() {
     use std::fs::OpenOptions;
@@ -410,9 +410,6 @@ fn attach_parent_console() {
     };
     let streams = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
         .map(|which| (which, inherited(which)));
-    if streams.iter().all(|(_, handle)| handle.is_some()) {
-        return;
-    }
 
     // SAFETY: kernel32 FFI; ATTACH_PARENT_PROCESS is the documented sentinel process id.
     unsafe {
@@ -425,7 +422,14 @@ fn attach_parent_console() {
     // buffer. AttachConsole already gave an unset stdin the console input. We leak the File
     // (mem::forget) because SetStdHandle does not duplicate the handle and we need it for the
     // process lifetime.
-    let console = OpenOptions::new().write(true).open("CONOUT$").ok();
+    let needs_console = streams
+        .iter()
+        .any(|(which, handle)| *which != STD_INPUT_HANDLE && handle.is_none());
+    let console = if needs_console {
+        OpenOptions::new().write(true).open("CONOUT$").ok()
+    } else {
+        None
+    };
     for (which, handle) in streams {
         let target = match handle {
             Some(handle) => handle,

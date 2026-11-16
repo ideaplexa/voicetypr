@@ -46,7 +46,7 @@ if (-not (Test-Path -LiteralPath $sde)) { throw 'Missing Intel SDE executable' }
 $exe = $env:VOICETYPR_EXECUTABLE
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Missing built app executable' }
 # A console parent (cmd.exe, SDE) must not swallow CLI output that the caller redirected.
-$piped = Invoke-Bounded -Label 'cmd-pipe' -File $env:ComSpec -Arguments @('/d', '/c', $exe, '--version') -Seconds 60
+$piped = Invoke-Bounded -Label 'cmd-pipe' -File $env:ComSpec -Arguments @('/d', '/c', [IO.Path]::GetFullPath($exe), '--version') -Seconds 60
 if ($piped.ExitCode -ne 0 -or $piped.Output.Trim() -notmatch '^voicetypr \S+$') {
   throw "cmd /c --version did not reach the caller's pipe: exit $($piped.ExitCode)"
 }
