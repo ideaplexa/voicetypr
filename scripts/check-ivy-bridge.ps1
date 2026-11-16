@@ -35,7 +35,10 @@ Write-Host ("[download] SDE in {0:n1}s" -f $watch.Elapsed.TotalSeconds)
 if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:SDE_SHA256) {
   throw 'Intel SDE archive SHA-256 mismatch'
 }
-$extract = Invoke-Bounded -Label 'extract' -File 'tar' -Arguments @('-xf', $archive, '-C', $root) -Seconds 180
+# windows-2022's bsdtar has no liblzma and hangs on .xz, so 7-Zip removes the xz layer.
+$unxz = Invoke-Bounded -Label 'unxz' -File '7z' -Arguments @('x', '-y', '-bd', $archive, "-o$root") -Seconds 180
+if ($unxz.ExitCode -ne 0) { throw "SDE xz extraction failed: $($unxz.ExitCode)" }
+$extract = Invoke-Bounded -Label 'extract' -File 'tar' -Arguments @('-xf', 'sde.tar', '-C', $root) -Seconds 180
 if ($extract.ExitCode -ne 0) { throw "SDE extraction failed: $($extract.ExitCode)" }
 # 10.13.1 ships sde.exe (not sde64.exe); keep its kit layout intact.
 $sde = Join-Path $root 'sde-external-10.13.1-2026-07-28-win/sde.exe'
