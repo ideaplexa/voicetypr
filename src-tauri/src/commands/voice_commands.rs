@@ -4,7 +4,7 @@
 //! or saved recordings.
 
 use crate::insertion::voice_keys::CommandError;
-use crate::recording::island::{self, BlockedKind, IslandAction};
+use crate::recording::island;
 use crate::transcription::TranscriptionResult;
 use crate::writing::{classify_utterance, Utterance, VoiceCommand};
 use tauri::{AppHandle, Manager};
@@ -27,6 +27,7 @@ pub(crate) fn classify(app: &AppHandle, transcription: &TranscriptionResult) -> 
 
 pub(crate) enum Failure {
     /// The Accessibility blocker now owns the pill.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     NoPermission,
     /// The pill says why in a note.
     Skipped,
@@ -46,8 +47,8 @@ pub(crate) async fn run(
         island::blocked(
             app,
             generation,
-            BlockedKind::AccessibilityOff,
-            IslandAction::OpenAccessibility,
+            island::BlockedKind::AccessibilityOff,
+            island::IslandAction::OpenAccessibility,
         );
         return Err(Failure::NoPermission);
     }
