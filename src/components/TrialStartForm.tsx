@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAME_MAX_LENGTH = 100;
 const EMAIL_MAX_LENGTH = 254;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_PATTERN = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
 const CONTROL_CHARACTERS = /\p{Cc}/u;
 
 type FieldErrors = { name?: string; email?: string };
@@ -16,7 +16,7 @@ type FieldErrors = { name?: string; email?: string };
 const SERVER_MESSAGES: Record<Exclude<TrialStartError, "trial_invalid_name" | "trial_invalid_email">, string> = {
   trial_unreachable: "Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.",
   trial_rate_limited: "Too many attempts, so your trial hasn’t started. Wait a few minutes, then try again.",
-  trial_failed: "Something went wrong on our side, so your trial hasn’t started. Try again in a moment.",
+  trial_failed: "We couldn’t confirm your trial. Try again in a moment; pressing again never starts a second trial.",
 };
 
 export function validateTrialContact(name: string, email: string): FieldErrors {

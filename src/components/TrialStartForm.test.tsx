@@ -40,6 +40,18 @@ describe("TrialStartForm", () => {
     expect(onStart).not.toHaveBeenCalled();
   });
 
+  it.each(["priya..raman@example.com", ".priya@example.com", "priya.@example.com", "priya@example.c"])(
+    "refuses %s, which the server would also refuse",
+    async (address) => {
+      const { user, start, onStart, name, email } = setup();
+      await user.type(name, "Priya Raman");
+      await user.type(email, address);
+      await user.click(start);
+      expect(screen.getByText("That email doesn’t look right")).toBeInTheDocument();
+      expect(onStart).not.toHaveBeenCalled();
+    },
+  );
+
   it("starts the trial once with the trimmed name and email, also from Enter", async () => {
     const { user, onStart, name, email } = setup();
 

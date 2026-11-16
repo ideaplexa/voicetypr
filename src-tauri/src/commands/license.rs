@@ -1147,14 +1147,37 @@ pub async fn start_trial(
     let validation_lock = app.state::<AppState>().license_validation_lock.clone();
     let _validation_guard = validation_lock.lock().await;
     let device_hash = device::get_device_hash()?;
-    if let Err(error) = LicenseApiClient::new()?
+    let started = match LicenseApiClient::new()?
         .start_trial(&device_hash, name.trim(), email.trim())
         .await
     {
-        log::warn!("Trial start failed: {}", error.code());
-        return Err(error.code().to_string());
-    }
+        Ok(response) => response.data,
+        Err(error) => {
+            log::warn!("Trial start failed: {}", error.code());
+            return Err(error.code().to_string());
+        }
+    };
     clear_license_status_cache(&app).await;
+    // Seed the offline trial cache from the start reply, so a failed follow-up
+    // read still reports the running trial instead of "not started".
+    if let (false, Some(expires_at)) = (started.is_expired, &started.expires_at) {
+        let _ = scache::set(
+            &app,
+            LAST_TRIAL_VALIDATION_KEY,
+            serde_json::to_value(Utc::now()).unwrap_or_default(),
+            None,
+        );
+        let _ = scache::set(
+            &app,
+            TRIAL_EXPIRES_KEY,
+            serde_json::to_value(expires_at).unwrap_or_default(),
+            Some(SetItemOptions {
+                ttl: Some(CACHE_TTL_HOURS * 60 * 60),
+                compress: None,
+                compression_method: None,
+            }),
+        );
+    }
     perform_license_status_check(&app).await
 }
 
