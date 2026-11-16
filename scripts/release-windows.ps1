@@ -96,6 +96,7 @@ if (-not (Test-Path $OutputDir)) {
 Require-Command cargo
 Require-Command pnpm
 Require-Command pwsh
+Require-Command 7z
 Require-File "package.json"
 
 if (-not $SkipPublish) {
