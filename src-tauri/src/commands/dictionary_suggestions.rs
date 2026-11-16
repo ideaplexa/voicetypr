@@ -129,9 +129,18 @@ fn heard_corrections(before: &str, raw: Option<&str>, edited: &str) -> Vec<Corre
             .collect();
         found.retain(|c| {
             let heard: Vec<String> = c.heard.split(' ').map(str::to_lowercase).collect();
-            raw_words
-                .windows(heard.len())
-                .any(|window| window == heard.as_slice())
+            let last = heard.len() - 1;
+            // One end of a phrase may be part of a word the engine merged with
+            // a neighbour; a single word must have been heard exactly.
+            raw_words.windows(heard.len()).any(|window| {
+                window == heard.as_slice()
+                    || (last > 0
+                        && window[1..last] == heard[1..last]
+                        && ((window[0].ends_with(heard[0].as_str())
+                            && window[last] == heard[last])
+                            || (window[0] == heard[0]
+                                && window[last].starts_with(heard[last].as_str()))))
+            })
         });
     }
     found
@@ -342,6 +351,48 @@ mod tests {
             .map(|s| (s.heard.as_str(), s.word.as_str()))
             .collect();
         assert_eq!(offered, vec![("cloud code", "Claude Code")]);
+    }
+
+    #[test]
+    fn a_word_merged_with_its_neighbour_offers_only_the_corrected_term() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_with_history(
+            &dir,
+            serde_json::json!({
+                "text": "It works like invoice typer for me.",
+                "model": "parakeet-tdt-0.6b-v2",
+                "status": "completed",
+                "writing": { "original_text": "it works like invoice typer for me" },
+            }),
+        );
+        let (_, offered) = edit_history_entry(
+            app.handle(),
+            "2026-11-16T09:00:00Z",
+            "It works like in Voicetypr for me.",
+        )
+        .unwrap();
+        let offered: Vec<_> = offered
+            .iter()
+            .map(|s| (s.heard.as_str(), s.word.as_str()))
+            .collect();
+        assert_eq!(offered, vec![("voice typer", "Voicetypr")]);
+    }
+
+    #[test]
+    fn a_polished_word_is_offered_only_if_the_engine_heard_that_whole_word() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_with_history(
+            &dir,
+            serde_json::json!({
+                "text": "Use Cloud.",
+                "model": "parakeet-tdt-0.6b-v2",
+                "status": "completed",
+                "writing": { "original_text": "use cloudflare" },
+            }),
+        );
+        let (_, offered) =
+            edit_history_entry(app.handle(), "2026-11-16T09:00:00Z", "Use Claude.").unwrap();
+        assert!(offered.is_empty());
     }
 
     #[test]
