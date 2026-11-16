@@ -30,6 +30,7 @@ pub mod text;
 pub mod updater;
 pub mod usage_stats;
 pub mod utils;
+pub(crate) mod voice_commands;
 pub mod window;
 
 pub mod original;

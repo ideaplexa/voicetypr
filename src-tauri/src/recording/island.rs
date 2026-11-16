@@ -87,6 +87,10 @@ pub enum Note {
     PolishSkipped {
         reason: PolishReason,
     },
+    /// "Delete that" did nothing, and why.
+    CommandSkipped {
+        reason: crate::insertion::voice_keys::SkipReason,
+    },
 }
 #[derive(Clone, Serialize)]
 struct NoteEvent {
@@ -468,6 +472,9 @@ mod tests {
             },
             Note::PolishSkipped {
                 reason: PolishReason::Guard,
+            },
+            Note::CommandSkipped {
+                reason: crate::insertion::voice_keys::SkipReason::TypedSince,
             },
         ] {
             let value = serde_json::to_value(NoteEvent {
