@@ -1,5 +1,6 @@
 mod app_category;
 pub(crate) mod clipboard_transaction;
+mod corrections;
 mod format;
 mod library_rules;
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub use vocabulary::{
     WHISPER_STYLE_HINT,
 };
 
+pub(crate) use corrections::{corrected_words, CorrectedWord};
 #[allow(unused_imports)]
 pub(crate) use format::{
     format_for_transcription, protected_terms, should_run_format_stage, FormatStageSettings,
