@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voicetypr first run · B · Big sentence</title>
+<style>
+/*BASE_CSS*/
+
+/* ===== B · Big sentence: no cards. The words are the interface, and they clean themselves up in place. ===== */
+.brand{position:fixed;left:28px;top:24px;display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;z-index:5}
+.brand i{width:26px;height:26px;border-radius:7px;background:var(--sage-bg);color:var(--sage);display:flex;align-items:center;justify-content:center}
+.brand svg{width:16px;height:16px}
+.progress{position:fixed;left:0;top:0;height:2px;width:0;background:var(--sage);transition:width .9s var(--ease-out);z-index:6}
+.status{position:fixed;right:22px;top:28px;z-index:5}
+.scene{justify-content:flex-start;padding-top:min(21vh,170px)}
+.stage{width:min(860px,calc(100vw - 96px));display:flex;flex-direction:column;align-items:flex-start;gap:22px}
+.stmt{margin:0;font-size:clamp(34px,5vw,60px);line-height:1.08;font-weight:600;letter-spacing:-.045em;text-wrap:balance}
+.stmt.mid{font-size:clamp(28px,3.9vw,46px);line-height:1.14;letter-spacing:-.038em}
+.stmt .dim{color:var(--text-3)}
+.sw{display:inline-block}
+.scene.active .stmt .sw{animation:rise .7s var(--ease-out) both;animation-delay:calc(var(--w,0)*38ms + 80ms)}
+.whisper{margin:0;font-size:17px;line-height:28px;color:var(--muted-foreground);max-width:640px;text-wrap:pretty}
+.whisper .caps{margin:0 4px}
+.whisper.sm{font-size:14px;line-height:22px}
+.whisper q{color:var(--foreground)}
+.acts{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.eyebrow{margin:0;font-family:var(--mono);font-size:12.5px;color:var(--muted-foreground);animation:fade .5s ease both}
+
+/* the sentence */
+.line{margin:0;font-size:clamp(27px,3.7vw,44px);line-height:1.2;font-weight:500;letter-spacing:-.032em;color:var(--text-3);min-height:2.4em;text-wrap:pretty;transition:color .6s ease}
+.line.polished{color:var(--foreground)}
+.line.listening::after{content:"";display:inline-block;width:.06em;height:.9em;margin-left:.08em;vertical-align:-.1em;background:var(--sage);border-radius:1px;animation:caret 1s steps(1) infinite}
+@keyframes caret{50%{opacity:0}}
+.rawline{margin:0;font-family:var(--mono);font-size:13px;line-height:21px;color:var(--muted-foreground);max-width:720px;animation:rise .6s var(--ease-out) both}
+.rawline b{font-weight:500;color:var(--text-3);margin-right:10px}
+.meta{margin:0;font-size:14px;color:var(--sage);font-weight:500;display:flex;align-items:center;gap:7px;animation:rise .6s .1s var(--ease-out) both}
+.meta svg{width:16px;height:16px}
+.say[data-phase="intro"] [data-show]:not([data-show~="intro"]),.say[data-phase="ready"] [data-show]:not([data-show~="ready"]),.say[data-phase="live"] [data-show]:not([data-show~="live"]),.say[data-phase="done"] [data-show]:not([data-show~="done"]){display:none}
+.acts[data-show]{animation:rise .6s .2s var(--ease-out) both}
+.warnline{margin:0;font-size:15px;color:var(--warn);background:var(--warn-bg);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:12px;animation:rise .4s var(--ease-out) both}
+
+/* controls that live inside a sentence */
+.stmt .caps{gap:.14em;vertical-align:.12em}
+.stmt .cap{font-size:.56em;padding:.16em .5em;border-radius:.3em;letter-spacing:-.01em}
+.inl{font:inherit;letter-spacing:inherit;border:0;background:none;padding:0;color:inherit;border-radius:.2em}
+.inl.swap{text-decoration:underline dotted;text-decoration-thickness:.05em;text-underline-offset:.16em;text-decoration-color:var(--text-3);transition:color .2s ease}
+.inl.swap:hover{color:var(--sage);text-decoration-color:var(--sage)}
+.inl.keys:hover .cap{border-color:var(--sage);box-shadow:0 0 0 3px var(--sage-bg)}
+.flash{animation:changed 1.2s ease both}
+.item{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.item+.item{margin-top:14px}
+.okline{display:inline-flex;align-items:center;gap:7px;color:var(--sage);font-weight:500;animation:rise .4s var(--ease-out) both}
+.okline svg{width:16px;height:16px}
+
+/* I mostly dictate ___ */
+.blank{display:inline-block;min-width:4.2em;border-bottom:.06em solid var(--border);color:var(--sage);line-height:1.05;transition:border-color .3s ease}
+.blank.filled{border-color:transparent;color:var(--foreground)}
+.blank span{display:inline-block;animation:word-in .45s var(--ease-out) both}
+.choices{display:flex;flex-wrap:wrap;gap:6px 8px;max-width:700px}
+.choice{border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--border);border-radius:999px;padding:8px 15px;font-size:15px;color:var(--muted-foreground);transition:color .2s ease,box-shadow .2s ease,background-color .2s ease,transform .12s var(--ease-out)}
+.choice:hover{color:var(--foreground);background:var(--secondary)}.choice:active{transform:scale(.97)}
+.choice[aria-checked="true"]{color:var(--foreground);box-shadow:inset 0 0 0 1.5px var(--sage)}
+
+/* trial */
+.week{display:flex;gap:8px;align-items:flex-end}
+.day{display:flex;flex-direction:column;gap:7px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--muted-foreground)}
+.day i{display:block;width:44px;height:6px;border-radius:3px;background:var(--border);transition:background-color .5s ease}
+.day.on i{background:var(--sage)}
+.day.on{color:var(--foreground)}
+.err{margin:0;font-size:14px;color:var(--destructive);max-width:520px}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--muted-foreground);max-width:520px;cursor:pointer}
+.consent input{accent-color:var(--sage);margin:2px 0 0;width:15px;height:15px;flex:none}
+@media (max-width:640px){.stage{width:calc(100vw - 40px)}.scene{padding-top:92px}.day i{width:30px}.status{display:none}}
+</style>
+</head>
+<body>
+<!--
+Voicetypr first run · B · Big sentence
+Screens: say (the promise is the first screen and it is already live: hold the shortcut and talk; the microphone prompt arrives on that first hold;
+              the sentence you said cleans itself up in place, with the raw line kept above it)
+         → setup (Accessibility on Mac and the shortcut, both edited inside the sentence) → use (optional: "I mostly dictate ___") → trial (Start 7-day trial → Day 1 of 7)
+State: VT.state { platform, hotkey, hold, mic, micDenied, ax, use, trial }; the say screen has data-phase intro | ready | live | done
+Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a click speaks for you). The macOS prompt and System Settings are drawn.
+       Trial start is a 1.1 s timeout; "Trial server: offline" in the review controls (bottom left) makes it fail.
+-->
+<div id="app">
+  <div class="progress" id="progress"></div>
+  <div class="brand"><i><svg viewBox="100 96 312 320" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M143 197 C166 288 201 350 240 393" stroke-width="36"/><path d="M369 197 C346 288 311 350 272 393" stroke-width="36"/><path d="M256 163 L256 338" stroke-width="23"/><path d="M202 226 L202 257" stroke-width="15"/><path d="M226 207 L226 276" stroke-width="15"/><path d="M286 207 L286 276" stroke-width="15"/><path d="M310 226 L310 257" stroke-width="15"/></g><circle cx="256" cy="124" r="18" fill="currentColor"/></svg></i>Voicetypr</div>
+  <div class="status" data-engine></div>
+
+  <section class="scene say" data-id="say" data-phase="intro">
+    <div class="stage">
+      <h1 class="stmt" data-show="intro" data-split>Say it messy.<br>It lands clean.</h1>
+      <p class="eyebrow" data-show="ready live done">Say it messy. It lands clean.</p>
+      <p class="rawline" data-show="done" id="rawline"></p>
+      <p class="line" data-show="ready live done" id="line" aria-live="off"></p>
+      <p class="meta" data-show="done" id="meta" role="status"></p>
+      <div data-show="intro ready" id="before">
+        <p class="whisper" data-rise="6"><span data-verb></span> <span data-caps></span> and say anything. Go on, nothing to set up first.</p>
+        <p class="whisper sm" data-rise="8" style="margin-top:10px">Stuck? Read this out: <q>um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before</q></p>
+        <p class="whisper sm" data-rise="9" style="margin-top:14px"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></p>
+      </div>
+      <div id="micwarn"></div>
+      <div class="acts" data-show="done">
+        <button type="button" class="btn lg" id="say-next">Continue</button>
+        <button type="button" class="btn ghost" id="replay">Show what I said</button>
+        <button type="button" class="btn ghost" id="again">Say something else</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="setup" hidden>
+    <div class="stage">
+      <div class="item" data-mac-only>
+        <h2 class="stmt mid" data-split>It types wherever your cursor is.</h2>
+        <p class="whisper" id="ax-line" data-rise="5">macOS wants your OK for that, once. <button type="button" class="btn sm" id="ax-btn" style="margin-left:8px">Allow Accessibility</button></p>
+      </div>
+      <div class="item">
+        <h2 class="stmt mid"><button type="button" class="inl swap" data-mode><span data-verb></span></button> <button type="button" class="inl keys" id="keys" aria-label="Change shortcut"><span data-caps></span></button> <span class="dim">to talk,</span> <button type="button" class="inl swap" data-mode><span data-after></span></button> <span class="dim">to paste.</span></h2>
+        <p class="whisper sm" data-rise="7">That’s your shortcut. Click the keys or the underlined words to change them.</p>
+      </div>
+      <div class="acts" data-rise="9" style="margin-top:10px">
+        <button type="button" class="btn lg" id="setup-next" data-autofocus>Continue</button>
+        <button type="button" class="btn ghost" id="setup-skip" data-mac-only>Not now, I’ll paste myself</button>
+        <button type="button" class="btn ghost" data-go="say">Back</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="use" hidden>
+    <div class="stage">
+      <h2 class="stmt"><span class="sw" style="--w:0">I</span> <span class="sw" style="--w:1">mostly</span> <span class="sw" style="--w:2">dictate</span> <span class="sw" style="--w:3"><span class="blank" id="blank">&nbsp;</span>.</span></h2>
+      <div class="choices" role="radiogroup" aria-label="What you mostly dictate" id="choices" data-rise="5"></div>
+      <p class="whisper" id="does" role="status" data-rise="6">Optional. It picks a starting point you can change any time.</p>
+      <div class="acts" data-rise="7">
+        <button type="button" class="btn lg" id="use-next" disabled>Continue</button>
+        <button type="button" class="btn ghost" id="use-skip">Skip</button>
+        <button type="button" class="btn ghost" data-go="setup">Back</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="trial" hidden>
+    <div class="stage">
+      <h2 class="stmt" id="trial-stmt" data-split>That’s Voicetypr.<br>Keep it for 7 days, free.</h2>
+      <div class="week" id="week" data-rise="7" aria-hidden="true"></div>
+      <p class="whisper" id="trial-whisper" data-rise="8">No card. The 7 days start when you click, not before.</p>
+      <div class="acts" data-rise="9" id="trial-acts">
+        <button type="button" class="btn lg" id="trial-btn" data-autofocus>Start 7-day trial</button>
+        <button type="button" class="btn ghost" data-go="use">Back</button>
+      </div>
+      <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
+      <label class="consent" data-rise="10" id="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content. By starting you agree to the Terms and Privacy Policy.</span></label>
+    </div>
+  </section>
+</div>
+<div class="pillzone"><div class="pill" id="pill" data-state="idle"></div></div>
+<div class="sr" id="pill-live" aria-live="polite"></div>
+<script>
+/*BASE_JS*/
+(function () {
+  "use strict";
+  var $ = VT.$, $$ = VT.$$, esc = VT.esc;
+  var TOKENS = [
+    { r: "um" }, { r: "so" }, { r: "let's", p: "Let’s" }, { r: "move", p: "move" }, { r: "the" }, { r: "the", p: "the" }, { r: "sync", p: "sync" }, { r: "to", p: "to" },
+    { r: "thursday" }, { r: "no" }, { r: "wait" }, { r: "friday", p: "Friday" }, { r: "at", p: "at" }, { r: "three", p: "3," }, { r: "and", p: "and" }, { r: "uh" },
+    { r: "i'll", p: "I’ll" }, { r: "send", p: "send" }, { r: "the", p: "the" }, { r: "notes", p: "notes" }, { r: "before", p: "before." },
+  ];
+  var OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
+  var PROGRESS = { say: 6, setup: 50, use: 75, trial: 92 };
+  var sentence = null, busy = false;
+
+  function split() {
+    $$("[data-split]").forEach(function (el) {
+      var n = 0;
+      Array.from(el.childNodes).forEach(function (node) {
+        if (node.nodeType !== 3) return;
+        var frag = document.createDocumentFragment();
+        node.textContent.split(/(\s+)/).forEach(function (part) {
+          if (!part.trim()) { frag.appendChild(document.createTextNode(part)); return; }
+          var s = document.createElement("span");
+          s.className = "sw"; s.textContent = part; s.style.setProperty("--w", n++);
+          frag.appendChild(s);
+        });
+        el.replaceChild(frag, node);
+      });
+    });
+  }
+  function phase(p) { $(".say").dataset.phase = p; }
+  function micWarn() {
+    var w = $("#micwarn");
+    if (!VT.state.micDenied) { w.innerHTML = ""; return; }
+    w.innerHTML = '<p class="warnline"><span>The microphone is off for Voicetypr, so it can’t hear you yet.</span><button type="button" class="btn sm" id="mic-fix">Open System Settings</button></p>';
+    $("#mic-fix").addEventListener("click", function () { VT.openSettings("mic").then(function (ok) { micWarn(); if (ok) VT.pill.hint(); }); });
+  }
+  var dict = new VT.Dictation({
+    tokens: TOKENS,
+    onStart: function () {
+      phase("live");
+      sentence = new VT.Sentence($("#line"), TOKENS);
+      $("#line").classList.add("listening");
+    },
+    onWord: function (i) { sentence.add(i); },
+    onShort: function () { $("#line").classList.remove("listening"); phase("ready"); },
+    onMic: function (ok) { micWarn(); if (ok) VT.pill.hint(); else VT.pill.note("Microphone access is off"); },
+    onPhase: function (p) {
+      $("#line").classList.remove("listening");
+      if (p === "polishing") { busy = true; sentence.polish().then(function () { busy = false; }); }
+    },
+    onDone: function (n) {
+      VT.later(function () {
+        $("#rawline").innerHTML = "<b>you said</b>" + VT.rawHTML(TOKENS);
+        $("#meta").innerHTML = OK + n + " words, typed 0.4 s after you let go";
+        $("#replay").textContent = "Show what I said";
+        phase("done");
+        $("#progress").style.width = "25%";
+        $("#say-next").focus({ preventScroll: true });
+      }, 900);
+    },
+  });
+
+  function paintAx() {
+    var mac = VT.state.platform === "mac", ok = VT.state.ax;
+    if (ok) $("#ax-line").innerHTML = '<span class="okline">' + OK + "Allowed. Your words will land in any app.</span>";
+    $("#setup-skip").hidden = !mac || ok;
+    $("#setup-next").disabled = mac && !ok;
+  }
+  function paintChoices() {
+    $("#choices").innerHTML = VT.USES.map(function (u) {
+      return '<button type="button" class="choice" role="radio" aria-checked="' + (VT.state.use === u.id) + '" data-use="' + u.id + '">' + esc(u.label.charAt(0).toLowerCase() + u.label.slice(1)) + "</button>";
+    }).join("");
+  }
+  function paintWeek() {
+    var days = ["Mon 16", "Tue 17", "Wed 18", "Thu 19", "Fri 20", "Sat 21", "Sun 22"];
+    $("#week").innerHTML = days.map(function (d, i) { return '<span class="day' + (VT.state.trial && i === 0 ? " on" : "") + '"><i></i>' + d + "</span>"; }).join("");
+  }
+
+  VT.onScene = function (id) {
+    VT.talk = null;
+    $("#progress").style.width = (id === "say" && dict.state() === "done" ? 25 : PROGRESS[id]) + "%";
+    if (id === "say") { dict.arm(); if (dict.state() !== "done") VT.pill.hint(); }
+    else VT.pill.idle();
+    if (id === "setup") paintAx();
+    if (id === "use") paintChoices();
+    if (id === "trial") paintWeek();
+    VT.paint();
+  };
+
+  VT.boot("Prototype B · Big sentence", function () {
+    dict.reset(); busy = false;
+    split();
+    $$("[data-go]").forEach(function (b) { b.addEventListener("click", function () { VT.go(b.dataset.go); }); });
+    $("#say-next").addEventListener("click", function () { VT.go("setup"); });
+    $("#again").addEventListener("click", function () { if (busy) return; dict.reset(); $("#line").innerHTML = ""; $("#line").classList.remove("polished"); phase("ready"); VT.pill.hint(); });
+    $("#replay").addEventListener("click", function (e) {
+      if (busy || !sentence) return;
+      busy = true;
+      var b = e.currentTarget;
+      (sentence.polished ? sentence.raw() : sentence.polish()).then(function () { busy = false; b.textContent = sentence.polished ? "Show what I said" : "Clean it up again"; });
+    });
+    $("#ax-btn").addEventListener("click", function () { VT.openSettings("ax").then(paintAx); });
+    $("#setup-next").addEventListener("click", function () { VT.go("use"); });
+    $("#setup-skip").addEventListener("click", function () { VT.go("use"); });
+    $("#keys").addEventListener("click", function (e) { VT.state.hotkey = (VT.state.hotkey + 1) % 3; VT.paint(); e.currentTarget.classList.remove("flash"); void e.currentTarget.offsetWidth; e.currentTarget.classList.add("flash"); });
+    $$("[data-mode]").forEach(function (b) { b.addEventListener("click", function () { VT.state.hold = !VT.state.hold; VT.paint(); $$("[data-mode]").forEach(function (x) { x.classList.remove("flash"); void x.offsetWidth; x.classList.add("flash"); }); }); });
+    $("#choices").addEventListener("click", function (e) {
+      var c = e.target.closest("[data-use]");
+      if (!c) return;
+      VT.state.use = c.dataset.use;
+      var u = VT.USES.filter(function (x) { return x.id === VT.state.use; })[0];
+      paintChoices();
+      $("#blank").className = "blank filled";
+      $("#blank").innerHTML = "<span>" + esc(u.label.charAt(0).toLowerCase() + u.label.slice(1)) + "</span>";
+      $("#does").textContent = u.does;
+      $("#use-next").disabled = false;
+      $('[data-use="' + u.id + '"]').focus();
+    });
+    $("#use-next").addEventListener("click", function () { VT.go("trial"); });
+    $("#use-skip").addEventListener("click", function () { VT.state.use = null; VT.go("trial"); });
+    $("#trial-btn").addEventListener("click", function (e) {
+      var b = e.currentTarget;
+      $("#trial-err").hidden = true;
+      b.setAttribute("aria-busy", "true");
+      b.innerHTML = '<span class="spin"></span>Starting your trial';
+      VT.startTrial().then(function () {
+        var s = $("#trial-stmt");
+        s.innerHTML = '<span class="sw" style="--w:0">Day</span> <span class="sw" style="--w:1">1</span> <span class="sw" style="--w:2">of</span> <span class="sw" style="--w:3">7.</span>';
+        paintWeek();
+        $("#progress").style.width = "100%";
+        $("#consent").hidden = true;
+        $("#trial-whisper").innerHTML = "Voicetypr is yours until " + VT.trialEnds + ". <span data-verb></span> <span data-caps></span> in any app and talk.";
+        $("#trial-acts").innerHTML = '<button type="button" class="btn lg" id="finish">Start using Voicetypr</button>';
+        $("#finish").addEventListener("click", function () { VT.toast("The prototype ends here. In the app, Home opens next."); });
+        $("#finish").focus({ preventScroll: true });
+        VT.paint();
+      }, function () {
+        b.removeAttribute("aria-busy"); b.textContent = "Try again";
+        $("#trial-err").hidden = false;
+      });
+    });
+    $$(".scene").forEach(function (s) { s.hidden = true; s.classList.remove("active"); });
+    VT.go("say");
+  });
+})();
+</script>
+</body>
+</html>
