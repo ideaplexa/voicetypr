@@ -21,12 +21,12 @@ export function DictionarySuggestions({ only }: { only?: string[] }) {
       <ul className="mt-1 divide-y divide-border">
         {shown.map((suggestion) => (
           <li key={suggestion.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
-            <p className="min-w-0 flex-1 text-[13px] text-foreground">
+            <p className="min-w-56 flex-1 text-[13px] text-foreground">
               <span className="font-medium">{suggestion.word}</span>{" "}
               <span className="text-xs text-muted-foreground">
                 {suggestion.heard.toLowerCase() === suggestion.word.toLowerCase()
                   ? `instead of “${suggestion.heard}”`
-                  : `when Voicetypr hears “${suggestion.heard}”`}
+                  : `heard as “${suggestion.heard}”`}
               </span>
             </p>
             <div className="flex gap-1.5">

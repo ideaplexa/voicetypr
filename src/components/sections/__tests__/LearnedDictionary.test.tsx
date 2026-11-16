@@ -74,7 +74,7 @@ describe("Dictionary learns from corrections", () => {
       text: "I pushed the fix to Voicetypr.",
     });
     const offered = within(await screen.findByRole("region", { name: "Suggested words" }));
-    expect(offered.getByText("when Voicetypr hears “voice typer”")).toBeInTheDocument();
+    expect(offered.getByText("heard as “voice typer”")).toBeInTheDocument();
     expect(screen.getByText("I pushed the fix to Voicetypr.")).toBeInTheDocument();
 
     await user.click(offered.getByRole("button", { name: "Add Voicetypr to Dictionary" }));
