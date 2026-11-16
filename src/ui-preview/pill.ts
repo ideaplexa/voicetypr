@@ -67,6 +67,7 @@ if (root) {
   if(state.startsWith('note-')) emit('dictation-note',notes[state.slice(5)]);
   if(state==='stack3') { for(const kind of ['polish_on','polish_off','shortcuts_retired','long_silence','long_silence']) emit('island-notice',{kind}); }
   if(state==='finishing') {emit('transcription-started');emit('island-notice',{kind:'finishing'});}
+  if(state==='copied-pasted') {emit('paste-outcome',{generation:1,outcome:'copied',words:38,polished:false});emit('recording-started');emit('transcription-started');emit('paste-outcome',{generation:params.has('stale') ? 0 : 2,outcome:'pasted',words:12,polished:false});}
   if(state==='pasted-original') {emit('paste-outcome',{outcome:'pasted',words:38,polished:true});emit('pill-pointer',{inside:true});}
   const quickState = state.replace('top-anchor-', '');
   if (quickState.startsWith('peek') || quickState.startsWith('pick-')) {
