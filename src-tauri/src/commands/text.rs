@@ -501,6 +501,15 @@ fn insert_via_clipboard(
         })
     };
 
+    // Remember where a dictation lands only while voice commands are on, so
+    // "delete that" can verify it; nothing else pays for the extra query.
+    let commands_target = (dictation_generation.is_some()
+        && app_handle
+            .as_ref()
+            .and_then(|app| crate::writing::load_writing_settings(app).ok())
+            .is_some_and(|settings| settings.editing_commands))
+    .then(crate::insertion::voice_keys::before_paste);
+
     #[cfg(target_os = "macos")]
     let outcome = {
         current()?;
@@ -521,10 +530,16 @@ fn insert_via_clipboard(
     let outcome = legacy::insert(
         clipboard,
         &mut paste,
-        text,
+        text.clone(),
         keep_transcription_in_clipboard,
         &current,
     )?;
+    match commands_target {
+        Some(target) if outcome == PasteOutcome::Pasted => {
+            crate::insertion::voice_keys::remember_insertion(target, &text)
+        }
+        _ => crate::insertion::voice_keys::forget_insertion(),
+    }
     let play_completed_cue = paste_completed_cue_eligible(&outcome);
 
     // Commit clipboard restoration state before best-effort feedback. The cue

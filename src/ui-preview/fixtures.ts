@@ -176,6 +176,7 @@ export const demoWriting: WritingSettings = {
     { app_name: "Cursor", preset: "Code", enabled: true },
   ],
   spoken_punctuation: false,
+  editing_commands: false,
 };
 
 const shortcutActions: ShortcutActionDefinition[] = [

@@ -8568,6 +8568,7 @@ dependencies = [
  "tokio-util",
  "transcript-text",
  "unicode-normalization",
+ "unicode-segmentation",
  "uuid",
  "warp",
  "webpki-roots 0.26.11",

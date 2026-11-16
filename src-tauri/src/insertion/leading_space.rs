@@ -1,6 +1,8 @@
 //! Best-effort insertion-boundary spacing. Context never leaves this module.
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::{focused_text, FocusedText};
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
