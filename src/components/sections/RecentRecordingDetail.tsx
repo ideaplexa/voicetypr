@@ -9,6 +9,7 @@ import { useDictionarySuggestions, type DictionarySuggestion } from "@/state/dic
 import { getErrorMessage } from "@/utils/error";
 import { getModelDisplayName } from "@/lib/model-display";
 import type { TranscriptionHistory } from "@/types";
+import { migratePreset, presetDisplayLabel, presetRequiresAiFormatting } from "@/types/ai";
 import { formatDurationMs, sourceLabel } from "./recentRecordingsHelpers";
 import { parseHistoryDate } from "@/lib/history-date";
 
@@ -84,6 +85,10 @@ export function RecentRecordingDetail({
   const app = item.writing?.context_hint?.app_name;
   const name = app && app !== "Other" ? app : sourceLabel(item.writing?.source);
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const polishMode = item.writing?.ai_applied ? item.writing.mode : undefined;
+  const polishPreset = polishMode ? migratePreset(polishMode) : null;
+  const polishLabel =
+    polishPreset && presetRequiresAiFormatting(polishPreset) ? presetDisplayLabel(polishPreset) : null;
   const original =
     item.writing?.original_text && item.writing.original_text !== text
       ? item.writing.original_text
@@ -266,9 +271,9 @@ export function RecentRecordingDetail({
             {getModelDisplayName(item.model) ?? item.model}
           </span>
         )}
-        {item.writing?.mode && (
+        {polishLabel && (
           <span className="rounded-[7px] border border-border px-[9px] py-1">
-            Polish: {item.writing.mode}
+            Polish: {polishLabel}
           </span>
         )}
         {item.writing?.ai_provider && (
