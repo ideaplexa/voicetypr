@@ -157,7 +157,26 @@ body.holding .cap.live{transform:translateY(1px);border-color:var(--sage);border
 .w.out{display:none}
 .w.changed{animation:changed 1.5s ease both}
 @keyframes changed{0%,35%{color:var(--sage)}100%{color:inherit}}
-s{text-decoration-thickness:1px;opacity:.6}
+s{text-decoration-thickness:1px}
+
+/* Pill controls during a dictation: Stop types it, the cross discards it (labelled, not hover-only) */
+.pill{pointer-events:auto}
+.pill .pbtn{border:0;height:24px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;padding:0 9px;flex:none;transition:background-color .15s ease}
+.pill .pbtn.stop{background:rgba(143,209,168,.18);color:var(--psage);margin-left:2px}
+.pill .pbtn.stop:hover{background:rgba(143,209,168,.3)}
+.pill .pbtn.cancel{width:24px;padding:0;background:transparent;color:var(--pt2)}
+.pill .pbtn.cancel:hover{background:rgba(255,255,255,.12);color:#fff}
+.pill .pbtn svg{width:14px;height:14px}
+.pill-hint{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:31;background:#121316;color:rgba(255,255,255,.92);font-size:12.5px;padding:7px 12px;border-radius:14px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 12px 34px rgba(0,0,0,.3);animation:pop .2s var(--ease-out) both}
+.proto .note{font-size:11px;padding:0 6px}
+.app-dialog .dlg{width:420px;max-width:calc(100vw - 32px);background:var(--card);color:var(--foreground);border-radius:14px;box-shadow:0 0 0 1px var(--border),var(--shadow-2xl);padding:18px 20px;font-size:13.5px;animation:pop .25s var(--ease-out) both}
+.app-dialog h3{margin:0 0 6px;font-size:16px;font-weight:600}
+.app-dialog p{margin:8px 0;color:var(--muted-foreground)}
+.app-dialog ul{margin:8px 0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.dlg-foot{display:flex;justify-content:flex-end;margin-top:12px}
+.legal{margin:0;font-size:12.5px;color:var(--muted-foreground)}
+.legal .link{font-size:inherit}
+h1:focus,h2:focus{outline:none}
 
 
 /* ===== A · Quiet page: today's centred column and cards, with the order turned round ===== */
@@ -190,7 +209,7 @@ h2{margin:0;font-size:26px;line-height:normal;font-weight:600;letter-spacing:-.5
 .pane .body{flex:1;font-size:15px;line-height:24px}
 .said .body{color:var(--text-3)}
 .said .body .sw{display:inline-block;animation:word-in .3s var(--ease-out) both;transition:opacity .4s ease}
-.said .body .sw.cut{text-decoration:line-through;opacity:.5}
+.said .body .sw.cut{text-decoration:line-through}
 .typed{background:var(--card)}
 .typed .body{font-size:17px;line-height:26px}
 .typed .hold{color:var(--muted-foreground);font-size:15px}
@@ -296,7 +315,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       <div class="card rows" data-rise>
         <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg></div><div class="txt"><b>Microphone</b><span id="micname">MacBook Pro Microphone</span></div><div class="act"><span class="badge"><i></i>We heard you</span></div></div>
         <div class="r" id="ax-row" data-mac-only><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg></div><div class="txt"><b>Accessibility</b><span id="ax-sub">So your words land at your cursor, in any app.</span></div><div class="act" id="ax-act"><button type="button" class="btn sm" id="ax-btn">Allow</button></div></div>
-        <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to paste.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>
+        <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to <span data-result></span>.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>
       </div>
       <div class="row-actions" data-rise>
         <button type="button" class="btn outline" data-go="try">Back</button>
@@ -328,7 +347,8 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       <button type="button" class="btn lg" id="trial-btn" data-rise data-autofocus>Start 7-day trial</button>
       <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
       <label class="consent" data-rise><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label>
-      <p class="fine" data-rise>By starting you agree to the Terms and Privacy Policy.</p>
+      <p class="legal" data-rise><button type="button" class="link" data-shared>What’s shared</button></p>
+      <p class="fine" data-rise>By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p>
     </div>
   </section>
 
@@ -336,7 +356,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     <div class="col">
       <div class="bigtick" data-rise><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg></div>
       <h2 data-rise>Trial started</h2>
-      <p class="lede" data-rise>Voicetypr is yours until <b id="ends"></b>. <span data-verb></span> <span data-caps></span> in any app and talk.</p>
+      <p class="lede" data-rise>Voicetypr is yours until <b id="ends"></b>. <span data-verb></span> <span data-caps></span> in any app and talk.<span data-degraded hidden> Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you.</span></p>
       <button type="button" class="btn lg" id="finish" data-rise data-autofocus>Start using Voicetypr</button>
     </div>
   </section>
@@ -355,6 +375,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
   var VT = (window.VT = { $: $, $$: $$, reduce: reduce, esc: esc, gen: 0, modal: false, talk: null, failTrial: false });
 
   var MARK = '<svg viewBox="100 96 312 320" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M143 197 C166 288 201 350 240 393" stroke-width="36"/><path d="M369 197 C346 288 311 350 272 393" stroke-width="36"/><path d="M256 163 L256 338" stroke-width="23"/><path d="M202 226 L202 257" stroke-width="15"/><path d="M226 207 L226 276" stroke-width="15"/><path d="M286 207 L286 276" stroke-width="15"/><path d="M310 226 L310 257" stroke-width="15"/></g><circle cx="256" cy="124" r="18" fill="currentColor"/></svg>';
+  var X = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>';
   var CHECK = '<svg class="tick" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
   var ARC = '<svg class="arc" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/></svg>';
   VT.icons = { mark: MARK, check: CHECK, arc: ARC };
@@ -365,16 +386,16 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     windows: [["Ctrl", "Space"], ["Right Alt"], ["F9"]],
   };
   VT.USES = [
-    { id: "messages", label: "Messages and email", does: "Polish set to Clean: tidy sentences, your wording." },
-    { id: "ai", label: "Prompts for AI", does: "Polish set to Clear intent, for the AI apps you use." },
-    { id: "code", label: "Code and tech notes", does: "Developer words on. Names like useEffect and kubectl stay intact." },
-    { id: "docs", label: "Notes and documents", does: "Polish set to Paragraphs: long thoughts, properly broken up." },
-    { id: "clinical", label: "Medical or legal work", does: "Medical and legal words on. Polish never changes a term." },
-    { id: "mix", label: "A bit of everything", does: "Sensible defaults. Voicetypr adapts to the app you are in." },
+    { id: "messages", label: "Messages and email", does: "Starts you on tidy sentences in your own wording." },
+    { id: "ai", label: "Prompts for AI", does: "Starts you on clean-up-and-clarify for the AI apps you use." },
+    { id: "code", label: "Code and tech notes", does: "Starts you with developer words, so names like useEffect and kubectl come out right." },
+    { id: "docs", label: "Notes and documents", does: "Starts you on longer text broken into paragraphs." },
+    { id: "clinical", label: "Medical or legal work", does: "Starts you with medical and legal words." },
+    { id: "mix", label: "A bit of everything", does: "Starts you on the defaults, shaped by the app you are in." },
   ];
   VT.trialEnds = "Monday 23 November";
   function fresh(platform) {
-    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, use: null, trial: false };
+    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, axSkipped: false, use: null, trial: false };
   }
   VT.state = fresh(/Win/i.test(navigator.platform || "") ? "windows" : "mac");
   VT.caps = function () { return HOTKEYS[VT.state.platform][VT.state.hotkey]; };
@@ -389,11 +410,19 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $$("[data-after]").forEach(function (e) { e.textContent = s.hold ? "let go" : "press again"; });
     $$("[data-os]").forEach(function (e) { e.textContent = s.platform === "mac" ? "Mac" : "PC"; });
     $$("[data-mac-only]").forEach(function (e) { e.hidden = s.platform !== "mac"; });
+    $$("[data-result]").forEach(function (e) { e.textContent = VT.copyOnly() ? "copy" : "paste"; });
+    $$("[data-degraded]").forEach(function (e) { e.hidden = !VT.copyOnly(); });
+    $$('[role="radiogroup"]').forEach(function (g) {
+      var rs = $$('[role="radio"]', g), on = rs.filter(function (r) { return r.getAttribute("aria-checked") === "true"; })[0] || rs[0];
+      rs.forEach(function (r) { r.tabIndex = r === on ? 0 : -1; });
+    });
   };
+  VT.copyOnly = function () { return VT.state.platform === "mac" && !VT.state.ax && VT.state.axSkipped; };
   VT.later = function (fn, ms) {
     var g = VT.gen;
-    return setTimeout(function () { if (g === VT.gen) fn(); }, reduce ? Math.min(ms, 60) : ms);
+    return setTimeout(function () { if (g === VT.gen) fn(); }, ms);
   };
+  VT.announce = function (text) { var a = $("#vt-announce"); if (a) { a.textContent = ""; setTimeout(function () { a.textContent = text; }, 50); } };
   VT.wait = function (ms) { return new Promise(function (r) { VT.later(r, ms); }); };
 
   /* ---------- pill ---------- */
@@ -432,6 +461,15 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       while (acc > 0.07) { acc -= 0.07; bars.unshift(level > 0.05 ? 3 + 15 * level * (0.55 + 0.45 * Math.random()) : 2); if (bars.length > 26) bars.pop(); }
       g.clearRect(0, 0, 96, 24);
       g.fillStyle = "#fff";
+      if (reduce) {
+        for (var k = 0; k < 11; k++) {
+          var lv = Math.min(1, level * 1.6) * (0.5 + 0.5 * Math.sin(Math.PI * (k + 0.5) / 11)), hh = 2 + 14 * lv;
+          g.globalAlpha = lv > 0.03 ? 0.93 : 0.34; g.beginPath(); g.roundRect(8 + k * 8, 12 - hh / 2, 2.4, hh, 1.2); g.fill();
+        }
+        timeEl.textContent = "0:" + String(Math.floor((now - t0) / 1000)).padStart(2, "0");
+        raf = requestAnimationFrame(frame);
+        return;
+      }
       var shift = (acc / 0.07) * 4;
       for (var i = 0; i < bars.length; i++) {
         var x = 96 - 4 - i * 4 - shift;
@@ -451,7 +489,18 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       var keys = VT.caps().map(function (c) { return '<span class="kc">' + esc(c) + "</span>"; }).join("");
       pillSet("hint", '<span class="dim">' + (VT.state.hold ? "Hold" : "Press") + "</span>" + keys + '<span class="dim">to talk</span>');
     },
-    listening: function () { pillSet("listening", '<canvas aria-hidden="true"></canvas><span class="time">0:00</span>'); startWave(); },
+    listening: function () {
+      pillSet("listening", '<canvas aria-hidden="true"></canvas><span class="time">0:00</span><button type="button" class="pbtn stop" data-pill="stop" aria-label="Stop and type it">Stop</button><button type="button" class="pbtn cancel" data-pill="cancel" aria-label="Cancel and discard">' + X + "</button>");
+      startWave();
+    },
+    escHint: function () {
+      var h = $("#pill-hint");
+      if (!h) return;
+      h.textContent = "Press Esc again to discard";
+      h.hidden = false;
+      clearTimeout(h.t);
+      h.t = setTimeout(function () { h.hidden = true; }, 2000);
+    },
     bump: function () { if (wave) wave.bump(); },
     work: function (label, polish) { pillSet("work", ARC.replace('class="arc"', 'class="arc' + (polish ? " slow" : "") + '"') + "<span>" + esc(label) + "</span>"); },
     done: function (words, then) {
@@ -473,7 +522,17 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     o.innerHTML = html;
     document.body.appendChild(o);
     VT.modal = true;
+    var app = $("#app");
+    if (app) app.inert = true;
     var prev = document.activeElement;
+    o.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab") return;
+      var f = $$("button", o);
+      if (!f.length) return;
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault();
+      f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+    });
     var api = {
       el: o,
       close: function () {
@@ -482,6 +541,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
         o.classList.add("closing");
         setTimeout(function () { o.remove(); }, 150);
         VT.modal = false;
+        if (app) app.inert = false;
         document.removeEventListener("keydown", api.onKey, true);
         if (prev && prev.isConnected && prev.focus) prev.focus({ preventScroll: true });
       },
@@ -570,6 +630,8 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
 
   /* ---------- engine getting ready in the background ---------- */
   var enginePct = 14, engineTimer = 0;
+  VT.engineReady = function () { return enginePct >= 100; };
+  VT.enginePct = function () { return Math.round(enginePct); };
   function paintEngine() {
     $$("[data-engine]").forEach(function (e) {
       var ready = enginePct >= 100;
@@ -583,10 +645,10 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     enginePct = 14;
     paintEngine();
     engineTimer = setInterval(function () {
-      enginePct = Math.min(100, enginePct + 2 + Math.random() * 5);
+      enginePct = Math.min(100, enginePct + 3 + Math.random() * 6);
       paintEngine();
       if (enginePct >= 100) clearInterval(engineTimer);
-    }, 900);
+    }, 800);
   }
   VT.paintEngine = paintEngine;
 
@@ -607,8 +669,8 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       VT.scene = id;
       document.body.dataset.scene = id;
       if (VT.onScene) VT.onScene(id);
-      var f = $("[data-autofocus]", next);
-      if (f) f.focus({ preventScroll: true });
+      var f = $("[data-autofocus]", next) || $("h1,h2", next);
+      if (f) { if (/^H/.test(f.tagName)) f.tabIndex = -1; f.focus({ preventScroll: true }); }
     };
     if (cur && !reduce) { cur.classList.add("leaving"); VT.later(show, 200); } else show();
   };
@@ -681,8 +743,9 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
 
   /* ---------- one dictation ---------- */
   VT.Dictation = function (o) {
-    var st = "idle", i = 0, auto = false, self = this;
+    var st = "idle", i = 0, auto = false, self = this, run = 0, releasedAt = 0, escAt = 0;
     var count = o.tokens.filter(function (t) { return t.p; }).length;
+    var at = function (fn, ms) { var r = run; VT.later(function () { if (r === run) fn(); }, ms); };
     function say() {
       if (st !== "listening") return;
       if (i >= o.tokens.length) { if (auto) release(); return; }
@@ -690,38 +753,67 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       VT.pill.bump();
       var len = o.tokens[i].r.length;
       i++;
-      VT.later(say, 150 + len * 26 + Math.random() * 90);
+      at(say, 150 + len * 26 + Math.random() * 90);
     }
     function begin(isAuto) {
-      auto = isAuto; st = "listening"; i = 0;
+      run++; auto = isAuto; st = "listening"; i = 0;
       if (o.onStart) o.onStart();
       VT.pill.listening();
-      VT.later(say, 340);
+      at(say, 340);
     }
-    function release() {
+    function release(stopped) {
       if (st !== "listening") return;
-      if (i < 3 && !auto) {
-        st = "idle";
+      if (i < 3 && (!auto || stopped)) {
+        run++; st = "idle";
         VT.pill.note("Too short. " + (VT.state.hold ? "Hold" : "Talk") + " a bit longer", VT.pill.hint);
         if (o.onShort) o.onShort();
         return;
       }
       st = "flushing";
+      releasedAt = performance.now();
+      if (stopped) { finish(); return; }
       flush();
     }
     function flush() {
-      if (i < o.tokens.length) { o.onWord(i, o.tokens[i]); i++; VT.later(flush, 42); return; }
+      if (i < o.tokens.length) { o.onWord(i, o.tokens[i]); i++; at(flush, 42); return; }
+      finish();
+    }
+    function finish() {
       st = "working";
+      if (!VT.engineReady()) {
+        VT.pill.work("Getting ready · " + VT.enginePct() + "%");
+        if (o.onPhase) o.onPhase("preparing");
+        at(finish, 300);
+        return;
+      }
       VT.pill.work("Transcribing");
       if (o.onPhase) o.onPhase("transcribing");
-      VT.later(function () {
-        VT.pill.work("Polishing \u00b7 Clean", true);
+      at(function () {
+        VT.pill.work("Polishing · Clean", true);
         if (o.onPhase) o.onPhase("polishing");
-        VT.later(function () { st = "done"; VT.pill.done(count); o.onDone(count); }, 950);
+        at(function () {
+          st = "done";
+          VT.pill.done(count);
+          o.onDone(count, ((performance.now() - releasedAt) / 1000).toFixed(1));
+        }, 950);
       }, 560);
     }
     this.state = function () { return st; };
-    this.reset = function () { st = "idle"; i = 0; };
+    this.reset = function () { run++; st = "idle"; i = 0; };
+    this.cancel = function () {
+      if (st !== "listening" && st !== "flushing" && st !== "working") return;
+      run++; st = "idle"; i = 0;
+      VT.pill.hint();
+      VT.announce("Cancelled. Nothing was typed");
+      if (o.onCancel) o.onCancel();
+    };
+    this.stop = function () { if (st === "listening") release(true); };
+    this.esc = function () {
+      if (st !== "listening") return false;
+      var now = performance.now();
+      if (now - escAt < 2000) { escAt = 0; self.cancel(); } else { escAt = now; VT.pill.escHint(); }
+      return true;
+    };
     this.down = function (src) {
       if (st !== "idle") return;
       if (VT.state.mic) return begin(src === "auto");
@@ -739,6 +831,13 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
 
   /* ---------- holding the shortcut ---------- */
   var holding = false, holdSrc = "", downAt = 0;
+  function talkKey(e) {
+    if (e.code === "Space") return true;
+    var s = VT.state;
+    if (s.hotkey === 1) return s.platform === "mac" ? e.code === "MetaRight" : e.code === "AltRight";
+    if (s.hotkey === 2) return s.platform === "windows" && e.code === "F9";
+    return false;
+  }
   function down(src) {
     if (holding || !VT.talk || VT.modal) return;
     holding = true; holdSrc = src; downAt = performance.now();
@@ -752,22 +851,64 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     if (VT.talk) VT.talk.up(holdSrc === "pointer" && performance.now() - downAt < 240);
   }
   document.addEventListener("keydown", function (e) {
-    if (e.code === "Space" && VT.talk && !VT.modal && !$(".pop") && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) {
+    if (e.key === "Escape" && VT.talk && !VT.modal && !$(".pop") && VT.talk.esc()) { e.preventDefault(); return; }
+    var t = VT.talk;
+    if (t && talkKey(e) && !VT.modal && !$(".pop") && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) {
+      var live = t.state() === "listening";
+      if (e.target.tagName === "BUTTON" && !e.target.hasAttribute("data-hold") && !live) return;
+      if (e.target.tagName === "BUTTON" && t.state() !== "idle" && !live) return;
       e.preventDefault();
-      if (!e.repeat) down("key");
+      if (e.repeat) return;
+      if (!VT.state.hold) {
+        if (live) t.stop();
+        else if (t.state() === "idle") t.down(VT.state.mic ? "auto-toggle" : "key");
+        return;
+      }
+      down("key");
       return;
     }
-    if (e.key === "Enter" && e.target.closest && e.target.closest("[data-hold]") && VT.talk) { e.preventDefault(); VT.talk.down("auto"); return; }
+    if (e.key === "Enter" && e.target.closest && e.target.closest("[data-hold]") && t) { e.preventDefault(); t.down("auto"); return; }
     if (e.key === "Enter" && e.target === document.body && !VT.modal) { var pr = $(".scene.active [data-primary]"); if (pr) pr.click(); }
+    var radio = e.target.closest && e.target.closest('[role="radio"]');
+    if (radio && /^Arrow/.test(e.key)) {
+      var rs = $('[role="radio"]', radio.closest('[role="radiogroup"]')), k = rs.indexOf(radio);
+      var n = rs[(k + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + rs.length) % rs.length];
+      e.preventDefault(); n.focus(); n.click();
+    }
   });
-  document.addEventListener("keyup", function (e) { if (e.code === "Space") { if (holding) e.preventDefault(); up(); } });
+  document.addEventListener("keyup", function (e) { if (talkKey(e) && VT.state.hold) { if (holding) e.preventDefault(); up(); } });
   document.addEventListener("pointerdown", function (e) {
     var h = e.target.closest && e.target.closest("[data-hold]");
-    if (h && e.button === 0) { e.preventDefault(); h.focus({ preventScroll: true }); down("pointer"); }
+    if (!h || e.button !== 0 || !VT.talk) return;
+    e.preventDefault(); h.focus({ preventScroll: true });
+    if (!VT.state.hold) { if (VT.talk.state() === "listening") VT.talk.stop(); else VT.talk.down("auto"); return; }
+    down("pointer");
+  });
+  document.addEventListener("click", function (e) {
+    var p = e.target.closest && e.target.closest("[data-pill]");
+    if (p && VT.talk) { if (p.dataset.pill === "stop") VT.talk.stop(); else VT.talk.cancel(); return; }
+    var d = e.target.closest && e.target.closest("[data-doc]");
+    if (d) { VT.toast((d.dataset.doc === "terms" ? "Terms" : "Privacy Policy") + " opens on voicetypr.com in your browser"); return; }
+    if (e.target.closest && e.target.closest("[data-shared]")) VT.shared(e.target.closest("[data-shared]"));
   });
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
   window.addEventListener("blur", up);
+
+  /* ---------- What's shared, the app's own copy (src/components/WhatsShared.tsx) ---------- */
+  VT.shared = function (anchor) {
+    var o = document.createElement("div");
+    o.className = "os app-dialog";
+    o.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">What’s shared</h3><p>Anonymous information goes to PostHog in the EU to help us find and fix problems.</p><ul><li>App version, operating system and device category.</li><li>Feature choices, dictation outcomes, word count ranges and speed numbers.</li><li>Fixed error codes and crash locations inside Voicetypr.</li><li>Random installation and dictation IDs that connect these events.</li></ul><p>Never your words, audio, clipboard, prompts, keys, file paths, app names or window titles. No screen recording or session replay. You can turn sharing off anytime in Settings → General.</p><div class="dlg-foot"><button type="button" class="btn sm" data-a="close">Close</button></div></div>';
+    document.body.appendChild(o);
+    VT.modal = true;
+    var app = $("#app"); if (app) app.inert = true;
+    var close = function () { o.remove(); VT.modal = false; if (app) app.inert = false; document.removeEventListener("keydown", key, true); if (anchor && anchor.isConnected) anchor.focus({ preventScroll: true }); };
+    var key = function (e) { if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); if (e.key === "Escape") close(); } };
+    document.addEventListener("keydown", key, true);
+    o.addEventListener("click", function (e) { if (e.target === o || e.target.closest('[data-a="close"]')) close(); });
+    $('[data-a="close"]', o).focus();
+  };
 
   /* ---------- review controls and boot ---------- */
   var themes = ["auto", "light", "dark"], theme = 0, stamped = document.documentElement.getAttribute("data-theme");
@@ -788,9 +929,15 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
   VT.boot = function (name, start) {
     VT.start = start;
     clean = $("#app").innerHTML;
+    var ann = document.createElement("div");
+    ann.className = "sr"; ann.id = "vt-announce"; ann.setAttribute("aria-live", "polite");
+    document.body.appendChild(ann);
+    var hint = document.createElement("div");
+    hint.className = "pill-hint"; hint.id = "pill-hint"; hint.hidden = true; hint.setAttribute("role", "status");
+    document.body.appendChild(hint);
     var bar = document.createElement("div");
     bar.className = "proto";
-    bar.innerHTML = '<button type="button" class="tag" aria-expanded="false" title="Review controls, not part of the design">' + esc(name) + '</button><span class="more"><button type="button" data-p="restart">Restart</button><button type="button" data-p="theme">Theme: auto</button><button type="button" data-p="platform"></button><button type="button" data-p="net">Trial server: online</button></span>';
+    bar.innerHTML = '<button type="button" class="tag" aria-expanded="false" title="Review controls, not part of the design">' + esc(name) + '</button><span class="more"><button type="button" data-p="restart">Restart</button><button type="button" data-p="theme">Theme: auto</button><button type="button" data-p="platform"></button><button type="button" data-p="net">Trial server: online</button><span class="note">Space stands in for any shortcut</span></span>';
     document.body.appendChild(bar);
     var platBtn = $('[data-p="platform"]', bar);
     platBtn.textContent = VT.state.platform === "mac" ? "Showing: Mac" : "Showing: Windows";
@@ -840,6 +987,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
   /* promise: one example after another, said then cleaned */
   function demo(n) {
     if (VT.scene !== "promise") return;
+    if (VT.reduce) { $("#demo").textContent = VT.polishedText(DEMOS[0]); $("#demo-tag").textContent = "you say “" + DEMOS[0].map(function (t) { return t.r; }).join(" ") + "”, it types"; return; }
     var toks = DEMOS[n % DEMOS.length], el = $("#demo"), tag = $("#demo-tag"), s = new VT.Sentence(el, toks), i = 0;
     el.parentNode.classList.remove("polished");
     tag.textContent = "you say";
@@ -870,7 +1018,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       return;
     }
     m.className = "card mic";
-    m.innerHTML = '<b>' + (VT.state.platform === "mac" ? "MacBook Pro Microphone" : "Microphone Array") + '</b><div class="meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' + new Array(25).join("<i></i>") + '</div><span id="mic-say">Listens only while you ' + (VT.state.hold ? "hold" : "record") + ". Nothing is saved.</span>";
+    m.innerHTML = '<b>' + (VT.state.platform === "mac" ? "MacBook Pro Microphone" : "Microphone Array") + '</b><div class="meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' + new Array(25).join("<i></i>") + '</div><span id="mic-say">Listens only while you ' + (VT.state.hold ? "hold" : "record") + "</span>";
   }
   function meter() {
     clearInterval(meterTimer);
@@ -928,15 +1076,17 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     },
     onPhase: function (p) {
       $("#typed").classList.add("working");
-      $(".hold", $("#typed-body")).textContent = p === "transcribing" ? "Transcribing…" : "Polishing…";
+      $(".hold", $("#typed-body")).textContent = p === "preparing" ? "Getting offline dictation ready, then this types…" : p === "transcribing" ? "Transcribing…" : "Polishing…";
     },
     onShort: function () { $("#typed-body").innerHTML = '<span class="hold">Your clean text lands here.</span>'; },
     onMic: function (ok) { micRow(); if (ok) VT.pill.hint(); else VT.pill.note("Microphone access is off"); },
-    onDone: function (n) {
+    onCancel: function () { resetTry(); },
+    onDone: function (n, secs) {
+      VT.announce("Voicetypr typed: " + VT.polishedText(TOKENS));
       $("#typed").classList.remove("working");
       fly().then(function () {
         $("#typed").classList.add("done");
-        $("#ok").innerHTML = '<p class="ok" role="status" style="margin:0">' + ICON.ok + "Worked · " + n + " words · 0.4 s after you let go</p>";
+        $("#ok").innerHTML = '<p class="ok" role="status" style="margin:0">' + ICON.ok + "Worked · " + n + " words · " + secs + " s after you let go</p>";
         $("#try-actions").innerHTML = '<button type="button" class="btn ghost" id="again">Try again</button><button type="button" class="btn" id="try-next">Continue</button>';
         $("#again").addEventListener("click", resetTry);
         $("#try-next").addEventListener("click", function () { VT.go("anywhere"); });
@@ -962,6 +1112,10 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#uses").innerHTML = VT.USES.map(function (u) {
       return '<button type="button" class="card use" role="radio" aria-checked="' + (VT.state.use === u.id) + '" data-use="' + u.id + '">' + esc(u.label) + ICON.check + "</button>";
     }).join("");
+    var u = VT.USES.filter(function (x) { return x.id === VT.state.use; })[0];
+    $("#does").innerHTML = u ? "<span>" + esc(u.does) + "</span>" : "";
+    $("#use-next").disabled = !u;
+    VT.paint();
   }
 
   /* trial */
@@ -971,7 +1125,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#sum").innerHTML =
       li('<span data-engine></span>') +
       li("Microphone<small>heard you</small>") +
-      li((s.platform === "mac" && !s.ax ? "Copies your words for you to paste<small>Accessibility is off</small>" : "Types at your cursor, in any app")) +
+      li((VT.copyOnly() ? "Copies your words for you to paste with ⌘V<small>Accessibility is off</small>" : "Types at your cursor, in any app")) +
       li("Shortcut<small>" + VT.capsHTML() + " " + (s.hold ? "hold to talk" : "press to start and stop") + "</small>") +
       (use ? li("Starting point<small>" + esc(use.label) + "</small>") : "");
     VT.paintEngine();
@@ -1000,7 +1154,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#begin").addEventListener("click", function () { VT.go("try"); });
     $$("[data-go]").forEach(function (b) { b.addEventListener("click", function () { VT.go(b.dataset.go); }); });
     $("#ax-btn").addEventListener("click", function () { VT.openSettings("ax").then(function (ok) { paintAx(); if (!ok) $("#ax-sub").textContent = "Still off. Without it, Voicetypr copies the text and you paste it."; }); });
-    $("#ax-skip").addEventListener("click", function () { VT.go("use"); });
+    $("#ax-skip").addEventListener("click", function () { VT.state.axSkipped = true; VT.go("use"); });
     $("#any-next").addEventListener("click", function () { VT.go("use"); });
     $("#hk-btn").addEventListener("click", function (e) { VT.editHotkey(e.currentTarget); });
     $("#uses").addEventListener("click", function (e) {
@@ -1008,8 +1162,6 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       if (!b) return;
       VT.state.use = b.dataset.use;
       paintUses();
-      $("#does").innerHTML = "<span>" + esc(VT.USES.filter(function (u) { return u.id === VT.state.use; })[0].does) + "</span>";
-      $("#use-next").disabled = false;
       $('[data-use="' + VT.state.use + '"]').focus();
     });
     $("#use-skip").addEventListener("click", function () { VT.state.use = null; VT.go("trial"); });

@@ -9,9 +9,10 @@
 
 /* ===== C · A note from the founder: a short thread you answer by voice. Setup arrives as replies. ===== */
 .status{position:fixed;right:22px;top:28px;z-index:5}
-.thread{position:fixed;left:0;right:0;top:0;bottom:64px;overflow-y:auto;display:flex;justify-content:center;scrollbar-width:none;mask-image:linear-gradient(to bottom,transparent 0,#000 72px)}
+.thread{position:fixed;left:0;right:0;top:0;bottom:64px;overflow-y:auto;display:flex;justify-content:center;scrollbar-width:thin;mask-image:linear-gradient(to bottom,transparent 0,#000 32px)}
 .thread::-webkit-scrollbar{display:none}
-.inner{width:min(600px,calc(100vw - 40px));display:flex;flex-direction:column;gap:12px;padding:96px 0 28px;min-height:100%;justify-content:flex-end}
+.inner{width:min(600px,calc(100vw - 40px));display:flex;flex-direction:column;gap:12px;padding:72px 0 28px;min-height:100%;height:max-content}
+.inner>:first-child{margin-top:auto}
 .msg{display:flex;gap:12px;align-items:flex-start;animation:rise .55s var(--ease-out) both}
 .msg .av{width:30px;height:30px;border-radius:9px;background:var(--sage-bg);color:var(--sage);display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px}
 .msg .av svg{width:18px;height:18px}
@@ -124,7 +125,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
     var av = '<div class="av' + (first ? "" : " none") + '">' + (first ? MARK : "") + "</div>";
     var t = add('<div class="msg m">' + av + '<div><span class="dots3"><i></i><i></i><i></i></span></div></div>', "m");
     return VT.wait(ms || 620).then(function () {
-      t.lastElementChild.innerHTML = (first ? '<span class="who">Moin, who makes Voicetypr</span>' : "") + "<p>" + html + "</p>";
+      t.lastElementChild.innerHTML = (first ? '<span class="who">Moin, who makes Voicetypr · written ahead of time</span>' : "") + "<p>" + html + "</p>";
       VT.paint();
       return VT.wait(260);
     });
@@ -135,7 +136,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
   /* 1. the first dictation, as a reply */
   function composer() {
     return until(function (done) {
-      var c = add('<div class="card composer" id="composer"><div class="field" id="field"><span class="ph"><span data-verb></span> <span data-caps></span> and talk</span></div><div class="bar" id="cbar"><span>Listens only while you <span data-verb="lower"></span>. Nothing is sent until you press Send.</span><span class="acts"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></span></div></div>');
+      var c = add('<div class="card composer" id="composer"><div class="field" id="field"><span class="ph"><span data-verb></span> <span data-caps></span> and talk</span></div><div class="bar" id="cbar"><span>A practice reply. It stays in this window; Moin doesn’t receive it.</span><span class="acts"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></span></div></div>');
       var warn = null;
       var micWarn = function () {
         if (warn) { warn.remove(); warn = null; }
@@ -147,7 +148,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
         c.className = "card composer";
         $("#field").className = "field";
         $("#field").innerHTML = '<span class="ph"><span data-verb></span> <span data-caps></span> and talk</span>';
-        $("#cbar").innerHTML = '<span>Listens only while you <span data-verb="lower"></span>. Nothing is sent until you press Send.</span><span class="acts"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></span>';
+        $("#cbar").innerHTML = '<span>A practice reply. It stays in this window; Moin doesn’t receive it.</span><span class="acts"><button type="button" class="link" data-hold id="holdbtn">Or press and hold here</button></span>';
         VT.paint(); dict.reset(); VT.pill.hint();
       };
       dict = new VT.Dictation({
@@ -156,11 +157,13 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
         onWord: function (i) { sentence.add(i); },
         onShort: idle,
         onMic: function (ok) { micWarn(); if (ok) VT.pill.hint(); else VT.pill.note("Microphone access is off"); },
-        onPhase: function (p) { c.className = "card composer"; if (p === "polishing") sentence.polish(); },
-        onDone: function (n) {
+        onPhase: function (p) { c.className = "card composer"; if (p === "preparing") $("#cbar").firstElementChild.textContent = "Getting offline dictation ready, then this cleans up…"; if (p === "polishing") sentence.polish(); },
+        onCancel: idle,
+        onDone: function (n, secs) {
+          VT.announce("Voicetypr typed: " + VT.polishedText(TOKENS));
           VT.later(function () {
             c.className = "card composer ready";
-            $("#cbar").innerHTML = "<span>" + n + ' words, cleaned up 0.4 s after you let go</span><span class="acts"><button type="button" class="btn ghost sm" id="redo">Say it again</button><button type="button" class="btn sm" id="send">Send</button></span>';
+            $("#cbar").innerHTML = "<span>" + n + ' words, cleaned up ' + secs + ' s after you let go</span><span class="acts"><button type="button" class="btn ghost sm" id="redo">Say it again</button><button type="button" class="btn sm" id="send">Send</button></span>';
             $("#redo").addEventListener("click", idle);
             $("#send").addEventListener("click", function () {
               VT.talk = null;
@@ -186,21 +189,24 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
       var mac = VT.state.platform === "mac";
       var c = add('<div class="card rows block">' +
         (mac ? '<div class="r" id="ax-row"><div class="ico">' + I.keys + '</div><div class="txt"><b>Accessibility</b><span id="ax-sub">So your words land at your cursor, in any app.</span></div><div class="act" id="ax-act"><button type="button" class="btn sm" id="ax-btn">Allow</button></div></div>' : "") +
-        '<div class="r ok"><div class="ico">' + I.cmd + '</div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to paste.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>' +
+        '<div class="r ok"><div class="ico">' + I.cmd + '</div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to <span data-result></span>.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>' +
         '<div class="foot">' + (mac ? '<button type="button" class="btn ghost sm" id="ax-skip">Skip, I’ll paste myself</button>' : "") + '<button type="button" class="btn sm" id="setup-ok"' + (mac ? " disabled" : "") + ">" + (mac ? "Continue" : "Looks good") + "</button></div></div>");
       var finish = function () { $(".foot", c).remove(); done(); };
       if (mac) {
         $("#ax-btn").addEventListener("click", function () {
           VT.openSettings("ax").then(function (ok) {
+            VT.state.axSkipped = VT.state.axSkipped && !ok;
             if (!ok) { $("#ax-sub").textContent = "Still off. Without it, Voicetypr copies the text and you paste it."; return; }
             $("#ax-row").classList.add("ok");
             $("#ax-act").innerHTML = '<span class="badge"><i></i>Allowed</span>';
+            VT.paint();
+            if (!$("#setup-ok")) return;
             $("#ax-skip").hidden = true;
             $("#setup-ok").disabled = false;
             $("#setup-ok").focus({ preventScroll: true });
           });
         });
-        $("#ax-skip").addEventListener("click", finish);
+        $("#ax-skip").addEventListener("click", function () { VT.state.axSkipped = true; VT.paint(); finish(); });
       }
       $("#hk-btn").addEventListener("click", function (e) { VT.editHotkey(e.currentTarget); });
       $("#setup-ok").addEventListener("click", finish);
@@ -224,7 +230,7 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
   /* 4. the trial click */
   function trial() {
     return until(function (done) {
-      var c = add('<div class="card trial block"><h3>7 days of Voicetypr, free</h3><p>Everything is included. No card. The clock starts when you click, not before.</p><button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button><p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content. By starting you agree to the Terms and Privacy Policy.</span></label></div>');
+      var c = add('<div class="card trial block"><h3>7 days of Voicetypr, free</h3><p>Everything is included. No card. The clock starts when you click, not before.</p><button type="button" class="btn lg" id="trial-btn">Start 7-day trial</button><p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label><p class="legal"><button type="button" class="link" data-shared>What’s shared</button> · By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p></div>');
       $("#trial-btn").focus({ preventScroll: true });
       $("#trial-btn").addEventListener("click", function (e) {
         var b = e.currentTarget;
@@ -252,13 +258,13 @@ Faked: speech is scripted (hold Space, or hold or click "press and hold here"; a
       .then(function () { return moin("It dropped the ums, kept your change of mind, and added nothing you didn’t say."); })
       .then(function () { return moin(mac ? "Two small things so it works outside this window." : "One small thing so it suits your hands.", 700); })
       .then(setup)
-      .then(function () { return moin(mac && !VT.state.ax ? "Fine. It will copy your words and you paste them. You can switch it on later in Settings." : "Good. From now on it types wherever your cursor is.", 520); })
+      .then(function () { return moin(VT.copyOnly() ? "Fine. It will copy your words and you paste them with ⌘V. You can switch Accessibility on later in Settings." : "Good. From now on it types wherever your cursor is.", 520); })
       .then(function () { return moin("One optional question. What will you mostly dictate?"); })
       .then(use)
       .then(function (u) {
         if (!u) return moin("No problem. The defaults are sensible.", 480);
         you(u.label);
-        return VT.wait(300).then(function () { return moin("Done. " + esc(u.does)); });
+        return VT.wait(300).then(function () { return moin("Noted. " + esc(u.does)); });
       })
       .then(function () { return moin("That’s the whole setup."); })
       .then(trial)

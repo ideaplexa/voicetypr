@@ -37,7 +37,7 @@ h2{margin:0;font-size:26px;line-height:normal;font-weight:600;letter-spacing:-.5
 .pane .body{flex:1;font-size:15px;line-height:24px}
 .said .body{color:var(--text-3)}
 .said .body .sw{display:inline-block;animation:word-in .3s var(--ease-out) both;transition:opacity .4s ease}
-.said .body .sw.cut{text-decoration:line-through;opacity:.5}
+.said .body .sw.cut{text-decoration:line-through}
 .typed{background:var(--card)}
 .typed .body{font-size:17px;line-height:26px}
 .typed .hold{color:var(--muted-foreground);font-size:15px}
@@ -143,7 +143,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       <div class="card rows" data-rise>
         <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg></div><div class="txt"><b>Microphone</b><span id="micname">MacBook Pro Microphone</span></div><div class="act"><span class="badge"><i></i>We heard you</span></div></div>
         <div class="r" id="ax-row" data-mac-only><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg></div><div class="txt"><b>Accessibility</b><span id="ax-sub">So your words land at your cursor, in any app.</span></div><div class="act" id="ax-act"><button type="button" class="btn sm" id="ax-btn">Allow</button></div></div>
-        <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to paste.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>
+        <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to <span data-result></span>.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>
       </div>
       <div class="row-actions" data-rise>
         <button type="button" class="btn outline" data-go="try">Back</button>
@@ -175,7 +175,8 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       <button type="button" class="btn lg" id="trial-btn" data-rise data-autofocus>Start 7-day trial</button>
       <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
       <label class="consent" data-rise><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers. Never your words, audio or app content.</span></label>
-      <p class="fine" data-rise>By starting you agree to the Terms and Privacy Policy.</p>
+      <p class="legal" data-rise><button type="button" class="link" data-shared>What’s shared</button></p>
+      <p class="fine" data-rise>By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p>
     </div>
   </section>
 
@@ -183,7 +184,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     <div class="col">
       <div class="bigtick" data-rise><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg></div>
       <h2 data-rise>Trial started</h2>
-      <p class="lede" data-rise>Voicetypr is yours until <b id="ends"></b>. <span data-verb></span> <span data-caps></span> in any app and talk.</p>
+      <p class="lede" data-rise>Voicetypr is yours until <b id="ends"></b>. <span data-verb></span> <span data-caps></span> in any app and talk.<span data-degraded hidden> Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you.</span></p>
       <button type="button" class="btn lg" id="finish" data-rise data-autofocus>Start using Voicetypr</button>
     </div>
   </section>
@@ -218,6 +219,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
   /* promise: one example after another, said then cleaned */
   function demo(n) {
     if (VT.scene !== "promise") return;
+    if (VT.reduce) { $("#demo").textContent = VT.polishedText(DEMOS[0]); $("#demo-tag").textContent = "you say “" + DEMOS[0].map(function (t) { return t.r; }).join(" ") + "”, it types"; return; }
     var toks = DEMOS[n % DEMOS.length], el = $("#demo"), tag = $("#demo-tag"), s = new VT.Sentence(el, toks), i = 0;
     el.parentNode.classList.remove("polished");
     tag.textContent = "you say";
@@ -248,7 +250,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       return;
     }
     m.className = "card mic";
-    m.innerHTML = '<b>' + (VT.state.platform === "mac" ? "MacBook Pro Microphone" : "Microphone Array") + '</b><div class="meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' + new Array(25).join("<i></i>") + '</div><span id="mic-say">Listens only while you ' + (VT.state.hold ? "hold" : "record") + ". Nothing is saved.</span>";
+    m.innerHTML = '<b>' + (VT.state.platform === "mac" ? "MacBook Pro Microphone" : "Microphone Array") + '</b><div class="meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' + new Array(25).join("<i></i>") + '</div><span id="mic-say">Listens only while you ' + (VT.state.hold ? "hold" : "record") + "</span>";
   }
   function meter() {
     clearInterval(meterTimer);
@@ -306,15 +308,17 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     },
     onPhase: function (p) {
       $("#typed").classList.add("working");
-      $(".hold", $("#typed-body")).textContent = p === "transcribing" ? "Transcribing…" : "Polishing…";
+      $(".hold", $("#typed-body")).textContent = p === "preparing" ? "Getting offline dictation ready, then this types…" : p === "transcribing" ? "Transcribing…" : "Polishing…";
     },
     onShort: function () { $("#typed-body").innerHTML = '<span class="hold">Your clean text lands here.</span>'; },
     onMic: function (ok) { micRow(); if (ok) VT.pill.hint(); else VT.pill.note("Microphone access is off"); },
-    onDone: function (n) {
+    onCancel: function () { resetTry(); },
+    onDone: function (n, secs) {
+      VT.announce("Voicetypr typed: " + VT.polishedText(TOKENS));
       $("#typed").classList.remove("working");
       fly().then(function () {
         $("#typed").classList.add("done");
-        $("#ok").innerHTML = '<p class="ok" role="status" style="margin:0">' + ICON.ok + "Worked · " + n + " words · 0.4 s after you let go</p>";
+        $("#ok").innerHTML = '<p class="ok" role="status" style="margin:0">' + ICON.ok + "Worked · " + n + " words · " + secs + " s after you let go</p>";
         $("#try-actions").innerHTML = '<button type="button" class="btn ghost" id="again">Try again</button><button type="button" class="btn" id="try-next">Continue</button>';
         $("#again").addEventListener("click", resetTry);
         $("#try-next").addEventListener("click", function () { VT.go("anywhere"); });
@@ -340,6 +344,10 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#uses").innerHTML = VT.USES.map(function (u) {
       return '<button type="button" class="card use" role="radio" aria-checked="' + (VT.state.use === u.id) + '" data-use="' + u.id + '">' + esc(u.label) + ICON.check + "</button>";
     }).join("");
+    var u = VT.USES.filter(function (x) { return x.id === VT.state.use; })[0];
+    $("#does").innerHTML = u ? "<span>" + esc(u.does) + "</span>" : "";
+    $("#use-next").disabled = !u;
+    VT.paint();
   }
 
   /* trial */
@@ -349,7 +357,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#sum").innerHTML =
       li('<span data-engine></span>') +
       li("Microphone<small>heard you</small>") +
-      li((s.platform === "mac" && !s.ax ? "Copies your words for you to paste<small>Accessibility is off</small>" : "Types at your cursor, in any app")) +
+      li((VT.copyOnly() ? "Copies your words for you to paste with ⌘V<small>Accessibility is off</small>" : "Types at your cursor, in any app")) +
       li("Shortcut<small>" + VT.capsHTML() + " " + (s.hold ? "hold to talk" : "press to start and stop") + "</small>") +
       (use ? li("Starting point<small>" + esc(use.label) + "</small>") : "");
     VT.paintEngine();
@@ -378,7 +386,7 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
     $("#begin").addEventListener("click", function () { VT.go("try"); });
     $$("[data-go]").forEach(function (b) { b.addEventListener("click", function () { VT.go(b.dataset.go); }); });
     $("#ax-btn").addEventListener("click", function () { VT.openSettings("ax").then(function (ok) { paintAx(); if (!ok) $("#ax-sub").textContent = "Still off. Without it, Voicetypr copies the text and you paste it."; }); });
-    $("#ax-skip").addEventListener("click", function () { VT.go("use"); });
+    $("#ax-skip").addEventListener("click", function () { VT.state.axSkipped = true; VT.go("use"); });
     $("#any-next").addEventListener("click", function () { VT.go("use"); });
     $("#hk-btn").addEventListener("click", function (e) { VT.editHotkey(e.currentTarget); });
     $("#uses").addEventListener("click", function (e) {
@@ -386,8 +394,6 @@ Faked: speech is scripted (hold Space, or hold or click the button; a click spea
       if (!b) return;
       VT.state.use = b.dataset.use;
       paintUses();
-      $("#does").innerHTML = "<span>" + esc(VT.USES.filter(function (u) { return u.id === VT.state.use; })[0].does) + "</span>";
-      $("#use-next").disabled = false;
       $('[data-use="' + VT.state.use + '"]').focus();
     });
     $("#use-skip").addEventListener("click", function () { VT.state.use = null; VT.go("trial"); });

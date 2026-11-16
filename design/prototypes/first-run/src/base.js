@@ -7,6 +7,7 @@
   var VT = (window.VT = { $: $, $$: $$, reduce: reduce, esc: esc, gen: 0, modal: false, talk: null, failTrial: false });
 
   var MARK = '<svg viewBox="100 96 312 320" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M143 197 C166 288 201 350 240 393" stroke-width="36"/><path d="M369 197 C346 288 311 350 272 393" stroke-width="36"/><path d="M256 163 L256 338" stroke-width="23"/><path d="M202 226 L202 257" stroke-width="15"/><path d="M226 207 L226 276" stroke-width="15"/><path d="M286 207 L286 276" stroke-width="15"/><path d="M310 226 L310 257" stroke-width="15"/></g><circle cx="256" cy="124" r="18" fill="currentColor"/></svg>';
+  var X = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>';
   var CHECK = '<svg class="tick" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>';
   var ARC = '<svg class="arc" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/></svg>';
   VT.icons = { mark: MARK, check: CHECK, arc: ARC };
@@ -17,16 +18,16 @@
     windows: [["Ctrl", "Space"], ["Right Alt"], ["F9"]],
   };
   VT.USES = [
-    { id: "messages", label: "Messages and email", does: "Polish set to Clean: tidy sentences, your wording." },
-    { id: "ai", label: "Prompts for AI", does: "Polish set to Clear intent, for the AI apps you use." },
-    { id: "code", label: "Code and tech notes", does: "Developer words on. Names like useEffect and kubectl stay intact." },
-    { id: "docs", label: "Notes and documents", does: "Polish set to Paragraphs: long thoughts, properly broken up." },
-    { id: "clinical", label: "Medical or legal work", does: "Medical and legal words on. Polish never changes a term." },
-    { id: "mix", label: "A bit of everything", does: "Sensible defaults. Voicetypr adapts to the app you are in." },
+    { id: "messages", label: "Messages and email", does: "Starts you on tidy sentences in your own wording." },
+    { id: "ai", label: "Prompts for AI", does: "Starts you on clean-up-and-clarify for the AI apps you use." },
+    { id: "code", label: "Code and tech notes", does: "Starts you with developer words, so names like useEffect and kubectl come out right." },
+    { id: "docs", label: "Notes and documents", does: "Starts you on longer text broken into paragraphs." },
+    { id: "clinical", label: "Medical or legal work", does: "Starts you with medical and legal words." },
+    { id: "mix", label: "A bit of everything", does: "Starts you on the defaults, shaped by the app you are in." },
   ];
   VT.trialEnds = "Monday 23 November";
   function fresh(platform) {
-    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, use: null, trial: false };
+    return { platform: platform, hotkey: 0, hold: true, mic: false, micDenied: false, ax: false, axSkipped: false, use: null, trial: false };
   }
   VT.state = fresh(/Win/i.test(navigator.platform || "") ? "windows" : "mac");
   VT.caps = function () { return HOTKEYS[VT.state.platform][VT.state.hotkey]; };
@@ -41,11 +42,19 @@
     $$("[data-after]").forEach(function (e) { e.textContent = s.hold ? "let go" : "press again"; });
     $$("[data-os]").forEach(function (e) { e.textContent = s.platform === "mac" ? "Mac" : "PC"; });
     $$("[data-mac-only]").forEach(function (e) { e.hidden = s.platform !== "mac"; });
+    $$("[data-result]").forEach(function (e) { e.textContent = VT.copyOnly() ? "copy" : "paste"; });
+    $$("[data-degraded]").forEach(function (e) { e.hidden = !VT.copyOnly(); });
+    $$('[role="radiogroup"]').forEach(function (g) {
+      var rs = $$('[role="radio"]', g), on = rs.filter(function (r) { return r.getAttribute("aria-checked") === "true"; })[0] || rs[0];
+      rs.forEach(function (r) { r.tabIndex = r === on ? 0 : -1; });
+    });
   };
+  VT.copyOnly = function () { return VT.state.platform === "mac" && !VT.state.ax && VT.state.axSkipped; };
   VT.later = function (fn, ms) {
     var g = VT.gen;
-    return setTimeout(function () { if (g === VT.gen) fn(); }, reduce ? Math.min(ms, 60) : ms);
+    return setTimeout(function () { if (g === VT.gen) fn(); }, ms);
   };
+  VT.announce = function (text) { var a = $("#vt-announce"); if (a) { a.textContent = ""; setTimeout(function () { a.textContent = text; }, 50); } };
   VT.wait = function (ms) { return new Promise(function (r) { VT.later(r, ms); }); };
 
   /* ---------- pill ---------- */
@@ -84,6 +93,15 @@
       while (acc > 0.07) { acc -= 0.07; bars.unshift(level > 0.05 ? 3 + 15 * level * (0.55 + 0.45 * Math.random()) : 2); if (bars.length > 26) bars.pop(); }
       g.clearRect(0, 0, 96, 24);
       g.fillStyle = "#fff";
+      if (reduce) {
+        for (var k = 0; k < 11; k++) {
+          var lv = Math.min(1, level * 1.6) * (0.5 + 0.5 * Math.sin(Math.PI * (k + 0.5) / 11)), hh = 2 + 14 * lv;
+          g.globalAlpha = lv > 0.03 ? 0.93 : 0.34; g.beginPath(); g.roundRect(8 + k * 8, 12 - hh / 2, 2.4, hh, 1.2); g.fill();
+        }
+        timeEl.textContent = "0:" + String(Math.floor((now - t0) / 1000)).padStart(2, "0");
+        raf = requestAnimationFrame(frame);
+        return;
+      }
       var shift = (acc / 0.07) * 4;
       for (var i = 0; i < bars.length; i++) {
         var x = 96 - 4 - i * 4 - shift;
@@ -103,7 +121,18 @@
       var keys = VT.caps().map(function (c) { return '<span class="kc">' + esc(c) + "</span>"; }).join("");
       pillSet("hint", '<span class="dim">' + (VT.state.hold ? "Hold" : "Press") + "</span>" + keys + '<span class="dim">to talk</span>');
     },
-    listening: function () { pillSet("listening", '<canvas aria-hidden="true"></canvas><span class="time">0:00</span>'); startWave(); },
+    listening: function () {
+      pillSet("listening", '<canvas aria-hidden="true"></canvas><span class="time">0:00</span><button type="button" class="pbtn stop" data-pill="stop" aria-label="Stop and type it">Stop</button><button type="button" class="pbtn cancel" data-pill="cancel" aria-label="Cancel and discard">' + X + "</button>");
+      startWave();
+    },
+    escHint: function () {
+      var h = $("#pill-hint");
+      if (!h) return;
+      h.textContent = "Press Esc again to discard";
+      h.hidden = false;
+      clearTimeout(h.t);
+      h.t = setTimeout(function () { h.hidden = true; }, 2000);
+    },
     bump: function () { if (wave) wave.bump(); },
     work: function (label, polish) { pillSet("work", ARC.replace('class="arc"', 'class="arc' + (polish ? " slow" : "") + '"') + "<span>" + esc(label) + "</span>"); },
     done: function (words, then) {
@@ -125,7 +154,17 @@
     o.innerHTML = html;
     document.body.appendChild(o);
     VT.modal = true;
+    var app = $("#app");
+    if (app) app.inert = true;
     var prev = document.activeElement;
+    o.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab") return;
+      var f = $$("button", o);
+      if (!f.length) return;
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault();
+      f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+    });
     var api = {
       el: o,
       close: function () {
@@ -134,6 +173,7 @@
         o.classList.add("closing");
         setTimeout(function () { o.remove(); }, 150);
         VT.modal = false;
+        if (app) app.inert = false;
         document.removeEventListener("keydown", api.onKey, true);
         if (prev && prev.isConnected && prev.focus) prev.focus({ preventScroll: true });
       },
@@ -222,6 +262,8 @@
 
   /* ---------- engine getting ready in the background ---------- */
   var enginePct = 14, engineTimer = 0;
+  VT.engineReady = function () { return enginePct >= 100; };
+  VT.enginePct = function () { return Math.round(enginePct); };
   function paintEngine() {
     $$("[data-engine]").forEach(function (e) {
       var ready = enginePct >= 100;
@@ -235,10 +277,10 @@
     enginePct = 14;
     paintEngine();
     engineTimer = setInterval(function () {
-      enginePct = Math.min(100, enginePct + 2 + Math.random() * 5);
+      enginePct = Math.min(100, enginePct + 3 + Math.random() * 6);
       paintEngine();
       if (enginePct >= 100) clearInterval(engineTimer);
-    }, 900);
+    }, 800);
   }
   VT.paintEngine = paintEngine;
 
@@ -259,8 +301,8 @@
       VT.scene = id;
       document.body.dataset.scene = id;
       if (VT.onScene) VT.onScene(id);
-      var f = $("[data-autofocus]", next);
-      if (f) f.focus({ preventScroll: true });
+      var f = $("[data-autofocus]", next) || $("h1,h2", next);
+      if (f) { if (/^H/.test(f.tagName)) f.tabIndex = -1; f.focus({ preventScroll: true }); }
     };
     if (cur && !reduce) { cur.classList.add("leaving"); VT.later(show, 200); } else show();
   };
@@ -333,8 +375,9 @@
 
   /* ---------- one dictation ---------- */
   VT.Dictation = function (o) {
-    var st = "idle", i = 0, auto = false, self = this;
+    var st = "idle", i = 0, auto = false, self = this, run = 0, releasedAt = 0, escAt = 0;
     var count = o.tokens.filter(function (t) { return t.p; }).length;
+    var at = function (fn, ms) { var r = run; VT.later(function () { if (r === run) fn(); }, ms); };
     function say() {
       if (st !== "listening") return;
       if (i >= o.tokens.length) { if (auto) release(); return; }
@@ -342,38 +385,67 @@
       VT.pill.bump();
       var len = o.tokens[i].r.length;
       i++;
-      VT.later(say, 150 + len * 26 + Math.random() * 90);
+      at(say, 150 + len * 26 + Math.random() * 90);
     }
     function begin(isAuto) {
-      auto = isAuto; st = "listening"; i = 0;
+      run++; auto = isAuto; st = "listening"; i = 0;
       if (o.onStart) o.onStart();
       VT.pill.listening();
-      VT.later(say, 340);
+      at(say, 340);
     }
-    function release() {
+    function release(stopped) {
       if (st !== "listening") return;
-      if (i < 3 && !auto) {
-        st = "idle";
+      if (i < 3 && (!auto || stopped)) {
+        run++; st = "idle";
         VT.pill.note("Too short. " + (VT.state.hold ? "Hold" : "Talk") + " a bit longer", VT.pill.hint);
         if (o.onShort) o.onShort();
         return;
       }
       st = "flushing";
+      releasedAt = performance.now();
+      if (stopped) { finish(); return; }
       flush();
     }
     function flush() {
-      if (i < o.tokens.length) { o.onWord(i, o.tokens[i]); i++; VT.later(flush, 42); return; }
+      if (i < o.tokens.length) { o.onWord(i, o.tokens[i]); i++; at(flush, 42); return; }
+      finish();
+    }
+    function finish() {
       st = "working";
+      if (!VT.engineReady()) {
+        VT.pill.work("Getting ready · " + VT.enginePct() + "%");
+        if (o.onPhase) o.onPhase("preparing");
+        at(finish, 300);
+        return;
+      }
       VT.pill.work("Transcribing");
       if (o.onPhase) o.onPhase("transcribing");
-      VT.later(function () {
-        VT.pill.work("Polishing \u00b7 Clean", true);
+      at(function () {
+        VT.pill.work("Polishing · Clean", true);
         if (o.onPhase) o.onPhase("polishing");
-        VT.later(function () { st = "done"; VT.pill.done(count); o.onDone(count); }, 950);
+        at(function () {
+          st = "done";
+          VT.pill.done(count);
+          o.onDone(count, ((performance.now() - releasedAt) / 1000).toFixed(1));
+        }, 950);
       }, 560);
     }
     this.state = function () { return st; };
-    this.reset = function () { st = "idle"; i = 0; };
+    this.reset = function () { run++; st = "idle"; i = 0; };
+    this.cancel = function () {
+      if (st !== "listening" && st !== "flushing" && st !== "working") return;
+      run++; st = "idle"; i = 0;
+      VT.pill.hint();
+      VT.announce("Cancelled. Nothing was typed");
+      if (o.onCancel) o.onCancel();
+    };
+    this.stop = function () { if (st === "listening") release(true); };
+    this.esc = function () {
+      if (st !== "listening") return false;
+      var now = performance.now();
+      if (now - escAt < 2000) { escAt = 0; self.cancel(); } else { escAt = now; VT.pill.escHint(); }
+      return true;
+    };
     this.down = function (src) {
       if (st !== "idle") return;
       if (VT.state.mic) return begin(src === "auto");
@@ -391,6 +463,13 @@
 
   /* ---------- holding the shortcut ---------- */
   var holding = false, holdSrc = "", downAt = 0;
+  function talkKey(e) {
+    if (e.code === "Space") return true;
+    var s = VT.state;
+    if (s.hotkey === 1) return s.platform === "mac" ? e.code === "MetaRight" : e.code === "AltRight";
+    if (s.hotkey === 2) return s.platform === "windows" && e.code === "F9";
+    return false;
+  }
   function down(src) {
     if (holding || !VT.talk || VT.modal) return;
     holding = true; holdSrc = src; downAt = performance.now();
@@ -404,22 +483,64 @@
     if (VT.talk) VT.talk.up(holdSrc === "pointer" && performance.now() - downAt < 240);
   }
   document.addEventListener("keydown", function (e) {
-    if (e.code === "Space" && VT.talk && !VT.modal && !$(".pop") && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) {
+    if (e.key === "Escape" && VT.talk && !VT.modal && !$(".pop") && VT.talk.esc()) { e.preventDefault(); return; }
+    var t = VT.talk;
+    if (t && talkKey(e) && !VT.modal && !$(".pop") && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) {
+      var live = t.state() === "listening";
+      if (e.target.tagName === "BUTTON" && !e.target.hasAttribute("data-hold") && !live) return;
+      if (e.target.tagName === "BUTTON" && t.state() !== "idle" && !live) return;
       e.preventDefault();
-      if (!e.repeat) down("key");
+      if (e.repeat) return;
+      if (!VT.state.hold) {
+        if (live) t.stop();
+        else if (t.state() === "idle") t.down(VT.state.mic ? "auto-toggle" : "key");
+        return;
+      }
+      down("key");
       return;
     }
-    if (e.key === "Enter" && e.target.closest && e.target.closest("[data-hold]") && VT.talk) { e.preventDefault(); VT.talk.down("auto"); return; }
+    if (e.key === "Enter" && e.target.closest && e.target.closest("[data-hold]") && t) { e.preventDefault(); t.down("auto"); return; }
     if (e.key === "Enter" && e.target === document.body && !VT.modal) { var pr = $(".scene.active [data-primary]"); if (pr) pr.click(); }
+    var radio = e.target.closest && e.target.closest('[role="radio"]');
+    if (radio && /^Arrow/.test(e.key)) {
+      var rs = $('[role="radio"]', radio.closest('[role="radiogroup"]')), k = rs.indexOf(radio);
+      var n = rs[(k + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + rs.length) % rs.length];
+      e.preventDefault(); n.focus(); n.click();
+    }
   });
-  document.addEventListener("keyup", function (e) { if (e.code === "Space") { if (holding) e.preventDefault(); up(); } });
+  document.addEventListener("keyup", function (e) { if (talkKey(e) && VT.state.hold) { if (holding) e.preventDefault(); up(); } });
   document.addEventListener("pointerdown", function (e) {
     var h = e.target.closest && e.target.closest("[data-hold]");
-    if (h && e.button === 0) { e.preventDefault(); h.focus({ preventScroll: true }); down("pointer"); }
+    if (!h || e.button !== 0 || !VT.talk) return;
+    e.preventDefault(); h.focus({ preventScroll: true });
+    if (!VT.state.hold) { if (VT.talk.state() === "listening") VT.talk.stop(); else VT.talk.down("auto"); return; }
+    down("pointer");
+  });
+  document.addEventListener("click", function (e) {
+    var p = e.target.closest && e.target.closest("[data-pill]");
+    if (p && VT.talk) { if (p.dataset.pill === "stop") VT.talk.stop(); else VT.talk.cancel(); return; }
+    var d = e.target.closest && e.target.closest("[data-doc]");
+    if (d) { VT.toast((d.dataset.doc === "terms" ? "Terms" : "Privacy Policy") + " opens on voicetypr.com in your browser"); return; }
+    if (e.target.closest && e.target.closest("[data-shared]")) VT.shared(e.target.closest("[data-shared]"));
   });
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
   window.addEventListener("blur", up);
+
+  /* ---------- What's shared, the app's own copy (src/components/WhatsShared.tsx) ---------- */
+  VT.shared = function (anchor) {
+    var o = document.createElement("div");
+    o.className = "os app-dialog";
+    o.innerHTML = '<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">What’s shared</h3><p>Anonymous information goes to PostHog in the EU to help us find and fix problems.</p><ul><li>App version, operating system and device category.</li><li>Feature choices, dictation outcomes, word count ranges and speed numbers.</li><li>Fixed error codes and crash locations inside Voicetypr.</li><li>Random installation and dictation IDs that connect these events.</li></ul><p>Never your words, audio, clipboard, prompts, keys, file paths, app names or window titles. No screen recording or session replay. You can turn sharing off anytime in Settings → General.</p><div class="dlg-foot"><button type="button" class="btn sm" data-a="close">Close</button></div></div>';
+    document.body.appendChild(o);
+    VT.modal = true;
+    var app = $("#app"); if (app) app.inert = true;
+    var close = function () { o.remove(); VT.modal = false; if (app) app.inert = false; document.removeEventListener("keydown", key, true); if (anchor && anchor.isConnected) anchor.focus({ preventScroll: true }); };
+    var key = function (e) { if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); if (e.key === "Escape") close(); } };
+    document.addEventListener("keydown", key, true);
+    o.addEventListener("click", function (e) { if (e.target === o || e.target.closest('[data-a="close"]')) close(); });
+    $('[data-a="close"]', o).focus();
+  };
 
   /* ---------- review controls and boot ---------- */
   var themes = ["auto", "light", "dark"], theme = 0, stamped = document.documentElement.getAttribute("data-theme");
@@ -440,9 +561,15 @@
   VT.boot = function (name, start) {
     VT.start = start;
     clean = $("#app").innerHTML;
+    var ann = document.createElement("div");
+    ann.className = "sr"; ann.id = "vt-announce"; ann.setAttribute("aria-live", "polite");
+    document.body.appendChild(ann);
+    var hint = document.createElement("div");
+    hint.className = "pill-hint"; hint.id = "pill-hint"; hint.hidden = true; hint.setAttribute("role", "status");
+    document.body.appendChild(hint);
     var bar = document.createElement("div");
     bar.className = "proto";
-    bar.innerHTML = '<button type="button" class="tag" aria-expanded="false" title="Review controls, not part of the design">' + esc(name) + '</button><span class="more"><button type="button" data-p="restart">Restart</button><button type="button" data-p="theme">Theme: auto</button><button type="button" data-p="platform"></button><button type="button" data-p="net">Trial server: online</button></span>';
+    bar.innerHTML = '<button type="button" class="tag" aria-expanded="false" title="Review controls, not part of the design">' + esc(name) + '</button><span class="more"><button type="button" data-p="restart">Restart</button><button type="button" data-p="theme">Theme: auto</button><button type="button" data-p="platform"></button><button type="button" data-p="net">Trial server: online</button><span class="note">Space stands in for any shortcut</span></span>';
     document.body.appendChild(bar);
     var platBtn = $('[data-p="platform"]', bar);
     platBtn.textContent = VT.state.platform === "mac" ? "Showing: Mac" : "Showing: Windows";

@@ -148,4 +148,23 @@ body.holding .cap.live{transform:translateY(1px);border-color:var(--sage);border
 .w.out{display:none}
 .w.changed{animation:changed 1.5s ease both}
 @keyframes changed{0%,35%{color:var(--sage)}100%{color:inherit}}
-s{text-decoration-thickness:1px;opacity:.6}
+s{text-decoration-thickness:1px}
+
+/* Pill controls during a dictation: Stop types it, the cross discards it (labelled, not hover-only) */
+.pill{pointer-events:auto}
+.pill .pbtn{border:0;height:24px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;padding:0 9px;flex:none;transition:background-color .15s ease}
+.pill .pbtn.stop{background:rgba(143,209,168,.18);color:var(--psage);margin-left:2px}
+.pill .pbtn.stop:hover{background:rgba(143,209,168,.3)}
+.pill .pbtn.cancel{width:24px;padding:0;background:transparent;color:var(--pt2)}
+.pill .pbtn.cancel:hover{background:rgba(255,255,255,.12);color:#fff}
+.pill .pbtn svg{width:14px;height:14px}
+.pill-hint{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:31;background:#121316;color:rgba(255,255,255,.92);font-size:12.5px;padding:7px 12px;border-radius:14px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 12px 34px rgba(0,0,0,.3);animation:pop .2s var(--ease-out) both}
+.proto .note{font-size:11px;padding:0 6px}
+.app-dialog .dlg{width:420px;max-width:calc(100vw - 32px);background:var(--card);color:var(--foreground);border-radius:14px;box-shadow:0 0 0 1px var(--border),var(--shadow-2xl);padding:18px 20px;font-size:13.5px;animation:pop .25s var(--ease-out) both}
+.app-dialog h3{margin:0 0 6px;font-size:16px;font-weight:600}
+.app-dialog p{margin:8px 0;color:var(--muted-foreground)}
+.app-dialog ul{margin:8px 0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.dlg-foot{display:flex;justify-content:flex-end;margin-top:12px}
+.legal{margin:0;font-size:12.5px;color:var(--muted-foreground)}
+.legal .link{font-size:inherit}
+h1:focus,h2:focus{outline:none}
