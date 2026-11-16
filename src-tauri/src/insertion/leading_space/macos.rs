@@ -129,46 +129,6 @@ fn selection(element: &Owned) -> Option<Range> {
     }
 }
 
-/// The focused element and its selection in UTF-16 units, for "delete that".
-/// No text is read.
-pub(crate) struct FocusedText {
-    element: Owned,
-    pub(crate) location: isize,
-    pub(crate) length: isize,
-}
-
-// SAFETY: an AXUIElement is an immutable CF object; AX calls on it are safe
-// from any thread (see the module note), and Owned releases it exactly once.
-unsafe impl Send for FocusedText {}
-
-impl FocusedText {
-    pub(crate) fn same_element(&self, other: &Self) -> bool {
-        // SAFETY: both are live CF objects.
-        unsafe { CFEqual(self.element.0, other.element.0) != 0 }
-    }
-}
-
-pub(crate) fn focused_text() -> Option<FocusedText> {
-    // SAFETY: these system queries take no pointers.
-    if unsafe { AXIsProcessTrusted() == 0 || IsSecureEventInputEnabled() != 0 } {
-        return None;
-    }
-    let system = Owned::new(unsafe { AXUIElementCreateSystemWide() })?;
-    if unsafe { AXUIElementSetMessagingTimeout(system.0, 0.120) } != 0 {
-        return None;
-    }
-    let element = system.attribute(c"AXFocusedUIElement")?;
-    if unsafe { AXUIElementSetMessagingTimeout(element.0, 0.120) } != 0 {
-        return None;
-    }
-    let range = selection(&element)?;
-    Some(FocusedText {
-        element,
-        location: range.location,
-        length: range.length,
-    })
-}
-
 pub(super) fn previous_character() -> Option<char> {
     // Do not prompt, inspect secure fields, or read an entire document into Rust.
     // SAFETY: these system queries take no pointers.

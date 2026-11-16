@@ -6642,8 +6642,16 @@ async fn stop_recording_with_mode_at(
                             crate::product_analytics::DictationOutcome::Failed
                         };
                         dictation_telemetry.text_ready("");
-                        let blocker_owns_pill = matches!(result, Err(super::voice_commands::Failure::NoPermission));
-                        if !blocker_owns_pill && should_hide_pill(&app_for_task).await {
+                        let feedback_owns_pill = match result {
+                            Err(super::voice_commands::Failure::NoPermission) => true,
+                            // Leave the "didn't delete" note up for its usual time.
+                            Err(super::voice_commands::Failure::Skipped) if crate::commands::pill_feedback::keep_visible_for_terminal(&app_for_task) => {
+                                crate::commands::pill_feedback::schedule_terminal_hide(&app_for_task, task_generation, "pasted");
+                                true
+                            }
+                            _ => false,
+                        };
+                        if !feedback_owns_pill && should_hide_pill(&app_for_task).await {
                             if let Err(e) = crate::commands::window::hide_pill_widget(app_for_task.clone()).await {
                                 log::error!("Failed to hide pill window after voice command: {}", e);
                             }

@@ -1,23 +1,24 @@
-//! The key presses behind voice commands, and where the last dictation landed
-//! so "delete that" removes exactly it. Only counts, a process id and an
-//! accessibility element are kept, in memory; no text is stored or logged.
+//! The key presses behind voice commands, and what Voicetypr knows about the
+//! last dictation it pasted, so "delete that" removes exactly it.
 //!
-//! "Delete that" runs only where the dictation can be proven to sit right
-//! before the caret: macOS text fields that report their caret through
-//! accessibility. Elsewhere (Windows today, some web and Electron fields) it
-//! presses nothing.
+//! "Delete that" trusts only Voicetypr's own record of the paste, never the
+//! target app's accessibility tree. The record is valid while nothing that
+//! could move the caret or change the text has happened since: no key-down
+//! reached any app (counted by the trigger engine's event tap or hook), the
+//! same app and window are still in front, and less than a minute has passed.
+//! Mouse clicks are not observed (no existing hook sees them), so removal uses
+//! the app's own undo, which takes back the paste wherever the caret is.
+//! Only a count, a process id, a window id and a time are kept, in memory;
+//! no text is stored or logged.
 
 use crate::writing::VoiceCommand;
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
-use unicode_segmentation::UnicodeSegmentation;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Key {
     Return,
-    Backspace,
-    Left,
     A,
     Z,
 }
@@ -35,57 +36,65 @@ type Press = (Key, Modifier);
 /// Shift+Return, not Return: chat apps and web forms send on a bare Return.
 const LINE_BREAK: Press = (Key::Return, Modifier::Shift);
 
-/// Longer dictations are not selected key by key; "delete that" refuses them.
-const MAX_DELETE_STEPS: usize = 1000;
+/// After this, "delete that" no longer trusts the record.
+const RECORD_LIFETIME: Duration = Duration::from_secs(60);
 
-/// How often a long deletion rechecks that the same app is still in front.
-const FOCUS_CHECK_EVERY: usize = 32;
+/// Why "delete that" did nothing. Shown in the pill.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    /// No dictation was pasted since the last command.
+    NothingToDelete,
+    /// A key was pressed since the dictation.
+    TypedSince,
+    /// Another app or window is in front.
+    FocusChanged,
+    /// The dictation is older than the record's lifetime.
+    TooLate,
+    /// The trigger engine is not watching keys, so typing cannot be ruled out.
+    NotWatching,
+}
 
-/// Where the next paste will land, read just before it.
-pub(crate) struct Target {
-    process_id: Option<u64>,
-    #[cfg(target_os = "macos")]
-    focused: Option<super::leading_space::FocusedText>,
+pub(crate) enum CommandError {
+    Skipped(SkipReason),
+    Failed(String),
+}
+
+impl From<String> for CommandError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Focus {
+    process_id: u64,
+    window_id: String,
 }
 
 struct LastInsertion {
-    process_id: u64,
-    /// Caret steps (grapheme clusters) the dictation spans.
-    steps: usize,
-    /// The field it went into, where the paste left the caret, and its
-    /// length, all in that field's UTF-16 units.
-    #[cfg(target_os = "macos")]
-    landing: Option<(super::leading_space::FocusedText, isize, isize)>,
+    focus: Focus,
+    key_downs: u64,
+    at: Instant,
 }
 
 static LAST_INSERTION: Mutex<Option<LastInsertion>> = Mutex::new(None);
 
-fn frontmost_process_id() -> Option<u64> {
+fn frontmost() -> Option<Focus> {
     active_win_pos_rs::get_active_window()
         .ok()
-        .map(|window| window.process_id)
+        .map(|window| Focus {
+            process_id: window.process_id,
+            window_id: window.window_id,
+        })
 }
 
-pub(crate) fn before_paste() -> Target {
-    Target {
-        process_id: frontmost_process_id(),
-        #[cfg(target_os = "macos")]
-        focused: super::leading_space::focused_text(),
-    }
-}
-
-/// Remember the dictation just pasted at `target`.
-pub(crate) fn remember_insertion(target: Target, text: &str) {
-    let steps = text.replace("\r\n", "\n").graphemes(true).count();
-    let insertion = target.process_id.map(|process_id| LastInsertion {
-        process_id,
-        steps,
-        #[cfg(target_os = "macos")]
-        landing: target.focused.map(|focused| {
-            let length = text.encode_utf16().count() as isize;
-            let caret = focused.location + length;
-            (focused, caret, length)
-        }),
+/// Remember the dictation just pasted into the frontmost app.
+pub(crate) fn remember_insertion() {
+    let insertion = frontmost().map(|focus| LastInsertion {
+        focus,
+        key_downs: keytrigger::text_key_downs(),
+        at: Instant::now(),
     });
     *LAST_INSERTION.lock().unwrap_or_else(|e| e.into_inner()) = insertion;
 }
@@ -94,102 +103,76 @@ pub(crate) fn forget_insertion() {
     *LAST_INSERTION.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
-/// Caret steps to select back over the last dictation, only when it is
-/// provably still right before the caret in the same place.
-fn deletable_steps(last: &LastInsertion) -> Option<usize> {
-    if last.steps == 0
-        || last.steps > MAX_DELETE_STEPS
-        || frontmost_process_id() != Some(last.process_id)
-    {
-        return None;
+fn check_record(
+    last: Option<&LastInsertion>,
+    watching: bool,
+    key_downs: u64,
+    now: Instant,
+    focus: Option<&Focus>,
+) -> Result<(), SkipReason> {
+    let last = last.ok_or(SkipReason::NothingToDelete)?;
+    if !watching {
+        return Err(SkipReason::NotWatching);
     }
-    // The same focused element, the caret where the paste left it, nothing
-    // selected. A field that hides its caret cannot be verified.
-    #[cfg(target_os = "macos")]
-    {
-        let (field, caret, _) = last.landing.as_ref()?;
-        let now = super::leading_space::focused_text()?;
-        (now.same_element(field) && now.location == *caret && now.length == 0).then_some(last.steps)
+    if key_downs != last.key_downs {
+        return Err(SkipReason::TypedSince);
     }
-    #[cfg(not(target_os = "macos"))]
-    None
+    if focus != Some(&last.focus) {
+        return Err(SkipReason::FocusChanged);
+    }
+    if now.duration_since(last.at) > RECORD_LIFETIME {
+        return Err(SkipReason::TooLate);
+    }
+    Ok(())
 }
 
-/// Right before Backspace: exactly the dictation is selected in its field.
-#[cfg(target_os = "macos")]
-fn exactly_dictation_selected(last: &LastInsertion) -> bool {
-    let Some((field, caret, length)) = last.landing.as_ref() else {
-        return false;
-    };
-    // The app applies the last Shift+Left on its own time; give it a moment.
-    (0..10).any(|attempt| {
-        if attempt > 0 {
-            thread::sleep(Duration::from_millis(30));
-        }
-        super::leading_space::focused_text().is_some_and(|now| {
-            now.same_element(field) && now.location == caret - length && now.length == *length
-        })
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn exactly_dictation_selected(_last: &LastInsertion) -> bool {
-    false
-}
-
-fn presses_for(command: VoiceCommand, delete_steps: usize) -> Vec<Press> {
+fn presses_for(command: VoiceCommand) -> Vec<Press> {
     match command {
         VoiceCommand::NewLine => vec![LINE_BREAK],
         VoiceCommand::NewParagraph => vec![LINE_BREAK, LINE_BREAK],
-        VoiceCommand::UndoThat => vec![(Key::Z, Modifier::Primary)],
+        // The app's own undo takes back the paste wherever the caret went;
+        // Backspace would delete at a caret a click had moved.
+        VoiceCommand::UndoThat | VoiceCommand::DeleteThat => vec![(Key::Z, Modifier::Primary)],
         VoiceCommand::SelectAll => vec![(Key::A, Modifier::Primary)],
         VoiceCommand::Send => vec![(Key::Return, Modifier::None)],
-        // Select the last dictation backwards, then delete the selection, so
-        // the app sees one deletion it can undo.
-        VoiceCommand::DeleteThat => {
-            let mut presses = vec![(Key::Left, Modifier::Shift); delete_steps];
-            presses.push((Key::Backspace, Modifier::None));
-            presses
-        }
     }
 }
 
 /// Press the keys for a command in the frontmost app. `current` is checked
-/// before every key, so a cancel or Secure Input stops a long deletion.
+/// before every key, so a cancel or Secure Input stops a long sequence.
 pub(crate) fn perform(
     command: VoiceCommand,
+    watching: bool,
     current: &dyn Fn() -> Result<(), String>,
-) -> Result<(), String> {
-    // Every command moves the caret or the text, so the remembered dictation
-    // is only good for the command that follows it directly.
+) -> Result<(), CommandError> {
+    // Every command moves the caret or the text, so the record is only good
+    // for the command that follows the dictation directly.
     let last = LAST_INSERTION
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
-    let delete_steps = if command == VoiceCommand::DeleteThat {
-        last.as_ref()
-            .and_then(deletable_steps)
-            .ok_or_else(|| "No dictation right before the caret to delete".to_string())?
-    } else {
-        0
-    };
-    let presses = presses_for(command, delete_steps);
-    let last_index = presses.len() - 1;
-    for (index, (key, modifier)) in presses.into_iter().enumerate() {
+    if command == VoiceCommand::DeleteThat {
+        check_record(
+            last.as_ref(),
+            watching,
+            keytrigger::text_key_downs(),
+            Instant::now(),
+            frontmost().as_ref(),
+        )
+        .map_err(CommandError::Skipped)?;
+    }
+    let key_downs = keytrigger::text_key_downs();
+    for (key, modifier) in presses_for(command) {
         current()?;
         wait_for_modifiers_released(current)?;
-        if command == VoiceCommand::DeleteThat {
-            let last = last.as_ref().expect("checked by deletable_steps");
-            if index > 0
-                && index % FOCUS_CHECK_EVERY == 0
-                && frontmost_process_id() != Some(last.process_id)
-            {
-                return Err("The app in front changed".to_string());
-            }
-            // The selection stays visible if this fails; nothing is deleted.
-            if index == last_index && !exactly_dictation_selected(last) {
-                return Err("The selection is not the last dictation".to_string());
-            }
+        // Waiting for modifiers can take a while; recheck before the undo.
+        if command == VoiceCommand::DeleteThat
+            && (keytrigger::text_key_downs() != key_downs
+                || frontmost().as_ref() != last.as_ref().map(|last| &last.focus))
+        {
+            return Err(CommandError::Failed(
+                "Input changed while deleting".to_string(),
+            ));
         }
         press(key, modifier)?;
     }
@@ -204,7 +187,8 @@ fn wait_for_modifiers_released(_current: &dyn Fn() -> Result<(), String>) -> Res
 }
 
 /// SendInput keeps the physical keyboard state: wait until the user has let
-/// go of Shift, Ctrl, Alt and Windows, or Ctrl+Shift+Left would select words.
+/// go of Shift, Ctrl, Alt and Windows, or Shift+Return would become
+/// Ctrl+Shift+Return.
 #[cfg(target_os = "windows")]
 fn wait_for_modifiers_released(current: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -229,25 +213,19 @@ fn press(key: Key, modifier: Modifier) -> Result<(), String> {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-    // kVK_Return, kVK_Delete, kVK_LeftArrow, kVK_ANSI_A, kVK_ANSI_Z.
+    // kVK_Return, kVK_ANSI_A, kVK_ANSI_Z.
     let code: u16 = match key {
         Key::Return => 36,
-        Key::Backspace => 51,
-        Key::Left => 123,
         Key::A => 0,
         Key::Z => 6,
     };
     // The modifier is a flag on the key event itself, as for ⌘V in paste_mac.
     // Explicit flags also keep a hotkey modifier the user still holds out of it.
-    let mut flags = match modifier {
+    let flags = match modifier {
         Modifier::None => CGEventFlags::empty(),
         Modifier::Shift => CGEventFlags::CGEventFlagShift,
         Modifier::Primary => CGEventFlags::CGEventFlagCommand,
     };
-    if key == Key::Left {
-        // Real arrow keys carry these; some apps ignore an arrow without them.
-        flags |= CGEventFlags::CGEventFlagNumericPad | CGEventFlags::CGEventFlagSecondaryFn;
-    }
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| "Failed to create CGEventSource".to_string())?;
     let down = CGEvent::new_keyboard_event(source.clone(), code, true)
@@ -266,28 +244,22 @@ fn press(key: Key, modifier: Modifier) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn press(key: Key, modifier: Modifier) -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_A, VK_BACK, VK_CONTROL, VK_LEFT,
-        VK_RETURN, VK_SHIFT, VK_Z,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY, VK_A, VK_CONTROL, VK_RETURN, VK_SHIFT, VK_Z,
     };
 
     fn input(vk: VIRTUAL_KEY, up: bool) -> INPUT {
-        let mut flags = KEYBD_EVENT_FLAGS(0);
-        if up {
-            flags |= KEYEVENTF_KEYUP;
-        }
-        // Without the extended flag, Shift+Left is read as the numeric keypad's
-        // 4 and Windows drops the Shift.
-        if vk == VK_LEFT {
-            flags |= KEYEVENTF_EXTENDEDKEY;
-        }
         INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
                     wVk: vk,
                     wScan: 0,
-                    dwFlags: flags,
+                    dwFlags: if up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        KEYBD_EVENT_FLAGS(0)
+                    },
                     time: 0,
                     dwExtraInfo: keytrigger::INJECTED_SIGNATURE,
                 },
@@ -297,8 +269,6 @@ fn press(key: Key, modifier: Modifier) -> Result<(), String> {
 
     let vk = match key {
         Key::Return => VK_RETURN,
-        Key::Backspace => VK_BACK,
-        Key::Left => VK_LEFT,
         Key::A => VK_A,
         Key::Z => VK_Z,
     };
@@ -341,32 +311,76 @@ fn press(_key: Key, _modifier: Modifier) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn record(at: Instant) -> LastInsertion {
+        LastInsertion {
+            focus: Focus {
+                process_id: 7,
+                window_id: "1".into(),
+            },
+            key_downs: 40,
+            at,
+        }
+    }
+
+    #[test]
+    fn delete_that_trusts_the_record_only_while_nothing_happened_since() {
+        let at = Instant::now();
+        let last = record(at);
+        let same = Some(&last.focus);
+        let other = Focus {
+            process_id: 7,
+            window_id: "2".into(),
+        };
+        let soon = at + Duration::from_secs(5);
+        assert_eq!(check_record(Some(&last), true, 40, soon, same), Ok(()));
+        assert_eq!(
+            check_record(None, true, 40, soon, same),
+            Err(SkipReason::NothingToDelete)
+        );
+        assert_eq!(
+            check_record(Some(&last), true, 41, soon, same),
+            Err(SkipReason::TypedSince)
+        );
+        assert_eq!(
+            check_record(Some(&last), true, 40, soon, Some(&other)),
+            Err(SkipReason::FocusChanged)
+        );
+        assert_eq!(
+            check_record(Some(&last), true, 40, at + Duration::from_secs(61), same),
+            Err(SkipReason::TooLate)
+        );
+        assert_eq!(
+            check_record(Some(&last), false, 40, soon, same),
+            Err(SkipReason::NotWatching)
+        );
+    }
+
     #[test]
     fn a_line_break_never_presses_a_bare_return_and_send_always_does() {
         assert_eq!(
-            presses_for(VoiceCommand::NewLine, 0),
+            presses_for(VoiceCommand::NewLine),
             [(Key::Return, Modifier::Shift)]
         );
         assert_eq!(
-            presses_for(VoiceCommand::NewParagraph, 9),
+            presses_for(VoiceCommand::NewParagraph),
             [(Key::Return, Modifier::Shift); 2]
         );
         assert_eq!(
-            presses_for(VoiceCommand::Send, 0),
+            presses_for(VoiceCommand::Send),
             [(Key::Return, Modifier::None)]
+        );
+        assert_eq!(
+            presses_for(VoiceCommand::DeleteThat),
+            [(Key::Z, Modifier::Primary)]
         );
     }
 
     #[test]
-    fn delete_that_selects_exactly_the_last_dictation_then_deletes_it() {
-        let presses = presses_for(VoiceCommand::DeleteThat, 3);
-        assert_eq!(presses[..3], [(Key::Left, Modifier::Shift); 3]);
-        assert_eq!(presses[3..], [(Key::Backspace, Modifier::None)]);
-    }
-
-    #[test]
-    fn delete_that_with_no_dictation_to_remove_presses_no_key() {
+    fn delete_that_with_no_dictation_presses_no_key() {
         forget_insertion();
-        assert!(perform(VoiceCommand::DeleteThat, &|| Ok(())).is_err());
+        assert!(matches!(
+            perform(VoiceCommand::DeleteThat, true, &|| Ok(())),
+            Err(CommandError::Skipped(SkipReason::NothingToDelete))
+        ));
     }
 }

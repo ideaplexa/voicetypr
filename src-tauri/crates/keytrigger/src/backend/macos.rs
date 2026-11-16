@@ -129,6 +129,10 @@ impl KeyEventSource for MacEventTap {
                 // change ahead of the first post-transition raw event.
                 let protected = sample_secure_input(&secure_cb, &tx_cb);
                 if is_key_event && protected {
+                    // Counted without reading any field of the protected event.
+                    if matches!(etype, CGEventType::KeyDown) {
+                        crate::note_text_key_down();
+                    }
                     return Some(event.clone());
                 }
                 if is_key_event
@@ -146,6 +150,8 @@ impl KeyEventSource for MacEventTap {
                         }
                         // Events were dropped while disabled: reset matcher state.
                         let _ = tx_cb.send(Msg::Control(Control::ReEnable));
+                        // Typing may have gone unseen during the gap.
+                        crate::note_text_key_down();
                         // Out-of-band lifecycle callback — no key event is behind
                         // it, so the return value is a harmless no-op; returning
                         // None is the historic choice.
@@ -186,6 +192,9 @@ impl KeyEventSource for MacEventTap {
                         ) {
                             // Consumed: do NOT forward the event to apps.
                             return None;
+                        }
+                        if down && side.is_none() {
+                            crate::note_text_key_down();
                         }
                     }
                     CGEventType::FlagsChanged => {

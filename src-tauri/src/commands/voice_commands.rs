@@ -3,6 +3,7 @@
 //! Commands never reach the writing pipeline, Polish, the clipboard, History
 //! or saved recordings.
 
+use crate::insertion::voice_keys::CommandError;
 use crate::recording::island::{self, BlockedKind, IslandAction};
 use crate::transcription::TranscriptionResult;
 use crate::writing::{classify_utterance, Utterance, VoiceCommand};
@@ -27,6 +28,8 @@ pub(crate) fn classify(app: &AppHandle, transcription: &TranscriptionResult) -> 
 pub(crate) enum Failure {
     /// The Accessibility blocker now owns the pill.
     NoPermission,
+    /// The pill says why in a note.
+    Skipped,
     NotRun,
 }
 
@@ -48,8 +51,10 @@ pub(crate) async fn run(
         );
         return Err(Failure::NoPermission);
     }
-    let app = app.clone();
+    let watching = app.state::<crate::AppState>().trigger_engine.is_running();
+    let worker_app = app.clone();
     let result = tokio::task::spawn_blocking(move || {
+        let app = worker_app;
         let current = || {
             if super::audio::delivery_aborted(
                 app.state::<crate::AppState>().is_cancellation_requested(),
@@ -63,18 +68,25 @@ pub(crate) async fn run(
             }
             Ok(())
         };
-        current()?;
+        current().map_err(CommandError::Failed)?;
         crate::insertion::menu_tracking::dispatch_if_ready(
             || crate::insertion::menu_tracking::paste_ready(Some(&app)),
-            || crate::insertion::voice_keys::perform(command, &current),
+            || crate::insertion::voice_keys::perform(command, watching, &current),
         )
-        .unwrap_or_else(|| Err("A menu owns the keyboard".to_string()))
+        .unwrap_or_else(|| Err(CommandError::Failed("A menu owns the keyboard".to_string())))
     })
     .await
-    .map_err(|e| e.to_string())
-    .and_then(|result| result);
-    result.map_err(|error| {
-        log::warn!("Voice command was not run: {}", error);
-        Failure::NotRun
-    })
+    .unwrap_or_else(|e| Err(CommandError::Failed(e.to_string())));
+    match result {
+        Ok(()) => Ok(()),
+        Err(CommandError::Skipped(reason)) => {
+            log::info!("Voice command skipped: {:?}", reason);
+            island::note(app, generation, island::Note::CommandSkipped { reason });
+            Err(Failure::Skipped)
+        }
+        Err(CommandError::Failed(error)) => {
+            log::warn!("Voice command was not run: {}", error);
+            Err(Failure::NotRun)
+        }
+    }
 }

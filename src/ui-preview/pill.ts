@@ -63,6 +63,7 @@ if (root) {
   const notes: Record<string,DictationNote> = {
     mic_dropped:{generation:1,kind:'mic_dropped',captured_ms:42000},mic_silent:{generation:1,kind:'mic_silent'},translate_failed:{generation:1,kind:'translate_failed'},model_fallback:{generation:1,kind:'model_fallback',engine_short:'Whisper Turbo',alt_engine_short:'Parakeet'},gpu_fallback:{generation:1,kind:'gpu_fallback',engine_short:'Whisper'},
     ...Object.fromEntries(['timeout','rate_limited','network','guard','error'].map(reason=>[`polish_skipped-${reason}`,{generation:1,kind:'polish_skipped',reason}])) as Record<string,DictationNote>,
+    command_skipped:{generation:1,kind:'command_skipped',reason:'typed_since'},
   };
   if(state.startsWith('note-')) emit('dictation-note',notes[state.slice(5)]);
   if(state==='stack3') { for(const kind of ['polish_on','polish_off','shortcuts_retired','long_silence','long_silence']) emit('island-notice',{kind}); }
