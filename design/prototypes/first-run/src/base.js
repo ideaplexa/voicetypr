@@ -289,11 +289,13 @@
     return '<div class="fields" data-trial-fields><div class="fld"><label for="f-name">Name</label><input id="f-name" data-autofocus autocomplete="name" placeholder="Priya Raman" aria-describedby="f-name-msg" required><span class="msg" id="f-name-msg" role="alert"></span></div><div class="fld"><label for="f-email">Email</label><input id="f-email" type="email" autocomplete="email" placeholder="priya@example.com" aria-describedby="f-email-msg" required><span class="msg" id="f-email-msg" role="alert"></span></div></div>';
   };
   VT.checkFields = function () {
+    var tb = $("#trial-btn");
+    if (tb && tb.getAttribute("aria-busy") === "true") return false;
     var n = $("#f-name"), m = $("#f-email"), bad = [];
     var name = n.value.trim(), email = m.value.trim();
     var set = function (el, msg) { el.setAttribute("aria-invalid", msg ? "true" : "false"); $("#" + el.id + "-msg").textContent = msg; if (msg) bad.push(el); };
     set(n, name ? "" : "Enter your name");
-    set(m, !email ? "Enter your email" : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "" : "That email doesn’t look right");
+    set(m, !email ? "Enter your email" : m.checkValidity() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "" : "That email doesn’t look right");
     if (bad.length) { bad[0].focus(); return false; }
     VT.state.name = name; VT.state.email = email;
     return true;
@@ -414,7 +416,7 @@
       if (st !== "listening") return;
       if (i < 3 && (!auto || stopped)) {
         run++; st = "idle";
-        VT.pill.note("Too short. " + (VT.state.hold ? "Hold" : "Talk") + " a bit longer", VT.pill.hint);
+        VT.pill.note("Too short — " + (VT.state.hold ? "hold" : "talk") + " a bit longer", VT.pill.hint);
         if (o.onShort) o.onShort();
         return;
       }
