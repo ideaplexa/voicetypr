@@ -523,7 +523,7 @@ fn insert_via_clipboard(
         &mut paste,
         text,
         keep_transcription_in_clipboard,
-        &current,
+        current,
     )?;
     let play_completed_cue = paste_completed_cue_eligible(&outcome);
 
