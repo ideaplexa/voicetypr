@@ -73,4 +73,26 @@ const swift = readFileSync(swiftPath, 'utf8');
 for (const match of swift.matchAll(/\blog\s*\([^\n]*/g)) {
   if (/\\\((?:audioPath|expectedPath\.path|path\.path|toks\.suffix|(?:text|transcript)(?:\)|\.))/.test(match[0])) report(swiftPath, swift, match.index);
 }
+// Every sink, the in-memory ring that bug reports attach included, takes its
+// text from the one Builder formatter, so that formatter must scrub. The
+// plugin's timezone_strategy() and clear_format() silently replace it.
+const libPath = 'src-tauri/src/lib.rs';
+const lib = readFileSync(libPath, 'utf8');
+const setup = lib.search(/fn\s+setup_logging\s*\(/);
+const setupEnd = setup < 0 ? -1 : closing(lib, lib.indexOf('{', setup), '{', '}');
+const body = setup < 0 ? '' : lib.slice(setup, setupEnd + 1);
+const formatter = body.search(/\.format\s*\(\s*(?:move\s*)?\|/);
+const formatCall = formatter < 0 ? '' : body.slice(formatter, closing(body, body.indexOf('(', formatter), '(', ')') + 1);
+if (!/\bscrub_log_message\s*\(/.test(formatCall) || /\.(?:timezone_strategy|clear_format)\s*\(/.test(body)) {
+  report(libPath, lib, Math.max(setup, 0));
+}
+for (const path of rustFiles('src-tauri/src')) {
+  const source = readFileSync(path, 'utf8');
+  for (const match of source.matchAll(/\bTargetKind::\w+/g)) {
+    const insideSetup = path === libPath && match.index > setup && match.index < setupEnd;
+    if (!insideSetup && !/^\s*\/\//.test(source.slice(source.lastIndexOf('\n', match.index) + 1, match.index))) {
+      report(path, source, match.index);
+    }
+  }
+}
 if (failures) process.exitCode = 1;

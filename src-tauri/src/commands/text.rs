@@ -103,15 +103,19 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
 
 #[tauri::command]
 pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    insert_text_with_generation(app, text, None, false).await
+    insert_text_with_generation(app, text, None, false)
+        .await
+        .map(|_| ())
 }
 
+/// True when the paste was posted, false when the text was left on the
+/// clipboard (the Copied card).
 pub(crate) async fn insert_dictation_text(
     app: tauri::AppHandle,
     text: String,
     generation: u64,
     polished: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let result = insert_text_with_generation(app.clone(), text, Some(generation), polished).await;
     if result.is_err() {
         // A permission outcome already owns its 2.5 s timeout. Other errors
@@ -126,7 +130,7 @@ async fn insert_text_with_generation(
     text: String,
     generation: Option<u64>,
     polished: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // Check if already inserting text
     if IS_INSERTING.swap(true, Ordering::SeqCst) {
         log::warn!("Text insertion already in progress, skipping duplicate request");
@@ -203,7 +207,7 @@ async fn insert_text_with_generation(
     if outcome == PasteOutcome::NoPermission {
         return Err("No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission.".to_string());
     }
-    Ok(())
+    Ok(outcome == PasteOutcome::Pasted)
 }
 
 /// Copy plain text to the system clipboard without attempting to paste

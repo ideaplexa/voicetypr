@@ -104,6 +104,49 @@ fn similarity(left: &str, right: &str) -> f32 {
     1.0 - previous[right.len()] as f32 / longest as f32
 }
 
+/// The engine can merge a neighbouring word into the misheard term ("in
+/// Voicetypr" heard as "invoice typer"). The neighbour is not part of the term,
+/// so it leaves the fix and its sound leaves what was heard.
+fn without_merged_neighbour<'t, 'a>(
+    heard: &[Token<'_>],
+    word: &'t [Token<'a>],
+) -> (String, &'t [Token<'a>]) {
+    let ordinary = |token: &Token<'_>| token.core.chars().all(char::is_lowercase);
+    let names_a_term = |tokens: &[Token<'_>]| {
+        tokens
+            .iter()
+            .any(|t| t.core.chars().any(|c| c.is_uppercase() || c.is_numeric()))
+    };
+    let cores = |tokens: &[Token<'_>]| {
+        tokens
+            .iter()
+            .map(|t| t.core.to_string())
+            .collect::<Vec<_>>()
+    };
+    if word.len() >= 2 && ordinary(&word[0]) && names_a_term(&word[1..]) {
+        let first = heard[0].core.to_lowercase();
+        if let Some(rest) = first.strip_prefix(&word[0].core.to_lowercase()) {
+            if rest.chars().count() >= 2 {
+                let mut parts = vec![rest.to_string()];
+                parts.extend(cores(&heard[1..]));
+                return (parts.join(" "), &word[1..]);
+            }
+        }
+    }
+    let end = word.len().saturating_sub(1);
+    if word.len() >= 2 && ordinary(&word[end]) && names_a_term(&word[..end]) {
+        let last = heard[heard.len() - 1].core.to_lowercase();
+        if let Some(rest) = last.strip_suffix(&word[end].core.to_lowercase()) {
+            if rest.chars().count() >= 2 {
+                let mut parts = cores(&heard[..heard.len() - 1]);
+                parts.push(rest.to_string());
+                return (parts.join(" "), &word[..end]);
+            }
+        }
+    }
+    (joined(heard), word)
+}
+
 fn candidate(heard: &[Token<'_>], word: &[Token<'_>]) -> Option<CorrectedWord> {
     if heard.is_empty()
         || word.is_empty()
@@ -112,7 +155,8 @@ fn candidate(heard: &[Token<'_>], word: &[Token<'_>]) -> Option<CorrectedWord> {
     {
         return None;
     }
-    let (heard_text, word_text) = (joined(heard), joined(word));
+    let (heard_text, word) = without_merged_neighbour(heard, word);
+    let word_text = joined(word);
     let word_chars = word_text.chars().count();
     if !(2..=MAX_PHRASE_CHARS).contains(&word_chars)
         || !(2..=MAX_PHRASE_CHARS).contains(&heard_text.chars().count())
@@ -123,8 +167,8 @@ fn candidate(heard: &[Token<'_>], word: &[Token<'_>]) -> Option<CorrectedWord> {
     let keep = if heard_text.to_lowercase() == word_text.to_lowercase() {
         // Only the capitals changed. "the" → "The" at a sentence start is ordinary
         // editing; "github" → "GitHub" or a mid-sentence "moin" → "Moin" is a name.
-        heard.iter().zip(word).any(|(old, new)| {
-            old.core != new.core
+        heard_text.split(' ').zip(word).any(|(old, new)| {
+            old != new.core
                 && (new.core.chars().skip(1).any(char::is_uppercase)
                     || (!new.starts_sentence
                         && new.core.chars().next().is_some_and(char::is_uppercase)))
@@ -227,6 +271,25 @@ mod tests {
                 pair("voice typer", "Voicetypr"),
                 pair("cloud code", "Claude Code")
             ]
+        );
+    }
+
+    #[test]
+    fn a_neighbouring_word_the_engine_merged_is_not_learned() {
+        assert_eq!(
+            pairs(
+                "It works like invoice typer for me.",
+                "It works like in Voicetypr for me."
+            ),
+            vec![pair("voice typer", "Voicetypr")]
+        );
+        assert_eq!(
+            pairs("push it to git hubat noon", "push it to GitHub at noon"),
+            vec![pair("git hub", "GitHub")]
+        );
+        assert_eq!(
+            pairs("ask ingithub today", "ask in GitHub today"),
+            vec![pair("github", "GitHub")]
         );
     }
 

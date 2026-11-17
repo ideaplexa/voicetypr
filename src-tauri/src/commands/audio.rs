@@ -6938,11 +6938,17 @@ async fn stop_recording_with_mode_at(
                         };
                         let insertion_start = Instant::now();
                         match insert_future.await {
-                            Ok(_) => {
+                            Ok(true) => {
                                 delivery_journey.mark_succeeded();
                                 dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Succeeded;
-                                log::debug!("Text inserted at cursor successfully");
+                                log::debug!("Paste posted at cursor");
+                            }
+                            Ok(false) => {
+                                delivery_journey.mark_succeeded();
+                                dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
+                                dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Failed;
+                                log::info!("Paste not posted; text left on clipboard (Copied)");
                             }
                             Err(e) => {
                                 delivery_journey.mark_failed();
