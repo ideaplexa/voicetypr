@@ -40,6 +40,7 @@ pub fn on_engine_event(app: &AppHandle, ev: TriggerEvent) {
                 &app_state,
                 &app_handle,
                 ev.phase,
+                crate::recording::escape_handler::EscapeSource::Hook,
             )
             .await;
         });

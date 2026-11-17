@@ -1278,6 +1278,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             start_recording,
             stop_recording,
             commands::recording_toggle::toggle_recording,
+            commands::recording_toggle::in_app_escape,
             cancel_recording,
             get_current_recording_state,
             save_transcription,

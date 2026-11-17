@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 import { useSetting } from "@/contexts/SettingsContext";
@@ -262,6 +263,18 @@ export function useInAppRecordingHotkey(): void {
         pendingTap = null;
       }
       if (event.isComposing) return;
+
+      // Esc Esc cancel: the Windows hook is blind in our window, so report Esc
+      // here. The backend counts a press both routes saw once and decides
+      // whether this is the first or second press. Esc is never consumed.
+      if (!isMacOS && event.key === "Escape") {
+        const state = latest.current.recording.state;
+        if (!event.repeat && state !== "idle" && state !== "error") {
+          void invoke("in_app_escape").catch(() => undefined);
+        }
+        return;
+      }
+
       const editable = isEditableTarget(event.target);
 
       const currentHotkey = latest.current.hotkey;

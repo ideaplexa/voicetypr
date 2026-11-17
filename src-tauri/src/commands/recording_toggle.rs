@@ -21,3 +21,18 @@ pub async fn toggle_recording(
     }
     crate::recording::toggle::toggle_recording(app, source).await
 }
+
+/// The main window's Esc on Windows, where the low-level hook is blind while
+/// our window has focus. Shares the double-press cancel with the hook.
+#[tauri::command]
+pub async fn in_app_escape(app: AppHandle) {
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    crate::recording::escape_handler::handle_escape_key_press(
+        &state,
+        &app,
+        keytrigger::KeyPhase::Pressed,
+        crate::recording::escape_handler::EscapeSource::InApp,
+    )
+    .await;
+}

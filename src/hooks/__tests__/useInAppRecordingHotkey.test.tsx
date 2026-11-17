@@ -204,6 +204,54 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
   });
 
+  describe("Esc Esc cancel", () => {
+    const fireEscape = (init: KeyboardEventInit = {}): KeyboardEvent => {
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        code: "Escape",
+        key: "Escape",
+        ...init,
+      });
+      nonEditable.dispatchEvent(event);
+      return event;
+    };
+    const escapeCalls = () => mockInvoke.mock.calls.filter(([command]) => command === "in_app_escape");
+
+    it.each(["starting", "recording", "stopping", "transcribing"])(
+      "on Windows reports each Esc to the backend during %s, without swallowing it",
+      (state) => {
+        mockRecording.state = state;
+        renderHook(() => useInAppRecordingHotkey());
+
+        const first = fireEscape();
+        fireEscape();
+
+        expect(escapeCalls()).toHaveLength(2);
+        expect(first.defaultPrevented).toBe(false);
+        expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
+      },
+    );
+
+    it("ignores Esc while idle and a held Esc's auto-repeat", () => {
+      renderHook(() => useInAppRecordingHotkey());
+      fireEscape();
+      mockRecording.state = "recording";
+      fireEscape({ repeat: true });
+
+      expect(escapeCalls()).toHaveLength(0);
+    });
+
+    it("leaves Esc to the native hook on macOS", () => {
+      platform.isMacOS = true;
+      mockRecording.state = "recording";
+      renderHook(() => useInAppRecordingHotkey());
+      fireEscape();
+
+      expect(escapeCalls()).toHaveLength(0);
+    });
+  });
+
   it("on Windows toggles from anywhere in the window, where the low-level hook hears nothing", () => {
     renderHook(() => useInAppRecordingHotkey());
 
