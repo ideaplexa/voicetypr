@@ -40,6 +40,14 @@ vi.mock("@/contexts/ReadinessContext", () => ({
   useReadinessState: () => readinessState.value,
 }));
 
+const licenseState = vi.hoisted(() => ({
+  value: { status: "trial" } as { status: "licensed" | "trial" | "expired" | "none" } | null,
+}));
+
+vi.mock("@/contexts/LicenseContext", () => ({
+  useLicense: () => ({ status: licenseState.value }),
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
@@ -354,6 +362,7 @@ describe("EnhancementsSection", () => {
     useEnhancementsStore.getState().clearPolishError();
     useWritingSettings.setState({ settings: defaultWritingSettings, loaded: false });
     readinessState.value = null;
+    licenseState.value = { status: "trial" };
     modelDiscovery.loading = {};
     modelDiscovery.errors = {};
     modelDiscovery.hiddenProviders.clear();
@@ -440,6 +449,52 @@ describe("EnhancementsSection", () => {
     modelDiscovery.fetchModels.mockImplementation((providerId: string) =>
       Promise.resolve(providerModels[providerId] || []),
     );
+  });
+
+  describe("Voicetypr Polish setting", () => {
+    const withSettings = (overrides: Record<string, unknown>) => {
+      const original = (invoke as ReturnType<typeof vi.fn>).getMockImplementation() as
+        | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
+        | undefined;
+      (invoke as ReturnType<typeof vi.fn>).mockImplementation((cmd: string, args?: Record<string, unknown>) =>
+        cmd === "get_settings"
+          ? Promise.resolve({ ...baseAppSettings, ...overrides })
+          : original?.(cmd, args),
+      );
+    };
+
+    it("says the text goes to Voicetypr's server and turns off with the switch", async () => {
+      withSettings({ builtin_polish_enabled: true });
+      const user = userEvent.setup();
+      renderWithProviders();
+
+      const toggle = await screen.findByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      await waitFor(() => expect(toggle).toBeChecked());
+      expect(screen.getByText(/sent to\s+Voicetypr’s server/)).toBeInTheDocument();
+      expect(screen.getByText("On: used because you haven’t connected your own provider.")).toBeInTheDocument();
+
+      await user.click(toggle);
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith(
+          "save_settings",
+          expect.objectContaining({ settings: expect.objectContaining({ builtin_polish_enabled: false }) }),
+        ),
+      );
+    });
+
+    it("is off for a user who never chose it", async () => {
+      renderWithProviders();
+      const toggle = await screen.findByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      expect(toggle).not.toBeChecked();
+      expect(screen.getByText("Off: your dictation stays on this computer.")).toBeInTheDocument();
+    });
+
+    it("explains it needs a trial or a license once the trial has ended", async () => {
+      licenseState.value = { status: "expired" };
+      withSettings({ builtin_polish_enabled: true });
+      renderWithProviders();
+      expect(await screen.findByText("Works during your trial or with a license.")).toBeInTheDocument();
+    });
   });
 
   it("renders cloud providers in the provider setup tabs", async () => {

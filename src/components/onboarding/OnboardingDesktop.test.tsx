@@ -155,6 +155,7 @@ beforeEach(() => {
   settingsView.current = settingsState;
   delete (settingsState as Record<string, unknown>).transcription_acceleration;
   delete (settingsState as Record<string, unknown>).recording_mode;
+  delete (settingsState as Record<string, unknown>).builtin_polish_enabled;
   modelManagement.models = {
     "base.en": {
       name: "base.en",
@@ -947,6 +948,8 @@ describe("OnboardingDesktop", () => {
         isMacOS: platform === "macos",
         isWindows: platform === "windows",
       });
+      // A user who turned built-in Polish off and has no AI of their own.
+      Object.assign(settingsState, { builtin_polish_enabled: false });
       const user = userEvent.setup();
       renderOnboarding();
       expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Say it.It lands in any app.");
@@ -966,6 +969,24 @@ describe("OnboardingDesktop", () => {
       await waitFor(() => expect(settingsState.onboarding_completed).toBe(true));
     },
   );
+
+  it("turns on built-in Polish for a new user and says the text goes to Voicetypr's server", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    await waitFor(() => expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: true }));
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Say it messy.It lands clean.");
+    await user.click(screen.getByRole("button", { name: /try it with your own voice/i }));
+    expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
+    expect(screen.getByText(/Polish sends your words to Voicetypr’s server/)).toBeInTheDocument();
+  });
+
+  it("keeps a user's earlier choice to leave built-in Polish off", async () => {
+    Object.assign(settingsState, { builtin_polish_enabled: false });
+    renderOnboarding();
+    await screen.findByRole("heading", { level: 1 });
+    expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: true });
+    expect(screen.queryByText(/Voicetypr’s server/)).not.toBeInTheDocument();
+  });
 
   it.each([
     ["macos", "Alt+Space", "⌥"],

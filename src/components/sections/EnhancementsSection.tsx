@@ -17,9 +17,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
 import { KeepWordsSetting } from "@/components/polish/KeepWordsSetting";
 import { PolishContextSetting } from "@/components/polish/PolishContextSetting";
+import { BuiltInPolishSetting } from "@/components/polish/BuiltInPolishSetting";
+import { useLicense } from "@/contexts/LicenseContext";
 import { SettingsPage } from "@/components/settings/settings-ui";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
+  const { status: licenseStatus } = useLicense();
   const { settings, updateSettings } = useSettings();
   const [providerSearch, setProviderSearch] = useState("");
   const [providerSetupOpen, setProviderSetupOpen] = useState(false);
@@ -102,6 +105,8 @@ export function EnhancementsSection() {
     (aiSettings.model || isAgentCliProvider(aiSettings.provider)) &&
     (isUsingCustomProvider || providerApiKeys[aiSettings.provider]),
   );
+  const builtinPolishEntitled = licenseStatus?.status === "trial" || licenseStatus?.status === "licensed";
+  const builtinPolishActive = !hasSelectedModel && builtinPolishEntitled && settings?.builtin_polish_enabled === true;
   const showAiModelReselectionNotice =
     aiModelNeedsReselection && aiSettings.enabled && !aiSettings.model;
   const effectiveFinalTextLanguage =
@@ -158,6 +163,10 @@ export function EnhancementsSection() {
         onOpenProviderSetup={openProviderSetup}
       />
 
+      <BuiltInPolishSetting checked={settings?.builtin_polish_enabled === true}
+        ownProvider={hasSelectedModel}
+        entitled={builtinPolishEntitled}
+        onCheckedChange={(checked) => void updateSettings({ builtin_polish_enabled: checked })} />
       <KeepWordsSetting checked={settings?.polish_keep_words ?? false}
         onCheckedChange={(checked) => void updateSettings({ polish_keep_words: checked })} />
       <PolishContextSetting checked={settings?.polish_context_enabled ?? true}
@@ -167,7 +176,7 @@ export function EnhancementsSection() {
             preset={enhancementOptions.preset}
             finalTextLanguage={effectiveFinalTextLanguage}
             writingSettings={writingSettings}
-            aiFormattingEnabled={aiSettings.enabled}
+            aiFormattingEnabled={aiSettings.enabled || builtinPolishActive}
             writingSettingsDisabled={!settingsLoaded}
             onPresetChange={(preset) => void persistEnhancementOptions({ preset })}
             onFinalTextLanguageChange={handleFinalTextLanguageChange}

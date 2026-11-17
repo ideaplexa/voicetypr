@@ -78,11 +78,14 @@ pub fn capture(app: &AppHandle, hint: Option<crate::writing::ContextHint>) -> Op
         .process_path
         .as_deref()
         .and_then(|path| super::icons::register(app, std::path::Path::new(path)));
-    let enabled = store
-        .get("ai_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let key_ok = crate::commands::ai::has_ai_model_and_key(app).unwrap_or(false);
+    let own_key_ok = crate::commands::ai::has_ai_model_and_key(app).unwrap_or(false);
+    let builtin = crate::ai::builtin::active(app, own_key_ok);
+    let enabled = builtin
+        || store
+            .get("ai_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+    let key_ok = own_key_ok || builtin;
     let options = store.get("enhancement_options");
     let global = crate::ai::prompts::enhancement_options_for_ai_enabled(options.as_ref(), enabled)
         .ok()?
@@ -98,6 +101,7 @@ pub fn capture(app: &AppHandle, hint: Option<crate::writing::ContextHint>) -> Op
         crate::writing::PipelineAiState {
             stored_ai_enabled: true,
             has_model_and_key: true,
+            builtin_polish: false,
         },
     )
     .preset;
@@ -279,10 +283,13 @@ pub fn effective_polish(app: &AppHandle) -> Option<EffectivePolish> {
         .ok()?
         .clone()?;
     let store = app.store("settings").ok()?;
-    let enabled = store
-        .get("ai_enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let own_key_ok = crate::commands::ai::has_ai_model_and_key(app).unwrap_or(false);
+    let builtin = crate::ai::builtin::active(app, own_key_ok);
+    let enabled = builtin
+        || store
+            .get("ai_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
     let options = store.get("enhancement_options");
     let global = crate::ai::prompts::enhancement_options_for_ai_enabled(options.as_ref(), enabled)
         .ok()?
@@ -296,6 +303,7 @@ pub fn effective_polish(app: &AppHandle) -> Option<EffectivePolish> {
         crate::writing::PipelineAiState {
             stored_ai_enabled: true,
             has_model_and_key: true,
+            builtin_polish: false,
         },
     )
     .preset;
@@ -311,9 +319,7 @@ pub fn effective_polish(app: &AppHandle) -> Option<EffectivePolish> {
         generation: crate::commands::audio::current_recording_generation(),
         app_name: name,
         style,
-        will_run: enabled
-            && crate::commands::ai::has_ai_model_and_key(app).unwrap_or(false)
-            && style.is_some(),
+        will_run: enabled && (own_key_ok || builtin) && style.is_some(),
         overridden,
     })
 }

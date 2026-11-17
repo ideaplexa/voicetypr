@@ -24,11 +24,11 @@ export interface OnboardingDesktopProps {
 }
 
 /**
- * Whether new users get Polish without their own key. Undecided by the founder;
- * nothing backs it yet, so the first sentence shows the engine's own text unless
- * this user has Polish on.
+ * New users get Voicetypr's built-in Polish (`builtin_polish_enabled`) without a
+ * key of their own. It runs only during an active trial or with a licence, and
+ * any failure pastes the engine's own text.
  */
-export const NEW_USERS_GET_POLISH = false;
+export const NEW_USERS_GET_POLISH = true;
 
 export type SourceType = "local" | "cloud" | "remote";
 export type PermissionStatus = "checking" | "granted" | "not_determined" | "denied" | "restricted" | "error";

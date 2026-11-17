@@ -16,6 +16,7 @@ export function TryStep({
   caps,
   holdToTalk,
   polishAvailable,
+  builtinPolish = false,
   engineReady,
   preparing,
   microphone,
@@ -28,6 +29,8 @@ export function TryStep({
   caps: string[];
   holdToTalk: boolean;
   polishAvailable: boolean;
+  /** Polish runs on Voicetypr's server rather than the user's own provider. */
+  builtinPolish?: boolean;
   engineReady: boolean;
   /** Download progress for the engine while it is not ready. */
   preparing: ReactNode;
@@ -113,6 +116,11 @@ export function TryStep({
           <CircleCheck className="size-4 text-sage" />
           Worked · {result.words} {result.words === 1 ? "word" : "words"}
           {!result.polished ? " · exactly what the engine heard" : null}
+        </p>
+      ) : null}
+      {builtinPolish ? (
+        <p className="max-w-[520px] text-[12.5px] text-muted-foreground">
+          Polish sends your words to Voicetypr’s server to clean them up, and nothing is kept. Turn it off under Settings → Polish.
         </p>
       ) : null}
 

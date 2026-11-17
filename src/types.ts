@@ -121,6 +121,7 @@ export interface ActiveStreamCapabilities {
 export interface AppSettings {
   polish_keep_words?: boolean;
   polish_context_enabled?: boolean; // default true; surrounding text is captured only with Polish on
+  builtin_polish_enabled?: boolean | null; // Voicetypr's server Polish; null until decided, which counts as off
   hotkey: string;
   current_model: string;
   speech_language: string;

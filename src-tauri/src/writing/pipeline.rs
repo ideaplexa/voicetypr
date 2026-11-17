@@ -34,6 +34,8 @@ fn enabled_app_rules(settings: &WritingSettings) -> impl Iterator<Item = &AppFor
 pub struct PipelineAiState {
     pub stored_ai_enabled: bool,
     pub has_model_and_key: bool,
+    /// Voicetypr's built-in Polish is on and eligible (see `ai::builtin`).
+    pub builtin_polish: bool,
 }
 
 impl PipelineAiState {
@@ -42,6 +44,7 @@ impl PipelineAiState {
         Self {
             stored_ai_enabled: ai_enabled,
             has_model_and_key: true,
+            builtin_polish: false,
         }
     }
 }
@@ -50,6 +53,8 @@ pub struct EffectiveConfig {
     pub preset: EnhancementPreset,
     pub final_text_language: String,
     pub ai_effective: bool,
+    /// Polish runs through Voicetypr's built-in provider, not the user's own.
+    pub builtin_polish: bool,
     pub category_hint: Option<AppCategory>,
 }
 
@@ -156,7 +161,9 @@ pub fn resolve_pipeline_config(
     active_app: Option<&ContextHint>,
     ai_state: PipelineAiState,
 ) -> EffectiveConfig {
-    let ai_effective = ai_state.stored_ai_enabled && ai_state.has_model_and_key;
+    let own_provider_effective = ai_state.stored_ai_enabled && ai_state.has_model_and_key;
+    let builtin_polish = ai_state.builtin_polish && !own_provider_effective;
+    let ai_effective = own_provider_effective || builtin_polish;
     let matched_rule = matching_app_formatting_preset(settings, active_app);
     // Explicit per-app rule wins: suppress the auto category nudge based on
     // the raw rule match, not the AI-filtered preset, so a matching rule still
@@ -173,7 +180,8 @@ pub fn resolve_pipeline_config(
         preset = EnhancementPreset::PersonalDictation;
     }
 
-    let final_text_language = if preset == EnhancementPreset::PersonalDictation {
+    // Built-in Polish cleans up; it never translates.
+    let final_text_language = if preset == EnhancementPreset::PersonalDictation || builtin_polish {
         FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string()
     } else {
         final_text_language.into()
@@ -182,6 +190,7 @@ pub fn resolve_pipeline_config(
         preset,
         final_text_language,
         ai_effective,
+        builtin_polish,
         category_hint,
     }
 }
@@ -192,10 +201,12 @@ fn read_pipeline_config_inputs(app: &AppHandle) -> Result<PipelineConfigInputs, 
         .get("ai_enabled")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    let has_model_and_key = crate::commands::ai::has_ai_model_and_key(app)?;
+    let builtin_polish = crate::ai::builtin::active(app, has_model_and_key);
     let stored_options = store.get("enhancement_options");
     let options = crate::ai::prompts::enhancement_options_for_ai_enabled(
         stored_options.as_ref(),
-        ai_enabled,
+        ai_enabled || builtin_polish,
     )?;
     let global_preset = options.preset;
     let legacy_translate_to_english = store
@@ -216,7 +227,8 @@ fn read_pipeline_config_inputs(app: &AppHandle) -> Result<PipelineConfigInputs, 
         normalize_final_text_language(stored_final_text_language.as_deref(), &transcription_task);
     let ai_state = PipelineAiState {
         stored_ai_enabled: ai_enabled,
-        has_model_and_key: crate::commands::ai::has_ai_model_and_key(app)?,
+        has_model_and_key,
+        builtin_polish,
     };
 
     Ok(PipelineConfigInputs {
@@ -414,20 +426,31 @@ async fn run_smart_formatting(
             )
         })
     });
-    match crate::commands::ai::polish_text_typed(
-        &request.app,
-        request.text,
-        &options,
-        request.translation_target,
-        request.transcript_language.as_deref(),
-        ai_context.as_deref(),
-        app_category_hint.as_deref(),
-        request.needs_output_language_transform,
-        request.settings.spoken_punctuation,
-        request.generation,
-    )
-    .await
-    {
+    let result = if request.config.builtin_polish {
+        crate::ai::builtin::polish(
+            &request.app,
+            request.text,
+            request.config.preset,
+            request.transcript_language.as_deref(),
+            request.settings.spoken_punctuation,
+        )
+        .await
+    } else {
+        crate::commands::ai::polish_text_typed(
+            &request.app,
+            request.text,
+            &options,
+            request.translation_target,
+            request.transcript_language.as_deref(),
+            ai_context.as_deref(),
+            app_category_hint.as_deref(),
+            request.needs_output_language_transform,
+            request.settings.spoken_punctuation,
+            request.generation,
+        )
+        .await
+    };
+    match result {
         Ok(result) => {
             let crate::ai::contract::AiPolishResult {
                 output_text: enhanced,
@@ -562,7 +585,7 @@ async fn process_transcription_with_options(
 ) -> Result<WritingResult, WritingError> {
     let settings = load_writing_settings(&app).map_err(WritingError::Config)?;
     let inputs = read_pipeline_config_inputs(&app).map_err(WritingError::Config)?;
-    let ai_enabled = inputs.ai_state.stored_ai_enabled;
+    let ai_enabled = inputs.ai_state.stored_ai_enabled || inputs.ai_state.builtin_polish;
     let mut active_app = app
         .try_state::<crate::state::AppState>()
         .and_then(|state| state.take_recording_app_context())
@@ -696,6 +719,7 @@ async fn process_transcription_with_options(
     let should_run_ai = can_run_ai_formatting && !library_result.literal_locked;
 
     let mut ai_error = None;
+    let mut ai_polish_failed = false;
     let mut ai_polish_ms = None;
     let mut ai_execution = None;
     let mut final_text = if library_result.literal_locked {
@@ -750,7 +774,12 @@ async fn process_transcription_with_options(
             }
         };
         let ai_failed = outcome.error.is_some();
-        ai_error = outcome.error;
+        ai_polish_failed = ai_failed;
+        // A built-in Polish failure pastes the engine's text without a notice.
+        ai_error = outcome.error.filter(|_| !pipeline_config.builtin_polish);
+        if pipeline_config.builtin_polish {
+            warnings.retain(|warning| warning.code != "ai_formatting_failed");
+        }
         ai_polish_ms = outcome.duration_ms.or(Some(attempted_ai_polish_ms));
         ai_execution = outcome.execution;
         if let Some(duration_ms) = ai_polish_ms {
@@ -804,14 +833,14 @@ async fn process_transcription_with_options(
     );
     final_text = guarded_text;
     applied_operations.extend(guard_operations);
-    let ai_applied = should_run_ai && ai_error.is_none() && final_text != library_result.text;
+    let ai_applied = should_run_ai && !ai_polish_failed && final_text != library_result.text;
     let ai_outcome = classify_ai_formatting_outcome(
         ai_enabled,
         pipeline_config.preset,
         library_result.literal_locked,
         ai_applied,
         needs_output_language_transform,
-        ai_error.is_some(),
+        ai_polish_failed,
     );
     log_ai_formatting_decision(
         ai_enabled,
@@ -1229,6 +1258,63 @@ mod tests {
 
         assert_eq!(effective.preset, EnhancementPreset::Message);
         assert!(effective.preset.requires_ai_formatting());
+    }
+
+    #[test]
+    fn built_in_polish_cleans_up_without_a_provider_and_never_translates() {
+        let effective = resolve_pipeline_config(
+            &WritingSettings::default(),
+            EnhancementPreset::CleanDictation,
+            "de",
+            None,
+            PipelineAiState {
+                stored_ai_enabled: false,
+                has_model_and_key: false,
+                builtin_polish: true,
+            },
+        );
+        assert!(effective.ai_effective);
+        assert!(effective.builtin_polish);
+        assert_eq!(effective.preset, EnhancementPreset::CleanDictation);
+        assert_eq!(
+            effective.final_text_language,
+            FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT
+        );
+    }
+
+    #[test]
+    fn own_provider_wins_over_built_in_polish() {
+        let effective = resolve_pipeline_config(
+            &WritingSettings::default(),
+            EnhancementPreset::Writing,
+            "de",
+            None,
+            PipelineAiState {
+                stored_ai_enabled: true,
+                has_model_and_key: true,
+                builtin_polish: true,
+            },
+        );
+        assert!(effective.ai_effective);
+        assert!(!effective.builtin_polish);
+        assert_eq!(effective.final_text_language, "de");
+    }
+
+    #[test]
+    fn without_built_in_polish_or_a_provider_the_engine_text_is_kept() {
+        let effective = resolve_pipeline_config(
+            &WritingSettings::default(),
+            EnhancementPreset::CleanDictation,
+            FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT,
+            None,
+            PipelineAiState {
+                stored_ai_enabled: false,
+                has_model_and_key: false,
+                builtin_polish: false,
+            },
+        );
+        assert!(!effective.ai_effective);
+        assert_eq!(effective.preset, EnhancementPreset::PersonalDictation);
     }
 
     #[test]

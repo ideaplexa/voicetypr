@@ -24,6 +24,7 @@ import { TrialStep } from "@/components/onboarding/TrialStep";
 import { DoneStep } from "@/components/onboarding/DoneStep";
 import { ConsentChoice } from "@/components/onboarding/ConsentChoice";
 import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
+import { useSettings } from "@/contexts/SettingsContext";
 import type { LicenseStatus } from "@/types";
 
 const noop = async () => {};
@@ -65,6 +66,14 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const [sawTrial, setSawTrial] = useState(false);
+  const { settings, updateSettings } = useSettings();
+  const builtinPolishSetting = settings?.builtin_polish_enabled;
+
+  // A new user starts with built-in Polish on; a choice they already made stays.
+  useEffect(() => {
+    if (!NEW_USERS_GET_POLISH || props.previewStep || !settings || builtinPolishSetting != null) return;
+    void Promise.resolve(updateSettings({ builtin_polish_enabled: true })).catch(() => undefined);
+  }, [settings, builtinPolishSetting, updateSettings, props.previewStep]);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +91,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     if (currentStep === "trial" && licensed) goTo("done");
   }, [currentStep, licensed, goTo]);
 
-  const polishAvailable = NEW_USERS_GET_POLISH || aiEnabled;
+  const builtinPolish = !aiEnabled && NEW_USERS_GET_POLISH && builtinPolishSetting !== false;
+  const polishAvailable = aiEnabled || builtinPolish;
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
@@ -177,6 +187,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               caps={caps}
               holdToTalk={holdToTalk}
               polishAvailable={polishAvailable}
+              builtinPolish={builtinPolish}
               engineReady={sourceReady}
               preparing={preparing}
               microphone={permissions.microphone.status}

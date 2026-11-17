@@ -27,7 +27,7 @@ export function SourceStep({
         layout="row"
         label={isMacOS ? "On this Mac" : "On this PC"}
         icon={Laptop}
-        description={`Private and offline.${modelSize ? ` Downloads a ${modelSize} model once.` : " Choose a local model."}`}
+        description={`Speech is recognised on this computer, even offline.${modelSize ? ` Downloads a ${modelSize} model once.` : " Choose a local model."}`}
         tag="Recommended"
         selected={sourceType === "local"}
         onSelect={() => onConfirmSource("local")}

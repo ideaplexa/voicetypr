@@ -1,5 +1,6 @@
 pub mod agent_cli;
 mod anthropic_current;
+pub(crate) mod builtin;
 pub mod catalog;
 pub mod context_reference;
 pub mod contract;

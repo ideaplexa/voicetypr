@@ -15,7 +15,7 @@ const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
 /// on port 4000. Release builds use the production host with NO env override —
 /// these endpoints carry license keys + device hashes, so an env-redirect would
 /// be a credential-exfiltration vector.
-fn get_api_base_url() -> String {
+pub(crate) fn get_api_base_url() -> String {
     #[cfg(debug_assertions)]
     {
         std::env::var("VOICETYPR_API_URL")
