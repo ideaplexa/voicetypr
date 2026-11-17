@@ -203,8 +203,13 @@ impl GpuSidecarProcess {
         if let Some(stderr) = child.stderr.take() {
             tauri::async_runtime::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
+                // whisper.cpp narrates every model load on stderr and its lines
+                // carry model paths: log only that a line reported a problem.
                 while let Ok(Some(line)) = lines.next_line().await {
-                    log::warn!("Whisper Vulkan sidecar stderr: {}", line);
+                    let lower = line.to_ascii_lowercase();
+                    if lower.contains("error") || lower.contains("fail") {
+                        log::warn!("Whisper Vulkan sidecar reported an error on stderr");
+                    }
                 }
             });
         }
