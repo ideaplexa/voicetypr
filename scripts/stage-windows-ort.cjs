@@ -162,7 +162,7 @@ async function acquireArchive({ archive, target, triple, manifest = provenance }
       fs.copyFileSync(download, destination);
       return destination;
     } catch (error) {
-      failures.push(`${new URL(source).host}: ${error.message}`);
+      failures.push(`${new URL(source).host}: ${error.code ?? error.message}`);
     } finally {
       fs.rmSync(temporary, { recursive: true, force: true });
     }
