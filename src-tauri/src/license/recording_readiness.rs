@@ -49,7 +49,7 @@ mod tests {
             trial_days_left: None,
             license_type: None,
             license_key: None,
-            expires_at: None,
+            expires_at: Some((chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339()),
             verification_state: None,
             verification_expires_at: None,
         }))

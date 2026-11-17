@@ -349,6 +349,7 @@ pub fn recovery_for_failure(
 
 pub async fn validate_recording_license(app: &AppHandle) -> Result<(), String> {
     // Wait only while startup is checking. Never bypass invalid/expired licenses.
+    crate::license::trial_clock::observe(app);
     let app_state = app.state::<AppState>();
     let license_state =
         crate::license::recording_readiness::wait_for_recording_license(&app_state.license_cache)

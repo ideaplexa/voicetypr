@@ -16,6 +16,7 @@ fn status_allows(status: LicenseStatus) -> bool {
 
 /// Checks the license now; a failed check never grants access.
 pub(crate) async fn require_for_cli(app: &AppHandle) -> Result<(), String> {
+    crate::license::trial_clock::observe(app);
     let status = crate::commands::license::check_license_status(app.clone()).await?;
     if status_allows(status) {
         Ok(())
@@ -27,6 +28,7 @@ pub(crate) async fn require_for_cli(app: &AppHandle) -> Result<(), String> {
 /// Whether this computer may transcribe audio another computer sent it.
 /// Waits like the desktop gate while a license check is running.
 pub(crate) fn require_for_sharing(app: &AppHandle) -> Result<(), String> {
+    crate::license::trial_clock::observe(app);
     let cache = app.state::<crate::AppState>().license_cache.clone();
     let state = tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current()
@@ -50,7 +52,7 @@ mod tests {
             trial_days_left: None,
             license_type: None,
             license_key: None,
-            expires_at: None,
+            expires_at: Some((chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339()),
             verification_state: None,
             verification_expires_at: None,
         }
@@ -62,5 +64,15 @@ mod tests {
         assert!(status_allows(status(LicenseState::Licensed)));
         assert!(!status_allows(status(LicenseState::None)));
         assert!(!status_allows(status(LicenseState::Expired)));
+    }
+
+    #[test]
+    fn a_cached_trial_past_its_end_may_not_transcribe() {
+        let mut ended = status(LicenseState::Trial);
+        ended.expires_at = Some((chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339());
+        assert!(!status_allows(ended));
+        let mut unknown = status(LicenseState::Trial);
+        unknown.expires_at = None;
+        assert!(!status_allows(unknown));
     }
 }
