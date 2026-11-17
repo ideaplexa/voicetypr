@@ -107,12 +107,28 @@ pub async fn uninstall_cli_tool() -> Result<CliToolStatus, String> {
     }
 }
 
-/// Drop this installation's folder from the user PATH. The Windows uninstaller
-/// runs it through the hidden `remove-cli-path` command; elsewhere a no-op.
-pub(crate) fn remove_install_dir_from_path() -> Result<(), String> {
+/// Drop this installation's folder from the user PATH and say whether it was
+/// there. The Windows uninstaller runs it through the hidden `remove-cli-path`
+/// command; elsewhere a no-op.
+pub(crate) fn remove_install_dir_from_path() -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
-        windows_path::uninstall()
+        let was_installed = windows_path::status().installed;
+        windows_path::uninstall()?;
+        Ok(was_installed)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+/// Put this installation back on the user PATH after a replacing install
+/// removed it (hidden `restore-cli-path`); elsewhere a no-op.
+pub(crate) fn restore_install_dir_on_path() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_path::install()
     }
     #[cfg(not(target_os = "windows"))]
     {

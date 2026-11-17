@@ -65,20 +65,42 @@
     Delete "$INSTDIR\ffprobe.exe.exe"
 !macroend
 
+!define CLI_PATH_MARKER_KEY "Software\Voicetypr\CliPath"
+
 !macro NSIS_HOOK_POSTINSTALL
     !insertmacro InstallVcRuntime
     !insertmacro InstallPdbSymbols
     !insertmacro RemoveLegacyFfmpeg
+
+    ; A replacing install runs the old uninstaller first, which took the CLI's
+    ; PATH entry with it and left this marker: put the entry back.
+    Push $0
+    ClearErrors
+    ReadRegDWORD $0 HKCU "${CLI_PATH_MARKER_KEY}" "RestoreOnInstall"
+    ${If} $0 = 1
+        ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" restore-cli-path'
+        DeleteRegKey HKCU "${CLI_PATH_MARKER_KEY}"
+    ${EndIf}
+    Pop $0
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
     ; This hook runs before Tauri's own running-app check; stop the app before deleting loaded DLLs.
     !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
-    ; A real uninstall takes the CLI's user PATH entry with it; an update keeps it.
-    ; The app edits HKCU\Environment itself, which avoids NSIS PATH truncation.
+    ; Uninstall takes the CLI's user PATH entry with it; an in-app update (/UPDATE)
+    ; keeps it. The app edits HKCU\Environment itself, which avoids NSIS PATH
+    ; truncation. Exit 0 means an entry was removed: remember it, so a manual
+    ; upgrade (which uninstalls first) restores it in POSTINSTALL.
     ${If} $UpdateMode <> 1
-        ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" remove-cli-path'
+        Push $0
+        ClearErrors
+        ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" remove-cli-path' $0
+        ${IfNot} ${Errors}
+        ${AndIf} $0 = 0
+            WriteRegDWORD HKCU "${CLI_PATH_MARKER_KEY}" "RestoreOnInstall" 1
+        ${EndIf}
+        Pop $0
     ${EndIf}
 
     Delete "$INSTDIR\voicetypr.pdb"

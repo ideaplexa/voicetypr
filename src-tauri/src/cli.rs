@@ -69,9 +69,14 @@ enum CliCommand {
     /// Replay a WAV through the hidden Parakeet streaming prototype and print timing spans.
     #[command(hide = true, name = "stream-bench")]
     StreamBench(StreamBenchArgs),
-    /// Remove this installation's folder from the user PATH (run by the Windows uninstaller).
+    /// Remove this installation's folder from the user PATH (run by the Windows
+    /// uninstaller). Exits 0 when an entry was removed and 3 when there was none.
     #[command(hide = true, name = "remove-cli-path")]
     RemoveCliPath,
+    /// Put this installation back on the user PATH (run by the Windows installer
+    /// after a replacing install removed it).
+    #[command(hide = true, name = "restore-cli-path")]
+    RestoreCliPath,
 }
 
 impl CliCommand {
@@ -90,7 +95,7 @@ impl CliCommand {
             CliCommand::Transcribe(a) => a.json,
             CliCommand::Record(a) => a.json,
             CliCommand::StreamBench(_) => true,
-            CliCommand::RemoveCliPath => false,
+            CliCommand::RemoveCliPath | CliCommand::RestoreCliPath => false,
         }
     }
 }
@@ -213,6 +218,7 @@ pub fn maybe_run_from_env_with_context(
                 | "record"
                 | "stream-bench"
                 | "remove-cli-path"
+                | "restore-cli-path"
                 | "polish"
                 | "polish-eval"
                 | "vad"
@@ -268,12 +274,23 @@ pub fn maybe_run_from_env_with_context(
     let Some(command) = cli.command else {
         return Ok(false);
     };
-    if let CliCommand::RemoveCliPath = &command {
-        if let Err(error) = crate::commands::cli_tool::remove_install_dir_from_path() {
-            eprintln!("{}", format_cli_error(&error, false));
-            std::process::exit(1);
+    if matches!(
+        command,
+        CliCommand::RemoveCliPath | CliCommand::RestoreCliPath
+    ) {
+        let result = if matches!(command, CliCommand::RemoveCliPath) {
+            crate::commands::cli_tool::remove_install_dir_from_path()
+        } else {
+            crate::commands::cli_tool::restore_install_dir_on_path().map(|()| true)
+        };
+        match result {
+            Ok(true) => std::process::exit(0),
+            Ok(false) => std::process::exit(3),
+            Err(error) => {
+                eprintln!("{}", format_cli_error(&error, false));
+                std::process::exit(1);
+            }
         }
-        return Ok(true);
     }
     if let CliCommand::Clipboard(args) = &command {
         if let Err(error) = crate::writing::clipboard_transaction::cli::run(args) {
@@ -349,8 +366,8 @@ pub fn maybe_run_from_env_with_context(
                 CliCommand::Transcribe(args) => run_transcribe(&app_handle, args).await?,
                 CliCommand::Record(args) => run_record(&app_handle, args).await?,
                 CliCommand::StreamBench(args) => run_stream_bench(&app_handle, args).await?,
-                CliCommand::RemoveCliPath => {
-                    unreachable!("PATH cleanup runs before desktop initialization")
+                CliCommand::RemoveCliPath | CliCommand::RestoreCliPath => {
+                    unreachable!("PATH maintenance runs before desktop initialization")
                 }
             }
             Ok(())
@@ -678,22 +695,20 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
     };
 
     // Ctrl+C is a cancel: stop the capture now (no post-roll), keep nothing.
+    // Transcription is not interrupted (native engines own their threads); a
+    // cancel there is honoured when it returns. The listener lives for the rest
+    // of the process because Tokio never restores the default SIGINT handler.
     let capture_interrupt = CaptureInterrupt::default();
-    let cancelled = Arc::new(tokio::sync::Notify::new());
     let cancel_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let ctrl_c = tauri::async_runtime::spawn({
-        let (interrupt, cancelled, requested) = (
-            capture_interrupt.clone(),
-            cancelled.clone(),
-            cancel_requested.clone(),
-        );
+    tauri::async_runtime::spawn({
+        let (interrupt, requested) = (capture_interrupt.clone(), cancel_requested.clone());
         async move {
             if tokio::signal::ctrl_c().await.is_err() {
                 return;
             }
             requested.store(true, Ordering::SeqCst);
             interrupt.interrupt();
-            cancelled.notify_one();
+            eprintln!("Cancelling… press Ctrl+C again to quit now.");
             // A second Ctrl+C is the escape hatch if the cancel stalls.
             if tokio::signal::ctrl_c().await.is_ok() {
                 std::process::exit(130);
@@ -750,14 +765,12 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
             )
         }
     };
-    let payload = tokio::select! {
-        payload = transcription => payload?,
-        _ = cancelled.notified() => {
-            recording_guard.delete_on_drop = true;
-            return Err(RECORDING_CANCELLED.into());
-        }
-    };
-    ctrl_c.abort();
+    let transcribed = transcription.await;
+    if cancel_requested.load(Ordering::SeqCst) {
+        recording_guard.delete_on_drop = true;
+        return Err(RECORDING_CANCELLED.into());
+    }
+    let payload = transcribed?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -1187,6 +1200,8 @@ mod tests {
     fn uninstaller_path_cleanup_is_a_hidden_cli_route() {
         let cli = Cli::try_parse_from(["voicetypr", "remove-cli-path"]).unwrap();
         assert!(matches!(cli.command, Some(CliCommand::RemoveCliPath)));
+        let cli = Cli::try_parse_from(["voicetypr", "restore-cli-path"]).unwrap();
+        assert!(matches!(cli.command, Some(CliCommand::RestoreCliPath)));
     }
 
     async fn assert_cli_model_resolution(command: &str) {
