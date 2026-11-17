@@ -18,6 +18,9 @@ import { useReadinessState } from "@/contexts/ReadinessContext";
 import { KeepWordsSetting } from "@/components/polish/KeepWordsSetting";
 import { PolishContextSetting } from "@/components/polish/PolishContextSetting";
 import { SettingsPage } from "@/components/settings/settings-ui";
+import { SectionIntro } from "@/components/discovery/SectionIntro";
+import { SpokenPunctuationField } from "@/components/polish/SpokenPunctuationField";
+import { VoiceCommandsField } from "@/components/polish/VoiceCommandsField";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
   const { settings, updateSettings } = useSettings();
@@ -156,6 +159,20 @@ export function EnhancementsSection() {
         polishEnabled={aiSettings.enabled}
         onToggleEnabled={handleToggleEnabled}
         onOpenProviderSetup={openProviderSetup}
+      />
+      <SectionIntro
+        art="polish"
+        line={!settingsLoaded || hasSelectedModel ? "Pick a default style, and give any app its own." : "Polish needs an AI provider below: a key, or a tool you already have like Claude Code."}
+      />
+      <VoiceCommandsField
+        enabled={writingSettings.editing_commands}
+        disabled={!settingsLoaded}
+        onChange={(editing_commands) => handleWritingSettingsChange({ editing_commands })}
+      />
+      <SpokenPunctuationField
+        enabled={writingSettings.spoken_punctuation}
+        disabled={!settingsLoaded}
+        onChange={(spoken_punctuation) => handleWritingSettingsChange({ spoken_punctuation })}
       />
 
       <KeepWordsSetting checked={settings?.polish_keep_words ?? false}

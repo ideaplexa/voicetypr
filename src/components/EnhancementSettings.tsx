@@ -1,6 +1,4 @@
 import { LanguageSelection } from "@/components/LanguageSelection";
-import { SpokenPunctuationField } from "@/components/polish/SpokenPunctuationField";
-import { VoiceCommandsField } from "@/components/polish/VoiceCommandsField";
 import { Button } from "@/components/settings/SettingsButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/settings/SettingsSwitch";
@@ -116,15 +114,5 @@ export function EnhancementSettings({
       {usingSpecificLanguage ? <div className="mt-3"><LanguageSelection value={finalTextLanguage} onValueChange={onFinalTextLanguageChange} className="w-full md:w-64" /></div> : null}
       {!aiFormattingEnabled && finalTextLanguage !== "same_as_transcript" ? <p className="mt-2 text-xs text-muted-foreground">Turn on Polish to use a different final text language.</p> : null}
     </SettingsCard>
-    <SpokenPunctuationField
-      enabled={writingSettings.spoken_punctuation}
-      disabled={writingSettingsDisabled}
-      onChange={(spoken_punctuation) => onWritingSettingsChange({ spoken_punctuation })}
-    />
-    <VoiceCommandsField
-      enabled={writingSettings.editing_commands}
-      disabled={writingSettingsDisabled}
-      onChange={(editing_commands) => onWritingSettingsChange({ editing_commands })}
-    />
   </div>;
 }

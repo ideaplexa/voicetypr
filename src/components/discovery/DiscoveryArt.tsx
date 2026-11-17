@@ -49,7 +49,7 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
       content = <><Chip className={centerTop}><s className="text-destructive decoration-[1.5px]">Brian</s> → Bryan</Chip>{pillBottom}</>;
       break;
     case "polish":
-      content = <><Chip className="top-[14%] left-[8%] text-muted-foreground"><s className="text-destructive decoration-[1.5px]">um, like</s></Chip><PillCharacter className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /><Chip className="right-[8%] bottom-[14%]">Clean.</Chip></>;
+      content = <><Chip className="top-[14%] left-[8%] text-muted-foreground"><s className="text-destructive decoration-[1.5px]">um, like</s></Chip><PillCharacter size="sm" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /><Chip className="right-[8%] bottom-[14%]">Clean.</Chip></>;
       break;
     case "voice_commands":
       content = <><Chip className={centerTop}>“new line” ↵</Chip>{pillBottom}</>;
