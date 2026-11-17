@@ -262,9 +262,13 @@ export function useOnboardingDesktop({
     })();
   }, [currentStep, sourceType, loadRemoteServers]);
 
+  const [sourceRestored, setSourceRestored] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void invoke<string | null>("get_active_remote_server")
+      .finally(() => {
+        if (!cancelled) setSourceRestored(true);
+      })
       .then((serverId) => {
         if (!cancelled && serverId) {
           setActiveRemoteServerId(serverId);
@@ -603,8 +607,8 @@ export function useOnboardingDesktop({
   });
   // The engine starts downloading on the first screen, so the try step is ready sooner.
   useEffect(() => {
-    if (currentStep === "promise" && sourceType === "local") startPreparingRef.current();
-  }, [currentStep, sourceType, preparation.recommended]);
+    if (currentStep === "promise" && sourceType === "local" && sourceRestored) startPreparingRef.current();
+  }, [currentStep, sourceType, sourceRestored, preparation.recommended]);
 
   const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
     if (style && polishOn) await invoke("update_enhancement_options", { options: { preset: style } });

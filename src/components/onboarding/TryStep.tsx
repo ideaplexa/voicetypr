@@ -54,20 +54,6 @@ export function TryStep({
   const sideBySide = result ? result.polished : polishAvailable;
   const verb = holdToTalk ? "Hold" : "Press";
 
-  if (!engineReady) {
-    return (
-      <section className="flex w-full flex-col items-center gap-[18px] text-center">
-        <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Almost ready</h2>
-        <p className="max-w-[480px] text-sm leading-8 text-muted-foreground">
-          The dictation engine downloads once. Finish downloading, then {verb.toLowerCase()}{" "}
-          <KeyCaps caps={caps} size="onboarding" /> and say your sentence.
-        </p>
-        {preparing}
-        <Button variant="outline" onClick={onBack}>Back</Button>
-      </section>
-    );
-  }
-
   if (access !== "ok") {
     const blocked = {
       none: ["Dictation starts with your trial", "Start your free 7-day trial or add a license key, and you can say your first sentence straight away.", "Start 7-day trial"],
@@ -86,6 +72,20 @@ export function TryStep({
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onBack}>Back</Button>
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNext}>Skip for now</Button>
         </div>
+      </section>
+    );
+  }
+
+  if (!engineReady) {
+    return (
+      <section className="flex w-full flex-col items-center gap-[18px] text-center">
+        <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Almost ready</h2>
+        <p className="max-w-[480px] text-sm leading-8 text-muted-foreground">
+          The dictation engine downloads once. Finish downloading, then {verb.toLowerCase()}{" "}
+          <KeyCaps caps={caps} size="onboarding" /> and say your sentence.
+        </p>
+        {preparing}
+        <Button variant="outline" onClick={onBack}>Back</Button>
       </section>
     );
   }

@@ -25,14 +25,14 @@ pub(crate) async fn require_for_cli(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Whether this computer may transcribe audio another computer sent it.
+/// Waits like the desktop gate while a license check is running.
 pub(crate) fn require_for_sharing(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<crate::AppState>();
-    let allowed = state
-        .license_cache
-        .try_read()
-        .map(|cache| recording_license_state(&cache) == RecordingLicenseState::Ready)
-        .unwrap_or(false);
-    if allowed {
+    let cache = app.state::<crate::AppState>().license_cache.clone();
+    let state = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current()
+            .block_on(crate::license::recording_readiness::wait_for_recording_license(&cache))
+    });
+    if state == RecordingLicenseState::Ready {
         Ok(())
     } else {
         Err(NO_ACCESS.to_string())

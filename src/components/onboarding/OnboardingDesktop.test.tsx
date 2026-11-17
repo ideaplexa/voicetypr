@@ -1008,8 +1008,9 @@ describe("OnboardingDesktop", () => {
       };
       const view = renderOnboarding();
       expect(await screen.findByText(/one-time download of the dictation engine \(670 MB\)/)).toBeInTheDocument();
+      await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en"));
       await user.click(screen.getByRole("button", { name: /try it with your own voice/i }));
-      expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en");
+      expect(modelManagement.downloadModel).toHaveBeenCalledTimes(1);
       modelManagement.downloadProgress = { "base.en": 42 };
       view.rerender(
         <OnboardingDesktop
