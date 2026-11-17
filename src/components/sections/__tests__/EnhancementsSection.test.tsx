@@ -482,11 +482,20 @@ describe("EnhancementsSection", () => {
       );
     });
 
+    it("says built-in Polish keeps the transcript language", async () => {
+      withSettings({ builtin_polish_enabled: true, final_text_language: "de" });
+      enhancementOptionsResponse = { preset: "CleanDictation" };
+      renderWithProviders();
+      expect(
+        await screen.findByText(/built-in Polish keeps the transcript language\. Connect your own AI provider/),
+      ).toBeInTheDocument();
+    });
+
     it("is off for a user who never chose it", async () => {
       renderWithProviders();
       const toggle = await screen.findByRole("switch", { name: "Clean up on Voicetypr’s server" });
       expect(toggle).not.toBeChecked();
-      expect(screen.getByText("Off: your dictation stays on this computer.")).toBeInTheDocument();
+      expect(screen.getByText("Off: built-in Polish won’t send your text.")).toBeInTheDocument();
     });
 
     it("explains it needs a trial or a license once the trial has ended", async () => {

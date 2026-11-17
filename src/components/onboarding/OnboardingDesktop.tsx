@@ -71,11 +71,13 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const { settings, updateSettings } = useSettings();
   const builtinPolishSetting = settings?.builtin_polish_enabled;
 
-  // A new user starts with built-in Polish on; a choice they already made stays.
+  // Only a new install starts with built-in Polish on. A user who finished onboarding
+  // before (onboarding reopened to recover a missing model) keeps it off until they choose.
+  const newInstall = settings?.onboarding_completed !== true;
   useEffect(() => {
-    if (!NEW_USERS_GET_POLISH || props.previewStep || !settings || builtinPolishSetting != null) return;
+    if (!NEW_USERS_GET_POLISH || props.previewStep || !settings || !newInstall || builtinPolishSetting != null) return;
     void Promise.resolve(updateSettings({ builtin_polish_enabled: true })).catch(() => undefined);
-  }, [settings, builtinPolishSetting, updateSettings, props.previewStep]);
+  }, [settings, newInstall, builtinPolishSetting, updateSettings, props.previewStep]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +95,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     if (currentStep === "trial" && licensed) goTo("try");
   }, [currentStep, licensed, goTo]);
 
-  const builtinPolish = !aiEnabled && NEW_USERS_GET_POLISH && builtinPolishSetting !== false;
+  const builtinPolish = !aiEnabled && NEW_USERS_GET_POLISH &&
+    (builtinPolishSetting === true || (newInstall && builtinPolishSetting == null));
   const polishAvailable = aiEnabled || builtinPolish;
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]

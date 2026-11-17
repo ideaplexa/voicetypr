@@ -554,6 +554,20 @@ fn resolve_smart_formatting_outcome(
     }
 }
 
+/// A built-in Polish failure pastes the fallback text without a notice: no
+/// error reaches the pill or the window, and no warning is kept in History.
+fn reported_polish_error(
+    error: Option<AiProviderError>,
+    builtin_polish: bool,
+    warnings: &mut Vec<WritingWarning>,
+) -> Option<AiProviderError> {
+    if !builtin_polish {
+        return error;
+    }
+    warnings.retain(|warning| warning.code != "ai_formatting_failed");
+    None
+}
+
 pub async fn process_transcription(
     app: AppHandle,
     transcription: TranscriptionResult,
@@ -775,11 +789,8 @@ async fn process_transcription_with_options(
         };
         let ai_failed = outcome.error.is_some();
         ai_polish_failed = ai_failed;
-        // A built-in Polish failure pastes the engine's text without a notice.
-        ai_error = outcome.error.filter(|_| !pipeline_config.builtin_polish);
-        if pipeline_config.builtin_polish {
-            warnings.retain(|warning| warning.code != "ai_formatting_failed");
-        }
+        ai_error =
+            reported_polish_error(outcome.error, pipeline_config.builtin_polish, &mut warnings);
         ai_polish_ms = outcome.duration_ms.or(Some(attempted_ai_polish_ms));
         ai_execution = outcome.execution;
         if let Some(duration_ms) = ai_polish_ms {
@@ -1280,6 +1291,41 @@ mod tests {
             effective.final_text_language,
             FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT
         );
+    }
+
+    #[test]
+    fn a_built_in_polish_failure_falls_back_without_a_notice() {
+        let mut warnings = Vec::new();
+        let outcome = resolve_smart_formatting_outcome(
+            Err(crate::commands::ai::AiPolishAttemptError {
+                error: AiProviderError::ServiceUnavailable,
+                provider_id: "voicetypr".to_string(),
+                model_id: String::new(),
+            }),
+            "engine text",
+            false,
+            Some("en"),
+            "en",
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(outcome.text, "engine text");
+        assert_eq!(
+            reported_polish_error(outcome.error.clone(), true, &mut warnings),
+            None
+        );
+        assert!(warnings.is_empty());
+
+        let mut own_warnings = vec![WritingWarning {
+            code: "ai_formatting_failed".to_string(),
+            message: String::new(),
+        }];
+        assert_eq!(
+            reported_polish_error(outcome.error, false, &mut own_warnings),
+            Some(AiProviderError::ServiceUnavailable),
+            "the user's own provider still reports its failures"
+        );
+        assert_eq!(own_warnings.len(), 1);
     }
 
     #[test]

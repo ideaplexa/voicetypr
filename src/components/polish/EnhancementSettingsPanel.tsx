@@ -9,6 +9,7 @@ export function EnhancementSettingsPanel({
   finalTextLanguage,
   writingSettings,
   aiFormattingEnabled,
+  translationAvailable,
   writingSettingsDisabled,
   providerSetup,
   onPresetChange,
@@ -19,6 +20,7 @@ export function EnhancementSettingsPanel({
   finalTextLanguage: string;
   writingSettings: WritingSettings;
   aiFormattingEnabled: boolean;
+  translationAvailable: boolean;
   writingSettingsDisabled: boolean;
   providerSetup: ProviderSetupCardProps;
   onPresetChange: (preset: EnhancementPreset) => void;
@@ -31,6 +33,7 @@ export function EnhancementSettingsPanel({
       finalTextLanguage={finalTextLanguage}
       writingSettings={writingSettings}
       aiFormattingEnabled={aiFormattingEnabled}
+      translationAvailable={translationAvailable}
       providerContent={<ProviderSetupCard {...providerSetup} />}
       onPresetChange={onPresetChange}
       onFinalTextLanguageChange={onFinalTextLanguageChange}

@@ -988,6 +988,14 @@ describe("OnboardingDesktop", () => {
     expect(screen.getByText(/Polish sends your words to Voicetypr’s server/)).toBeInTheDocument();
   });
 
+  it("leaves built-in Polish off when onboarding reopens for an existing user", async () => {
+    Object.assign(settingsState, { onboarding_completed: true });
+    renderOnboarding();
+    await screen.findByRole("heading", { level: 1 });
+    expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: true });
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Say it.It lands in any app.");
+  });
+
   it("keeps a user's earlier choice to leave built-in Polish off", async () => {
     Object.assign(settingsState, { builtin_polish_enabled: false });
     renderOnboarding();

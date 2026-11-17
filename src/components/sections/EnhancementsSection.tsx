@@ -177,6 +177,7 @@ export function EnhancementsSection() {
             finalTextLanguage={effectiveFinalTextLanguage}
             writingSettings={writingSettings}
             aiFormattingEnabled={aiSettings.enabled || builtinPolishActive}
+            translationAvailable={aiSettings.enabled && hasSelectedModel}
             writingSettingsDisabled={!settingsLoaded}
             onPresetChange={(preset) => void persistEnhancementOptions({ preset })}
             onFinalTextLanguageChange={handleFinalTextLanguageChange}

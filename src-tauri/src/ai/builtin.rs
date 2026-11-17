@@ -89,6 +89,7 @@ struct PolishRequest<'a> {
     style: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+    keep_words: bool,
 }
 
 #[derive(Deserialize)]
@@ -185,19 +186,23 @@ pub(crate) async fn polish(
     }
     let device_hash = device_hash().map_err(|_| fail(AiProviderError::Internal))?;
     let license_key = crate::license::keychain::get_license(app).ok().flatten();
+    let request = PolishRequest {
+        device_hash,
+        license_key: license_key.as_deref(),
+        text,
+        style,
+        language: language_code(transcript_language),
+        keep_words: crate::ai::keep_words::read(app),
+    };
+    // A cancelled or superseded recording never sends its text, and stops waiting at once.
+    let cancellation = crate::commands::ai_lifecycle::polish_cancellation();
+    let base_url = crate::license::api_client::get_api_base_url();
     let started = Instant::now();
-    let result = post(
-        client(),
-        &crate::license::api_client::get_api_base_url(),
-        &PolishRequest {
-            device_hash,
-            license_key: license_key.as_deref(),
-            text,
-            style,
-            language: language_code(transcript_language),
-        },
-    )
-    .await
+    let result = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err(AiProviderError::Canceled),
+        result = post(client(), &base_url, &request) => result,
+    }
     .and_then(|data| {
         let output = data.text.trim().to_string();
         crate::ai::output_guard::check(text, &output)
@@ -294,6 +299,7 @@ mod tests {
             text: "um so tuesday no wednesday",
             style: "clean",
             language: Some("en".to_string()),
+            keep_words: false,
         }
     }
 
@@ -306,7 +312,8 @@ mod tests {
                 "deviceHash": "abc",
                 "text": "um so tuesday no wednesday",
                 "style": "clean",
-                "language": "en"
+                "language": "en",
+                "keepWords": false
             })))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "success": true,
@@ -322,7 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn every_refusal_is_an_error_the_pipeline_falls_back_from() {
+    async fn every_server_refusal_maps_to_a_polish_error() {
         for (status, expected) in [
             (403, AiProviderError::ServiceUnavailable),
             (503, AiProviderError::ServiceUnavailable),

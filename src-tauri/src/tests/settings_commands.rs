@@ -1012,6 +1012,7 @@ mod tests {
             original.polish_context_enabled
         );
         assert_eq!(restored.current_model, original.current_model);
+        assert_eq!(restored.builtin_polish_enabled, Some(true));
         assert_eq!(restored.current_model_engine, original.current_model_engine);
         assert_eq!(restored.speech_language, original.speech_language);
         assert_eq!(restored.transcription_task, original.transcription_task);
