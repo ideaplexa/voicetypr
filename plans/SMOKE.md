@@ -8,6 +8,8 @@ reproduced failure against the named plan.
 
 Latest published releases: stable **2.0.12** and beta **2.1.0-beta.7**.
 The integration branch is `release/2.1.0-beta.9`; it is not a published build.
+Its next published beta is **2.1.0-beta.10**, because the local candidate below
+already carries 2.1.0-beta.9.
 Old candidate names below describe historical checks, not the current release.
 `OBSOLETE` rows preserve historical instructions and are not pending checks.
 
