@@ -7,12 +7,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { InfoButton, PageHeader } from "@/components/settings/settings-ui";
+import { isMacOS } from "@/lib/platform";
 
 export function ModelsSourcesHeader() {
   return (
     <PageHeader
       title="Transcription"
-      description="Choose where your voice is turned into text."
+      className="[&>div:first-child]:flex-1"
+      description={`Choose where your voice is turned into text. On-device models keep your audio on this ${isMacOS ? "Mac" : "PC"}. Cloud sources send it to the provider you choose.`}
       action={
         <Dialog>
           <DialogTrigger render={<InfoButton label="Transcription guide" />} />
