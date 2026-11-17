@@ -138,7 +138,8 @@ founder's OK; hardware-dependent claims stay `NEEDS-SMOKE` until run.
 
 Goal: 2.1.0 before 2027-01-15, with the audit's privacy, security and release
 problems closed. Beta scope is [plan 087](087-2.1-beta8-beta9.md); beta.9 is
-the last beta.
+the last beta. It publishes as **2.1.0-beta.10**: a local candidate already
+carries 2.1.0-beta.9, and beta.8 was never published.
 
 | # | Work | Proof of done |
 |---|---|---|

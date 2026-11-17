@@ -1158,6 +1158,25 @@ pub(crate) fn apply_spoken_punctuation(
     Some(out)
 }
 
+/// The line or paragraph break a whole phrase names in the transcript
+/// language, for voice commands. `phrase` is already lowercase with single
+/// spaces. Prefix-only phrases are not offered.
+pub(super) fn break_for_phrase(
+    phrase: &str,
+    transcript_language: Option<&str>,
+) -> Option<&'static str> {
+    let command = matcher_for(transcript_language)?.commands.get(phrase)?;
+    (command.placement == Placement::Break
+        && command.trigger == Trigger::Always
+        && command.symbol.chars().all(|ch| ch == '\n'))
+    .then_some(command.symbol)
+}
+
+/// The transcript language's escape word ("literal"), for voice commands.
+pub(super) fn escape_word(transcript_language: Option<&str>) -> Option<&'static str> {
+    matcher_for(transcript_language).map(|matcher| matcher.language.escape)
+}
+
 /// One command as shown in Settings.
 #[derive(Debug, Clone, Serialize)]
 pub struct SpokenPunctuationCommand {

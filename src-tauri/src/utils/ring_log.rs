@@ -46,7 +46,49 @@ pub fn scrub_log_message(message: &str) -> String {
     } else {
         result.into_owned()
     };
-    HOME_PREFIX.replace_all(&result, "~").into_owned()
+    redact_local_paths(&HOME_PREFIX.replace_all(&result, "~"))
+}
+
+/// Absolute paths outside the home folder (other volumes, the app bundle,
+/// temp folders, drive letters, network shares, file URLs) become
+/// `[PATH_REDACTED]`. A path may contain spaces, apostrophes and
+/// parentheses; it ends at a quote, a line end, or punctuation that closes it
+/// ("path: reason", "path, next", "(path)").
+pub fn redact_local_paths(message: &str) -> String {
+    static START: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?m)(?:^|[\s"'(=\[]|file://)(/[^/\s"'<>]+/|[A-Za-z]:[\\/]|\\\\)"#)
+            .unwrap()
+    });
+    let bytes = message.as_bytes();
+    let closes = |i: usize| bytes.get(i + 1).is_none_or(|n| n.is_ascii_whitespace());
+    let mut out = String::with_capacity(message.len());
+    let mut pos = 0;
+    while let Some(found) = START.captures_at(message, pos).and_then(|c| c.get(1)) {
+        let (start, mut end, mut depth) = (found.start(), found.end(), 0usize);
+        while end < bytes.len() {
+            match bytes[end] {
+                b'\r' | b'\n' | b'"' | b'<' | b'>' | b'`' => break,
+                b'(' => depth += 1,
+                b')' if depth == 0 => break,
+                b')' => depth -= 1,
+                b'\'' | b',' | b';' | b':' | b']' if closes(end) => break,
+                b' ' if bytes.get(end + 1) == Some(&b'(') => {
+                    // "C:\Program Files (x86)\…" continues; "path (os error 2)" ends.
+                    let inner = message[end + 2..].find(')').map(|k| end + 3 + k);
+                    if !inner.is_some_and(|k| matches!(bytes.get(k), Some(b'/' | b'\\'))) {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            end += 1;
+        }
+        out.push_str(&message[pos..start]);
+        out.push_str("[PATH_REDACTED]");
+        pos = end;
+    }
+    out.push_str(&message[pos..]);
+    out
 }
 
 const MAX_ENTRIES: usize = 1000;
@@ -149,6 +191,66 @@ pub fn snapshot_joined(max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paths_outside_home_never_reach_a_sink() {
+        for (line, expected) in [
+            (
+                "Creating sidecar /Applications/Voicetypr.app/Contents/MacOS/voicetypr-parakeet",
+                "Creating sidecar [PATH_REDACTED]",
+            ),
+            (
+                "Creating sidecar /Volumes/Client's Drive/voicetypr/target/debug/voicetypr-parakeet",
+                "Creating sidecar [PATH_REDACTED]",
+            ),
+            (
+                "Creating sidecar C:\\Program Files (x86)\\Voicetypr\\voicetypr-parakeet.exe",
+                "Creating sidecar [PATH_REDACTED]",
+            ),
+            (
+                "Creating sidecar D:/Apps/Voicetypr/voicetypr-parakeet.exe",
+                "Creating sidecar [PATH_REDACTED]",
+            ),
+            (
+                "Opening \\\\nas\\share\\clips\\take.wav",
+                "Opening [PATH_REDACTED]",
+            ),
+            (
+                "temp file \"/private/var/folders/xy/T/recording.wav\"",
+                "temp file \"[PATH_REDACTED]\"",
+            ),
+            (
+                "Failed to load /Applications/Voicetypr.app/model.bin: Permission denied (os error 13)",
+                "Failed to load [PATH_REDACTED]: Permission denied (os error 13)",
+            ),
+            (
+                "open failed for /data/Client/private/take.wav (os error 2)",
+                "open failed for [PATH_REDACTED] (os error 2)",
+            ),
+            (
+                "loading file:///Volumes/ClientDrive/private/take.wav, retrying",
+                "loading file://[PATH_REDACTED], retrying",
+            ),
+        ] {
+            assert_eq!(scrub_log_message(line), expected);
+        }
+    }
+
+    #[test]
+    fn scrubbing_keeps_home_relative_paths_urls_and_ordinary_text() {
+        assert_eq!(
+            scrub_log_message("models in /Users/alice/Library/Application Support/x"),
+            "models in ~/Library/Application Support/x"
+        );
+        assert_eq!(
+            scrub_log_message("POST https://user:pass@api.example.com/trial/check took 12ms"),
+            "POST https://api.example.com/trial/check took 12ms"
+        );
+        assert_eq!(
+            scrub_log_message("ratio 3/4 and/or 12:30, done"),
+            "ratio 3/4 and/or 12:30, done"
+        );
+    }
 
     #[test]
     fn ring_keeps_most_recent_lines_under_entry_cap() {

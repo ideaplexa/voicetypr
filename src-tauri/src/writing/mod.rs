@@ -1,5 +1,6 @@
 mod app_category;
 pub(crate) mod clipboard_transaction;
+mod corrections;
 mod format;
 mod library_rules;
 #[cfg(test)]
@@ -11,6 +12,7 @@ mod settings;
 mod snippets;
 mod spoken_punctuation;
 mod vocabulary;
+mod voice_commands;
 
 #[allow(unused_imports)]
 pub use app_category::{category_label, category_prompt_hint, classify, AppCategory};
@@ -34,6 +36,7 @@ pub use vocabulary::{
     WHISPER_STYLE_HINT,
 };
 
+pub(crate) use corrections::{corrected_words, CorrectedWord};
 #[allow(unused_imports)]
 pub(crate) use format::{
     format_for_transcription, protected_terms, should_run_format_stage, FormatStageSettings,
@@ -42,6 +45,7 @@ pub(crate) use format::{
 pub(crate) use library_rules::{
     apply_final_restoration_guard, apply_library_rules, sanitize_transcript,
 };
+pub(crate) use pipeline::effective_transcript_language;
 #[allow(unused_imports)]
 pub(crate) use pipeline::{
     language_scope_matches, normalize_language_scope, process_diarized_transcription_at,
@@ -49,3 +53,4 @@ pub(crate) use pipeline::{
 };
 pub(crate) use spoken_punctuation::apply_spoken_punctuation;
 pub use spoken_punctuation::{spoken_punctuation_reference, SpokenPunctuationLanguage};
+pub(crate) use voice_commands::{classify_utterance, Utterance, VoiceCommand};

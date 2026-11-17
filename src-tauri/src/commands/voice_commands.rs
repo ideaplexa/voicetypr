@@ -1,0 +1,93 @@
+//! Runs a finished dictation as a voice command when the setting is on and
+//! the command is the whole dictation (rule in writing/voice_commands.rs).
+//! Commands never reach the writing pipeline, Polish, the clipboard, History
+//! or saved recordings.
+
+use crate::insertion::voice_keys::CommandError;
+use crate::recording::island;
+use crate::transcription::TranscriptionResult;
+use crate::writing::{classify_utterance, Utterance, VoiceCommand};
+use tauri::{AppHandle, Manager};
+
+/// What a finished dictation is. Always `Dictation` while the setting is off.
+pub(crate) fn classify(app: &AppHandle, transcription: &TranscriptionResult) -> Utterance {
+    let Ok(settings) = crate::writing::load_writing_settings(app) else {
+        return Utterance::Dictation;
+    };
+    if !settings.editing_commands {
+        return Utterance::Dictation;
+    }
+    let language = crate::writing::effective_transcript_language(transcription);
+    classify_utterance(
+        &transcription.raw_text,
+        language.as_deref(),
+        settings.spoken_punctuation,
+    )
+}
+
+pub(crate) enum Failure {
+    /// The Accessibility blocker now owns the pill.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    NoPermission,
+    /// The pill says why in a note.
+    Skipped,
+    NotRun,
+}
+
+pub(crate) async fn run(
+    app: &AppHandle,
+    command: VoiceCommand,
+    generation: u64,
+) -> Result<(), Failure> {
+    #[cfg(target_os = "macos")]
+    if !super::permissions::check_accessibility_permission(app.clone())
+        .await
+        .unwrap_or(false)
+    {
+        island::blocked(
+            app,
+            generation,
+            island::BlockedKind::AccessibilityOff,
+            island::IslandAction::OpenAccessibility,
+        );
+        return Err(Failure::NoPermission);
+    }
+    let watching = app.state::<crate::AppState>().trigger_engine.is_running();
+    let worker_app = app.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let app = worker_app;
+        let current = || {
+            if super::audio::delivery_aborted(
+                app.state::<crate::AppState>().is_cancellation_requested(),
+                generation,
+            ) {
+                return Err("Dictation discarded".to_string());
+            }
+            // A registered hotkey never authorizes keys into a protected field.
+            if keytrigger::backend::secure_input_enabled() {
+                return Err("Secure Input is on".to_string());
+            }
+            Ok(())
+        };
+        current().map_err(CommandError::Failed)?;
+        crate::insertion::menu_tracking::dispatch_if_ready(
+            || crate::insertion::menu_tracking::paste_ready(Some(&app)),
+            || crate::insertion::voice_keys::perform(command, watching, &current),
+        )
+        .unwrap_or_else(|| Err(CommandError::Failed("A menu owns the keyboard".to_string())))
+    })
+    .await
+    .unwrap_or_else(|e| Err(CommandError::Failed(e.to_string())));
+    match result {
+        Ok(()) => Ok(()),
+        Err(CommandError::Skipped(reason)) => {
+            log::info!("Voice command skipped: {:?}", reason);
+            island::note(app, generation, island::Note::CommandSkipped { reason });
+            Err(Failure::Skipped)
+        }
+        Err(CommandError::Failed(error)) => {
+            log::warn!("Voice command was not run: {}", error);
+            Err(Failure::NotRun)
+        }
+    }
+}
