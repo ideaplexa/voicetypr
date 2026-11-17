@@ -34,6 +34,7 @@ export interface WritingSettings {
   snippets: Snippet[];
   app_formatting_rules: AppFormattingRule[];
   spoken_punctuation: boolean;
+  editing_commands: boolean;
 }
 
 export type SpokenPunctuationTrigger =
@@ -61,6 +62,7 @@ export const defaultWritingSettings: WritingSettings = {
   snippets: [],
   app_formatting_rules: [],
   spoken_punctuation: false,
+  editing_commands: false,
 };
 
 // Only known fields are merged, so old persisted settings that still carry a
@@ -74,4 +76,5 @@ export const mergeWritingSettings = (
   snippets: partial.snippets ?? defaultWritingSettings.snippets,
   app_formatting_rules: partial.app_formatting_rules ?? defaultWritingSettings.app_formatting_rules,
   spoken_punctuation: partial.spoken_punctuation ?? defaultWritingSettings.spoken_punctuation,
+  editing_commands: partial.editing_commands ?? defaultWritingSettings.editing_commands,
 });

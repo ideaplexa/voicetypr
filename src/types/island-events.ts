@@ -23,12 +23,14 @@ export interface DictationRecovery {
 }
 export interface DictationBlocked { generation: number; kind: BlockedKind; action: IslandAction }
 export type PolishSkippedReason = "timeout" | "rate_limited" | "network" | "guard" | "error";
+export type CommandSkippedReason = "nothing_to_delete" | "typed_since" | "focus_changed" | "too_late" | "not_watching";
 export type DictationNote = { generation: number } & (
   | { kind: "mic_dropped"; captured_ms: number }
   | { kind: "mic_silent" | "mic_silent_live" | "translate_failed" | "storage_failed" }
   | { kind: "model_fallback"; engine_short: string; alt_engine_short: string }
   | { kind: "gpu_fallback"; engine_short: string }
   | { kind: "polish_skipped"; reason: PolishSkippedReason }
+  | { kind: "command_skipped"; reason: CommandSkippedReason }
 );
 export interface DictationNoteWithdraw { generation: number; kind: "mic_silent_live" }
 export interface RecordingTooShort { generation: number; mode: "hold" | "toggle" }

@@ -176,6 +176,7 @@ export const demoWriting: WritingSettings = {
     { app_name: "Cursor", preset: "Code", enabled: true },
   ],
   spoken_punctuation: false,
+  editing_commands: false,
 };
 
 const shortcutActions: ShortcutActionDefinition[] = [
@@ -378,6 +379,13 @@ export function createFixtures(options: PreviewOptions) {
     get_transcription_count: history.length,
     get_writing_settings: writing,
     update_writing_settings: null,
+    list_dictionary_suggestions: options.empty
+      ? []
+      : [{ id: "preview-1", heard: "cloud code", word: "Claude Code", status: "pending" }],
+    set_dictionary_suggestion_status: null,
+    update_transcription_text: [
+      { id: "preview-2", heard: "voice typer", word: "Voicetypr", status: "pending" },
+    ],
     get_shortcut_settings: shortcuts,
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,

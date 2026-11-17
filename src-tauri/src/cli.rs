@@ -462,6 +462,7 @@ async fn build_cli_app(
         .build(context)?;
 
     crate::ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+    crate::recording::file_jobs::initialize_temp_dir(&app.config().identifier);
 
     #[cfg(target_os = "windows")]
     crate::secure_store::windows_identity::initialize(&app.path().app_data_dir()?)?;
