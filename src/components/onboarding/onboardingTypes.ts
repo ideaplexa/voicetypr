@@ -5,7 +5,7 @@ import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import { isMacOS } from "@/lib/platform";
 import type { LicenseStatus, TrialStartError } from "@/types";
 
-export type Step = "promise" | "try" | "source" | "readiness" | "setup" | "trial" | "done";
+export type Step = "promise" | "trial" | "try" | "source" | "readiness" | "setup" | "use" | "done";
 
 export interface OnboardingDesktopProps {
   /** Screenshot fixtures only; production onboarding always starts at the promise. */

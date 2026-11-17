@@ -100,6 +100,7 @@ mod tests {
             onboarding_completed: true,
             check_updates_automatically: true,
             selected_microphone: None,
+            starting_polish_style: None,
             recording_mode: "toggle".to_string(),
             use_different_ptt_key: false,
             ptt_hotkey: Some("Alt+Space".to_string()),
@@ -198,6 +199,7 @@ mod tests {
             onboarding_completed: false,
             check_updates_automatically: true,
             selected_microphone: Some("USB Microphone".to_string()),
+            starting_polish_style: None,
             recording_mode: "push_to_talk".to_string(),
             use_different_ptt_key: true,
             ptt_hotkey: Some("CommandOrControl+Space".to_string()),
@@ -816,6 +818,7 @@ mod tests {
     fn test_selected_microphone_with_device() {
         let settings = Settings {
             selected_microphone: Some("USB Audio Device".to_string()),
+            starting_polish_style: None,
             ..Settings::default()
         };
 
@@ -968,6 +971,7 @@ mod tests {
             onboarding_completed: true,
             check_updates_automatically: false,
             selected_microphone: Some("Studio Mic".to_string()),
+            starting_polish_style: None,
             recording_mode: "push_to_talk".to_string(),
             use_different_ptt_key: true,
             ptt_hotkey: Some("Alt+R".to_string()),
@@ -1137,6 +1141,7 @@ mod tests {
     fn test_settings_unicode_values() {
         let settings = Settings {
             selected_microphone: Some("マイク 日本語".to_string()),
+            starting_polish_style: None,
             sharing_password: Some("пароль123".to_string()),
             ..Settings::default()
         };
@@ -1187,6 +1192,7 @@ mod tests {
 
         let settings = Settings {
             selected_microphone: Some(long_string.clone()),
+            starting_polish_style: None,
             ..Settings::default()
         };
 

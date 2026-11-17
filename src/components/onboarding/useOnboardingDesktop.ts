@@ -26,6 +26,7 @@ import type {
 } from "@/types/shortcuts";
 import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 import { useOfflinePreparation } from "@/components/onboarding/useOfflinePreparation";
+import type { StartingPolishStyle } from "@/components/onboarding/UseStep";
 
 // Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
 const defaultHotkey = () => (isMacOS ? "Alt+Space" : "Control+Space");
@@ -586,13 +587,42 @@ export function useOnboardingDesktop({
     return true;
   };
 
+  const preparingStarted = useRef(false);
+  const startPreparing = () => {
+    if (preparingStarted.current || sourceReady || !preparation.recommended ||
+      models[preparation.recommended]?.downloaded) return;
+    preparingStarted.current = true;
+    void prepareLocal().catch(() => {
+      preparingStarted.current = false;
+    });
+  };
+
+  const startPreparingRef = useRef(startPreparing);
+  useEffect(() => {
+    startPreparingRef.current = startPreparing;
+  });
+  // The engine starts downloading on the first screen, so the try step is ready sooner.
+  useEffect(() => {
+    if (currentStep === "promise" && sourceType === "local") startPreparingRef.current();
+  }, [currentStep, sourceType, preparation.recommended]);
+
+  const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
+    if (style && polishOn) await invoke("update_enhancement_options", { options: { preset: style } });
+    else await updateSettings({ starting_polish_style: style });
+    setCurrentStep("done");
+  };
+
+  const afterPromise: Step = needsTrial ? "trial" : "try";
+
   const handleNext = async () => {
     try {
       if (currentStep === "promise") {
         if (sourceType === "local") {
-          if (!sourceReady && !(await prepareLocal())) return setCurrentStep("source");
+          if (!sourceReady && !preparation.recommended) return setCurrentStep("source");
+          if (!sourceReady && models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
+          else startPreparing();
         } else if (!sourceReady) return setCurrentStep("readiness");
-        setCurrentStep("try");
+        setCurrentStep(afterPromise);
         return;
       }
 
@@ -601,7 +631,7 @@ export function useOnboardingDesktop({
         sourceChosenByUser.current = true;
         if (sourceType === "local") {
           if (!(await prepareLocal())) return;
-          setCurrentStep("try");
+          setCurrentStep(afterPromise);
         } else setCurrentStep("readiness");
         return;
       }
@@ -611,6 +641,11 @@ export function useOnboardingDesktop({
           await invoke("set_active_remote_server", { serverId: null });
           setActiveRemoteServerId(null);
         }
+        setCurrentStep(afterPromise);
+        return;
+      }
+
+      if (currentStep === "trial") {
         setCurrentStep("try");
         return;
       }
@@ -622,11 +657,9 @@ export function useOnboardingDesktop({
 
       if (currentStep === "setup") {
         await saveHotkeySettings();
-        setCurrentStep(needsTrial ? "trial" : "done");
+        setCurrentStep("use");
         return;
       }
-
-      if (currentStep === "trial") setCurrentStep("done");
     } catch (error) {
       log.error("Failed to advance onboarding:", error);
       toast.error(error instanceof Error ? error.message : "Failed to continue onboarding");
@@ -637,9 +670,10 @@ export function useOnboardingDesktop({
     const previous: Partial<Record<Step, Step>> = {
       source: "promise",
       readiness: "source",
-      try: "promise",
+      trial: "promise",
+      try: needsTrial ? "trial" : "promise",
       setup: "try",
-      trial: "setup",
+      use: "setup",
     };
     const step = previous[currentStep];
     if (step) setCurrentStep(step);
@@ -663,6 +697,7 @@ export function useOnboardingDesktop({
 
   return {
     currentStep,
+    chooseStartingStyle,
     isEditingHotkey,
     goTo: setCurrentStep,
     sourceType,

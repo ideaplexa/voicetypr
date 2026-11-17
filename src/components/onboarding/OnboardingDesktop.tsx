@@ -22,9 +22,10 @@ import { TryStep } from "@/components/onboarding/TryStep";
 import { SetupStep } from "@/components/onboarding/SetupStep";
 import { TrialStep } from "@/components/onboarding/TrialStep";
 import { DoneStep } from "@/components/onboarding/DoneStep";
+import { UseStep } from "@/components/onboarding/UseStep";
 import { ConsentChoice } from "@/components/onboarding/ConsentChoice";
 import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
-import type { LicenseStatus } from "@/types";
+import type { LicenseStatus, TrialStartError } from "@/types";
 
 const noop = async () => {};
 
@@ -65,6 +66,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const [sawTrial, setSawTrial] = useState(false);
+  const [trialError, setTrialError] = useState<TrialStartError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +81,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   // A key activated or a status recheck that finds a license or trial ends the trial step.
   const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
   useEffect(() => {
-    if (currentStep === "trial" && licensed) goTo("done");
+    if (currentStep === "trial" && licensed) goTo("try");
   }, [currentStep, licensed, goTo]);
 
   const polishAvailable = NEW_USERS_GET_POLISH || aiEnabled;
@@ -91,7 +93,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const downloadNote = sourceType === "local" && model && !model.downloaded && modelSize
     ? `Apart from a one-time download of the dictation engine (${modelSize}).`
     : null;
-  const flowSteps: Step[] = ["promise", "try", "setup", ...(sawTrial || !licensed ? (["trial"] as Step[]) : []), "done"];
+  const flowSteps: Step[] = ["promise", ...(sawTrial || !licensed ? (["trial"] as Step[]) : []), "try", "setup", "use", "done"];
   const dotIndex = Math.max(0, flowSteps.indexOf(currentStep === "source" || currentStep === "readiness" ? "promise" : currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -139,6 +141,30 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
+          {currentStep === "trial" && (
+            <TrialStep
+              trialEnded={licenseStatus?.status === "expired"}
+              localDictation={sourceType === "local"}
+              onStartTrial={async (name, email) => {
+                const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email);
+                setTrialError(error);
+                if (!error) {
+                  setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
+                  goTo("try");
+                }
+                return error;
+              }}
+              onUpgrade={upgrade}
+              onHaveKey={() => setKeyDialogOpen(true)}
+              onBack={handleBack}
+              onDecideLater={() => {
+                setOutcome({ kind: "later" });
+                goTo("try");
+              }}
+              consent={consent}
+            />
+          )}
+
           {(currentStep === "source" || currentStep === "readiness") && (
             <>
               <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
@@ -178,6 +204,11 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               holdToTalk={holdToTalk}
               polishAvailable={polishAvailable}
               engineReady={sourceReady}
+              access={licensed || outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
+                : licenseStatus?.status === "expired" ? "ended"
+                : trialError === "trial_unreachable" ? "offline" : "none"}
+              onStartTrial={() => goTo("trial")}
+              onHaveKey={() => setKeyDialogOpen(true)}
               preparing={preparing}
               microphone={permissions.microphone.status}
               onAllowMicrophone={flow.ensureMicrophone}
@@ -227,25 +258,12 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
-          {currentStep === "trial" && (
-            <TrialStep
-              trialEnded={licenseStatus?.status === "expired"}
-              localDictation={sourceType === "local"}
-              onStartTrial={async (name, email) => {
-                const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email);
-                if (!error) {
-                  setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
-                  goTo("done");
-                }
-                return error;
-              }}
-              onUpgrade={upgrade}
-              onHaveKey={() => setKeyDialogOpen(true)}
-              onDecideLater={() => {
-                setOutcome({ kind: "later" });
-                goTo("done");
-              }}
-              consent={consent}
+          {currentStep === "use" && (
+            <UseStep
+              polishAvailable={aiEnabled}
+              saving={busy}
+              onBack={handleBack}
+              onChoose={(style) => void run(() => flow.chooseStartingStyle(style, aiEnabled))}
             />
           )}
 
@@ -281,7 +299,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           const error = await (onActivateLicense ?? (async () => "Couldn’t activate the key. Try again."))(key);
           if (!error) {
             setOutcome({ kind: "key" });
-            goTo("done");
+            if (currentStep === "trial") goTo("try");
           }
           return error;
         }}

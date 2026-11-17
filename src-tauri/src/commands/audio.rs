@@ -4588,10 +4588,7 @@ pub(crate) fn recording_license_state(
     }
 }
 /// Pre-recording validation using the readiness state
-pub(super) async fn validate_recording_requirements(
-    app: &AppHandle,
-    first_run: bool,
-) -> Result<(), String> {
+pub(super) async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> {
     let validate_start = std::time::Instant::now();
     log::debug!("⏱️ [VALIDATE] starting recognition_availability_snapshot");
     let availability = crate::recognition_availability_snapshot(app).await;
@@ -4654,9 +4651,6 @@ pub(super) async fn validate_recording_requirements(
         return Err(error_text);
     }
 
-    if first_run {
-        return crate::license::first_run::validate_recording_license(app).await;
-    }
     validate_recording_license(app).await
 }
 
@@ -7796,7 +7790,7 @@ pub(crate) async fn transcribe_audio_file_impl(
     let upload_generation = retry_generation.unwrap_or_else(current_recording_generation);
     log::info!("[UPLOAD] transcribe_audio_file started");
     if validate_requirements {
-        validate_recording_requirements(&app, false).await?;
+        validate_recording_requirements(&app).await?;
     }
 
     // Use the provided file path directly
@@ -8091,7 +8085,7 @@ pub async fn diarize_audio_file(
     app: AppHandle,
     file_path: String,
 ) -> Result<Vec<UploadDiarizationSegment>, String> {
-    validate_recording_requirements(&app, false).await?;
+    validate_recording_requirements(&app).await?;
 
     let audio_path = std::path::PathBuf::from(&file_path);
     if !audio_path.exists() {

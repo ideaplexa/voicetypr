@@ -13,6 +13,7 @@ export function TrialStep({
   onStartTrial,
   onUpgrade,
   onHaveKey,
+  onBack,
   onDecideLater,
   consent,
 }: {
@@ -22,6 +23,7 @@ export function TrialStep({
   onStartTrial: (name: string, email: string) => Promise<TrialStartError | null>;
   onUpgrade: () => void;
   onHaveKey: () => void;
+  onBack: () => void;
   onDecideLater: () => void;
   consent: ReactNode;
 }) {
@@ -29,7 +31,7 @@ export function TrialStep({
   return (
     <section className="flex w-full flex-col items-center gap-[18px]">
       <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        {trialEnded ? "Trial ended" : "You’re set. Keep it free for 7 days."}
+        {trialEnded ? "Trial ended" : "Start with 7 days free"}
       </h2>
       <div className="grid w-full gap-3 sm:grid-cols-[1.45fr_1fr]">
         {trialEnded ? (
@@ -67,9 +69,12 @@ export function TrialStep({
         <li className="flex items-center gap-1.5"><Lock className="size-3.5" />Usage reports never include your words or audio</li>
       </ul>
       {consent}
-      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onDecideLater}>
-        Decide later
-      </Button>
+      <div className="flex gap-[10px]">
+        <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
+        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onDecideLater}>
+          Decide later
+        </Button>
+      </div>
     </section>
   );
 }

@@ -62,8 +62,7 @@ them): `commands/audio.rs` (~8.7k lines), `cloud_stt/soniox.rs` (~4.6k),
    hold-to-record) spawns `start_recording` / `stop_recording`
    (`commands/audio.rs`). In-window fallback: `useInAppRecordingHotkey.ts`.
 2. **Start** — `start_recording -> Result<bool, String>`: validates license/mic/
-   model (`validate_recording_requirements`; a device whose trial never started
-   gets a few dictations during onboarding, `license/first_run.rs`), opens a recording generation
+   model (`validate_recording_requirements`), opens a recording generation
    (`begin_recording_generation`), `Idle → Starting → Recording`, optionally
    builds a live-preview sink factory, starts the recorder.
 3. **Capture** — `audio/recorder.rs`: CPAL callback → writer thread (WAV) +
