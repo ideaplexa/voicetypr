@@ -21,6 +21,7 @@ export function TryStep({
   microphone,
   onAllowMicrophone,
   onBack,
+  onChooseEngine,
   onNext,
   onWorked,
 }: {
@@ -33,6 +34,7 @@ export function TryStep({
   microphone: PermissionStatus;
   onAllowMicrophone: () => Promise<boolean>;
   onBack: () => void;
+  onChooseEngine: () => void;
   onNext: () => void;
   onWorked: () => void;
 }) {
@@ -126,9 +128,17 @@ export function TryStep({
               {working ? <Spinner /> : listening ? <Square className="size-3.5" /> : <Mic className="size-4" />}
               {listening ? "Stop" : "Or click here to talk"}
             </Button>
-            <Button variant="ghost" onClick={onNext}>Skip for now</Button>
+            <Button variant="ghost" disabled={listening || working} onClick={onNext}>Skip for now</Button>
           </>
         )}
+      </div>
+      <div className="flex items-center gap-[10px]">
+        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={listening || working} onClick={onBack}>
+          Back
+        </Button>
+        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={listening || working} onClick={onChooseEngine}>
+          Use a cloud provider or another computer
+        </Button>
       </div>
     </section>
   );

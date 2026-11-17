@@ -1,11 +1,15 @@
 //! A new user's first dictations in onboarding, before any trial exists.
 //! Only a device whose trial was never started qualifies, only until
-//! onboarding finishes, and only a few times; an ended trial never does.
+//! onboarding finishes, and only a few times per device; an ended trial
+//! never does. The count lives in secure storage, which a reset keeps.
 use crate::commands::audio::RecordingLicenseState;
 use crate::commands::license::RuntimeLicenseCache;
 use crate::license::LicenseState;
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
+
+static CLAIM: Mutex<()> = Mutex::new(());
 
 pub(crate) const FIRST_RUN_DICTATIONS: u64 = 5;
 const USED_KEY: &str = "first_run_dictations_used";
@@ -16,7 +20,8 @@ pub(crate) fn allows(cache: &RuntimeLicenseCache, onboarding_completed: bool, us
         && used < FIRST_RUN_DICTATIONS
 }
 
-/// The license check for a new recording, with the first-run allowance applied.
+/// The license check for a new recording (not file transcription), with the
+/// first-run allowance applied.
 pub(crate) async fn validate_recording_license(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<crate::AppState>();
     let license =
@@ -30,23 +35,25 @@ pub(crate) async fn validate_recording_license(app: &AppHandle) -> Result<(), St
 /// Uses one first-run dictation when this device may still have one.
 async fn claim(app: &AppHandle) -> bool {
     let state = app.state::<crate::AppState>();
-    let Ok(store) = app.store("settings") else {
+    let completed = app
+        .store("settings")
+        .ok()
+        .and_then(|store| store.get("onboarding_completed"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    let cache = state.license_cache.read().await.clone();
+    let Ok(_claim) = CLAIM.lock() else {
         return false;
     };
-    let completed = store
-        .get("onboarding_completed")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let used = store
-        .get(USED_KEY)
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    if !allows(&*state.license_cache.read().await, completed, used) {
+    let used = match crate::secure_store::secure_get(app, USED_KEY) {
+        Ok(value) => value.and_then(|count| count.parse().ok()).unwrap_or(0),
+        Err(_) => return false,
+    };
+    if !allows(&cache, completed, used) {
         return false;
     }
-    store.set(USED_KEY, used + 1);
-    if let Err(error) = store.save() {
-        log::warn!("Could not save the first-run dictation count: {error}");
+    if crate::secure_store::secure_set(app, USED_KEY, &(used + 1).to_string()).is_err() {
+        log::warn!("Could not save the first-run dictation count");
         return false;
     }
     log::info!(

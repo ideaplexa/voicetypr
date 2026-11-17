@@ -67,7 +67,7 @@ export function useFirstDictation(active: boolean) {
   const talk = useCallback(async () => {
     setBusy(true);
     try {
-      await invoke(listening ? "stop_recording" : "start_recording");
+      await (listening ? invoke("stop_recording") : invoke("start_recording", { source: "pointer" }));
     } catch {
       toast.error(listening ? "Could not stop dictation. Try again." : "Could not start dictation. Try again.");
     } finally {

@@ -182,6 +182,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               microphone={permissions.microphone.status}
               onAllowMicrophone={flow.ensureMicrophone}
               onBack={handleBack}
+              onChooseEngine={() => goTo("source")}
               onNext={() => void run(handleNext)}
               onWorked={() => setHeardYou(true)}
             />
@@ -211,7 +212,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                     await flow.saveHotkeySettings();
                     setEditingShortcut(false);
                   })}
-                  nextDisabled={nextDisabled || busy}
+                  nextDisabled={flow.isEditingHotkey || busy}
                 />
               ) : null}
               onChangeShortcut={() => setEditingShortcut(true)}

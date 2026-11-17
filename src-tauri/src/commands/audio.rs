@@ -1,7 +1,8 @@
 use super::normalized_audio::{normalize_upload_audio, NormalizedTempFile};
 use crate::recording::island::{
     self, emit_visible_main, plan_translation_failure, polish_was_guarded, recovery_for_failure,
-    BlockedKind, DesktopWritingSuccessPlan, IslandAction, Note, PolishReason, RecoveryKind,
+    validate_recording_license, BlockedKind, DesktopWritingSuccessPlan, IslandAction, Note,
+    PolishReason, RecoveryKind,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -4587,7 +4588,10 @@ pub(crate) fn recording_license_state(
     }
 }
 /// Pre-recording validation using the readiness state
-pub(super) async fn validate_recording_requirements(app: &AppHandle) -> Result<(), String> {
+pub(super) async fn validate_recording_requirements(
+    app: &AppHandle,
+    first_run: bool,
+) -> Result<(), String> {
     let validate_start = std::time::Instant::now();
     log::debug!("⏱️ [VALIDATE] starting recognition_availability_snapshot");
     let availability = crate::recognition_availability_snapshot(app).await;
@@ -4650,7 +4654,10 @@ pub(super) async fn validate_recording_requirements(app: &AppHandle) -> Result<(
         return Err(error_text);
     }
 
-    crate::license::first_run::validate_recording_license(app).await
+    if first_run {
+        return crate::license::first_run::validate_recording_license(app).await;
+    }
+    validate_recording_license(app).await
 }
 
 pub(crate) fn clear_pending_stop_after_start(app_state: &AppState) {
@@ -7789,7 +7796,7 @@ pub(crate) async fn transcribe_audio_file_impl(
     let upload_generation = retry_generation.unwrap_or_else(current_recording_generation);
     log::info!("[UPLOAD] transcribe_audio_file started");
     if validate_requirements {
-        validate_recording_requirements(&app).await?;
+        validate_recording_requirements(&app, false).await?;
     }
 
     // Use the provided file path directly
@@ -8084,7 +8091,7 @@ pub async fn diarize_audio_file(
     app: AppHandle,
     file_path: String,
 ) -> Result<Vec<UploadDiarizationSegment>, String> {
-    validate_recording_requirements(&app).await?;
+    validate_recording_requirements(&app, false).await?;
 
     let audio_path = std::path::PathBuf::from(&file_path);
     if !audio_path.exists() {

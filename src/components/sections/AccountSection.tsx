@@ -3,6 +3,7 @@ import { useLicense } from "@/contexts/LicenseContext";
 import { ask } from "@tauri-apps/plugin-dialog";
 
 import { useState } from "react";
+import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
 import { ActivateLicenseCard } from "@/components/sections/ActivateLicenseCard";
 import { LicenseStatusCard } from "@/components/sections/LicenseStatusCard";
 
@@ -19,6 +20,7 @@ export function AccountSection({ embedded = false }: { embedded?: boolean } = {}
   } = useLicense();
   const [licenseKey, setLicenseKey] = useState("");
   const [isActivating, setIsActivating] = useState(false);
+  const [keyWindowOpen, setKeyWindowOpen] = useState(false);
 
   const handleActivate = async () => {
     if (!licenseKey.trim()) return;
@@ -76,9 +78,18 @@ export function AccountSection({ embedded = false }: { embedded?: boolean } = {}
           onActivate={() => {
             void handleActivate();
           }}
-          onPurchase={openPurchasePage}
+          onPurchase={() => {
+            void openPurchasePage();
+            setKeyWindowOpen(true);
+          }}
         />
       )}
+      <LicenseKeyDialog
+        open={keyWindowOpen}
+        onOpenChange={setKeyWindowOpen}
+        onActivate={(key) => activateLicense(key, { quiet: true })}
+        onRecheck={checkStatus}
+      />
     </SettingsPage>
   );
 }

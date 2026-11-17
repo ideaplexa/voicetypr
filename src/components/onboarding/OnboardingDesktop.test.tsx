@@ -1064,7 +1064,7 @@ describe("OnboardingDesktop", () => {
     await reachTry(user);
     await user.click(screen.getByRole("button", { name: /click here to talk/i }));
     expect(permissionState.requestMicrophone).toHaveBeenCalledTimes(1);
-    expect(invokeMock).toHaveBeenCalledWith("start_recording");
+    expect(invokeMock).toHaveBeenCalledWith("start_recording", { source: "pointer" });
   });
 
   it("explains a denied microphone and opens its settings", async () => {
@@ -1085,7 +1085,7 @@ describe("OnboardingDesktop", () => {
     emit("recording-state-changed", { state: "recording", error: null, generation: 1 });
     await user.click(await screen.findByRole("button", { name: "Stop" }));
     expect(invokeMock).toHaveBeenCalledWith("stop_recording");
-    expect(invokeMock).not.toHaveBeenCalledWith("start_recording");
+    expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
   });
 
   it("lets Accessibility be skipped and says how to paste", async () => {

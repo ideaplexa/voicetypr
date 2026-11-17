@@ -663,6 +663,7 @@ export function useOnboardingDesktop({
 
   return {
     currentStep,
+    isEditingHotkey,
     goTo: setCurrentStep,
     sourceType,
     preparation,

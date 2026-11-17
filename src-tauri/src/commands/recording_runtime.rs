@@ -15,7 +15,7 @@ impl RecordingRuntime for tauri::Wry {
     }
 
     async fn validate(app: &AppHandle<Self>) -> Result<(), String> {
-        super::audio::validate_recording_requirements(app).await
+        super::audio::validate_recording_requirements(app, true).await
     }
 }
 
