@@ -10,6 +10,7 @@ export function AppMark() {
 export function PromiseStep({
   polishAvailable,
   downloadNote,
+  nextLine,
   busy,
   onBegin,
   onChooseEngine,
@@ -17,6 +18,8 @@ export function PromiseStep({
   polishAvailable: boolean;
   /** One-time download the first try needs, such as "Downloads a 480 MB engine once." */
   downloadNote: string | null;
+  /** What comes after this screen, such as starting the free week. */
+  nextLine: string;
   busy: boolean;
   onBegin: () => void;
   onChooseEngine: () => void;
@@ -48,7 +51,8 @@ export function PromiseStep({
         <ChevronRight />
       </Button>
       <p className="text-[12.5px] text-muted-foreground">
-        {downloadNote ?? "Nothing to set up before you try it."}
+        {nextLine}
+        {downloadNote ? <><br />{downloadNote}</> : null}
       </p>
       <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onChooseEngine}>
         Use a cloud provider or another computer

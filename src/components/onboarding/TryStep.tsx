@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { PermissionStatus } from "@/components/onboarding/onboardingTypes";
 import { useFirstDictation } from "@/components/onboarding/useFirstDictation";
+import { FounderLine } from "@/components/onboarding/FounderLine";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { CircleCheck, Mic, MicOff, Square } from "lucide-react";
@@ -72,6 +73,7 @@ export function TryStep({
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onBack}>Back</Button>
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNext}>Skip for now</Button>
         </div>
+        {access === "ended" ? <FounderLine /> : null}
       </section>
     );
   }

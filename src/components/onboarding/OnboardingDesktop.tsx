@@ -91,7 +91,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const model = preparation.recommended ? local.models[preparation.recommended] : undefined;
   const modelSize = model?.size ? `${Math.round(model.size / (1024 * 1024))} MB` : null;
   const downloadNote = sourceType === "local" && model && !model.downloaded && modelSize
-    ? `Apart from a one-time download of the dictation engine (${modelSize}).`
+    ? `The dictation engine (${modelSize}) downloads once, in the background.`
     : null;
   const flowSteps: Step[] = ["promise", ...(sawTrial || !licensed ? (["trial"] as Step[]) : []), "try", "setup", "use", "done"];
   const dotIndex = Math.max(0, flowSteps.indexOf(currentStep === "source" || currentStep === "readiness" ? "promise" : currentStep));
@@ -135,6 +135,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             <PromiseStep
               polishAvailable={polishAvailable}
               downloadNote={downloadNote}
+              nextLine={licenseStatus?.status === "licensed" ? "Your license is active. Say anything."
+                : licenseStatus?.status === "trial" ? "Your free week is running. Say anything."
+                : licenseStatus?.status === "expired" ? "Upgrade or add your key, then say anything."
+                : "Start your free week, then say anything."}
               busy={busy || preparation.savingLanguage}
               onBegin={() => void run(handleNext)}
               onChooseEngine={() => goTo("source")}

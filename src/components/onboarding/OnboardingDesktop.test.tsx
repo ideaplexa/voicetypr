@@ -103,6 +103,9 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn().mockResolvedValue(undefined),
 }));
 
+const shellOpen = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@tauri-apps/plugin-shell", () => ({ open: shellOpen }));
+
 const platformMock = vi.hoisted(() => ({ isMacOS: true, isWindows: false, isLinux: false }));
 vi.mock("@/lib/platform", () => platformMock);
 
@@ -1007,7 +1010,7 @@ describe("OnboardingDesktop", () => {
         downloaded: false,
       };
       const view = renderOnboarding();
-      expect(await screen.findByText(/one-time download of the dictation engine \(670 MB\)/)).toBeInTheDocument();
+      expect(await screen.findByText(/The dictation engine \(670 MB\) downloads once, in the background\./)).toBeInTheDocument();
       await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en"));
       await user.click(screen.getByRole("button", { name: /try it with your own voice/i }));
       expect(modelManagement.downloadModel).toHaveBeenCalledTimes(1);
@@ -1151,6 +1154,8 @@ describe("OnboardingDesktop", () => {
       const start = vi.fn().mockResolvedValue(null);
       const user = userEvent.setup();
       renderOnboarding({ licenseStatus: { status: "none" }, onStartTrial: start });
+      expect(await screen.findByText("Start your free week, then say anything.")).toBeInTheDocument();
+      expect(screen.queryByText(/nothing to set up/i)).not.toBeInTheDocument();
       await reachTrial(user);
       expect(screen.getByRole("checkbox", { name: /share anonymous crash reports/i })).not.toBeChecked();
       await fillContact(user);
@@ -1240,6 +1245,19 @@ describe("OnboardingDesktop", () => {
       await user.click(await screen.findByRole("button", { name: /^continue$/i }));
       await skipUse(user);
       expect(await screen.findByRole("heading", { name: "License active. Voicetypr is yours." })).toBeInTheDocument();
+    });
+
+    it.each([
+      ["a new device", { status: "none" }],
+      ["a device whose trial ended", { status: "expired" }],
+    ] as const)("signs the trial step from Moinul with the support address on %s", async (_name, licenseStatus) => {
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus, onStartTrial: vi.fn() });
+      await user.click(await screen.findByRole("button", { name: /try it with your own voice/i }));
+      expect(await screen.findByText(/Made by Moinul\./)).toBeInTheDocument();
+      expect(screen.queryByText(/within|Made by Moin\b/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "I read every email." }));
+      expect(shellOpen).toHaveBeenCalledWith("mailto:support@voicetypr.com");
     });
 
     it("offers only Upgrade and a key when this device's trial has ended", async () => {
