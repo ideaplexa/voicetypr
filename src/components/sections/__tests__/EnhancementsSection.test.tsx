@@ -1048,11 +1048,9 @@ describe("EnhancementsSection", () => {
         provider: "openai",
         model: "gpt-6.1-sol",
       });
-      expect(invoke).toHaveBeenCalledWith("update_enhancement_options", {
-        options: { preset: "CleanDictation" },
-      });
       expect(toast.success).toHaveBeenCalledWith("Polish on");
     });
+    expect(invoke).not.toHaveBeenCalledWith("update_enhancement_options", expect.anything());
   });
 
   it("keeps a loaded key-based provider connected when backend AI readiness is ready", async () => {
@@ -1261,7 +1259,10 @@ describe("EnhancementsSection", () => {
     });
   });
 
-  it("switches to Clean Dictation when Polish is turned on", async () => {
+  it.each([
+    ["Clean", "CleanDictation"],
+    ["Message", "Message"],
+  ])("shows the %s style Polish was turned on with, without overwriting it", async (label, preset) => {
     aiSettingsResponse = { ...enabledAISettings, enabled: false };
     (hasApiKey as ReturnType<typeof vi.fn>).mockImplementation(
       async (providerId: string) => providerId === "openai",
@@ -1271,13 +1272,14 @@ describe("EnhancementsSection", () => {
 
     const aiToggle = await screen.findByRole("switch", { name: /polish/i });
     await waitFor(() => expect(aiToggle).toBeEnabled());
+    enhancementOptionsResponse = { preset };
     await user.click(aiToggle);
 
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("update_enhancement_options", {
-        options: { preset: "CleanDictation" },
-      });
-    });
+    const styles = await screen.findByRole("group", { name: "Default style" });
+    await waitFor(() =>
+      expect(within(styles).getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(invoke).not.toHaveBeenCalledWith("update_enhancement_options", expect.anything());
   });
 
   it("saves custom provider setup without enabling Polish", async () => {

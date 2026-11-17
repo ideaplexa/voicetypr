@@ -285,6 +285,9 @@ impl RealTranscriptionContext {
         context: Option<&str>,
     ) -> Result<TranscriptionResult, String> {
         let start = Instant::now();
+        if let Some(app) = &self.app_handle {
+            crate::license::access::require_for_sharing(app)?;
+        }
 
         // Get current engine and model info from one atomic shared-state snapshot.
         let SharedModelState {

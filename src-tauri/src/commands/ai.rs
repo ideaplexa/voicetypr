@@ -902,9 +902,14 @@ pub async fn update_ai_settings(
             if selection_clears_model_reselection(&provider, &model) {
                 store.set("ai_model_needs_reselection", json!(false));
             }
+            let options = if enabled {
+                crate::ai::starting_style::take_enabled_options(store)
+            } else {
+                EnhancementOptions::default_for_ai_enabled(false)
+            };
             store.set(
                 "enhancement_options",
-                serde_json::to_value(EnhancementOptions::default_for_ai_enabled(enabled))
+                serde_json::to_value(options)
                     .map_err(|e| format!("Failed to serialize enhancement options: {}", e))?,
             );
             if !enabled {

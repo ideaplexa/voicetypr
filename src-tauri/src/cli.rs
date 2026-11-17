@@ -550,9 +550,7 @@ async fn run_transcribe(
     if !args.file.exists() {
         return Err(format!("Audio file not found: {}", args.file.display()).into());
     }
-    if args.server.is_none() {
-        check_license_status(app.clone()).await?;
-    }
+    crate::license::access::require_for_cli(app).await?;
     let payload = if let Some(server) = args.server.as_deref() {
         let password = resolve_password(args.password.clone(), args.password_stdin)?;
         transcribe_via_remote(app, &args.file, server, password).await?
@@ -617,7 +615,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         );
     }
 
-    check_license_status(app.clone()).await?;
+    crate::license::access::require_for_cli(app).await?;
     let settings = get_settings(app.clone()).await?;
     let recordings_dir = crate::recording::file_jobs::cli_directory(&app.path().app_data_dir()?)?;
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
@@ -710,6 +708,7 @@ async fn run_stream_bench(
     if !args.file.exists() {
         return Err(format!("Audio file not found: {}", args.file.display()).into());
     }
+    crate::license::access::require_for_cli(app).await?;
 
     let settings = get_settings(app.clone()).await?;
     let model = args

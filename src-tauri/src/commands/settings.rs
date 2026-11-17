@@ -110,6 +110,9 @@ pub struct Settings {
     pub onboarding_completed: bool,
     pub check_updates_automatically: bool,
     pub selected_microphone: Option<String>,
+    /// Polish style picked in onboarding; applied when Polish first turns on.
+    #[serde(default)]
+    pub starting_polish_style: Option<String>,
     // Push-to-talk support
     pub recording_mode: String, // "toggle" or "push_to_talk"
     pub use_different_ptt_key: bool,
@@ -190,6 +193,7 @@ impl Default for Settings {
             onboarding_completed: false,      // Default to not completed
             check_updates_automatically: true, // Default to automatic update checks; installs still require confirmation
             selected_microphone: None,         // Default to system default microphone
+            starting_polish_style: None,
             recording_mode: "toggle".to_string(), // Default to toggle mode for backward compatibility
             use_different_ptt_key: false,         // Default to using same key
             ptt_hotkey: None,                     // Empty until the user picks a separate hold key
@@ -607,6 +611,12 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         selected_microphone: store
             .get("selected_microphone")
             .and_then(|v| v.as_str().map(|s| s.to_string())),
+        starting_polish_style: crate::ai::starting_style::normalize(
+            store
+                .get(crate::ai::starting_style::KEY)
+                .as_ref()
+                .and_then(|v| v.as_str()),
+        ),
         recording_mode: store
             .get("recording_mode")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -916,6 +926,12 @@ pub async fn save_settings(
         json!(settings.check_updates_automatically),
     );
     store.set("selected_microphone", json!(settings.selected_microphone));
+    match crate::ai::starting_style::normalize(settings.starting_polish_style.as_deref()) {
+        Some(style) => store.set(crate::ai::starting_style::KEY, json!(style)),
+        None => {
+            store.delete(crate::ai::starting_style::KEY);
+        }
+    }
 
     // Save push-to-talk settings
     store.set("recording_mode", json!(settings.recording_mode.clone()));

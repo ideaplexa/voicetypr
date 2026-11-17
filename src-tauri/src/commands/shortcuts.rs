@@ -644,7 +644,13 @@ pub async fn toggle_ai_formatting(app: AppHandle) -> Result<(), String> {
                 &app,
                 move |store| {
                     store.set("ai_enabled", serde_json::Value::Bool(true));
-                    if normalize_to_clean {
+                    if store.has(crate::ai::starting_style::KEY) {
+                        let options = crate::ai::starting_style::take_enabled_options(store);
+                        store.set(
+                            "enhancement_options",
+                            serde_json::to_value(options).map_err(|e| e.to_string())?,
+                        );
+                    } else if normalize_to_clean {
                         store.set("enhancement_options", clean_dictation_options());
                     }
                     Ok(())

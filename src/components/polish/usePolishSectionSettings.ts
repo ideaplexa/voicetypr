@@ -89,11 +89,10 @@ export function usePolishSectionSettings({
 
   useTauriEvent("polish-options-changed", () => { void loadEnhancementOptionsRef.current(true); });
 
+  // Turning Polish on already saved its style (Clean, or the onboarding pick).
   const handlePolishEnabled = useCallback(async () => {
-    if (enhancementOptions.preset !== "CleanDictation") {
-      await persistEnhancementOptionsRef.current({ preset: "CleanDictation" });
-    }
-  }, [enhancementOptions.preset]);
+    await loadEnhancementOptionsRef.current(true);
+  }, []);
 
   const handleEnabledModelSelected = useCallback(async () => {
     await loadEnhancementOptionsRef.current(true);
@@ -101,7 +100,11 @@ export function usePolishSectionSettings({
 
   const handlePolishToggled = useCallback(
     async (enabled: boolean) => {
-      const nextPreset: EnhancementPreset = enabled ? "CleanDictation" : "PersonalDictation";
+      if (enabled) {
+        await loadEnhancementOptionsRef.current(true);
+        return;
+      }
+      const nextPreset: EnhancementPreset = "PersonalDictation";
 
       if (
         nextPreset === "PersonalDictation" &&

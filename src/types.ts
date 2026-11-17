@@ -1,3 +1,5 @@
+import type { EnhancementPreset } from "@/types/ai";
+
 /** Data failures prevent success; OS integration warnings do not prevent restart. */
 export interface ResetResult {
   success: boolean;
@@ -133,6 +135,8 @@ export interface AppSettings {
   onboarding_completed?: boolean;
   check_updates_automatically?: boolean;
   selected_microphone?: string | null;
+  /** Polish style picked in onboarding; becomes the Default style when Polish first turns on. */
+  starting_polish_style?: Exclude<EnhancementPreset, "PersonalDictation"> | null;
   // Push-to-talk support
   recording_mode?: RecordingMode;
   use_different_ptt_key?: boolean;

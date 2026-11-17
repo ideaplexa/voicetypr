@@ -1504,6 +1504,7 @@ pub async fn transcribe_remote(
     // History passes the recordings-dir path used by maintenance, not its
     // canonical alias. Lease before settings can suspend; RAII also covers errors.
     let _source_lease = crate::recording::kept::protect_path(std::path::Path::new(&audio_path));
+    crate::recording::island::validate_recording_license(&app).await?;
     // Get the connection info
     let connection = {
         let settings = remote_settings.lock().await;

@@ -242,7 +242,7 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
 ];
 
-export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed";
+export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed" | "no-access";
 
 export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
@@ -287,10 +287,14 @@ export function createFixtures(options: PreviewOptions) {
             };
       })
     : demoModels;
+  const beforeTrial = options.onboarding === "promise" || options.onboarding === "trial" ||
+    options.onboarding === "source" || options.onboarding === "readiness" || options.onboardingCase === "no-access";
   const license: LicenseStatus = options.onboardingCase === "expired"
     ? { status: "expired" }
-    : options.trialNotStarted || (options.onboarding && options.onboardingCase !== "licensed")
+    : options.trialNotStarted || (options.onboarding && beforeTrial)
     ? { status: "none" }
+    : options.onboarding && options.onboardingCase !== "licensed"
+    ? { status: "trial", trial_days_left: 7, expires_at: "2026-11-24T12:00:00Z" }
     : {
         status: "licensed",
         license_type: "pro",

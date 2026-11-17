@@ -177,7 +177,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
       const licenseStatus = await invoke<LicenseStatus>("start_trial", { name, email, noticeVersion: TRIAL_NOTICE_VERSION });
       if (checkId === latestCheckStatusId.current) setStatus(licenseStatus);
       if (licenseStatus.status === "trial") toast.success("Your free trial has started");
-      return null;
+      return licenseStatus.status === "trial" || licenseStatus.status === "licensed" ? null : "trial_failed";
     } catch (error: unknown) {
       const code = TRIAL_START_ERRORS.find((known) => known === error) ?? "trial_failed";
       log.error("Failed to start trial:", code);

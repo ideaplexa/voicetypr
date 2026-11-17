@@ -43,3 +43,4 @@ pub(crate) mod settings_migration;
 mod fallback_reason;
 
 pub(crate) mod settings_selection;
+pub(crate) mod starting_style;

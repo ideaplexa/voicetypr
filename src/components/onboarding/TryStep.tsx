@@ -18,6 +18,9 @@ export function TryStep({
   polishAvailable,
   builtinPolish = false,
   engineReady,
+  access,
+  onStartTrial,
+  onHaveKey,
   preparing,
   microphone,
   onAllowMicrophone,
@@ -32,6 +35,10 @@ export function TryStep({
   /** Polish runs on Voicetypr's server rather than the user's own provider. */
   builtinPolish?: boolean;
   engineReady: boolean;
+  /** Whether this device may dictate: a trial or license is needed first. */
+  access: "ok" | "none" | "offline" | "ended";
+  onStartTrial: () => void;
+  onHaveKey: () => void;
   /** Download progress for the engine while it is not ready. */
   preparing: ReactNode;
   microphone: PermissionStatus;
@@ -41,7 +48,7 @@ export function TryStep({
   onNext: () => void;
   onWorked: () => void;
 }) {
-  const { listening, working, result, busy, talk, reset } = useFirstDictation(engineReady);
+  const { listening, working, result, busy, talk, reset } = useFirstDictation(engineReady && access === "ok");
   useEffect(() => {
     if (result) onWorked();
   }, [result, onWorked]);
@@ -49,6 +56,28 @@ export function TryStep({
   // Both panes only when Polish could change the text and, once heard, did.
   const sideBySide = result ? result.polished : polishAvailable;
   const verb = holdToTalk ? "Hold" : "Press";
+
+  if (access !== "ok") {
+    const blocked = {
+      none: ["Dictation starts with your trial", "Start your free 7-day trial or add a license key, and you can say your first sentence straight away.", "Start 7-day trial"],
+      offline: ["We couldn’t confirm your trial", "Check your connection and try again. Dictation starts as soon as your trial is confirmed.", "Try again"],
+      ended: ["Trial ended", "This device’s free week has been used. Upgrade, or activate a key you already have, to keep dictating.", "Upgrade or add a key"],
+    }[access];
+    return (
+      <section className="flex w-full flex-col items-center gap-[18px] text-center">
+        <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">{blocked[0]}</h2>
+        <p role="alert" className="max-w-[480px] text-sm leading-6 text-muted-foreground">{blocked[1]}</p>
+        <div className="flex flex-wrap items-center justify-center gap-[10px]">
+          <Button onClick={onStartTrial}>{blocked[2]}</Button>
+          <Button variant="ghost" onClick={onHaveKey}>I have a key</Button>
+        </div>
+        <div className="flex items-center gap-[10px]">
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onBack}>Back</Button>
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNext}>Skip for now</Button>
+        </div>
+      </section>
+    );
+  }
 
   if (!engineReady) {
     return (
