@@ -107,6 +107,19 @@ pub async fn uninstall_cli_tool() -> Result<CliToolStatus, String> {
     }
 }
 
+/// Drop this installation's folder from the user PATH. The Windows uninstaller
+/// runs it through the hidden `remove-cli-path` command; elsewhere a no-op.
+pub(crate) fn remove_install_dir_from_path() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_path::uninstall()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(())
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use super::{CliToolStatus, MACOS_SHIM_PATH};

@@ -8,5 +8,16 @@ pub async fn toggle_recording(
     app: AppHandle,
     source: Option<StartSource>,
 ) -> Result<ToggleRoute, String> {
-    crate::recording::toggle::toggle_recording(app, source.unwrap_or_default()).await
+    let source = source.unwrap_or_default();
+    // Only the main window's in-app hotkey fallback sends Hotkey here.
+    if source == StartSource::Hotkey {
+        use tauri::Manager;
+        let state = app.state::<crate::AppState>();
+        if !crate::recording::hotkeys::claim_toggle_window(&state) {
+            log::info!("Toggle: in-app hotkey ignored; this press was already handled");
+            return Ok(ToggleRoute::NoChange);
+        }
+        log::info!("Toggle: in-app hotkey fallback");
+    }
+    crate::recording::toggle::toggle_recording(app, source).await
 }

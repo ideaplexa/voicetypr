@@ -11,11 +11,13 @@ use serde_json::json;
 use tauri::async_runtime::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use tauri::Manager;
 
-use crate::audio::recorder::AudioRecorder;
+use crate::audio::recorder::{AudioRecorder, CaptureInterrupt};
 use crate::commands::ai::{ai_provider_key_names, cache_ai_api_key, CacheApiKeyArgs};
-use crate::commands::audio::transcribe_audio_file_for_cli;
+use crate::commands::audio::{
+    recording_license_state, transcribe_audio_file_for_cli, RecordingLicenseState,
+};
 use crate::commands::keyring::keyring_get;
-use crate::commands::license::check_license_status;
+use crate::commands::license::{check_license_status, RuntimeLicenseCache};
 use crate::commands::model::get_model_status;
 use crate::commands::remote::load_remote_settings;
 use crate::commands::settings::get_settings;
@@ -67,6 +69,9 @@ enum CliCommand {
     /// Replay a WAV through the hidden Parakeet streaming prototype and print timing spans.
     #[command(hide = true, name = "stream-bench")]
     StreamBench(StreamBenchArgs),
+    /// Remove this installation's folder from the user PATH (run by the Windows uninstaller).
+    #[command(hide = true, name = "remove-cli-path")]
+    RemoveCliPath,
 }
 
 impl CliCommand {
@@ -85,6 +90,7 @@ impl CliCommand {
             CliCommand::Transcribe(a) => a.json,
             CliCommand::Record(a) => a.json,
             CliCommand::StreamBench(_) => true,
+            CliCommand::RemoveCliPath => false,
         }
     }
 }
@@ -111,7 +117,8 @@ struct TranscribeArgs {
     /// Model to use (e.g. "base", "large-v3-turbo"); defaults to the app's selected model. Run `voicetypr models` to list installed models.
     #[arg(long)]
     model: Option<String>,
-    /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine.
+    /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine,
+    /// or is inferred from --model when a model is given.
     #[arg(long)]
     engine: Option<String>,
     /// Override the app's speech_language setting for this transcription run.
@@ -146,7 +153,8 @@ struct RecordArgs {
     /// Model to use (e.g. "base", "large-v3-turbo"); defaults to the app's selected model. Run `voicetypr models` to list installed models.
     #[arg(long)]
     model: Option<String>,
-    /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine.
+    /// Engine override ("whisper" or "parakeet"); defaults to the selected model's engine,
+    /// or is inferred from --model when a model is given.
     #[arg(long)]
     engine: Option<String>,
     /// Transcribe via a remote Voicetypr server given as host:port (e.g. 192.168.1.10:47842) instead of locally.
@@ -204,6 +212,7 @@ pub fn maybe_run_from_env_with_context(
                 | "transcribe"
                 | "record"
                 | "stream-bench"
+                | "remove-cli-path"
                 | "polish"
                 | "polish-eval"
                 | "vad"
@@ -259,6 +268,13 @@ pub fn maybe_run_from_env_with_context(
     let Some(command) = cli.command else {
         return Ok(false);
     };
+    if let CliCommand::RemoveCliPath = &command {
+        if let Err(error) = crate::commands::cli_tool::remove_install_dir_from_path() {
+            eprintln!("{}", format_cli_error(&error, false));
+            std::process::exit(1);
+        }
+        return Ok(true);
+    }
     if let CliCommand::Clipboard(args) = &command {
         if let Err(error) = crate::writing::clipboard_transaction::cli::run(args) {
             eprintln!("{}", format_cli_error(error, args.wants_json()));
@@ -333,6 +349,9 @@ pub fn maybe_run_from_env_with_context(
                 CliCommand::Transcribe(args) => run_transcribe(&app_handle, args).await?,
                 CliCommand::Record(args) => run_record(&app_handle, args).await?,
                 CliCommand::StreamBench(args) => run_stream_bench(&app_handle, args).await?,
+                CliCommand::RemoveCliPath => {
+                    unreachable!("PATH cleanup runs before desktop initialization")
+                }
             }
             Ok(())
         }
@@ -552,7 +571,7 @@ async fn run_transcribe(
         return Err(format!("Audio file not found: {}", args.file.display()).into());
     }
     if args.server.is_none() {
-        check_license_status(app.clone()).await?;
+        require_license(app).await?;
     }
     let payload = if let Some(server) = args.server.as_deref() {
         let password = resolve_password(args.password.clone(), args.password_stdin)?;
@@ -582,17 +601,46 @@ async fn run_transcribe(
     Ok(())
 }
 
+/// The CLI takes the hotkey's licence decision. A check that failed is
+/// reported as a failed check, never as an ended trial.
+async fn require_license(app: &tauri::AppHandle) -> Result<(), String> {
+    cli_license_decision(&check_license_status(app.clone()).await).map_err(str::to_owned)
+}
+
+fn cli_license_decision(
+    check: &Result<crate::license::LicenseStatus, String>,
+) -> Result<(), &'static str> {
+    match recording_license_state(&RuntimeLicenseCache::from_check(check)) {
+        RecordingLicenseState::Ready => Ok(()),
+        RecordingLicenseState::Blocked => Err(
+            "No active license or trial. Buy a license or enter your key in Voicetypr → Settings → License, then try again.",
+        ),
+        RecordingLicenseState::VerificationRequired => Err(
+            "Voicetypr needs to verify your license online. Connect to the internet, open Voicetypr → Settings → License and choose Recheck, then try again.",
+        ),
+        RecordingLicenseState::CheckFailed | RecordingLicenseState::Loading => Err(
+            "Could not check your Voicetypr license (network or server problem). Check your connection and try again.",
+        ),
+    }
+}
+
+const RECORDING_CANCELLED: &str = "Recording cancelled. Nothing was saved.";
+
 fn resolve_cli_model_selection(
     model: Option<&str>,
     engine: Option<&str>,
     settings: &crate::commands::settings::Settings,
 ) -> Result<(String, Option<String>), String> {
+    let selected_model =
+        (!settings.current_model.is_empty()).then_some(settings.current_model.as_str());
     let model = model
-        .or_else(|| (!settings.current_model.is_empty()).then_some(settings.current_model.as_str()))
+        .or(selected_model)
         .ok_or_else(|| "No model specified and no model is selected in the app. Pass --model <name> (run `voicetypr models` to list installed models) or choose a default model in Voicetypr settings.".to_string())?;
+    // The selected engine belongs to the selected model only; another --model
+    // lets the resolver infer its engine from the model name.
     let engine = engine
         .or_else(|| {
-            (!settings.current_model_engine.is_empty())
+            (Some(model) == selected_model && !settings.current_model_engine.is_empty())
                 .then_some(settings.current_model_engine.as_str())
         })
         .map(str::to_owned)
@@ -618,7 +666,7 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         );
     }
 
-    check_license_status(app.clone()).await?;
+    require_license(app).await?;
     let settings = get_settings(app.clone()).await?;
     let recordings_dir = crate::recording::file_jobs::cli_directory(&app.path().app_data_dir()?)?;
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
@@ -629,6 +677,30 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         delete_on_drop: true,
     };
 
+    // Ctrl+C is a cancel: stop the capture now (no post-roll), keep nothing.
+    let capture_interrupt = CaptureInterrupt::default();
+    let cancelled = Arc::new(tokio::sync::Notify::new());
+    let cancel_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ctrl_c = tauri::async_runtime::spawn({
+        let (interrupt, cancelled, requested) = (
+            capture_interrupt.clone(),
+            cancelled.clone(),
+            cancel_requested.clone(),
+        );
+        async move {
+            if tokio::signal::ctrl_c().await.is_err() {
+                return;
+            }
+            requested.store(true, Ordering::SeqCst);
+            interrupt.interrupt();
+            cancelled.notify_one();
+            // A second Ctrl+C is the escape hatch if the cancel stalls.
+            if tokio::signal::ctrl_c().await.is_ok() {
+                std::process::exit(130);
+            }
+        }
+    });
+
     let mut recorder = AudioRecorder::new();
     recorder.start_recording(
         output_path
@@ -637,36 +709,55 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         settings.selected_microphone.clone(),
         false,
         0,
-        Default::default(),
+        capture_interrupt,
         std::sync::Arc::new(|| false),
         None,
         std::time::Instant::now(),
     )?;
-    eprintln!("Recording… stop by silence.");
-    let stop_message = recorder.wait_for_recording_end()?;
+    eprintln!("Recording… stop by silence, or press Ctrl+C to cancel.");
+    let capture = recorder.wait_for_recording_end();
+    if cancel_requested.load(Ordering::SeqCst) {
+        return Err(RECORDING_CANCELLED.into());
+    }
+    let stop_message = capture?;
     // Only finalized, usable captures are offered for retry.
     recording_guard.capture_finished()?;
 
-    let payload = if let Some(server) = args.server.as_deref() {
-        let password = resolve_password(args.password.clone(), args.password_stdin)?;
-        let mut payload = transcribe_via_remote(app, &output_path, server, password).await?;
-        payload["stop_reason"] = json!(stop_message);
-        payload
-    } else {
-        let (model, engine) =
-            resolve_cli_model_selection(args.model.as_deref(), args.engine.as_deref(), &settings)?;
-        let t = transcribe_audio_file_for_cli(
-            app.clone(),
-            output_path.to_string_lossy().to_string(),
-            model.clone(),
-            engine.clone(),
-            None,
-            None,
-            None,
-        )
-        .await?;
-        json!({ "text": t.text, "words": t.words, "metadata": t.metadata, "model": model, "engine": engine, "stop_reason": stop_message })
+    let transcription = async {
+        if let Some(server) = args.server.as_deref() {
+            let password = resolve_password(args.password.clone(), args.password_stdin)?;
+            let mut payload = transcribe_via_remote(app, &output_path, server, password).await?;
+            payload["stop_reason"] = json!(stop_message);
+            Ok::<_, Box<dyn Error>>(payload)
+        } else {
+            let (model, engine) = resolve_cli_model_selection(
+                args.model.as_deref(),
+                args.engine.as_deref(),
+                &settings,
+            )?;
+            let t = transcribe_audio_file_for_cli(
+                app.clone(),
+                output_path.to_string_lossy().to_string(),
+                model.clone(),
+                engine.clone(),
+                None,
+                None,
+                None,
+            )
+            .await?;
+            Ok(
+                json!({ "text": t.text, "words": t.words, "metadata": t.metadata, "model": model, "engine": engine, "stop_reason": stop_message }),
+            )
+        }
     };
+    let payload = tokio::select! {
+        payload = transcription => payload?,
+        _ = cancelled.notified() => {
+            recording_guard.delete_on_drop = true;
+            return Err(RECORDING_CANCELLED.into());
+        }
+    };
+    ctrl_c.abort();
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -1025,6 +1116,77 @@ mod tests {
                 model
             );
         }
+    }
+
+    #[test]
+    fn a_model_flag_does_not_inherit_the_selected_models_engine() {
+        let settings = crate::commands::settings::Settings {
+            current_model: "parakeet-tdt-0.6b-v3".to_string(),
+            current_model_engine: "parakeet".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_cli_model_selection(Some("base.en"), None, &settings).unwrap(),
+            ("base.en".to_string(), None)
+        );
+        assert_eq!(
+            resolve_cli_model_selection(None, None, &settings).unwrap(),
+            (
+                "parakeet-tdt-0.6b-v3".to_string(),
+                Some("parakeet".to_string())
+            )
+        );
+        assert_eq!(
+            resolve_cli_model_selection(Some("base.en"), Some("whisper"), &settings).unwrap(),
+            ("base.en".to_string(), Some("whisper".to_string()))
+        );
+    }
+
+    fn license(status: crate::license::LicenseState) -> crate::license::LicenseStatus {
+        crate::license::LicenseStatus {
+            status,
+            trial_days_left: None,
+            license_type: None,
+            license_key: None,
+            expires_at: None,
+            verification_state: None,
+            verification_expires_at: None,
+        }
+    }
+
+    #[test]
+    fn cli_refuses_without_an_active_license_or_trial() {
+        use crate::license::LicenseState;
+        for status in [LicenseState::Expired, LicenseState::None] {
+            let refusal = cli_license_decision(&Ok(license(status))).unwrap_err();
+            assert!(refusal.starts_with("No active license or trial."));
+            assert!(refusal.contains("Settings → License"));
+        }
+        for status in [LicenseState::Trial, LicenseState::Licensed] {
+            assert_eq!(cli_license_decision(&Ok(license(status))), Ok(()));
+        }
+    }
+
+    #[test]
+    fn cli_reports_a_failed_license_check_as_a_failure_not_an_ended_trial() {
+        let refusal = cli_license_decision(&Err("request timed out".to_string())).unwrap_err();
+        assert!(refusal.starts_with("Could not check your Voicetypr license"));
+        assert!(!refusal.to_lowercase().contains("trial"));
+        assert!(!refusal.to_lowercase().contains("expired"));
+    }
+
+    #[test]
+    fn cli_asks_for_online_verification_when_the_offline_window_has_ended() {
+        let mut status = license(crate::license::LicenseState::Licensed);
+        status.verification_expires_at = Some(chrono::Utc::now() - chrono::Duration::minutes(1));
+        let refusal = cli_license_decision(&Ok(status)).unwrap_err();
+        assert!(refusal.starts_with("Voicetypr needs to verify your license online."));
+    }
+
+    #[test]
+    fn uninstaller_path_cleanup_is_a_hidden_cli_route() {
+        let cli = Cli::try_parse_from(["voicetypr", "remove-cli-path"]).unwrap();
+        assert!(matches!(cli.command, Some(CliCommand::RemoveCliPath)));
     }
 
     async fn assert_cli_model_resolution(command: &str) {

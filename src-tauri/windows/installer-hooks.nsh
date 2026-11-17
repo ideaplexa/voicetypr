@@ -58,15 +58,31 @@
 !macro NSIS_HOOK_PREINSTALL
 !macroend
 
+!macro RemoveLegacyFfmpeg
+    ; Installers before 2.1 shipped ffmpeg sidecars that an older bundler named
+    ; ffmpeg.exe.exe / ffprobe.exe.exe (about 100 MB each). Nothing uses them now.
+    Delete "$INSTDIR\ffmpeg.exe.exe"
+    Delete "$INSTDIR\ffprobe.exe.exe"
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
     !insertmacro InstallVcRuntime
     !insertmacro InstallPdbSymbols
+    !insertmacro RemoveLegacyFfmpeg
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
     ; This hook runs before Tauri's own running-app check; stop the app before deleting loaded DLLs.
     !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
+    ; A real uninstall takes the CLI's user PATH entry with it; an update keeps it.
+    ; The app edits HKCU\Environment itself, which avoids NSIS PATH truncation.
+    ${If} $UpdateMode <> 1
+        ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" remove-cli-path'
+    ${EndIf}
+
     Delete "$INSTDIR\voicetypr.pdb"
+    !insertmacro RemoveLegacyFfmpeg
 
     ; Remove the app-local runtime DLLs copied at install time. Iterate the
     ; bundled folder (still present at this point) so the list never drifts.
