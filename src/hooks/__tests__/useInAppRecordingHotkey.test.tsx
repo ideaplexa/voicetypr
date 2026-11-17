@@ -194,13 +194,32 @@ describe("useInAppRecordingHotkey", () => {
     now.mockRestore();
   });
 
-  it("ignores the hotkey when focus is not in an editable field", () => {
+  it("on macOS ignores the hotkey when focus is not in an editable field", () => {
+    platform.isMacOS = true;
     renderHook(() => useInAppRecordingHotkey());
 
     fireHotkey(nonEditable);
 
     expect(mockRecording.toggleRecording).not.toHaveBeenCalled();
     expect(mockRecording.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("on Windows toggles from anywhere in the window, where the low-level hook hears nothing", () => {
+    renderHook(() => useInAppRecordingHotkey());
+
+    fireHotkey(nonEditable);
+
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
+    expect(mockRecording.startRecording).not.toHaveBeenCalled();
+  });
+
+  it("on Windows matches the stored default primary Control+Space", () => {
+    mockSettings.hotkey = "Control+Space";
+    renderHook(() => useInAppRecordingHotkey());
+
+    fireHotkey(editable);
+
+    expect(mockRecording.toggleRecording).toHaveBeenCalledTimes(1);
   });
 
   it("ignores a combo that does not match the configured hotkey", () => {

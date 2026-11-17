@@ -296,6 +296,7 @@ pub(crate) fn dispatch_action(
         };
 
         if !should_dispatch {
+            log::debug!("Shortcut {id}: press ignored, still marked as pressed");
             return;
         }
     } else if action != ShortcutAction::HoldToRecord {
