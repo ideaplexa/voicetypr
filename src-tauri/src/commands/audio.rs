@@ -6499,8 +6499,15 @@ async fn stop_recording_with_mode_at(
         // skips the write.
         let pre_discard =
             app_state.is_cancellation_requested() || recording_generation_is_stale(task_generation);
+        // A voice command is decided here, before any audio is saved, so a
+        // command's recording is never written.
+        let voice_utterance = match &transcription_result {
+            Ok(transcription) => super::voice_commands::classify(&app_for_task, transcription),
+            Err(_) => crate::writing::Utterance::Dictation,
+        };
+        let is_voice_command = matches!(voice_utterance, crate::writing::Utterance::Command(_));
         let mut recording_file =
-            if should_save_recording_audio(pre_discard, transcription_result.as_ref().err()) {
+            if should_save_recording_audio(pre_discard || is_voice_command, transcription_result.as_ref().err()) {
                 maybe_save_recording_if_current(&app_for_task, task_generation, &audio_path_clone)
                     .await
             } else {
@@ -6623,6 +6630,36 @@ async fn stop_recording_with_mode_at(
 
                     return;
                 }
+
+                let transcription = match voice_utterance {
+                    crate::writing::Utterance::Dictation => transcription,
+                    crate::writing::Utterance::Literal(raw_text) => crate::transcription::TranscriptionResult { raw_text, ..transcription },
+                    crate::writing::Utterance::Command(command) => {
+                        let result = super::voice_commands::run(&app_for_task, command, task_generation).await;
+                        dictation_telemetry.facts.outcome = if result.is_ok() {
+                            crate::product_analytics::DictationOutcome::Delivered
+                        } else {
+                            crate::product_analytics::DictationOutcome::Failed
+                        };
+                        dictation_telemetry.text_ready("");
+                        let feedback_owns_pill = match result {
+                            Err(super::voice_commands::Failure::NoPermission) => true,
+                            // Leave the "didn't delete" note up for its usual time.
+                            Err(super::voice_commands::Failure::Skipped) if crate::commands::pill_feedback::keep_visible_for_terminal(&app_for_task) => {
+                                crate::commands::pill_feedback::schedule_terminal_hide(&app_for_task, task_generation, "pasted");
+                                true
+                            }
+                            _ => false,
+                        };
+                        if !feedback_owns_pill && should_hide_pill(&app_for_task).await {
+                            if let Err(e) = crate::commands::window::hide_pill_widget(app_for_task.clone()).await {
+                                log::error!("Failed to hide pill window after voice command: {}", e);
+                            }
+                        }
+                        update_recording_state(&app_for_task, RecordingState::Idle, None);
+                        return;
+                    }
+                };
 
                 let should_emit_enhancing =
                     crate::writing::effective_pipeline_config(&app_for_task)
@@ -6901,11 +6938,17 @@ async fn stop_recording_with_mode_at(
                         };
                         let insertion_start = Instant::now();
                         match insert_future.await {
-                            Ok(_) => {
+                            Ok(true) => {
                                 delivery_journey.mark_succeeded();
                                 dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
                                 dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Succeeded;
-                                log::debug!("Text inserted at cursor successfully");
+                                log::debug!("Paste posted at cursor");
+                            }
+                            Ok(false) => {
+                                delivery_journey.mark_succeeded();
+                                dictation_telemetry.facts.outcome = crate::product_analytics::DictationOutcome::Delivered;
+                                dictation_telemetry.facts.paste = crate::product_analytics::DictationPaste::Failed;
+                                log::info!("Paste not posted; text left on clipboard (Copied)");
                             }
                             Err(e) => {
                                 delivery_journey.mark_failed();

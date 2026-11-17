@@ -5,6 +5,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { PageHeader, SettingsPage } from "@/components/settings/settings-ui";
 import { DictionaryTabs } from "@/components/settings/DictionaryTabs";
+import { DictionarySuggestions } from "@/components/settings/DictionarySuggestions";
+import { useDictionarySuggestions } from "@/state/dictionarySuggestions";
 import { useWritingSettings } from "@/state/writingSettings";
 import type { CustomWord, Snippet, TextReplacementRule } from "@/types/writing";
 import {
@@ -53,9 +55,11 @@ export function DictionarySection() {
   const [tab, setTab] = useState<DictionaryTab>("words");
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Editor | null>(null);
+  const loadSuggestions = useDictionarySuggestions((state) => state.load);
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadSuggestions();
+  }, [load, loadSuggestions]);
   const list = (kind: DictionaryTab): DictionaryEntry[] =>
     kind === "words"
       ? settings.custom_words
@@ -174,6 +178,7 @@ export function DictionarySection() {
           </Button>
         }
       />
+      <DictionarySuggestions />
       <DictionaryTabs
         value={tab}
         onValueChange={changeTab}

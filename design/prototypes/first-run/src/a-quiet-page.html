@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voicetypr first run · A · Quiet page</title>
+<style>
+/*BASE_CSS*/
+
+/* ===== A · Quiet page: today's centred column and cards, with the order turned round ===== */
+.col{width:min(620px,calc(100vw - 48px));display:flex;flex-direction:column;align-items:center;gap:22px;padding-bottom:56px}
+.dots{position:fixed;top:44px;left:0;right:0;display:flex;justify-content:center;gap:6px;transition:opacity .3s ease;z-index:5}
+.dots span{height:6px;width:8px;border-radius:3px;background:var(--border);transition:width .5s var(--spring),background-color .3s ease}
+.dots span.on{background:var(--sage)}.dots span.cur{width:28px}
+body[data-scene="promise"] .dots,body[data-scene="done"] .dots{opacity:0}
+.status{position:fixed;right:18px;bottom:16px;z-index:5}
+h1{margin:0;font-size:clamp(40px,6.2vw,60px);line-height:1.02;font-weight:600;letter-spacing:-.045em;text-align:center;text-wrap:balance}
+h1 em{font-style:normal;color:var(--sage)}
+h2{margin:0;font-size:26px;line-height:normal;font-weight:600;letter-spacing:-.5px;text-align:center;text-wrap:balance}
+.lede{margin:0;font-size:16px;line-height:26px;color:var(--muted-foreground);text-align:center;max-width:520px;text-wrap:pretty}
+.lede .caps{margin:0 3px}
+.fine{margin:0;font-size:12.5px;color:var(--muted-foreground);text-align:center}
+.tile{width:44px;height:44px;border-radius:12px;background:var(--sage-bg);color:var(--sage);display:flex;align-items:center;justify-content:center}
+.tile svg{width:26px;height:26px}
+.card{background:var(--card);border-radius:14px;box-shadow:inset 0 0 0 1px var(--border)}
+.row-actions{display:flex;align-items:center;justify-content:center;gap:10px}
+
+/* promise: the claim, shown happening */
+.demo{width:100%;min-height:92px;padding:18px 20px;font-size:17px;line-height:28px;color:var(--text-3)}
+.demo.polished{color:var(--foreground)}
+.demo .tagline{display:block;font-size:12px;line-height:16px;color:var(--muted-foreground);margin-bottom:6px;font-family:var(--mono)}
+
+/* try: raw beside polished */
+.pair{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pane{padding:16px 18px;min-height:150px;display:flex;flex-direction:column;gap:8px;transition:box-shadow .4s ease}
+.pane label{font-size:12px;color:var(--muted-foreground);font-family:var(--mono)}
+.pane .body{flex:1;font-size:15px;line-height:24px}
+.said .body{color:var(--text-3)}
+.said .body .sw{display:inline-block;animation:word-in .3s var(--ease-out) both;transition:opacity .4s ease}
+.said .body .sw.cut{text-decoration:line-through}
+.typed{background:var(--card)}
+.typed .body{font-size:17px;line-height:26px}
+.typed .hold{color:var(--muted-foreground);font-size:15px}
+.typed.working .hold{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+.typed.done{box-shadow:inset 0 0 0 1.5px var(--sage)}
+.typed .ok{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--sage);animation:rise .5s var(--ease-out) both}
+.typed .ok svg{width:16px;height:16px}
+.ghost-word{position:fixed;z-index:20;pointer-events:none;font-size:17px;line-height:26px;white-space:nowrap}
+.suggest{width:100%;font-size:13.5px;line-height:22px;color:var(--muted-foreground);text-align:center;margin:-8px 0 0}
+.suggest q{color:var(--foreground)}
+.mic{width:100%;display:flex;align-items:center;gap:12px;padding:10px 14px;font-size:12.5px;color:var(--muted-foreground)}
+.mic b{font-weight:500;color:var(--foreground)}
+.meter{flex:1;display:flex;gap:3px;height:8px}
+.meter i{flex:1;border-radius:2px;background:var(--muted);transition:background-color .08s linear}
+.meter i.on{background:var(--sage)}
+.mic.off{background:var(--warn-bg);box-shadow:none;color:var(--warn)}
+.mic.off b{color:var(--warn)}
+
+/* anywhere: the permission rows */
+.rows{width:100%;padding:4px 18px}
+.r{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}
+.r:last-child{border-bottom:0}
+.r .ico{width:34px;height:34px;border-radius:9px;background:var(--secondary);color:var(--muted-foreground);display:flex;align-items:center;justify-content:center;flex:none;transition:background-color .3s ease,color .3s ease}
+.r.ok .ico{background:var(--sage-bg);color:var(--sage)}
+.r .ico svg{width:17px;height:17px}
+.r .txt{flex:1;min-width:0}
+.r .txt b{display:block;font-size:14.5px;font-weight:600}
+.r .txt>span{display:block;font-size:13px;color:var(--muted-foreground)}
+.r .act{display:flex;align-items:center;gap:10px;flex:none}
+.badge{animation:pop .3s var(--ease-out) both}
+
+/* use */
+.uses{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.use{text-align:left;border:0;padding:14px 16px;font-size:14.5px;font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:8px;transition:box-shadow .2s ease,transform .12s var(--ease-out),background-color .2s ease}
+.use:hover{background:var(--secondary)}.use:active{transform:scale(.985)}
+.use svg{width:16px;height:16px;color:var(--sage);opacity:0;transform:scale(.6);transition:opacity .2s ease,transform .3s var(--spring)}
+.use[aria-checked="true"]{box-shadow:inset 0 0 0 1.5px var(--sage)}
+.use[aria-checked="true"] svg{opacity:1;transform:none}
+.does{min-height:22px;font-size:13.5px;color:var(--sage);text-align:center;margin:-6px 0}
+.does span{display:inline-block;animation:rise .4s var(--ease-out) both}
+
+/* trial */
+.sum{width:100%;padding:6px 18px}
+.scene[data-id="trial"]{padding-top:56px}
+.scene[data-id="trial"] .col{gap:14px;padding-bottom:24px}
+.scene[data-id="trial"] .sum li{padding:7px 0}
+.legalrow{display:flex;flex-direction:column;align-items:center;gap:6px}
+.sum li{display:flex;align-items:center;gap:10px;padding:9px 0;font-size:14px;border-bottom:1px solid var(--border)}
+.sum ul{list-style:none;margin:0;padding:0}.sum li:last-child{border-bottom:0}
+.sum li svg{width:16px;height:16px;color:var(--sage);flex:none}
+.sum li small{margin-left:auto;font-size:12.5px;color:var(--muted-foreground)}
+.sum li .caps .cap{font-size:12px;padding:1px 7px}
+.sum .engine{font-size:14px;color:var(--foreground)}.sum .engine .dot{display:none}
+.err{font-size:13px;color:var(--destructive);text-align:center;margin:-8px 0;max-width:460px}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--muted-foreground);max-width:480px;cursor:pointer}
+.consent input{accent-color:var(--sage);margin:2px 0 0;width:15px;height:15px;flex:none}
+.bigtick{width:56px;height:56px;border-radius:50%;background:var(--sage-bg);color:var(--sage);display:flex;align-items:center;justify-content:center;animation:pop .5s var(--spring) both}
+.bigtick svg{width:28px;height:28px}
+.bigtick path{stroke-dasharray:20;stroke-dashoffset:20;animation:draw .5s .25s var(--ease-out) forwards}
+@media (max-width:560px){.pair,.uses{grid-template-columns:1fr}.pane{min-height:104px}.col{gap:16px}.status{display:none}}
+</style>
+</head>
+<body>
+<!--
+Voicetypr first run · A · Quiet page
+Screens: promise (the claim, looping as a live example) → try (first dictation; the microphone prompt arrives on the first hold; raw card beside polished card)
+         → anywhere (Accessibility on Mac + shortcut) → use (optional) → trial (Start 7-day trial) → done
+State: VT.state { platform, hotkey, hold, mic, micDenied, ax, use, trial }
+Faked: speech is scripted (hold Space, or hold or click the button; a click speaks for you). The macOS prompt and System Settings are drawn.
+       Trial start is a 1.1 s timeout; "Trial server: offline" in the review controls (bottom left) makes it fail.
+-->
+<div id="app">
+  <div class="dots" role="progressbar" aria-label="Setup" aria-valuemin="1" aria-valuemax="4"><span></span><span></span><span></span><span></span></div>
+
+  <section class="scene" data-id="promise">
+    <div class="col">
+      <div class="tile" data-rise><svg viewBox="100 96 312 320" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M143 197 C166 288 201 350 240 393" stroke-width="36"/><path d="M369 197 C346 288 311 350 272 393" stroke-width="36"/><path d="M256 163 L256 338" stroke-width="23"/><path d="M202 226 L202 257" stroke-width="15"/><path d="M226 207 L226 276" stroke-width="15"/><path d="M286 207 L286 276" stroke-width="15"/><path d="M310 226 L310 257" stroke-width="15"/></g><circle cx="256" cy="124" r="18" fill="currentColor"/></svg></div>
+      <h1 data-rise>Say it messy.<br>It lands clean.</h1>
+      <div class="card demo" data-rise aria-hidden="true"><span class="tagline" id="demo-tag">you say</span><span id="demo"></span></div>
+      <p class="lede" data-rise>Voicetypr types what you meant, into any app, from your voice.</p>
+      <button type="button" class="btn lg" id="begin" data-rise data-primary>Try it with your own voice <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+      <p class="fine" data-rise>Ten seconds. Nothing to set up first.</p>
+    </div>
+  </section>
+
+  <section class="scene" data-id="try" hidden>
+    <div class="col">
+      <h2 data-rise>Say something messy</h2>
+      <p class="lede" data-rise><span data-verb></span> <span data-caps></span> talk, then <span data-after></span>. Change your mind halfway.</p>
+      <p class="suggest" data-rise id="suggest">Not sure what to say? Read this out: <q>um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before</q></p>
+      <div class="pair" data-rise>
+        <div class="card pane said"><label>You said</label><div class="body" id="said" aria-live="off"></div></div>
+        <div class="card pane typed" id="typed"><label>Voicetypr typed</label><div class="body" id="typed-body"><span class="hold">Your clean text lands here.</span></div><div id="ok"></div></div>
+      </div>
+      <div class="card mic" id="mic" data-rise hidden></div>
+      <div class="row-actions" data-rise id="try-actions">
+        <button type="button" class="btn outline" data-hold id="holdbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg> Or press and hold here</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="anywhere" hidden>
+    <div class="col">
+      <h2 data-rise>Now let it type anywhere</h2>
+      <p class="lede" data-rise id="any-lede"></p>
+      <div class="card rows" data-rise>
+        <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg></div><div class="txt"><b>Microphone</b><span id="micname">MacBook Pro Microphone</span></div><div class="act"><span class="badge"><i></i>We heard you</span></div></div>
+        <div class="r" id="ax-row" data-mac-only><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg></div><div class="txt"><b>Accessibility</b><span id="ax-sub">So your words land at your cursor, in any app.</span></div><div class="act" id="ax-act"><button type="button" class="btn sm" id="ax-btn">Allow</button></div></div>
+        <div class="r ok"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></svg></div><div class="txt"><b>Shortcut</b><span><span data-verb></span> to talk, <span data-after></span> to <span data-result></span>.</span></div><div class="act"><span data-caps></span><button type="button" class="link" id="hk-btn">Change</button></div></div>
+      </div>
+      <div class="row-actions" data-rise>
+        <button type="button" class="btn outline" data-go="try">Back</button>
+        <button type="button" class="btn ghost" id="ax-skip" data-mac-only>Skip, I’ll paste myself</button>
+        <button type="button" class="btn" id="any-next" data-autofocus>Continue</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="use" hidden>
+    <div class="col">
+      <h2 data-rise>What will you mostly dictate?</h2>
+      <p class="lede" data-rise>Optional. It picks a starting point you can change any time.</p>
+      <div class="uses" role="radiogroup" aria-label="What you mostly dictate" id="uses" data-rise></div>
+      <p class="does" id="does" role="status"></p>
+      <div class="row-actions" data-rise>
+        <button type="button" class="btn outline" data-go="anywhere">Back</button>
+        <button type="button" class="btn ghost" id="use-skip">Skip</button>
+        <button type="button" class="btn" id="use-next" disabled>Continue</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="trial" hidden>
+    <div class="col">
+      <h2 data-rise>You’re set. Start your 7 days.</h2>
+      <p class="lede" data-rise>All of Voicetypr, free for 7 days. No card. The clock starts when you click, not before.</p>
+      <div class="card sum" data-rise><ul id="sum"></ul></div>
+      <div id="fields-slot" data-rise style="width:100%"></div>
+      <button type="button" class="btn lg" id="trial-btn" data-rise>Start 7-day trial</button>
+      <p class="err" id="trial-err" role="alert" hidden>Couldn’t reach Voicetypr, so your trial hasn’t started. Check your connection and try again.</p>
+      <div class="legalrow" data-rise><label class="consent"><input type="checkbox" checked><span>Share anonymous crash reports and usage numbers — never your words, audio or app content.</span></label>
+      <p class="fine"><button type="button" class="link" data-shared>What’s shared</button> · By starting you agree to the <button type="button" class="link" data-doc="terms">Terms</button> and <button type="button" class="link" data-doc="privacy">Privacy Policy</button>.</p></div>
+    </div>
+  </section>
+
+  <section class="scene" data-id="done" hidden>
+    <div class="col">
+      <div class="bigtick" data-rise><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg></div>
+      <h2 data-rise id="done-title">Trial started</h2>
+      <p class="lede" data-rise>Voicetypr is yours until <b id="ends"></b>. <span data-verb></span> <span data-caps></span> in any app and talk.<span data-degraded hidden> Then press ⌘V to paste it. Turn on Accessibility in Settings and it pastes for you.</span></p>
+      <button type="button" class="btn lg" id="finish" data-rise data-autofocus>Start using Voicetypr</button>
+    </div>
+  </section>
+
+  <div class="status" data-engine></div>
+</div>
+<div class="pillzone"><div class="pill" id="pill" data-state="idle"></div></div>
+<div class="sr" id="pill-live" aria-live="polite"></div>
+<script>
+/*BASE_JS*/
+(function () {
+  "use strict";
+  var $ = VT.$, $$ = VT.$$, esc = VT.esc;
+  var TOKENS = [
+    { r: "um" }, { r: "so" }, { r: "let's", p: "Let’s" }, { r: "move", p: "move" }, { r: "the" }, { r: "the", p: "the" }, { r: "sync", p: "sync" }, { r: "to", p: "to" },
+    { r: "thursday" }, { r: "no" }, { r: "wait" }, { r: "friday", p: "Friday" }, { r: "at", p: "at" }, { r: "three", p: "3," }, { r: "and", p: "and" }, { r: "uh" },
+    { r: "i'll", p: "I’ll" }, { r: "send", p: "send" }, { r: "the", p: "the" }, { r: "notes", p: "notes" }, { r: "before", p: "before." },
+  ];
+  var DEMOS = [
+    [["um"], ["so"], ["basically"], ["i", "I"], ["think", "think"], ["we", "we"], ["should", "should"], ["uh"], ["ship", "ship"], ["on", "on"], ["friday", "Friday."]],
+    [["hey", "Hey,"], ["can", "can"], ["you", "you"], ["send", "send"], ["me", "me"], ["the"], ["the"], ["deck"], ["no"], ["sorry"], ["the", "the"], ["budget", "budget"], ["sheet", "sheet"], ["by", "by"], ["tomorrow", "tomorrow?"]],
+    [["remind", "Remind"], ["me", "me"], ["to", "to"], ["uh"], ["call", "call"], ["the", "the"], ["dentist", "dentist"], ["and", "and"], ["like"], ["book", "book"], ["the", "the"], ["car", "car"], ["service", "service."]],
+  ].map(function (d) { return d.map(function (t) { return { r: t[0], p: t[1] }; }); });
+  var ORDER = ["try", "anywhere", "use", "trial"];
+
+  function dots(id) {
+    var at = ORDER.indexOf(id);
+    $$(".dots span").forEach(function (s, i) { s.classList.toggle("on", i <= at); s.classList.toggle("cur", i === at); });
+    $(".dots").setAttribute("aria-valuenow", String(Math.max(1, at + 1)));
+  }
+
+  /* promise: one example after another, said then cleaned */
+  function demo(n) {
+    if (VT.scene !== "promise") return;
+    if (VT.reduce) { $("#demo").textContent = VT.polishedText(DEMOS[0]); $("#demo-tag").textContent = "you say “" + DEMOS[0].map(function (t) { return t.r; }).join(" ") + "”, it types"; return; }
+    var toks = DEMOS[n % DEMOS.length], el = $("#demo"), tag = $("#demo-tag"), s = new VT.Sentence(el, toks), i = 0;
+    el.parentNode.classList.remove("polished");
+    tag.textContent = "you say";
+    (function next() {
+      if (VT.scene !== "promise") return;
+      if (i < toks.length) { s.add(i++); VT.later(next, 150); return; }
+      VT.later(function () {
+        if (VT.scene !== "promise") return;
+        s.polish().then(function () {
+          el.parentNode.classList.add("polished");
+          tag.textContent = "it types";
+          VT.later(function () { demo(n + 1); }, 2400);
+        });
+      }, 500);
+    })();
+  }
+
+  /* try */
+  var saidSpans = [], level = 0, meterTimer = 0;
+  function micRow() {
+    var m = $("#mic");
+    if (!m) return;
+    m.hidden = false;
+    if (VT.state.micDenied) {
+      m.className = "card mic off";
+      m.innerHTML = "<span><b>The microphone is off for Voicetypr</b>, so it can’t hear you yet.</span><span style=\"flex:1\"></span><button type=\"button\" class=\"btn sm\" id=\"mic-fix\">Open System Settings</button>";
+      $("#mic-fix").addEventListener("click", function () { VT.openSettings("mic").then(function (ok) { micRow(); if (ok) VT.pill.hint(); }); });
+      return;
+    }
+    m.className = "card mic";
+    m.innerHTML = '<b>' + (VT.state.platform === "mac" ? "MacBook Pro Microphone" : "Microphone Array") + '</b><div class="meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">' + new Array(25).join("<i></i>") + '</div><span id="mic-say">Listens only while you ' + (VT.state.hold ? "hold" : "record") + "</span>";
+  }
+  function meter() {
+    clearInterval(meterTimer);
+    meterTimer = setInterval(function () {
+      var bars = $$("#mic .meter i");
+      if (!bars.length) return clearInterval(meterTimer);
+      level *= 0.8;
+      var n = Math.round(level * 24);
+      bars.forEach(function (b, i) { b.classList.toggle("on", i < n); });
+      if (level < 0.02 && dict.state() !== "listening") clearInterval(meterTimer);
+    }, 60);
+  }
+  function resetTry() {
+    saidSpans = [];
+    $("#said").innerHTML = "";
+    $("#typed").className = "card pane typed";
+    $("#typed-body").innerHTML = '<span class="hold">Your clean text lands here.</span>';
+    $("#ok").innerHTML = "";
+    $("#try-actions").innerHTML = '<button type="button" class="btn outline" data-hold id="holdbtn">' + ICON.mic + " Or press and hold here</button>";
+    dict.reset();
+    VT.pill.hint();
+  }
+  function fly() {
+    var body = $("#typed-body"), kept = TOKENS.filter(function (t) { return t.p; });
+    body.innerHTML = kept.map(function (t) { return '<span class="tw" style="opacity:0">' + esc(t.p) + "</span>"; }).join(" ");
+    var targets = $$(".tw", body), k = 0;
+    saidSpans.forEach(function (s, i) {
+      if (!TOKENS[i].p) { VT.later(function () { s.classList.add("cut"); }, i * 22); return; }
+      var t = targets[k], n = k++;
+      if (VT.reduce) { t.style.opacity = 1; return; }
+      var a = s.getBoundingClientRect(), b = t.getBoundingClientRect();
+      var g = document.createElement("span");
+      g.className = "ghost-word"; g.textContent = t.textContent;
+      g.style.left = b.left + "px"; g.style.top = b.top + "px";
+      document.body.appendChild(g);
+      g.animate([{ transform: "translate(" + (a.left - b.left) + "px," + (a.top - b.top) + "px) scale(.88)", opacity: 0.35, transformOrigin: "0 50%" }, { transform: "none", opacity: 1, transformOrigin: "0 50%" }], { duration: 640, delay: 120 + n * 42, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" }).onfinish = function () { t.style.opacity = 1; g.remove(); };
+    });
+    return VT.wait(120 + kept.length * 42 + 660);
+  }
+  var dict = new VT.Dictation({
+    tokens: TOKENS,
+    onStart: function () {
+      saidSpans = []; $("#said").innerHTML = "";
+      $("#typed-body").innerHTML = '<span class="hold">Listening…</span>';
+      micRow(); meter();
+    },
+    onWord: function (i, t) {
+      var s = document.createElement("span");
+      s.className = "sw"; s.textContent = t.r;
+      $("#said").appendChild(s); $("#said").appendChild(document.createTextNode(" "));
+      saidSpans.push(s);
+      level = 0.5 + Math.random() * 0.5;
+      var say = $("#mic-say");
+      if (say) say.textContent = "We can hear you";
+    },
+    onPhase: function (p) {
+      $("#typed").classList.add("working");
+      $(".hold", $("#typed-body")).textContent = p === "preparing" ? "Getting offline dictation ready, then this types…" : p === "transcribing" ? "Transcribing…" : "Polishing…";
+    },
+    onShort: function () { $("#typed-body").innerHTML = '<span class="hold">Your clean text lands here.</span>'; },
+    onMic: function (ok) { micRow(); if (ok) VT.pill.hint(); else VT.pill.note("Microphone access is off"); },
+    onCancel: function () { resetTry(); },
+    onDone: function (n, secs) {
+      VT.announce("Voicetypr typed: " + VT.polishedText(TOKENS));
+      $("#typed").classList.remove("working");
+      fly().then(function () {
+        $("#typed").classList.add("done");
+        $("#ok").innerHTML = '<p class="ok" role="status" style="margin:0">' + ICON.ok + "Worked · " + n + " words · " + secs + " s after you let go</p>";
+        $("#try-actions").innerHTML = '<button type="button" class="btn ghost" id="again">Try again</button><button type="button" class="btn" id="try-next">Continue</button>';
+        $("#again").addEventListener("click", resetTry);
+        $("#try-next").addEventListener("click", function () { VT.go("anywhere"); });
+        $("#try-next").focus({ preventScroll: true });
+      });
+    },
+  });
+
+  /* anywhere */
+  function paintAx() {
+    var mac = VT.state.platform === "mac";
+    $("#any-lede").textContent = mac ? "One permission and your shortcut. Then Voicetypr works in every app." : "Your shortcut works in every app. Keep it or pick another.";
+    $("#micname").textContent = mac ? "MacBook Pro Microphone" : "Microphone Array";
+    var ok = VT.state.ax;
+    $("#ax-row").classList.toggle("ok", ok);
+    if (ok) $("#ax-act").innerHTML = '<span class="badge"><i></i>Allowed</span>';
+    $("#ax-skip").hidden = !mac || ok;
+    $("#any-next").disabled = mac && !ok;
+  }
+
+  /* use */
+  function paintUses() {
+    $("#uses").innerHTML = VT.USES.map(function (u) {
+      return '<button type="button" class="card use" role="radio" aria-checked="' + (VT.state.use === u.id) + '" data-use="' + u.id + '">' + esc(u.label) + ICON.check + "</button>";
+    }).join("");
+    var u = VT.USES.filter(function (x) { return x.id === VT.state.use; })[0];
+    $("#does").innerHTML = u ? "<span>" + esc(u.does) + "</span>" : "";
+    $("#use-next").disabled = !u;
+    VT.paint();
+  }
+
+  /* trial */
+  function paintSum() {
+    var s = VT.state, use = VT.USES.filter(function (u) { return u.id === s.use; })[0];
+    var li = function (html) { return "<li>" + ICON.check + html + "</li>"; };
+    $("#sum").innerHTML =
+      li('<span data-engine></span>') +
+      
+      li((VT.copyOnly() ? "Copies your words for you to paste with ⌘V<small>Accessibility is off</small>" : "Types at your cursor, in any app")) +
+      li("Shortcut<small>" + VT.capsHTML() + " " + (s.hold ? "hold to talk" : "press to start and stop") + "</small>") +
+      (use ? li("Starting point<small>" + esc(use.label) + "</small>") : "");
+    VT.paintEngine();
+    $("#ends").textContent = VT.trialEnds;
+    if (!$("#f-name")) { $("#fields-slot").innerHTML = VT.fieldsHTML(); $("#f-name").focus({ preventScroll: true }); }
+  }
+
+  var ICON = {
+    mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
+    check: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+  };
+
+  VT.onScene = function (id) {
+    dots(id);
+    VT.talk = null;
+    if (id === "promise") { VT.pill.idle(); demo(0); }
+    if (id === "try") { dict.arm(); if (dict.state() !== "done") VT.pill.hint(); if (VT.state.mic || VT.state.micDenied) micRow(); }
+    if (id === "anywhere") { VT.pill.idle(); paintAx(); }
+    if (id === "use") paintUses();
+    if (id === "trial") paintSum();
+    VT.paint();
+  };
+
+  VT.boot("Prototype A · Quiet page", function () {
+    dict.reset();
+    $("#begin").addEventListener("click", function () { VT.go("try"); });
+    $$("[data-go]").forEach(function (b) { b.addEventListener("click", function () { VT.go(b.dataset.go); }); });
+    $("#ax-btn").addEventListener("click", function () { VT.openSettings("ax").then(function (ok) { paintAx(); if (!ok) $("#ax-sub").textContent = "Still off. Without it, Voicetypr copies the text and you paste it."; }); });
+    $("#ax-skip").addEventListener("click", function () { VT.state.axSkipped = true; VT.go("use"); });
+    $("#any-next").addEventListener("click", function () { VT.go("use"); });
+    $("#hk-btn").addEventListener("click", function (e) { VT.editHotkey(e.currentTarget); });
+    $("#uses").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-use]");
+      if (!b) return;
+      VT.state.use = b.dataset.use;
+      paintUses();
+      $('[data-use="' + VT.state.use + '"]').focus();
+    });
+    $("#use-skip").addEventListener("click", function () { VT.state.use = null; VT.go("trial"); });
+    $("#use-next").addEventListener("click", function () { VT.go("trial"); });
+    $("#trial-btn").addEventListener("click", function (e) {
+      var b = e.currentTarget;
+      if (!VT.checkFields()) return;
+      $("#trial-err").hidden = true;
+      b.setAttribute("aria-busy", "true");
+      b.innerHTML = '<span class="spin"></span>Starting your trial';
+      VT.startTrial().then(function () { $("#done-title").textContent = "You’re in, " + VT.firstName(); VT.go("done"); }, function () {
+        b.removeAttribute("aria-busy"); b.textContent = "Try again";
+        $("#trial-err").hidden = false;
+      });
+    });
+    $("#finish").addEventListener("click", function () { VT.toast("The prototype ends here. In the app, Home opens next."); });
+    $$(".scene").forEach(function (s) { s.hidden = true; s.classList.remove("active"); });
+    VT.go("promise");
+  });
+})();
+</script>
+</body>
+</html>

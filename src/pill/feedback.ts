@@ -1,4 +1,4 @@
-import type { DictationBlocked, DictationNote, DictationRecovery, IslandAction, IslandNotice, RecordingTooShort } from '@/types/island-events';
+import type { CommandSkippedReason, DictationBlocked, DictationNote, DictationRecovery, IslandAction, IslandNotice, RecordingTooShort } from '@/types/island-events';
 import type { IslandIcon } from '@/pill/icons';
 import { elapsed } from '@/pill/copy';
 export type CardCommand = { command: 'island_action'; action: IslandAction } | { command: 'retry_kept_dictation'; id: string; engine: string | null } | { command: 'transcribe_anyway' | 'discard_kept_dictation'; id: string };
@@ -65,6 +65,13 @@ export function retryErrorCard(error: unknown): FeedbackCard {
 export function deleteErrorCard(): FeedbackCard {
   return card('delete-error',"Couldn't delete audio",'Recording is still kept. Try Delete audio again in Home.',6000,'amber');
 }
+const commandSkipped = {
+  nothing_to_delete:'nothing to take back',
+  typed_since:'you typed since',
+  focus_changed:'a different window is in front',
+  too_late:'it was over a minute ago',
+  not_watching:"can't tell if you typed since",
+} satisfies Record<CommandSkippedReason,string>;
 export function noteCard(e: DictationNote): FeedbackCard {
   const reasons = {timeout:'Polish timed out',rate_limited:'Polish rate limited',network:'Polish unavailable offline',guard:'Polish kept the original',error:'Polish failed'};
   switch(e.kind) {
@@ -76,6 +83,7 @@ export function noteCard(e: DictationNote): FeedbackCard {
     case 'model_fallback': return card(e.kind,`Using ${e.alt_engine_short} · ${e.engine_short} isn't downloaded`);
     case 'gpu_fallback': return card(e.kind,'GPU unavailable · using the CPU');
     case 'polish_skipped': return card(e.kind,`Pasted unpolished · ${reasons[e.reason]}`);
+    case 'command_skipped': return card(e.kind,`Didn't delete · ${commandSkipped[e.reason]}`);
   }
 }
 export function shortCard(e: RecordingTooShort) { return card('too_short',`Too short — ${e.mode === 'hold' ? 'hold' : 'talk'} a bit longer`,'',2200); }

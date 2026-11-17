@@ -108,6 +108,11 @@ pub struct WritingSettings {
     /// Opt-in: spoken punctuation commands ("semicolon" → ";"), see `spoken_punctuation`.
     #[serde(default)]
     pub spoken_punctuation: bool,
+    /// Opt-in voice commands: a dictation that is only a command ("new line",
+    /// "send") presses its keys instead of being typed, see `voice_commands`.
+    /// Not named `voice_commands`: that key held a removed feature's list.
+    #[serde(default)]
+    pub editing_commands: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +283,7 @@ pub fn sanitize_writing_settings(settings: WritingSettings) -> WritingSettings {
             })
             .collect(),
         spoken_punctuation: settings.spoken_punctuation,
+        editing_commands: settings.editing_commands,
     }
 }
 

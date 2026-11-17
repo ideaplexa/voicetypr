@@ -103,15 +103,19 @@ fn ensure_trailing_sentence_space(text: &str) -> String {
 
 #[tauri::command]
 pub async fn insert_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    insert_text_with_generation(app, text, None, false).await
+    insert_text_with_generation(app, text, None, false)
+        .await
+        .map(|_| ())
 }
 
+/// True when the paste was posted, false when the text was left on the
+/// clipboard (the Copied card).
 pub(crate) async fn insert_dictation_text(
     app: tauri::AppHandle,
     text: String,
     generation: u64,
     polished: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let result = insert_text_with_generation(app.clone(), text, Some(generation), polished).await;
     if result.is_err() {
         // A permission outcome already owns its 2.5 s timeout. Other errors
@@ -126,7 +130,7 @@ async fn insert_text_with_generation(
     text: String,
     generation: Option<u64>,
     polished: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // Check if already inserting text
     if IS_INSERTING.swap(true, Ordering::SeqCst) {
         log::warn!("Text insertion already in progress, skipping duplicate request");
@@ -203,7 +207,7 @@ async fn insert_text_with_generation(
     if outcome == PasteOutcome::NoPermission {
         return Err("No accessibility permission - text copied to clipboard. Please paste manually or grant accessibility permission.".to_string());
     }
-    Ok(())
+    Ok(outcome == PasteOutcome::Pasted)
 }
 
 /// Copy plain text to the system clipboard without attempting to paste
@@ -501,6 +505,15 @@ fn insert_via_clipboard(
         })
     };
 
+    // Remember a dictation only while voice commands are on, for "delete that".
+    let remember_for_commands = dictation_generation.is_some()
+        && app_handle
+            .as_ref()
+            .and_then(|app| crate::writing::load_writing_settings(app).ok())
+            .is_some_and(|settings| settings.editing_commands);
+    crate::insertion::voice_keys::forget_insertion();
+    let before_paste = remember_for_commands.then(crate::insertion::voice_keys::before_paste);
+
     #[cfg(target_os = "macos")]
     let outcome = {
         current()?;
@@ -525,6 +538,9 @@ fn insert_via_clipboard(
         keep_transcription_in_clipboard,
         current,
     )?;
+    if let Some(before_paste) = before_paste.filter(|_| outcome == PasteOutcome::Pasted) {
+        crate::insertion::voice_keys::remember_insertion(before_paste);
+    }
     let play_completed_cue = paste_completed_cue_eligible(&outcome);
 
     // Commit clipboard restoration state before best-effort feedback. The cue

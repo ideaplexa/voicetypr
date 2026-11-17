@@ -12,6 +12,8 @@ type WritingSettingsState = {
   loaded: boolean;
   load: (signal?: AbortSignal) => Promise<boolean>;
   update: (patch: Partial<WritingSettings>) => void;
+  /** Resolves once every save queued so far has finished or rolled back. */
+  flush: () => Promise<void>;
 };
 
 export const useWritingSettings = create<WritingSettingsState>((set, get) => {
@@ -75,5 +77,6 @@ export const useWritingSettings = create<WritingSettingsState>((set, get) => {
         pendingPatch = { ...pendingPatch, ...patch };
       }
     },
+    flush: () => saveQueue,
   };
 });

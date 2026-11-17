@@ -1,8 +1,15 @@
-import type { MouseEvent } from "react";
-import { Copy, FolderOpen, Loader2, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { useState, type MouseEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { Copy, FolderOpen, Loader2, Pencil, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/settings/SettingsButton";
+import { DictionarySuggestions } from "@/components/settings/DictionarySuggestions";
+import { Textarea } from "@/components/ui/textarea";
+import { useDictionarySuggestions, type DictionarySuggestion } from "@/state/dictionarySuggestions";
+import { getErrorMessage } from "@/utils/error";
 import { getModelDisplayName } from "@/lib/model-display";
 import type { TranscriptionHistory } from "@/types";
+import { migratePreset, presetDisplayLabel, presetRequiresAiFormatting } from "@/types/ai";
 import { formatDurationMs, sourceLabel } from "./recentRecordingsHelpers";
 import { parseHistoryDate } from "@/lib/history-date";
 
@@ -15,6 +22,7 @@ interface Props {
   onReTranscribe: (item: TranscriptionHistory) => void;
   onShowInFolder: (item: TranscriptionHistory) => void;
   onDelete: (event: MouseEvent, id: string) => void;
+  onEdited?: () => void;
   onClose: () => void;
 }
 
@@ -44,15 +52,45 @@ export function RecentRecordingDetail({
   onReTranscribe,
   onShowInFolder,
   onDelete,
+  onEdited,
   onClose,
 }: Props) {
+  const offer = useDictionarySuggestions((state) => state.offer);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [offered, setOffered] = useState<string[]>([]);
+  const text = saved ?? item.text;
+  const saveEdit = async () => {
+    if (draft === null) return;
+    setSaving(true);
+    try {
+      const found = await invoke<DictionarySuggestion[] | null>("update_transcription_text", {
+        id: item.id,
+        text: draft,
+      });
+      offer(found ?? []);
+      setOffered((found ?? []).map((suggestion) => suggestion.id));
+      setSaved(draft.trim());
+      setDraft(null);
+      onEdited?.();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Couldn't save your edit"));
+    } finally {
+      setSaving(false);
+    }
+  };
   const failed = item.status === "failed";
   const inProgress = item.status === "in_progress" || reTranscribing;
   const app = item.writing?.context_hint?.app_name;
   const name = app && app !== "Other" ? app : sourceLabel(item.writing?.source);
-  const words = item.text.trim() ? item.text.trim().split(/\s+/).length : 0;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const polishMode = item.writing?.ai_applied ? item.writing.mode : undefined;
+  const polishPreset = polishMode ? migratePreset(polishMode) : null;
+  const polishLabel =
+    polishPreset && presetRequiresAiFormatting(polishPreset) ? presetDisplayLabel(polishPreset) : null;
   const original =
-    item.writing?.original_text && item.writing.original_text !== item.text
+    item.writing?.original_text && item.writing.original_text !== text
       ? item.writing.original_text
       : null;
   const dateTime = formatHistoryDateTime(item.timestamp);
@@ -83,10 +121,21 @@ export function RecentRecordingDetail({
               type="button"
               aria-label="Copy"
               title="Copy"
-              onClick={() => copy(item.text)}
+              onClick={() => copy(text)}
               className="grid size-[33px] place-items-center rounded-[10px] text-muted-foreground hover:bg-muted"
             >
               <Copy className="size-[15px]" />
+            </button>
+          )}
+          {!inProgress && !failed && draft === null && (
+            <button
+              type="button"
+              aria-label="Edit text"
+              title="Edit text"
+              onClick={() => setDraft(text)}
+              className="grid size-[33px] place-items-center rounded-[10px] text-muted-foreground hover:bg-muted"
+            >
+              <Pencil className="size-[15px]" />
             </button>
           )}
           {verified && (
@@ -159,9 +208,41 @@ export function RecentRecordingDetail({
             : "Translation failed - saved untranslated"}
         </p>
       )}
-      <p className="mt-[14px] whitespace-pre-wrap break-words text-[17px] font-medium leading-[26px] text-foreground">
-        {item.text}
-      </p>
+      {draft === null ? (
+        <p className="mt-[14px] whitespace-pre-wrap break-words text-[17px] font-medium leading-[26px] text-foreground">
+          {text}
+        </p>
+      ) : (
+        <div className="mt-[14px]">
+          <Textarea
+            aria-label="Dictation text"
+            autoFocus
+            className="min-h-32 bg-card text-[15px] leading-[23px]"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Fix a word Voicetypr got wrong and it will be offered for your Dictionary.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button
+              size="sm"
+              disabled={saving || !draft.trim() || draft.trim() === text}
+              onClick={() => void saveEdit()}
+            >
+              Save
+            </Button>
+            <Button size="sm" variant="outline" disabled={saving} onClick={() => setDraft(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {offered.length > 0 && (
+        <div className="mt-[14px]">
+          <DictionarySuggestions only={offered} />
+        </div>
+      )}
       {original && (
         <section aria-label="Before polish" className="mt-[14px] rounded-[10px] bg-muted p-[14px]">
           <div className="flex items-center justify-between gap-2">
@@ -190,9 +271,9 @@ export function RecentRecordingDetail({
             {getModelDisplayName(item.model) ?? item.model}
           </span>
         )}
-        {item.writing?.mode && (
+        {polishLabel && (
           <span className="rounded-[7px] border border-border px-[9px] py-1">
-            Polish: {item.writing.mode}
+            Polish: {polishLabel}
           </span>
         )}
         {item.writing?.ai_provider && (

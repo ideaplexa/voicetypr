@@ -640,6 +640,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let exit_code = builder
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+            recording::file_jobs::initialize_temp_dir(&app.config().identifier);
             app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
@@ -1370,6 +1371,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             save_image_to_file,
             copy_text_to_clipboard,
             commands::original::copy_last_original,
+            commands::dictionary_suggestions::update_transcription_text,
+            commands::dictionary_suggestions::list_dictionary_suggestions,
+            commands::dictionary_suggestions::set_dictionary_suggestion_status,
             get_ai_settings,
             get_ai_settings_for_provider,
             cache_ai_api_key,

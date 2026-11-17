@@ -38,3 +38,19 @@ pub use types::{
 /// `dwExtraInfo` and passes through to trigger hotkeys normally. Value is arbitrary
 /// but must be non-zero; both the injector and the hook reference this one constant.
 pub const INJECTED_SIGNATURE: usize = 0x5654_5950; // "VTYP"
+
+static TEXT_KEY_DOWNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many non-modifier key-downs (repeats included) from anyone but
+/// Voicetypr have reached the focused app since the backend started. Only a
+/// count: no key is recorded. Keys consumed as a trigger are not counted, and
+/// neither are modifier changes, so pressing a dictation hotkey does not move
+/// it; typing, Backspace, arrows and shortcuts do. "Delete that" uses it to
+/// know nothing was typed since the last dictation.
+pub fn text_key_downs() -> u64 {
+    TEXT_KEY_DOWNS.load(std::sync::atomic::Ordering::Acquire)
+}
+
+pub(crate) fn note_text_key_down() {
+    TEXT_KEY_DOWNS.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}

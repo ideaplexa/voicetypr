@@ -178,7 +178,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     // modifier changes through a FlagsChanged branch that always
                     // passes through; `should_consume_keydown` enforces the same
                     // invariant here (pure + unit-tested in `backend::vk`).
-                    should_consume_keydown(
+                    let consumed = should_consume_keydown(
                         vk,
                         key,
                         side,
@@ -186,7 +186,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         is_repeat,
                         modset_from_down(&state.down),
                         &state.consume.load(),
-                    )
+                    );
+                    if down && side.is_none() && !consumed {
+                        crate::note_text_key_down();
+                    }
+                    consumed
                 } else {
                     false
                 }
