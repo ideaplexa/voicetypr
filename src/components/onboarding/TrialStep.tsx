@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { isMacOS } from "@/lib/platform";
 import type { TrialStartError } from "@/types";
+import { FounderLine } from "@/components/onboarding/FounderLine";
 import { CreditCard, Laptop, Lock } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -75,6 +76,7 @@ export function TrialStep({
           Decide later
         </Button>
       </div>
+      <FounderLine />
     </section>
   );
 }
