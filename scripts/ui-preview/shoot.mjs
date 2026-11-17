@@ -61,7 +61,7 @@ try {
   browser = await chromium.launch({ executablePath: chrome, headless: true, args: ["--no-sandbox"] });
   for (const platform of ["macos", "windows"]) {
     for (const theme of ["light", "dark"]) {
-      for (const phase of [1, 2, 3]) {
+      for (const phase of ["promise", "try", "setup", "trial", "done"]) {
         const name = `onboarding-${phase}`;
         if (!shouldCapture(platform, theme, name)) continue;
         const page = await browser.newPage({ viewport: { width: 1000, height: 680 }, deviceScaleFactor: 2 });

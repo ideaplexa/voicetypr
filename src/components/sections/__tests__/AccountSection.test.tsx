@@ -104,8 +104,10 @@ describe("AccountSection license verification", () => {
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: "License key" })).toHaveValue(""),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Buy License" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade now" }));
     expect(openPurchasePage).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("textbox", { name: "License key" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Recheck" })).toBeInTheDocument();
   });
 
   it("opens the existing license management portal from an unlicensed state", async () => {

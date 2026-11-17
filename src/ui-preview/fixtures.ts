@@ -1,3 +1,4 @@
+import type { Step } from "@/components/onboarding/onboardingTypes";
 import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type LicenseStatus, type ModelInfo, type TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
@@ -14,7 +15,9 @@ export type PreviewOptions = {
   platform: "macos" | "windows";
   empty: boolean;
   sidebar?: "expanded" | "rail";
-  onboarding?: 1 | 2 | 3;
+  onboarding?: Step;
+  /** `?case=`: an onboarding edge case, such as a denied microphone. */
+  onboardingCase?: OnboardingPreviewCase;
   /** `?license=none`: a device whose free trial has not been started. */
   trialNotStarted?: boolean;
 };
@@ -239,17 +242,19 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
 ];
 
+export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed";
+
 export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
   const settings: AppSettings = {
     hotkey,
     current_model: "parakeet-v3",
-    current_model_engine: "parakeet",
+    current_model_engine: options.onboarding && options.platform === "windows" ? "whisper" : "parakeet",
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
     check_updates_automatically: false,
-    recording_mode: "push_to_talk",
+    recording_mode: options.onboarding ? "toggle" : "push_to_talk",
     selected_microphone:
       options.platform === "macos" ? "MacBook Pro Microphone" : "Built-in Microphone",
     auto_paste_transcription: true,
@@ -271,18 +276,20 @@ export function createFixtures(options: PreviewOptions) {
               ...model,
               display_name: "Parakeet V3",
               size: 500_000_000,
-              downloaded: options.onboarding !== 1,
+              downloaded: options.onboarding !== "promise" && options.onboardingCase !== "downloading",
             }
           : {
               ...model,
               display_name: "Large v3 Turbo",
               engine: "whisper" as const,
               size: 1_624_555_275,
-              downloaded: options.onboarding !== 1,
+              downloaded: options.onboarding !== "promise" && options.onboardingCase !== "downloading",
             };
       })
     : demoModels;
-  const license: LicenseStatus = options.trialNotStarted
+  const license: LicenseStatus = options.onboardingCase === "expired"
+    ? { status: "expired" }
+    : options.trialNotStarted || (options.onboarding && options.onboardingCase !== "licensed")
     ? { status: "none" }
     : {
         status: "licensed",
@@ -313,7 +320,7 @@ export function createFixtures(options: PreviewOptions) {
     { id: "gemini", name: "Gemini", status: "production", requires_api_key: true },
   ];
   const aiSettings: AISettings = {
-    enabled: true,
+    enabled: !options.onboarding || options.onboardingCase === "polished",
     provider: "openai",
     model: "gpt-6-luna",
     hasApiKey: true,
@@ -362,13 +369,14 @@ export function createFixtures(options: PreviewOptions) {
     "plugin:log|log": null,
     get_settings: settings,
     list_kept_dictations: [],
-    get_microphone_permission_status: options.onboarding === 2 ? "not_determined" : "granted",
+    get_microphone_permission_status: options.onboardingCase === "mic-denied" ? "denied"
+      : options.onboarding === "promise" || options.onboarding === "try" ? "not_determined" : "granted",
     start_microphone_test: "preview",
     stop_microphone_test: null,
     save_settings: null,
     check_license_status: license,
     revalidate_license: license,
-    start_trial: { status: "trial", trial_days_left: 7 } satisfies LicenseStatus,
+    start_trial: { status: "trial", trial_days_left: 7, expires_at: "2026-11-24T12:00:00Z" } satisfies LicenseStatus,
     get_model_status: { models: onboardingModels },
     get_recognition_availability_snapshot: {
       whisper_available: false,
@@ -398,7 +406,7 @@ export function createFixtures(options: PreviewOptions) {
     ],
     validate_microphone_selection: false,
     check_microphone_permission: true,
-    check_accessibility_permission: options.onboarding === 2 ? false : true,
+    check_accessibility_permission: !(options.onboarding === "setup" || options.onboardingCase === "ax-skipped"),
     get_tray_status: { available: true, attempts: 0, lastError: null },
     get_distribution_info: distribution,
     check_for_app_update: null,

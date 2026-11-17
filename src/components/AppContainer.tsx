@@ -53,7 +53,7 @@ export function AppContainer() {
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
   const { settings, refreshSettings } = useSettings();
   const { checkAccessibilityPermission, checkMicrophonePermission } = useReadiness();
-  const { status: licenseStatus, startTrial } = useLicense();
+  const { status: licenseStatus, startTrial, activateLicense, checkStatus, openPurchasePage } = useLicense();
   const modelAvailability = useModelAvailabilityContext();
 
   // Use the model management context for onboarding
@@ -111,7 +111,7 @@ export function AppContainer() {
     return (
       <AppErrorBoundary>
         <OnboardingDesktop
-          previewPhase={getOnboardingPreview()}
+          previewStep={getOnboardingPreview()}
           onCompletionStart={markOnboardingCompletionStarted}
           onCompletionError={clearOnboardingCompletionMarker}
           onComplete={() => {
@@ -119,7 +119,11 @@ export function AppContainer() {
             refreshSettings();
             void modelAvailability.checkModels();
           }}
-          onStartTrial={licenseStatus?.status === "none" ? startTrial : undefined}
+          licenseStatus={licenseStatus}
+          onStartTrial={startTrial}
+          onActivateLicense={(key) => activateLicense(key, { quiet: true })}
+          onRecheckLicense={checkStatus}
+          onOpenPricing={openPurchasePage}
           modelManagement={{ ...modelManagement, downloadProgress }}
         />
       </AppErrorBoundary>

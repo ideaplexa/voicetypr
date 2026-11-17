@@ -2,6 +2,7 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Input } from "@/components/ui/input";
 import { SettingsCard } from "@/components/settings/settings-ui";
 import { Crown } from "lucide-react";
+import { useRef } from "react";
 import { openExternalLink } from "./accountLicenseUtils";
 
 interface ActivateLicenseCardProps {
@@ -19,6 +20,7 @@ export function ActivateLicenseCard({
   onActivate,
   onPurchase,
 }: ActivateLicenseCardProps) {
+  const keyInput = useRef<HTMLInputElement>(null);
   return (
     <SettingsCard
       icon={Crown}
@@ -27,9 +29,16 @@ export function ActivateLicenseCard({
     >
       <div className="mt-4 space-y-4">
         <div className="flex gap-2">
-          <Button onClick={onPurchase} className="flex-1" size="sm">
+          <Button
+            onClick={() => {
+              onPurchase();
+              keyInput.current?.focus();
+            }}
+            className="flex-1"
+            size="sm"
+          >
             <Crown className="mr-1.5 h-3.5 w-3.5" />
-            Buy License
+            Upgrade now
           </Button>
           <Button
             onClick={() => openExternalLink("https://polar.sh/ideaplexa/portal")}
@@ -45,6 +54,7 @@ export function ActivateLicenseCard({
           <p className="text-sm font-medium">Have a license key?</p>
           <div className="flex gap-2">
             <Input
+              ref={keyInput}
               aria-label="License key"
               placeholder="Enter license key"
               value={licenseKey}

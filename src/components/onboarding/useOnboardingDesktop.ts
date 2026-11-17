@@ -28,7 +28,7 @@ import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 import { useOfflinePreparation } from "@/components/onboarding/useOfflinePreparation";
 
 // Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
-const DEFAULT_HOTKEY = isMacOS ? "Alt+Space" : "Control+Space";
+const defaultHotkey = () => (isMacOS ? "Alt+Space" : "Control+Space");
 
 const log = createLogger("onboarding");
 const NO_DOWNLOAD_ERRORS: Readonly<Record<string, string>> = Object.freeze({});
@@ -38,8 +38,10 @@ export function useOnboardingDesktop({
   onCompletionError,
   onComplete,
   modelManagement,
-  previewPhase,
+  previewStep,
+  licenseStatus,
 }: OnboardingDesktopProps) {
+  const needsTrial = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "trial";
   const { settings, updateSettings } = useSettings();
   const preparation = useOfflinePreparation(modelManagement);
   const {
@@ -73,17 +75,10 @@ export function useOnboardingDesktop({
     isLoading,
   } = modelManagement;
 
-  const [currentStep, setCurrentStep] = useState<Step>(
-    previewPhase === 2
-      ? isMacOS
-        ? "permissions"
-        : "hotkey"
-      : previewPhase === 3
-        ? "success"
-        : "welcome",
-  );
-  // Both independent privacy choices are opt-out and default to checked.
-  const [telemetryOptIn, setTelemetryOptIn] = useState(true);
+  const [currentStep, setCurrentStep] = useState<Step>(previewStep ?? "promise");
+  // Sharing is opt-in: the box starts unticked unless the user already chose.
+  const [telemetryOptIn, setTelemetryOptIn] = useState(false);
+  const [accessibilitySkipped, setAccessibilitySkipped] = useState(false);
   const [sourceType, setSourceType] = useState<SourceType>(() =>
     isCloudEngine(settings?.current_model_engine ?? "") ? "cloud" : "local",
   );
@@ -110,13 +105,12 @@ export function useOnboardingDesktop({
   const [previousSettings, setPreviousSettings] = useState(settings);
   const sourceChosenByUser = useRef(false);
 
-  // Hydrate persisted consent so a relaunched onboarding cannot silently
-  // overwrite a previously stored opt-out with the default-on state.
+  // A relaunched onboarding keeps a choice the user already made.
   useEffect(() => {
     let cancelled = false;
-    invoke<{ enabled: boolean }>("get_telemetry_status")
+    invoke<{ enabled: boolean; consent_required?: boolean } | null>("get_telemetry_status")
       .then((telemetry) => {
-        if (cancelled) return;
+        if (cancelled || !telemetry || telemetry.consent_required !== false) return;
         setTelemetryOptIn(telemetry.enabled);
       })
       .catch((error) => {
@@ -149,15 +143,6 @@ export function useOnboardingDesktop({
     } as PermissionState,
   };
 
-  const steps = useMemo(
-    () =>
-      isMacOS
-        ? (["welcome", "source", "readiness", "permissions", "hotkey", "success"] satisfies Step[])
-        : (["welcome", "source", "readiness", "hotkey", "success"] satisfies Step[]),
-    [],
-  );
-
-  const currentIndex = steps.indexOf(currentStep);
   const selectedModelName = settings?.current_model || null;
   const selectedModel = selectedModelName ? models[selectedModelName] : null;
   const localModelNames = useMemo(
@@ -254,12 +239,12 @@ export function useOnboardingDesktop({
   }, []);
 
   useEffect(() => {
-    if (currentStep !== "permissions") return;
+    if (currentStep !== "try" && currentStep !== "setup" && currentStep !== "done") return;
     void checkPermissions();
   }, [currentStep, checkPermissions]);
 
   useEffect(() => {
-    if (currentStep !== "permissions") return;
+    if (currentStep !== "try" && currentStep !== "setup") return;
     const handleFocus = () => {
       void checkPermissionsRef.current();
     };
@@ -307,14 +292,14 @@ export function useOnboardingDesktop({
           setHotkey("");
           setHoldToTalk(primary.action === "hold_to_record");
         } else {
-          setHotkey(DEFAULT_HOTKEY);
+          setHotkey(defaultHotkey());
         }
         setHotkeyHydrated(true);
       })
       .catch((error) => {
         if (cancelled) return;
         log.error("[OnboardingDesktop] Failed to restore configured hotkey:", error);
-        setHotkey(DEFAULT_HOTKEY);
+        setHotkey(defaultHotkey());
         setHotkeyHydrated(true);
       });
     return () => {
@@ -364,6 +349,13 @@ export function useOnboardingDesktop({
     } finally {
       setIsRequestingPermission(null);
     }
+  };
+
+  // Asks on first use; afterwards only System Settings can change the answer.
+  const ensureMicrophone = async () => {
+    if (microphonePermissionStatus === "not_determined") return requestMicPermission();
+    await requestPermission("microphone");
+    return false;
   };
 
   const selectModel = async (modelName: string, source: "local" | "cloud") => {
@@ -586,10 +578,21 @@ export function useOnboardingDesktop({
     }
   };
 
+  const prepareLocal = async () => {
+    if (!preparation.recommended) return false;
+    await invoke("set_active_remote_server", { serverId: null });
+    setActiveRemoteServerId(null);
+    await preparation.prepare(preparation.recommended);
+    return true;
+  };
+
   const handleNext = async () => {
     try {
-      if (currentStep === "welcome") {
-        setCurrentStep("source");
+      if (currentStep === "promise") {
+        if (sourceType === "local") {
+          if (!sourceReady && !(await prepareLocal())) return setCurrentStep("source");
+        } else if (!sourceReady) return setCurrentStep("readiness");
+        setCurrentStep("try");
         return;
       }
 
@@ -597,17 +600,9 @@ export function useOnboardingDesktop({
         if (preparation.savingLanguage) return;
         sourceChosenByUser.current = true;
         if (sourceType === "local") {
-          if (!preparation.recommended) return;
-          await invoke("set_active_remote_server", { serverId: null });
-          setActiveRemoteServerId(null);
-          await preparation.prepare(preparation.recommended);
-          setCurrentStep(isMacOS ? "permissions" : "hotkey");
+          if (!(await prepareLocal())) return;
+          setCurrentStep("try");
         } else setCurrentStep("readiness");
-        return;
-      }
-
-      if (currentStep === "permissions") {
-        setCurrentStep("hotkey");
         return;
       }
 
@@ -616,16 +611,22 @@ export function useOnboardingDesktop({
           await invoke("set_active_remote_server", { serverId: null });
           setActiveRemoteServerId(null);
         }
-        setCurrentStep(isMacOS ? "permissions" : "hotkey");
+        setCurrentStep("try");
         return;
       }
 
-      if (currentStep === "hotkey") {
-        if (!sourceReady) return;
-        await saveHotkeySettings();
-        setCurrentStep("success");
+      if (currentStep === "try") {
+        setCurrentStep("setup");
         return;
       }
+
+      if (currentStep === "setup") {
+        await saveHotkeySettings();
+        setCurrentStep(needsTrial ? "trial" : "done");
+        return;
+      }
+
+      if (currentStep === "trial") setCurrentStep("done");
     } catch (error) {
       log.error("Failed to advance onboarding:", error);
       toast.error(error instanceof Error ? error.message : "Failed to continue onboarding");
@@ -633,31 +634,26 @@ export function useOnboardingDesktop({
   };
 
   const handleBack = () => {
-    if (sourceType === "local" &&
-      (currentStep === "permissions" || (currentStep === "hotkey" && !isMacOS))) {
-      setCurrentStep("source");
-      return;
-    }
-    const previousIndex = currentIndex - 1;
-    if (previousIndex >= 0) {
-      setCurrentStep(steps[previousIndex]);
-    }
+    const previous: Partial<Record<Step, Step>> = {
+      source: "promise",
+      readiness: "source",
+      try: "promise",
+      setup: "try",
+      trial: "setup",
+    };
+    const step = previous[currentStep];
+    if (step) setCurrentStep(step);
   };
 
   const canProceed = () => {
     switch (currentStep) {
       case "source":
         return !preparation.savingLanguage && (sourceType !== "local" || Boolean(preparation.recommended));
-      case "permissions":
-        if (!isMacOS) return true;
-        return (
-          permissions.microphone.status === "granted" &&
-          permissions.accessibility.status === "granted"
-        );
       case "readiness":
         return sourceType === "local" ? Boolean(preparation.name) : sourceReady;
-      case "hotkey":
-        return !isEditingHotkey && sourceReady;
+      case "setup":
+        return !isEditingHotkey && (!isMacOS || accessibilitySkipped ||
+          permissions.accessibility.status === "granted");
       default:
         return true;
     }
@@ -667,8 +663,7 @@ export function useOnboardingDesktop({
 
   return {
     currentStep,
-    currentIndex,
-    steps,
+    goTo: setCurrentStep,
     sourceType,
     preparation,
     sourceReady,
@@ -682,6 +677,7 @@ export function useOnboardingDesktop({
     isRequestingPermission,
     checkSinglePermission,
     requestPermission,
+    ensureMicrophone,
     local: {
       localModelNames,
       recommendedModel: preparation.bestMatch,
@@ -771,6 +767,9 @@ export function useOnboardingDesktop({
       setHotkey("");
     },
     onHoldToTalkChange: setHoldToTalk,
+    accessibilitySkipped,
+    skipAccessibility: () => setAccessibilitySkipped(true),
+    saveHotkeySettings,
     telemetryOptIn,
     isSavingCompletion,
     onTelemetryChange: setTelemetryOptIn,

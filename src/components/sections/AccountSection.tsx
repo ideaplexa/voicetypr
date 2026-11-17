@@ -24,9 +24,9 @@ export function AccountSection({ embedded = false }: { embedded?: boolean } = {}
     if (!licenseKey.trim()) return;
 
     setIsActivating(true);
-    await activateLicense(licenseKey.trim());
+    const error = await activateLicense(licenseKey.trim());
     setIsActivating(false);
-    setLicenseKey("");
+    if (!error) setLicenseKey("");
   };
 
   const handleDeactivate = async () => {

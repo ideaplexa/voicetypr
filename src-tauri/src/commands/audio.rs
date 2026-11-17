@@ -1,8 +1,7 @@
 use super::normalized_audio::{normalize_upload_audio, NormalizedTempFile};
 use crate::recording::island::{
     self, emit_visible_main, plan_translation_failure, polish_was_guarded, recovery_for_failure,
-    validate_recording_license, BlockedKind, DesktopWritingSuccessPlan, IslandAction, Note,
-    PolishReason, RecoveryKind,
+    BlockedKind, DesktopWritingSuccessPlan, IslandAction, Note, PolishReason, RecoveryKind,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -4651,7 +4650,7 @@ pub(super) async fn validate_recording_requirements(app: &AppHandle) -> Result<(
         return Err(error_text);
     }
 
-    validate_recording_license(app).await
+    crate::license::first_run::validate_recording_license(app).await
 }
 
 pub(crate) fn clear_pending_stop_after_start(app_state: &AppState) {

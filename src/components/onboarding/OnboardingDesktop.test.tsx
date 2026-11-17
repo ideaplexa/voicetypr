@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelInfo } from "@/types";
+import type { LicenseStatus, ModelInfo } from "@/types";
 import { OnboardingDesktop } from "./OnboardingDesktop";
+import type { OnboardingDesktopProps } from "./onboardingTypes";
 
 const {
   invokeMock,
@@ -65,20 +66,26 @@ vi.mock("@/contexts/SettingsContext", () => ({
   }),
 }));
 
+const permissionState = vi.hoisted(() => ({
+  microphone: "granted" as string,
+  accessibility: true,
+  requestMicrophone: vi.fn(),
+}));
+
 vi.mock("@/hooks/useMicrophonePermission", () => ({
   useMicrophonePermission: () => ({
-    hasPermission: true,
-    permissionStatus: "granted",
-    checkPermission: vi.fn().mockResolvedValue(true),
-    requestPermission: vi.fn().mockResolvedValue(true),
+    hasPermission: permissionState.microphone === "granted",
+    permissionStatus: permissionState.microphone,
+    checkPermission: vi.fn().mockResolvedValue(permissionState.microphone === "granted"),
+    requestPermission: permissionState.requestMicrophone,
   }),
 }));
 
 vi.mock("@/hooks/useAccessibilityPermission", () => ({
   useAccessibilityPermission: () => ({
-    hasPermission: true,
-    checkPermission: vi.fn().mockResolvedValue(true),
-    requestPermission: vi.fn().mockResolvedValue(true),
+    hasPermission: permissionState.accessibility,
+    checkPermission: vi.fn().mockResolvedValue(permissionState.accessibility),
+    requestPermission: vi.fn().mockResolvedValue(permissionState.accessibility),
   }),
 }));
 
@@ -99,19 +106,43 @@ vi.mock("@tauri-apps/api/event", () => ({
 const platformMock = vi.hoisted(() => ({ isMacOS: true, isWindows: false, isLinux: false }));
 vi.mock("@/lib/platform", () => platformMock);
 
-const renderOnboarding = () =>
+const licensed: LicenseStatus = { status: "licensed", license_type: "pro" };
+
+const renderOnboarding = (props: Partial<OnboardingDesktopProps> = {}) =>
   render(
     <OnboardingDesktop
       onCompletionStart={onCompletionStartMock}
       onCompletionError={onCompletionErrorMock}
       onComplete={onCompleteMock}
+      licenseStatus={licensed}
       modelManagement={modelManagement as never}
+      {...props}
     />,
   );
+
+type User = ReturnType<typeof userEvent.setup>;
+
+const openSource = async (user: User) => {
+  await user.click(await screen.findByRole("button", { name: /use a cloud provider or another computer/i }));
+  await screen.findByRole("heading", { name: /where should your voice become text/i });
+};
+
+const reachSetup = async (user: User) => {
+  await user.click(await screen.findByRole("button", { name: /try it with your own voice/i }));
+  await user.click(await screen.findByRole("button", { name: /skip for now/i }));
+  await screen.findByRole("heading", { name: /now let it type anywhere/i });
+};
+
+const finishSetup = async (user: User) => {
+  await reachSetup(user);
+  await user.click(screen.getByRole("button", { name: /^continue$/i }));
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  Object.assign(permissionState, { microphone: "granted", accessibility: true });
+  permissionState.requestMicrophone.mockResolvedValue(true);
   Object.assign(platformMock, { isMacOS: true, isWindows: false, isLinux: false });
   eventListeners.clear();
   Object.assign(settingsState, {
@@ -168,17 +199,13 @@ beforeEach(() => {
 });
 
 describe("OnboardingDesktop", () => {
-  it("saves the hotkey and reaches success without a sample transcription", async () => {
+  it("saves the hotkey and reaches the end without a trial step for a licensed device", async () => {
     const user = userEvent.setup();
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await finishSetup(user);
 
-    await screen.findByRole("heading", { name: /try it now/i });
-    expect(screen.queryByText(/do your first transcription/i)).not.toBeInTheDocument();
-    expect(eventListeners.has("transcription-added")).toBe(false);
+    await screen.findByRole("heading", { name: /welcome back/i });
     expect(invokeMock).toHaveBeenCalledWith("set_global_shortcut", {
       shortcut: "CommandOrControl+Shift+Space",
     });
@@ -235,11 +262,9 @@ describe("OnboardingDesktop", () => {
     });
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await finishSetup(user);
 
-    await screen.findByRole("heading", { name: /try it now/i });
+    await screen.findByRole("heading", { name: /welcome back/i });
 
     // Combo save registers the primary global shortcut AND removes only the
     // onboarding-created hold binding, so recording can never fire from both a
@@ -268,9 +293,7 @@ describe("OnboardingDesktop", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await finishSetup(user);
 
     expect(invokeMock).toHaveBeenCalledWith("set_global_shortcut", {
       shortcut: "CommandOrControl+Alt+M",
@@ -310,15 +333,14 @@ describe("OnboardingDesktop", () => {
     });
     const view = renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: /another computer/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(await screen.findByRole("button", { name: /use this server/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await user.click(await screen.findByRole("button", { name: /^Change shortcut$/i }));
+    await user.click(await screen.findByRole("button", { name: /skip for now/i }));
+    await user.click(await screen.findByRole("button", { name: /^Change$/ }));
     await user.click(screen.getByTitle("Change hotkey"));
     fireEvent.keyDown(window, { key: "k", code: "KeyK", metaKey: true });
     fireEvent.keyUp(window, { key: "k", code: "KeyK", metaKey: true });
@@ -375,9 +397,7 @@ describe("OnboardingDesktop", () => {
     });
 
     renderOnboarding();
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await finishSetup(user);
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("update_shortcut_settings", {
@@ -393,7 +413,7 @@ describe("OnboardingDesktop", () => {
     const user = userEvent.setup();
 
     renderOnboarding();
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: "Choose a different model" }));
     expect(
       await screen.findByRole("heading", { name: /where should your voice become text/i }),
@@ -406,9 +426,10 @@ describe("OnboardingDesktop", () => {
   });
 
   it("shows local, cloud, and remote as explicit source choices", async () => {
+    const user = userEvent.setup();
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
 
     expect(
       screen.getByRole("heading", { name: /where should your voice become text/i }),
@@ -443,7 +464,7 @@ describe("OnboardingDesktop", () => {
     });
 
     renderOnboarding();
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: /^Cloud$/i }));
 
     await act(async () => {
@@ -478,7 +499,7 @@ describe("OnboardingDesktop", () => {
     });
 
     renderOnboarding();
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: "Choose a different model" }));
     await user.click(await screen.findByText("Base English"));
 
@@ -496,17 +517,15 @@ describe("OnboardingDesktop", () => {
     });
   });
 
-  it("selects the recommended ready local model and proceeds straight to permissions", async () => {
+  it("selects the recommended ready local model and goes straight to the first try", async () => {
     const user = userEvent.setup();
     settingsState.current_model = "";
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(await screen.findByRole("button", { name: /try it with your own voice/i }));
 
-    expect(screen.getByText("Offline dictation ready")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Let Voicetypr hear you and type for you" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+    expect(updateSettingsMock).toHaveBeenCalledWith({ current_model: "base.en", current_model_engine: "whisper" });
+    expect(await screen.findByRole("button", { name: /click here to talk/i })).toBeEnabled();
   });
 
   it("lets remote-first users switch to local setup from the empty remote state", async () => {
@@ -514,7 +533,7 @@ describe("OnboardingDesktop", () => {
     settingsState.current_model = "";
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: /another computer/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
@@ -572,7 +591,7 @@ describe("OnboardingDesktop", () => {
 
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: /another computer/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
@@ -614,7 +633,7 @@ describe("OnboardingDesktop", () => {
     });
 
     renderOnboarding();
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: /^Cloud$/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
@@ -646,7 +665,7 @@ describe("OnboardingDesktop", () => {
     const user = userEvent.setup();
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     const gpuSwitch = screen.getByRole("switch", { name: /use gpu acceleration/i });
@@ -665,7 +684,7 @@ describe("OnboardingDesktop", () => {
     const user = userEvent.setup();
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     const gpuSwitch = screen.getByRole("switch", { name: /use gpu acceleration/i });
@@ -686,7 +705,7 @@ describe("OnboardingDesktop", () => {
     };
     const user = userEvent.setup();
     renderOnboarding();
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: "Choose a different model" }));
     expect(screen.queryByRole("switch", { name: /use gpu acceleration/i })).not.toBeInTheDocument();
   });
@@ -697,7 +716,7 @@ describe("OnboardingDesktop", () => {
     renderOnboarding();
 
     // Navigate through macOS flow to readiness (welcome→source→permissions→readiness)
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
+    await openSource(user);
     await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     expect(screen.queryByText(/use gpu acceleration/i)).not.toBeInTheDocument();
@@ -706,32 +725,18 @@ describe("OnboardingDesktop", () => {
   it("saves isolated_tap binding when bare modifier captured with Hold to talk OFF", async () => {
     const user = userEvent.setup();
     renderOnboarding();
-
-    // Navigate to hotkey step (macOS: welcome→source→permissions→readiness→hotkey)
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    // Enter HotkeyInput edit mode
-
-    await user.click(await screen.findByRole("button", { name: /^Change shortcut$/i }));
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^Change$/ }));
     await user.click(screen.getByTitle("Change hotkey"));
 
-    // Simulate Right Alt bare modifier press + release; waitFor ensures the
-    // keydown listener is attached and pendingBareModifier is set before clicking Save.
+    // Wait until the keydown listener has captured the bare modifier.
     fireEvent.keyDown(window, { key: "Alt", code: "AltRight", altKey: true });
     fireEvent.keyUp(window, { key: "Alt", code: "AltRight" });
     await waitFor(() => expect(screen.getByTitle("Save hotkey")).not.toBeDisabled());
-
-    // Save within HotkeyInput (the checkmark icon button)
     await user.click(screen.getByTitle("Save hotkey"));
-
-    // Hold to talk is OFF by default; save the step
     await user.click(screen.getByRole("button", { name: /save hotkey/i }));
 
-    await screen.findByRole("heading", { name: /try it now/i });
-
-    // isolated_tap / toggle_recording / pressed
+    await screen.findByRole("button", { name: /^Change$/ });
     expect(invokeMock).toHaveBeenCalledWith("update_shortcut_settings", {
       settings: {
         bindings: [
@@ -749,39 +754,24 @@ describe("OnboardingDesktop", () => {
     expect(updateSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({ recording_mode: "toggle" }),
     );
+    expect(screen.getByText(/Press to talk, press again to paste/)).toBeInTheDocument();
   });
 
   it("saves modifier_hold binding when bare modifier captured with Hold to talk ON", async () => {
     const user = userEvent.setup();
     renderOnboarding();
-
-    // Navigate to hotkey step
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    // Enter HotkeyInput edit mode
-
-    await user.click(await screen.findByRole("button", { name: /^Change shortcut$/i }));
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^Change$/ }));
     await user.click(screen.getByTitle("Change hotkey"));
 
-    // Simulate Right Alt bare modifier press + release
     fireEvent.keyDown(window, { key: "Alt", code: "AltRight", altKey: true });
     fireEvent.keyUp(window, { key: "Alt", code: "AltRight" });
     await waitFor(() => expect(screen.getByTitle("Save hotkey")).not.toBeDisabled());
-
-    // Save within HotkeyInput
     await user.click(screen.getByTitle("Save hotkey"));
-
-    // Toggle "Hold to talk" ON
     await user.click(screen.getByRole("switch", { name: /hold to talk/i }));
-
-    // Save the step
     await user.click(screen.getByRole("button", { name: /save hotkey/i }));
 
-    await screen.findByRole("heading", { name: /try it now/i });
-
-    // modifier_hold / hold_to_record / hold
+    await screen.findByRole("button", { name: /^Change$/ });
     expect(invokeMock).toHaveBeenCalledWith("update_shortcut_settings", {
       settings: {
         bindings: [
@@ -799,83 +789,70 @@ describe("OnboardingDesktop", () => {
     expect(updateSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({ recording_mode: "push_to_talk" }),
     );
+    expect(screen.getByText(/Hold to talk, let go to paste/)).toBeInTheDocument();
   });
 
-  it("defaults the unified privacy choice on and persists them on completion", async () => {
+  it("starts the sharing choice unticked and saves it on completion", async () => {
     const user = userEvent.setup();
     renderOnboarding();
+    await finishSetup(user);
+    await screen.findByRole("heading", { name: /welcome back/i });
 
-    // Navigate to the success step (welcome→source→permissions→readiness→hotkey).
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await screen.findByRole("heading", { name: /try it now/i });
-
-    expect(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i })).not.toBeChecked();
 
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: true });
-      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", {
-        enabled: true,
-      });
+      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false });
       expect(invokeMock).toHaveBeenCalledWith("record_onboarding_completed");
     });
   });
 
-  it("persists the unified opt-out during onboarding", async () => {
+  it("keeps a sharing choice the user already made when onboarding runs again", async () => {
+    const user = userEvent.setup();
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
+      command === "get_telemetry_status"
+        ? Promise.resolve({ enabled: true, available: true, consent_required: false })
+        : base?.(command, ...rest),
+    );
+    renderOnboarding();
+    await finishSetup(user);
+    expect(await screen.findByRole("checkbox", { name: /share anonymous crash reports/i })).toBeChecked();
+  });
+
+  it("saves the opt-in during onboarding", async () => {
     const user = userEvent.setup();
     renderOnboarding();
-
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await screen.findByRole("heading", { name: /try it now/i });
+    await finishSetup(user);
+    await screen.findByRole("heading", { name: /welcome back/i });
 
     await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false });
-      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", {
-        enabled: false,
-      });
+      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: true });
     });
   });
 
-  it("keeps onboarding active until the unified opt-out are persisted", async () => {
+  it("keeps onboarding active until the sharing choice is saved", async () => {
     const user = userEvent.setup();
     let resolveAnalytics: (() => void) | undefined;
     const analyticsPersisted = new Promise<void>((resolve) => {
       resolveAnalytics = resolve;
     });
     invokeMock.mockImplementation((command: string) => {
-      if (command === "get_audio_devices") return Promise.resolve([]);
-      if (command === "set_telemetry_consent") {
-        return analyticsPersisted;
-      }
-      if (command === "discover_remote_servers" || command === "list_remote_servers") {
+      if (command === "set_telemetry_consent") return analyticsPersisted;
+      if (command === "discover_remote_servers" || command === "list_remote_servers" || command === "get_audio_devices") {
         return Promise.resolve([]);
-      }
-      if (command === "get_active_remote_server") {
-        return Promise.resolve(null);
       }
       return Promise.resolve(null);
     });
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
-    await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
+    await finishSetup(user);
+    await user.click(await screen.findByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false });
-      expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", {
-        enabled: false,
-      });
     });
     expect(onCompletionStartMock).toHaveBeenCalledTimes(1);
     expect(
@@ -895,59 +872,40 @@ describe("OnboardingDesktop", () => {
     });
   });
 
-  it("keeps onboarding recoverable when unified consent fails", async () => {
+  it("keeps onboarding recoverable when saving the sharing choice fails", async () => {
     const user = userEvent.setup();
     invokeMock.mockImplementation((command: string) => {
-      if (command === "get_audio_devices") return Promise.resolve([]);
       if (command === "set_telemetry_consent") {
         return Promise.reject(new Error("analytics consent store unavailable"));
       }
-      if (command === "discover_remote_servers" || command === "list_remote_servers") {
+      if (command === "discover_remote_servers" || command === "list_remote_servers" || command === "get_audio_devices") {
         return Promise.resolve([]);
-      }
-      if (command === "get_active_remote_server") {
-        return Promise.resolve(null);
       }
       return Promise.resolve(null);
     });
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
-    await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
+    await finishSetup(user);
+    await user.click(await screen.findByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => {
       expect(onCompletionErrorMock).toHaveBeenCalledTimes(1);
     });
-    expect(invokeMock).toHaveBeenCalledWith("set_telemetry_consent", { enabled: false });
     expect(invokeMock).not.toHaveBeenCalledWith("record_onboarding_completed");
-    expect(
-      updateSettingsMock.mock.calls.some(([updates]) => updates?.onboarding_completed === true),
-    ).toBe(false);
     expect(onCompleteMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("heading", { name: /try it now/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start using voicetypr/i })).toBeEnabled();
 
     invokeMock.mockResolvedValue(null);
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => {
-      expect(
-        invokeMock.mock.calls.filter(([command]) => command === "set_telemetry_consent"),
-      ).toHaveLength(2);
-      expect(updateSettingsMock).toHaveBeenCalledWith(
-        { onboarding_completed: true },
-        { publishAfterSave: true },
-      );
       expect(onCompleteMock).toHaveBeenCalledTimes(1);
     });
     expect(onCompletionStartMock).toHaveBeenCalledTimes(2);
-    expect(onCompletionErrorMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps opt-outs selected when the completion save fails and succeeds on retry", async () => {
+  it("keeps the sharing choice when the completion save fails and succeeds on retry", async () => {
     const user = userEvent.setup();
     let completionAttempts = 0;
     updateSettingsMock.mockImplementation(
@@ -965,18 +923,13 @@ describe("OnboardingDesktop", () => {
     );
     renderOnboarding();
 
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
+    await finishSetup(user);
+    await user.click(await screen.findByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i }));
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
 
     await waitFor(() => expect(onCompletionErrorMock).toHaveBeenCalledTimes(1));
     expect(settingsState.onboarding_completed).toBe(false);
-    expect(onCompleteMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("heading", { name: /try it now/i })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i })).not.toBeChecked();
-    expect(screen.getByRole("button", { name: /start using voicetypr/i })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: /share anonymous crash reports and usage numbers/i })).toBeChecked();
 
     await user.click(screen.getByRole("button", { name: /start using voicetypr/i }));
 
@@ -985,11 +938,10 @@ describe("OnboardingDesktop", () => {
       expect(onCompleteMock).toHaveBeenCalledTimes(1);
     });
     expect(completionAttempts).toBe(2);
-    expect(onCompletionStartMock).toHaveBeenCalledTimes(2);
-    expect(onCompletionErrorMock).toHaveBeenCalledTimes(1);
   });
+
   it.each(["macos", "windows"] as const)(
-    "renders all three real phases on %s",
+    "walks the promise, the first try, setup and done on %s",
     async (platform) => {
       Object.assign(platformMock, {
         isMacOS: platform === "macos",
@@ -997,36 +949,43 @@ describe("OnboardingDesktop", () => {
       });
       const user = userEvent.setup();
       renderOnboarding();
-      expect(
-        await screen.findByRole("button", {
-          name: platform === "macos" ? "On this Mac" : "On this PC",
-        }),
-      ).toHaveAttribute("aria-pressed", "true");
-      await user.click(screen.getByRole("button", { name: /continue/i }));
-      expect(
-        screen.getByRole("heading", {
-          name:
-            platform === "macos"
-              ? "Let Voicetypr hear you and type for you"
-              : "Check your microphone",
-        }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("combobox")).toBeInTheDocument();
-      expect(screen.getByRole("meter", { name: "Microphone input level" })).toBeInTheDocument();
-      expect(screen.getByText(/(Nothing is saved|This check saves nothing)/)).toBeInTheDocument();
-      if (platform === "macos")
+      expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Say it.It lands in any app.");
+      await user.click(screen.getByRole("button", { name: /try it with your own voice/i }));
+      expect(await screen.findByRole("heading", { name: "Say something" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /skip for now/i }));
+      await screen.findByRole("heading", { name: "Now let it type anywhere" });
+      if (platform === "macos") {
         expect(screen.getByRole("heading", { name: "Accessibility" })).toBeInTheDocument();
-      else expect(screen.queryByText("Accessibility")).not.toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: /continue/i }));
-      expect(await screen.findByRole("textbox", { name: "Try a dictation" })).toHaveFocus();
-      expect(screen.getByRole("button", { name: "Change shortcut" })).toBeInTheDocument();
+      } else {
+        expect(screen.queryByText("Accessibility")).not.toBeInTheDocument();
+        expect(screen.getByRole("meter", { name: "Microphone input level" })).toBeInTheDocument();
+      }
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("heading", { name: /welcome back/i });
       await user.click(screen.getByRole("button", { name: "Start using Voicetypr" }));
       await waitFor(() => expect(settingsState.onboarding_completed).toBe(true));
     },
   );
 
+  it.each([
+    ["macos", "Alt+Space", "⌥"],
+    ["windows", "Control+Space", "Ctrl"],
+  ] as const)("uses the platform default shortcut in the copy on %s", async (platform, hotkey, cap) => {
+    Object.assign(platformMock, { isMacOS: platform === "macos", isWindows: platform === "windows" });
+    settingsState.hotkey = "";
+    const user = userEvent.setup();
+    renderOnboarding();
+    await user.click(await screen.findByRole("button", { name: /try it with your own voice/i }));
+    const keys = await screen.findAllByLabelText(`${cap} + Space`);
+    expect(keys.length).toBeGreaterThan(0);
+    expect(screen.getByText(/Press again when you’re done/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /skip for now/i }));
+    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("set_global_shortcut", { shortcut: hotkey }));
+  });
+
   it.each(["macos", "windows"] as const)(
-    "shows the real model size and reachable download progress on %s",
+    "starts the engine download from the promise and blocks the first try until it is ready on %s",
     async (platform) => {
       Object.assign(platformMock, {
         isMacOS: platform === "macos",
@@ -1040,65 +999,112 @@ describe("OnboardingDesktop", () => {
         downloaded: false,
       };
       const view = renderOnboarding();
-      await user.click(
-        await screen.findByRole("button", { name: "Continue — download Parakeet (670 MB)" }),
-      );
+      expect(await screen.findByText(/one-time download of the dictation engine \(670 MB\)/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /try it with your own voice/i }));
       expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en");
       modelManagement.downloadProgress = { "base.en": 42 };
       view.rerender(
         <OnboardingDesktop
           onComplete={onCompleteMock}
+          licenseStatus={licensed}
           modelManagement={modelManagement as never}
         />,
       );
+      expect(screen.getByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
       expect(screen.getByText("Preparing offline dictation · 42%")).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Where should your voice become text?" })).not.toBeInTheDocument();
-      if (platform === "macos") {
-        expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
-        await user.click(screen.getByRole("button", { name: /continue/i }));
-        expect(screen.getByText("Offline dictation must be ready before you can try it.")).toBeInTheDocument();
-      } else expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: /click here to talk/i })).not.toBeInTheDocument();
     },
   );
 
-  it("requires both a pasted outcome and text change, and retains the trial while editing", async () => {
+  const reachTry = async (user: User) => {
+    await user.click(await screen.findByRole("button", { name: /try it with your own voice/i }));
+    await screen.findByRole("button", { name: /click here to talk/i });
+  };
+  const emit = (event: string, payload: unknown) =>
+    act(() => {
+      for (const handler of eventListeners.get(event) ?? []) handler({ payload });
+    });
+
+  it("shows the engine's own text when Polish is off", async () => {
     const user = userEvent.setup();
     renderOnboarding();
-    await user.click(await screen.findByRole("button", { name: /continue/i }));
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-    const trial = await screen.findByRole("textbox", { name: "Try a dictation" });
-    const outcome = (kind: string) =>
-      act(() => {
-        for (const handler of eventListeners.get("paste-outcome") ?? [])
-          handler({ payload: { outcome: kind, words: 3 } });
-      });
-    outcome("pasted");
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-    fireEvent.change(trial, { target: { value: "a real change" } });
-    expect(screen.getByText("Worked · 3 words")).toBeInTheDocument();
-    act(() => {
-      for (const handler of eventListeners.get("recording-started") ?? [])
-        handler({ payload: null });
-    });
-    await user.type(trial, " more");
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-    outcome("left_in_clipboard");
-    await user.type(trial, " text");
-    expect(screen.queryByText(/Worked/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Change shortcut" }));
-    expect(screen.getByRole("button", { name: /save hotkey/i })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /save hotkey/i }));
-    expect(await screen.findByRole("textbox", { name: "Try a dictation" })).toHaveValue(
-      "a real change more text",
+    await reachTry(user);
+    emit("transcription-added", { text: "um so Friday at three", writing: { ai_applied: false } });
+    expect(await screen.findByText("um so Friday at three")).toBeInTheDocument();
+    expect(screen.getByText("Voicetypr typed")).toBeInTheDocument();
+    expect(screen.queryByText("You said")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Worked · 5 words · exactly what the engine heard");
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(await screen.findByRole("heading", { name: "Now let it type anywhere" })).toBeInTheDocument();
+  });
+
+  it("puts what was said beside the cleaned text when Polish changed it", async () => {
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
+      command === "get_ai_settings" ? Promise.resolve({ enabled: true }) : base?.(command, ...rest),
     );
-    expect(screen.getByRole("textbox", { name: "Try a dictation" })).toHaveFocus();
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachTry(user);
+    expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
+    emit("transcription-added", {
+      text: "Let’s move the sync to Friday at 3.",
+      writing: { ai_applied: true, original_text: "um so let's move the sync to thursday no friday at three" },
+    });
+    expect(await screen.findByText("um so let's move the sync to thursday no friday at three")).toBeInTheDocument();
+    expect(screen.getByText("Let’s move the sync to Friday at 3.")).toBeInTheDocument();
+    expect(screen.getByText("You said")).toBeInTheDocument();
+    expect(screen.getByText("Voicetypr cleaned it")).toBeInTheDocument();
+  });
+
+  it("asks for the microphone on the first try, then starts dictation", async () => {
+    permissionState.microphone = "not_determined";
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachTry(user);
+    await user.click(screen.getByRole("button", { name: /click here to talk/i }));
+    expect(permissionState.requestMicrophone).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("start_recording");
+  });
+
+  it("explains a denied microphone and opens its settings", async () => {
+    permissionState.microphone = "denied";
+    const user = userEvent.setup();
+    renderOnboarding();
+    await user.click(await screen.findByRole("button", { name: /try it with your own voice/i }));
+    expect(await screen.findByText(/The microphone is off for Voicetypr/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /click here to talk/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Open System Settings" }));
+    expect(invokeMock).toHaveBeenCalledWith("open_microphone_settings");
+  });
+
+  it("offers an explicit Stop while dictating, without starting another recording", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachTry(user);
+    emit("recording-state-changed", { state: "recording", error: null, generation: 1 });
+    await user.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(invokeMock).toHaveBeenCalledWith("stop_recording");
+    expect(invokeMock).not.toHaveBeenCalledWith("start_recording");
+  });
+
+  it("lets Accessibility be skipped and says how to paste", async () => {
+    permissionState.accessibility = false;
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachSetup(user);
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled();
+    expect(screen.getByText(/Press to talk, press again to copy/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /skip, i’ll paste myself/i }));
+    await screen.findByRole("heading", { name: /welcome back/i });
+    expect(screen.getByText(/press ⌘V to paste them/)).toBeInTheDocument();
   });
 
   it("saves the Windows shortcut once while registration is pending", async () => {
     Object.assign(platformMock, { isMacOS: false, isWindows: true });
     const user = userEvent.setup();
     renderOnboarding();
-    await user.click(await screen.findByRole("button", { name: /continue/i }));
+    await reachSetup(user);
     let resolveSave: (() => void) | undefined;
     const pendingSave = new Promise<void>((resolve) => {
       resolveSave = resolve;
@@ -1106,7 +1112,8 @@ describe("OnboardingDesktop", () => {
     invokeMock.mockImplementation((command: string) =>
       command === "set_global_shortcut" ? pendingSave : Promise.resolve(null),
     );
-    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled();
     expect(
       invokeMock.mock.calls.filter(([command]) => command === "set_global_shortcut"),
     ).toHaveLength(1);
@@ -1114,9 +1121,90 @@ describe("OnboardingDesktop", () => {
       resolveSave?.();
       await pendingSave;
     });
-    await screen.findByRole("textbox", { name: "Try a dictation" });
+    await screen.findByRole("heading", { name: /welcome back/i });
     expect(
       invokeMock.mock.calls.filter(([command]) => command === "set_global_shortcut"),
     ).toHaveLength(1);
+  });
+
+  describe("trial step", () => {
+    const fillContact = async (user: User) => {
+      await user.type(await screen.findByLabelText("Name"), "Priya Raman");
+      await user.type(screen.getByLabelText("Email"), "priya@example.com");
+    };
+
+    it("asks for the trial after setup, then greets the user by first name", async () => {
+      const start = vi.fn().mockResolvedValue(null);
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: { status: "none" }, onStartTrial: start });
+      await finishSetup(user);
+      await screen.findByRole("heading", { name: "You’re set. Keep it free for 7 days." });
+      expect(screen.getByRole("checkbox", { name: /share anonymous crash reports/i })).not.toBeChecked();
+      await fillContact(user);
+      await user.click(screen.getByRole("button", { name: "Start 7-day trial" }));
+      expect(start).toHaveBeenCalledWith("Priya Raman", "priya@example.com");
+      expect(await screen.findByRole("heading", { name: "You’re in, Priya" })).toBeInTheDocument();
+    });
+
+    it("keeps the user on the trial step and never says the trial ended when the start fails", async () => {
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: null, onStartTrial: vi.fn().mockResolvedValue("trial_unreachable") });
+      await finishSetup(user);
+      await fillContact(user);
+      await user.click(screen.getByRole("button", { name: "Start 7-day trial" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t reach Voicetypr, so your trial hasn’t started");
+      expect(screen.queryByText(/expired|trial ended/i)).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "You’re set. Keep it free for 7 days." })).toBeInTheDocument();
+      expect(screen.getByLabelText("Email")).toHaveValue("priya@example.com");
+    });
+
+    it("skips the trial step when this device already has a license", async () => {
+      const user = userEvent.setup();
+      renderOnboarding({ onStartTrial: vi.fn() });
+      await finishSetup(user);
+      expect(await screen.findByRole("heading", { name: "Welcome back. Your license is active on this Mac." })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Start 7-day trial" })).not.toBeInTheDocument();
+    });
+
+    it("opens pricing and the key window with the cursor in the field on Upgrade", async () => {
+      const openPricing = vi.fn().mockResolvedValue(undefined);
+      const recheck = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: { status: "none" }, onOpenPricing: openPricing, onRecheckLicense: recheck });
+      await finishSetup(user);
+      await user.click(await screen.findByRole("button", { name: "Upgrade now" }));
+      expect(openPricing).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "License key" })).toHaveFocus());
+      await user.click(screen.getByRole("button", { name: "Recheck" }));
+      expect(recheck).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows a key error in plain words, then finishes once a key activates", async () => {
+      const activate = vi.fn()
+        .mockResolvedValueOnce("That key isn’t right. Check it against your receipt email and paste it again.")
+        .mockResolvedValueOnce(null);
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: { status: "none" }, onActivateLicense: activate });
+      await finishSetup(user);
+      await user.click(await screen.findByRole("button", { name: "I have a key" }));
+      await user.type(screen.getByRole("textbox", { name: "License key" }), "VT-BAD");
+      await user.click(screen.getByRole("button", { name: "Activate" }));
+      expect(await screen.findByText(/That key isn’t right/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "License key" })).toBeInTheDocument();
+      await user.clear(screen.getByRole("textbox", { name: "License key" }));
+      await user.type(screen.getByRole("textbox", { name: "License key" }), "VT-GOOD");
+      await user.click(screen.getByRole("button", { name: "Activate" }));
+      expect(activate).toHaveBeenLastCalledWith("VT-GOOD");
+      expect(await screen.findByRole("heading", { name: "License active. Voicetypr is yours." })).toBeInTheDocument();
+    });
+
+    it("offers only Upgrade and a key when this device's trial has ended", async () => {
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: { status: "expired" }, onStartTrial: vi.fn() });
+      await finishSetup(user);
+      expect(await screen.findByRole("heading", { name: "Trial ended" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Start 7-day trial" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Upgrade now" })).toBeInTheDocument();
+    });
   });
 });

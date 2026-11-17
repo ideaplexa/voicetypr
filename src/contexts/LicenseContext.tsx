@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/utils/error";
 import { createLogger } from "@/lib/logger";
 import { TRIAL_NOTICE_VERSION } from "@/lib/trial-notice";
+import { isMacOS } from "@/lib/platform";
 
 const log = createLogger("license");
 const LICENSE_COMMAND_TIMEOUT_MS = 60_000;
@@ -33,7 +34,8 @@ interface LicenseContextValue {
   revalidateLicense: () => Promise<void>;
   startTrial: (name: string, email: string) => Promise<TrialStartError | null>;
   restoreLicense: () => Promise<void>;
-  activateLicense: (key: string) => Promise<void>;
+  /** Resolves to the error in plain words, or null once the key is active. */
+  activateLicense: (key: string, options?: { quiet?: boolean }) => Promise<string | null>;
   deactivateLicense: () => Promise<void>;
   openPurchasePage: () => Promise<void>;
 }
@@ -59,21 +61,22 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<
 const getFriendlyLicenseError = (action: "activate" | "restore", rawMessage?: string) => {
   const lower = rawMessage?.toLowerCase() ?? "";
   const actionLabel = action === "activate" ? "activate license" : "restore license";
+  const machine = isMacOS ? "Mac" : "PC";
 
   if (lower.includes("network error") || lower.includes("error sending request")) {
-    return `Failed to ${actionLabel}. Please check your connection and try again.`;
+    return `Couldn’t reach Voicetypr to ${action === "activate" ? "activate your key" : "restore your license"}. Check your connection and try again.`;
   }
 
   if (lower.includes("already activated on another device")) {
-    return "This license is already activated on another device";
+    return `This key is already in use on another ${machine}. Deactivate it there first, or write to support@voicetypr.com.`;
   }
 
   if (lower.includes("maximum number of devices")) {
-    return "This license has reached its device activation limit";
+    return "This key is on as many devices as it covers. Free one up in Manage license, or write to support@voicetypr.com.";
   }
 
   if (lower.includes("invalid license key")) {
-    return "Invalid license key";
+    return "That key isn’t right. Check it against your receipt email and paste it again.";
   }
 
   if (action === "restore" && lower.includes("no license found")) {
@@ -198,15 +201,17 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const activateLicense = useCallback(async (key: string) => {
+  const activateLicense = useCallback(async (key: string, options?: { quiet?: boolean }) => {
     try {
       const licenseStatus = await invoke<LicenseStatus>("activate_license", { licenseKey: key });
       setStatus(licenseStatus);
       toast.success("License activated successfully");
+      return null;
     } catch (error: unknown) {
-      const message = getErrorMessage(error);
-      log.error("Failed to activate license:", error);
-      toast.error(getFriendlyLicenseError("activate", message));
+      const friendly = getFriendlyLicenseError("activate", getErrorMessage(error));
+      log.error("Failed to activate license");
+      if (!options?.quiet) toast.error(friendly);
+      return friendly;
     }
   }, []);
 

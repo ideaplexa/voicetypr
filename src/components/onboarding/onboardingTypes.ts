@@ -3,20 +3,32 @@ import type { SavedConnection } from "@/components/RemoteServerCard";
 import type { useModelManagement } from "@/hooks/useModelManagement";
 import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import { isMacOS } from "@/lib/platform";
-import type { TrialStartError } from "@/types";
+import type { LicenseStatus, TrialStartError } from "@/types";
+
+export type Step = "promise" | "try" | "source" | "readiness" | "setup" | "trial" | "done";
 
 export interface OnboardingDesktopProps {
-  /** Screenshot fixtures only; production onboarding always starts at welcome. */
-  previewPhase?: 1 | 2 | 3;
+  /** Screenshot fixtures only; production onboarding always starts at the promise. */
+  previewStep?: Step;
   onCompletionStart?: () => void;
   onCompletionError?: () => void;
   onComplete: () => void;
-  /** Set only while this device has no trial yet; starts it on the user's click. */
+  /** The licence as last checked; null when the check has not answered. */
+  licenseStatus?: LicenseStatus | null;
   onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
+  /** Resolves to a message the user can act on, or null once the key is active. */
+  onActivateLicense?: (key: string) => Promise<string | null>;
+  onRecheckLicense?: () => Promise<void>;
+  onOpenPricing?: () => Promise<void>;
   modelManagement: ReturnType<typeof useModelManagement>;
 }
 
-export type Step = "welcome" | "source" | "permissions" | "readiness" | "hotkey" | "success";
+/**
+ * Whether new users get Polish without their own key. Undecided by the founder;
+ * nothing backs it yet, so the first sentence shows the engine's own text unless
+ * this user has Polish on.
+ */
+export const NEW_USERS_GET_POLISH = false;
 
 export type SourceType = "local" | "cloud" | "remote";
 export type PermissionStatus = "checking" | "granted" | "not_determined" | "denied" | "restricted" | "error";
