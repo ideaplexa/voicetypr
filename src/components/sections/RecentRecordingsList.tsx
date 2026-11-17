@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { AlertTriangle, Search } from "lucide-react";
-import { PillCharacter } from "@/components/discovery/DiscoveryArt";
+import { PillPreview } from "@/components/discovery/PillPreview";
 import { KeyCaps } from "@/components/KeyCaps";
 import { Button } from "@/components/settings/SettingsButton";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
@@ -89,7 +89,7 @@ export function RecentRecordingsList({
   if (filteredHistory.length === 0)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        {historyLength === 0 ? <PillCharacter size="lg" asleep className="mb-1" /> : <Search className="size-7 text-muted-foreground" />}
+        {historyLength === 0 ? <PillPreview silent scale={0.7} className="mb-1" /> : <Search className="size-7 text-muted-foreground" />}
         {historyLength === 0 ? (
           readinessStatus.ready ? (
             <p className="text-sm text-muted-foreground">

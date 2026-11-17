@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { PageHeader, SettingsPage } from "@/components/settings/settings-ui";
-import { SectionEmpty, SectionIntro } from "@/components/discovery/SectionIntro";
+import { SectionIntro } from "@/components/discovery/SectionIntro";
 import { DictionaryTabs } from "@/components/settings/DictionaryTabs";
 import { DictionarySuggestions } from "@/components/settings/DictionarySuggestions";
 import { useDictionarySuggestions } from "@/state/dictionarySuggestions";
@@ -179,14 +179,7 @@ export function DictionarySection() {
           </Button>
         }
       />
-      {loaded && settings.custom_words.length + settings.replacements.length + settings.snippets.length === 0 ? (
-        <SectionEmpty title="Teach it a name it got wrong.">
-          <Button variant="outline" size="sm" onClick={() => add("words")}>Add a word</Button>
-          <p className="text-xs text-muted-foreground">Fix a word in History and it shows up here as a suggestion.</p>
-        </SectionEmpty>
-      ) : (
-        <SectionIntro art="dictionary" line="Words, corrections and snippets. Fix a word in History and it shows up here as a suggestion." />
-      )}
+      <SectionIntro art="suggestion" line="Fix a word in History and it shows up here as a suggestion." />
       <DictionarySuggestions />
       <DictionaryTabs
         value={tab}

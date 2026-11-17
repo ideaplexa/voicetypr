@@ -204,6 +204,9 @@ vi.mock("@tauri-apps/plugin-os", () => ({
   type: vi.fn(() => "macos"), // Default to macOS for tests
 }));
 
+// jsdom has no canvas; drawing code treats a null context as nothing to draw.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
+
 // Mock window.matchMedia
 Object.defineProperty(window, "matchMedia", {
   writable: true,
