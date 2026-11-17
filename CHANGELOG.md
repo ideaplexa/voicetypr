@@ -1,3 +1,42 @@
+## 2.1.0-beta.10 (draft, not released)
+
+Changes since 2.1.0-beta.7. Betas 8 and 9 were never published, so everything below is new to beta users.
+
+### New
+
+* **Voice commands (off by default):** say "new line", "new paragraph", "undo that", "delete that", "select all" or "send" as the whole dictation and Voicetypr does it instead of typing it. The same words inside a longer sentence are still typed, and "literal send" types the word. Turn it on in settings.
+* **Dictionary learns your fixes:** when you correct a name or a technical word in History, Voicetypr offers to add it to your Dictionary so it is spelled right next time.
+* **Only failed recordings are kept:** by default, audio is saved only when a dictation fails, so you can retry it with another model. Failed takes stay on this device for up to 7 days, even after a restart, and are removed after a successful retry or when you delete them. You can choose Don't save in Recording settings.
+* **Parakeet on Windows:** the Parakeet V3 speech model now runs on Windows.
+* **Polish knows what you are writing into (macOS):** when Polish is on, it can read the text around your cursor so the cleaned-up sentence fits what is already there. AI chat and agent apps get their own category, so prompts you dictate into them get a fitting hint.
+* **Spoken punctuation (opt-in):** say "comma", "period" or "new line" style commands in English, German, French, Spanish, Italian, Portuguese, Dutch and Polish.
+
+### Improvements
+
+* **Smoother first run:** the speech model downloads in the background while you set up, Voicetypr asks which language you speak and lets you test your microphone.
+* **Clearer pill:** it shows when the microphone is getting ready and has a visible Stop button, and Stop and Cancel sit neatly inside the pill.
+* **Your clipboard is put back:** after a paste, Voicetypr restores what you had copied, unless you asked to keep the transcript on the clipboard.
+* **Faster Claude Code Polish:** the result is used as soon as it is complete.
+* **Better with other languages:** French punctuation spacing is kept, Korean words are spaced correctly, dictation in an unknown language stays in that language unless you asked for a translation, and snippets match accented and other non-English text.
+* **macOS Secure Input:** when a password field blocks the usual shortcut, Voicetypr recovers with a fallback shortcut instead of getting stuck.
+
+### Bug fixes
+
+* After a dictation could only be copied, the "Copied" card now clears once a later dictation pastes.
+* A dictation that only reached the clipboard is no longer reported as inserted.
+* Recording no longer starts when you let go of a hold-to-talk key during the startup license check, and dictation stays on the clipboard when a menu is open.
+* Saving several settings quickly no longer loses changes.
+* Uploaded files with several speakers get the same writing clean-up as plain transcription.
+* History shows the Polish label only when Polish actually ran.
+* Reset and cleanup only touch Voicetypr's own temporary files.
+* On Windows, command-line output now reaches a pipe or file when the CLI is run from cmd.exe or a script.
+* The trial label no longer shows a fixed number of days.
+
+### Privacy
+
+* Logs and bug reports no longer include file paths outside your home folder, such as other drives, temporary folders or the app's own location.
+* With network sharing on and no password set, the status page no longer shows your computer's name or its device identifier.
+
 ## Unreleased
 
 ### Features
