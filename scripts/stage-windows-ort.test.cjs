@@ -318,3 +318,22 @@ test("Mac native caches and RUSTFLAGS preserve the CPU VAD patch epoch", () => {
   }
   assert.equal(jobs, 4, "Expected CI Intel, native ARM, release ARM and release Intel");
 });
+
+test("NuGet fallback package stages the same pinned DLL and rejects a different binary", () => fixture(({ root, dll, options }) => {
+  const notices = Object.keys(options.manifest.notice_sha256).map((name) => [
+    name, fs.readFileSync(path.join(repo, "src-tauri/models/onnxruntime", name)),
+  ]);
+  const nupkg = path.join(root, "runtime.nupkg");
+  const writePackage = (bytes) => {
+    const archive = zip([["runtimes/win-x64/native/onnxruntime.dll", bytes], ...notices]);
+    fs.writeFileSync(nupkg, archive);
+    return { ...options.manifest, fallback: { ...provenance.fallback, archive_sha256: hash(archive) } };
+  };
+  assert.deepEqual(readArchive(nupkg, options.triple, writePackage(dll)), dll);
+  const other = Buffer.from(dll);
+  other.write("OTHER!!!", 504);
+  assert.throws(() => readArchive(nupkg, options.triple, writePackage(other)), /unrecognized onnxruntime\.dll/);
+  const manifest = writePackage(dll);
+  fs.appendFileSync(nupkg, "tampered");
+  assert.throws(() => readArchive(nupkg, options.triple, manifest), /SHA256 mismatch/);
+}));
