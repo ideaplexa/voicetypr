@@ -288,7 +288,7 @@ export function createFixtures(options: PreviewOptions) {
       })
     : demoModels;
   const beforeTrial = options.onboarding === "promise" || options.onboarding === "trial" ||
-    options.onboarding === "source" || options.onboarding === "readiness" || options.onboardingCase === "no-access";
+    options.onboardingCase === "no-access";
   const license: LicenseStatus = options.onboardingCase === "expired"
     ? { status: "expired" }
     : options.trialNotStarted || (options.onboarding && beforeTrial)

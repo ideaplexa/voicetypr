@@ -1,14 +1,11 @@
 import { HotkeyStep } from "@/components/onboarding/HotkeyStep";
 import { StepDots } from "@/components/onboarding/OnboardingChrome";
-import { SourceStep } from "@/components/onboarding/SourceStep";
+import { SourceSheet } from "@/components/onboarding/SourceSheet";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/settings/SettingsButton";
 import { isMacOS } from "@/lib/platform";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
-import { ReadinessLocalPanel } from "@/components/onboarding/ReadinessLocalPanel";
-import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel";
-import { ReadinessRemotePanel } from "@/components/onboarding/ReadinessRemotePanel";
 import {
   formatBareModifierLabel,
   NEW_USERS_GET_POLISH,
@@ -46,7 +43,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     sourceType,
     preparation,
     sourceReady,
-    openModelChoices,
     confirmSource,
     handleBack,
     handleNext,
@@ -67,6 +63,13 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const [sawTrial, setSawTrial] = useState(false);
   const [trialError, setTrialError] = useState<TrialStartError | null>(null);
+  const [sourceSheet, setSourceSheet] = useState<"closed" | "sources" | "models">("closed");
+  const [sourceAtOpen, setSourceAtOpen] = useState(sourceType);
+  const openSourceSheet = (view: "sources" | "models") => {
+    setSourceAtOpen(sourceType);
+    if (view === "models") confirmSource("local");
+    setSourceSheet(view);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +97,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     ? `The dictation engine (${modelSize}) downloads once, in the background.`
     : null;
   const flowSteps: Step[] = ["promise", ...(sawTrial || !licensed ? (["trial"] as Step[]) : []), "try", "setup", "use", "done"];
-  const dotIndex = Math.max(0, flowSteps.indexOf(currentStep === "source" || currentStep === "readiness" ? "promise" : currentStep));
+  const dotIndex = Math.max(0, flowSteps.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try { await action(); } finally { setBusy(false); }
@@ -113,8 +116,18 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
       failed={Boolean(preparation.name && local.downloadErrors[preparation.name])}
       onCancel={() => { if (preparation.name) local.onCancelDownload(preparation.name); }}
       onRetry={() => { if (preparation.name) local.onDownload(preparation.name); }}
-      onChoose={openModelChoices}
+      onChoose={() => openSourceSheet("models")}
     />
+  ) : null;
+
+  const languageWarning = preparation.warningModel ? (
+    <div role="alert" className="flex flex-col items-center gap-3 text-sm">
+      <p>This model does not support your chosen language. Download it without selecting it?</p>
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
+        <Button onClick={preparation.confirmDownload}>Download anyway</Button>
+      </div>
+    </div>
   ) : null;
 
   const doneTitle = outcome?.kind === "trial"
@@ -141,7 +154,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 : "Start your free week, then say anything."}
               busy={busy || preparation.savingLanguage}
               onBegin={() => void run(handleNext)}
-              onChooseEngine={() => goTo("source")}
             />
           )}
 
@@ -169,39 +181,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
-          {(currentStep === "source" || currentStep === "readiness") && (
-            <>
-              <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-                Where should your voice become text?
-              </h2>
-              <p className="text-center text-sm leading-[normal] text-muted-foreground">
-                You can change this any time. Most people start on this {isMacOS ? "Mac" : "PC"}.
-              </p>
-              {currentStep === "source" ? (
-                <SourceStep
-                  sourceType={sourceType}
-                  onConfirmSource={confirmSource}
-                  modelSize={modelSize}
-                  language={preparation.language}
-                  onLanguageChange={(value) => void preparation.changeLanguage(value)}
-                />
-              ) : (
-                <div className="w-full">
-                  {sourceType === "local" && <ReadinessLocalPanel {...local} />}
-                  {sourceType === "cloud" && <ReadinessCloudPanel {...flow.cloud} />}
-                  {sourceType === "remote" && <ReadinessRemotePanel {...flow.remote} />}
-                </div>
-              )}
-              <div className="flex gap-[10px]">
-                <Button variant="outline" onClick={handleBack}>Back</Button>
-                <Button disabled={nextDisabled || busy} onClick={() => void run(handleNext)}>Continue</Button>
-              </div>
-              {currentStep === "source" && sourceType === "local" && (
-                <Button variant="ghost" onClick={openModelChoices}>Choose a different model</Button>
-              )}
-            </>
-          )}
-
           {currentStep === "try" && (
             <TryStep
               caps={caps}
@@ -217,7 +196,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               microphone={permissions.microphone.status}
               onAllowMicrophone={flow.ensureMicrophone}
               onBack={handleBack}
-              onChooseEngine={() => goTo("source")}
+              localSource={sourceType === "local"}
+              onUseSomethingElse={() => openSourceSheet("sources")}
               onNext={() => void run(handleNext)}
               onWorked={() => setHeardYou(true)}
             />
@@ -285,17 +265,26 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
-          {preparation.warningModel && (
-            <div role="alert" className="flex flex-col items-center gap-3 text-sm">
-              <p>This model does not support your chosen language. Download it without selecting it?</p>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
-                <Button onClick={preparation.confirmDownload}>Download anyway</Button>
-              </div>
-            </div>
-          )}
+          {sourceSheet === "closed" && languageWarning}
         </div>
       </main>
+      <SourceSheet
+        open={sourceSheet !== "closed"}
+        showModels={sourceSheet === "models"}
+        sourceType={sourceType}
+        modelSize={modelSize}
+        language={preparation.language}
+        local={local}
+        cloud={flow.cloud}
+        remote={flow.remote}
+        onConfirmSource={confirmSource}
+        onLanguageChange={(value) => void preparation.changeLanguage(value)}
+        warning={languageWarning}
+        onDone={() => {
+          setSourceSheet("closed");
+          void flow.finishSource(sourceAtOpen !== "local");
+        }}
+      />
       <LicenseKeyDialog
         open={keyDialogOpen}
         onOpenChange={setKeyDialogOpen}
