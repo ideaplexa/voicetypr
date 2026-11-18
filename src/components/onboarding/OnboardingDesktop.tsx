@@ -107,7 +107,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     void (onOpenPricing ?? noop)();
     setKeyDialogOpen(true);
   };
-  const consent = <ConsentChoice checked={flow.telemetryOptIn} onChange={flow.onTelemetryChange} />;
+  const consent = flow.consentRequired
+    ? <ConsentChoice checked={flow.telemetryOptIn} onChange={flow.onTelemetryChange} disabled={flow.isSavingCompletion} terms={!sawTrial} />
+    : null;
+  const [trialPending, setTrialPending] = useState(false);
   const preparing = (onChoose: () => void, compact = false) => (
     <OfflinePreparationStatus
       compact={compact}
@@ -165,8 +168,11 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             <TrialStep
               trialEnded={licenseStatus?.status === "expired"}
               localDictation={sourceType === "local"}
+              pending={trialPending}
               onStartTrial={async (name, email) => {
-                const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email);
+                setTrialPending(true);
+                const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email)
+                  .finally(() => setTrialPending(false));
                 setTrialError(error);
                 if (!error) {
                   setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });

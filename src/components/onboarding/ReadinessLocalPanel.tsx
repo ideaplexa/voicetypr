@@ -76,12 +76,7 @@ export function ReadinessLocalPanel({
           return (
             <div key={name} className="flex flex-col gap-2 border-b border-border py-3.5 last:border-0">
               <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  aria-pressed={currentModel === name}
-                  onClick={() => onSelectLocal(name)}
-                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-md text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
                   <span className="flex items-center gap-2 text-sm font-semibold">
                     {model.display_name}
                     {name === recommendedModel ? (
@@ -91,7 +86,7 @@ export function ReadinessLocalPanel({
                   <span className="text-[13px] text-muted-foreground">
                     {[strengths(model, list), `${Math.round((model.size ?? 0) / (1024 * 1024))} MB`].filter(Boolean).join(" · ")}
                   </span>
-                </button>
+                </div>
                 {inUse ? (
                   <span className="flex items-center gap-1.5 text-[13px] font-medium text-sage">
                     <CircleCheck className="size-4" />In use
@@ -99,17 +94,17 @@ export function ReadinessLocalPanel({
                 ) : ready ? (
                   <span className="flex items-center gap-3 text-[13px] text-muted-foreground">
                     Downloaded
-                    <Button variant="outline" size="sm" onClick={() => onSelectLocal(name)}>Use</Button>
+                    <Button variant="outline" size="sm" aria-label={`Use ${model.display_name}`} onClick={() => onSelectLocal(name)}>Use</Button>
                   </span>
                 ) : verifying ? (
                   <span className="text-[13px] text-muted-foreground">Checking…</span>
                 ) : progress !== undefined ? (
                   <span className="flex items-center gap-3 text-[13px] tabular-nums text-muted-foreground">
                     <span>{Math.round(progress)}%</span>
-                    <Button variant="ghost" size="sm" onClick={() => onCancelDownload(name)}>Cancel</Button>
+                    <Button variant="ghost" size="sm" aria-label={`Cancel downloading ${model.display_name}`} onClick={() => onCancelDownload(name)}>Cancel</Button>
                   </span>
                 ) : (
-                  <Button size="sm" variant={name === recommendedModel ? "default" : "outline"} onClick={() => onSelectLocal(name)}>
+                  <Button size="sm" variant={name === recommendedModel ? "default" : "outline"} aria-label={`${error ? "Retry" : "Download"} ${model.display_name}`} onClick={() => onSelectLocal(name)}>
                     {error ? "Retry" : "Download"}
                   </Button>
                 )}
@@ -118,7 +113,7 @@ export function ReadinessLocalPanel({
                 <Progress
                   value={verifying ? 100 : progress ?? null}
                   aria-label={`Downloading ${model.display_name}`}
-                  className={cn(verifying && "animate-pulse")}
+                  className={cn("[&_[data-slot=progress-indicator]]:bg-sage [&_[data-slot=progress-track]]:h-2", verifying && "animate-pulse")}
                 />
               ) : null}
               {error ? <p role="alert" className="text-[13px] text-destructive">The download stopped. {failureReason(error)}</p> : null}

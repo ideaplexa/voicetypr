@@ -1,4 +1,5 @@
 import { KeyCaps } from "@/components/KeyCaps";
+import { Band } from "@/components/onboarding/OnboardingChrome";
 import { Button } from "@/components/settings/SettingsButton";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
@@ -115,6 +116,12 @@ export function TryStep({
 
   return (
     <section className="flex w-full flex-col items-center gap-[18px] text-center">
+      <Band>
+        <span className="flex items-center gap-3 text-sm font-medium text-sage">
+          {verb}
+          <KeyCaps caps={caps} size="lg" />
+        </span>
+      </Band>
       <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
         {polishAvailable ? "Say something messy" : "Say something"}
       </h2>

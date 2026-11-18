@@ -508,7 +508,7 @@ describe("OnboardingDesktop", () => {
 
     renderOnboarding();
     await openSource(user);
-    await user.click(await screen.findByText("Base English"));
+    await user.click(await screen.findByRole("button", { name: "Use Base English" }));
 
     await act(async () => {
       resolveActiveRemote("remote-1");
@@ -590,12 +590,18 @@ describe("OnboardingDesktop", () => {
     expect(screen.getByText("In use")).toBeInTheDocument();
     expect(screen.getByText("Most accurate · English only · 466 MB")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /repair|delete/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Download" }));
+    await user.click(screen.getByRole("button", { name: "Download Small English" }));
     await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("small.en"));
+    const rerender = () => view.rerender(<OnboardingDesktop onComplete={onCompleteMock} licenseStatus={licensed} modelManagement={modelManagement as never} />);
     modelManagement.downloadProgress = { "small.en": 30 };
-    view.rerender(<OnboardingDesktop onComplete={onCompleteMock} licenseStatus={licensed} modelManagement={modelManagement as never} />);
+    rerender();
     expect(screen.getByRole("progressbar", { name: "Downloading Small English" })).toBeInTheDocument();
     expect(screen.getByText("30%")).toBeInTheDocument();
+    expect(settingsState.current_model).toBe("base.en");
+    modelManagement.downloadProgress = {};
+    modelManagement.models["small.en"] = { ...modelManagement.models["small.en"], downloaded: true };
+    rerender();
+    await waitFor(() => expect(settingsState.current_model).toBe("small.en"));
   });
 
   it("lets remote-first users switch to local setup from the empty remote state", async () => {
@@ -883,7 +889,11 @@ describe("OnboardingDesktop", () => {
     );
     renderOnboarding();
     await finishSetup(user);
-    expect(await screen.findByRole("checkbox", { name: /share anonymous crash reports/i })).toBeChecked();
+    await screen.findByRole("heading", { name: /welcome back/i });
+    expect(screen.queryByRole("checkbox", { name: /share anonymous crash reports/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Start using Voicetypr" }));
+    await waitFor(() => expect(settingsState.onboarding_completed).toBe(true));
+    expect(invokeMock).not.toHaveBeenCalledWith("set_telemetry_consent", expect.anything());
   });
 
   it("saves the opt-in during onboarding", async () => {

@@ -22,6 +22,7 @@ function Point({ children }: { children: ReactNode }) {
 export function TrialStep({
   trialEnded,
   localDictation,
+  pending,
   onStartTrial,
   onUpgrade,
   onHaveKey,
@@ -31,6 +32,8 @@ export function TrialStep({
   /** This device already used its trial, so only buying or a key can unlock it. */
   trialEnded: boolean;
   localDictation: boolean;
+  /** A trial start is in flight: leaving now would let it be sent twice. */
+  pending: boolean;
   onStartTrial: (name: string, email: string) => Promise<TrialStartError | null>;
   onUpgrade: () => void;
   onHaveKey: () => void;
@@ -43,11 +46,11 @@ export function TrialStep({
       <h3 className="text-[17px] font-semibold">Upgrade now</h3>
       <ul className="flex flex-col gap-2">
         <Point>One payment, yours to keep.</Point>
-        <Point>Pay on voicetypr.com, then paste your key here.</Point>
+        <Point>Choose a license on voicetypr.com, then paste the key from your receipt.</Point>
         <Point>Your history and settings carry on as they are.</Point>
       </ul>
       <span className="flex-1" />
-      <Button type="button" size="lg" variant={trialEnded ? "default" : "outline"} className="w-full" onClick={onUpgrade}>
+      <Button type="button" size="lg" variant={trialEnded ? "default" : "outline"} className="w-full" disabled={pending} onClick={onUpgrade}>
         Upgrade now
       </Button>
     </Card>
@@ -95,7 +98,7 @@ export function TrialStep({
       )}
       <p className="text-sm text-muted-foreground">
         Already bought it?{" "}
-        <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={onHaveKey}>
+        <button type="button" disabled={pending} className="font-medium text-foreground underline underline-offset-2 disabled:opacity-50" onClick={onHaveKey}>
           I have a key
         </button>
       </p>
@@ -103,7 +106,7 @@ export function TrialStep({
         {localDictation ? (
           <li className="flex items-center gap-1.5"><Laptop className="size-4" />Dictation runs on this {machine}</li>
         ) : null}
-        <li className="flex items-center gap-1.5"><CreditCard className="size-4" />No card</li>
+        {trialEnded ? null : <li className="flex items-center gap-1.5"><CreditCard className="size-4" />No card for the trial</li>}
         <li className="flex items-center gap-1.5"><Lock className="size-4" />Usage reports never include your words or audio</li>
         <li className="flex items-center gap-1.5"><FounderLine /></li>
       </ul>
@@ -111,8 +114,8 @@ export function TrialStep({
         <TermsLine action={trialEnded ? "continuing" : "starting"} />
       </p>
       <div className="flex gap-[10px]">
-        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onBack}>Back</Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onDecideLater}>Decide later</Button>
+        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={pending} onClick={onBack}>Back</Button>
+        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={pending} onClick={onDecideLater}>Decide later</Button>
       </div>
     </section>
   );
