@@ -41,8 +41,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   // Upgrading comes after the first try, only for someone on a trial.
-  const showKeep = licenseStatus?.status !== "licensed" && outcome?.kind !== "key" &&
-    (licenseStatus?.status === "trial" || outcome?.kind === "trial");
+  const showKeep = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "expired" &&
+    outcome?.kind !== "key" && (licenseStatus?.status === "trial" || outcome?.kind === "trial");
   const flow = useOnboardingDesktop(props, showKeep);
   const {
     currentStep,
@@ -83,16 +83,19 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   if (currentStep === "trial" && !sawTrial) setSawTrial(true);
   // A key activated or a status recheck that finds a license or trial ends the trial step.
   const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
+  const { after } = flow;
   useEffect(() => {
-    if (currentStep === "trial" && licensed) goTo("source");
-  }, [currentStep, licensed, goTo]);
+    if (currentStep === "trial" && licensed) goTo(after("trial"));
+    // A key activated on the upgrade step: nothing is left to upgrade.
+    if (currentStep === "keep" && !showKeep) goTo(after("keep"));
+  }, [currentStep, licensed, showKeep, goTo, after]);
 
   const polishOn = aiEnabled && polishCanRun;
   const polishAvailable = NEW_USERS_GET_POLISH || polishOn;
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
-  const dotIndex = Math.max(0, flow.steps.indexOf(currentStep));
+  const dotIndex = Math.max(0, flow.dots.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try { await action(); } finally { setBusy(false); }
@@ -143,7 +146,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
-      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flow.steps.length} />}
+      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flow.dots.length} />}
       <div className="mt-3 flex min-h-5 items-center justify-center">{downloadLine}</div>
       <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
         <div className="flex w-full max-w-[640px] flex-col items-center gap-[22px]">
@@ -171,7 +174,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 setTrialError(error);
                 if (!error) {
                   setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
-                  goTo("source");
+                  goTo(after("trial"));
                 }
                 return error;
               }}
@@ -180,7 +183,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               onBack={handleBack}
               onDecideLater={() => {
                 setOutcome({ kind: "later" });
-                goTo("source");
+                goTo(after("trial"));
               }}
             />
           )}
@@ -318,7 +321,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           const error = await (onActivateLicense ?? (async () => "Couldn’t activate the key. Try again."))(key);
           if (!error) {
             setOutcome({ kind: "key" });
-            if (currentStep === "trial") goTo("source");
+            if (currentStep === "trial") goTo(after("trial"));
           }
           return error;
         }}

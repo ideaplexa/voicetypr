@@ -19,7 +19,6 @@ export interface ReadinessCloudPanelProps {
 
 /** Every cloud provider the app supports, one row each, with its key as the control. */
 export function ReadinessCloudPanel({
-  cloudModelNames,
   currentModel,
   cloudModelSetup,
   isSavingCloudKey,
@@ -29,9 +28,7 @@ export function ReadinessCloudPanel({
   onCloudKeySubmit,
 }: ReadinessCloudPanelProps) {
   const activeCloudProvider = cloudModelSetup ? getCloudProviderByModel(cloudModelSetup) : undefined;
-  const providers = Object.values(CLOUD_PROVIDERS).filter(
-    (provider) => cloudModelNames.length === 0 || cloudModelNames.includes(provider.modelName),
-  );
+  const providers = Object.values(CLOUD_PROVIDERS);
   return (
     <div className="flex flex-col gap-4">
       <SettingsPaneCard className="!px-[18px] !py-1">

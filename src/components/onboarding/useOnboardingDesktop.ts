@@ -84,16 +84,18 @@ export function useOnboardingDesktop({
   }
   const steps: Step[] = [
     "promise",
-    ...((shape?.trial ?? needsTrial) ? (["trial"] as Step[]) : []),
+    "trial",
     "source",
     "engine",
     "setup",
     "polish",
     "try",
-    ...(shape?.keep ? (["keep"] as Step[]) : []),
+    "keep",
     "done",
   ];
   const skipped = (step: Step) => (step === "trial" && !needsTrial) || (step === "keep" && !showKeep);
+  // The dots count the steps this licence started with; a step re-entered later shares its neighbour's dot.
+  const dots = steps.filter((step) => (step !== "trial" || (shape?.trial ?? needsTrial)) && (step !== "keep" || shape?.keep));
   const walk = (from: Step, by: 1 | -1): Step => {
     for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
       if (!skipped(steps[i])) return steps[i];
@@ -385,17 +387,16 @@ export function useOnboardingDesktop({
 
   const selectModel = async (modelName: string, source: "local" | "cloud") => {
     const info: ModelInfo | undefined = models[modelName];
-    if (!info) {
-      toast.error("That model is not available");
-      return;
-    }
+    // A cloud provider is known from the app's own list even before the model list reloads.
+    const engine = info?.engine ?? (source === "cloud" ? getCloudProviderByModel(modelName)?.engine : undefined);
+    if (!engine) throw new Error("That model is not available");
     sourceChosenByUser.current = true;
     await invoke("set_active_remote_server", { serverId: null });
     setActiveRemoteServerId(null);
     setSourceType(source);
     await updateSettings({
       current_model: modelName,
-      current_model_engine: info.engine ?? "whisper",
+      current_model_engine: engine,
     });
   };
 
@@ -646,7 +647,7 @@ export function useOnboardingDesktop({
     try {
       if (currentStep === "source") {
         if (preparation.savingLanguage) return;
-        setCurrentStep("engine");
+        setCurrentStep(after("source"));
         return;
       }
 
@@ -672,11 +673,12 @@ export function useOnboardingDesktop({
 
   // Leaving the source steps either way: a remote server stays active only when
   // it is the chosen source, so "this Mac" never sends audio to the network.
+  // The backend's route is cleared whatever the screen last loaded, so a late
+  // refresh can never leave a network computer active behind "this Mac".
   const leaveSource = async () => {
-    if (sourceType !== "remote" && activeRemoteServerId) {
-      await invoke("set_active_remote_server", { serverId: null });
-      setActiveRemoteServerId(null);
-    }
+    if (sourceType === "remote") return;
+    await invoke("set_active_remote_server", { serverId: null });
+    setActiveRemoteServerId(null);
   };
 
   const handleBack = async () => {
@@ -719,7 +721,8 @@ export function useOnboardingDesktop({
     preparation,
     sourceReady,
     confirmSource,
-    steps,
+    dots,
+    after,
     chooseSourceFromTry: () => {
       setSourceFromTry(true);
       setCurrentStep("source");
@@ -771,7 +774,7 @@ export function useOnboardingDesktop({
       isSavingCloudKey,
       isModelReady,
       onSelectCloud: (name: string) => {
-        void selectCloudModel(name);
+        void selectCloudModel(name).catch(() => toast.error("Couldn’t switch to that provider. Try again."));
       },
       onSetCloudModelSetup: setCloudModelSetup,
       onCloudKeySubmit: (apiKey: string) => {

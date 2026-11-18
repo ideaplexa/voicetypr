@@ -6,11 +6,10 @@ const machine = isMacOS ? "Mac" : "PC";
 
 /** What a license keeps after the trial, from what the license gate covers in the app. */
 export const KEEP_FEATURES = [
-  "Dictation in every app on this " + machine + ", with no end date after your 7 days",
+  "Keep dictating on this " + machine + " after your 7 days",
   "Every on-device model, and your own cloud keys",
   "Network sharing with your other computers",
   "The command line: transcribe files and record from the terminal",
-  "Your history, dictionary and settings carry on as they are",
   "Direct help from Moinul, who reads every email",
 ];
 
@@ -40,7 +39,7 @@ export function KeepStep({
         ))}
       </ul>
       <div className="flex flex-wrap justify-center gap-[10px]">
-        <Button onClick={onUpgrade}>Upgrade now</Button>
+        <Button variant="outline" onClick={onUpgrade}>Upgrade now</Button>
         <Button variant="outline" onClick={onKeepGoing}>Keep going with the trial</Button>
       </div>
       <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onBack}>Back</Button>

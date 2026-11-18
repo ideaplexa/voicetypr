@@ -742,10 +742,7 @@ describe("OnboardingDesktop", () => {
         requires_setup: true,
       },
     };
-    for (const engine of ["deepgram", "openai", "groq", "cohere"]) {
-      modelManagement.models[engine] = { ...modelManagement.models.soniox, name: engine, display_name: engine, engine } as ModelInfo;
-    }
-    modelManagement.modelOrder = ["soniox", "deepgram", "openai", "groq", "cohere"];
+    modelManagement.modelOrder = ["soniox"];
     modelManagement.loadModels.mockImplementation(async () => {
       modelManagement.models.soniox.downloaded = true;
       modelManagement.models.soniox.requires_setup = false;
@@ -1253,6 +1250,46 @@ describe("OnboardingDesktop", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
     await user.click(screen.getByRole("button", { name: "Recheck" }));
     expect(recheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Keep Voicetypr after the first try of a trial, and leaves it once a key activates", async () => {
+    const openPricing = vi.fn().mockResolvedValue(undefined);
+    const activate = vi.fn().mockResolvedValue(null);
+    const user = userEvent.setup();
+    renderOnboarding({
+      licenseStatus: { status: "trial", trial_days_left: 5, expires_at: "2026-11-24T12:00:00Z" },
+      onOpenPricing: openPricing,
+      onActivateLicense: activate,
+    });
+    await reachTry(user);
+    await user.click(screen.getByRole("button", { name: /skip for now/i }));
+    expect(await screen.findByRole("heading", { name: "Keep Voicetypr" })).toBeInTheDocument();
+    expect(screen.getByText(/^Voicetypr is yours until /)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Upgrade now" }));
+    expect(openPricing).toHaveBeenCalledTimes(1);
+    await user.type(await screen.findByRole("textbox", { name: "License key" }), "VT-GOOD");
+    await user.click(screen.getByRole("button", { name: "Activate" }));
+    expect(await screen.findByRole("heading", { name: "License active. Voicetypr is yours." })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Keep Voicetypr" })).not.toBeInTheDocument();
+  });
+
+  it("never shows Keep Voicetypr to a licensed device", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachTry(user);
+    await user.click(screen.getByRole("button", { name: /skip for now/i }));
+    expect(await screen.findByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
+  });
+
+  it("clears the network route when this Mac is chosen, even before the saved route has loaded", async () => {
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
+      command === "get_active_remote_server" ? new Promise(() => undefined) : base?.(command, ...rest),
+    );
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachSetup(user);
+    expect(invokeMock).toHaveBeenCalledWith("set_active_remote_server", { serverId: null });
   });
 
   it("asks for the microphone on the first try, then starts dictation", async () => {
