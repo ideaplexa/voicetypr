@@ -3,7 +3,7 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { PermissionStatus } from "@/components/onboarding/onboardingTypes";
-import { useFirstDictation } from "@/components/onboarding/useFirstDictation";
+import { useFirstDictation, type FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { FounderLine } from "@/components/onboarding/FounderLine";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -48,11 +48,11 @@ export function TryStep({
   /** Opens the choice of the cloud or another computer instead. */
   onUseSomethingElse: () => void;
   onNext: () => void;
-  onWorked: () => void;
+  onWorked: (result: FirstDictation) => void;
 }) {
   const { listening, working, result, busy, talk, reset } = useFirstDictation(engineReady && access === "ok");
   useEffect(() => {
-    if (result) onWorked();
+    if (result) onWorked(result);
   }, [result, onWorked]);
   const micOff = microphone === "denied" || microphone === "restricted";
   // Both panes only when Polish could change the text and, once heard, did.
@@ -105,7 +105,10 @@ export function TryStep({
         </p>
         {preparing}
         {somethingElse}
-        <Button variant="outline" onClick={onBack}>Back</Button>
+        <div className="flex flex-wrap justify-center gap-[10px]">
+          <Button variant="outline" onClick={onBack}>Back</Button>
+          <Button variant="ghost" onClick={onNext}>Skip for now</Button>
+        </div>
       </section>
     );
   }

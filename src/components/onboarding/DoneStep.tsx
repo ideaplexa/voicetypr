@@ -13,6 +13,7 @@ export function DoneStep({
   copyOnly,
   consent,
   saving,
+  onBack,
   onFinish,
 }: {
   title: string;
@@ -23,6 +24,7 @@ export function DoneStep({
   copyOnly: boolean;
   consent: ReactNode;
   saving: boolean;
+  onBack: () => void;
   onFinish: () => void;
 }) {
   return (
@@ -33,6 +35,11 @@ export function DoneStep({
         {detail ? <>{detail} </> : null}
         {holdToTalk ? "Hold" : "Press"} <KeyCaps caps={caps} size="onboarding" /> in any app and talk.
       </p>
+      <p className="max-w-[500px] text-sm text-muted-foreground">
+        {isMacOS
+          ? "When this window closes, Voicetypr keeps running in your menu bar. Its menu starts dictation, switches Polish, the engine and the microphone, and opens Settings."
+          : "When this window closes, Voicetypr keeps running in the system tray. Its menu starts dictation, switches Polish, the engine and the microphone, and opens Settings."}
+      </p>
       {copyOnly ? (
         <p className="max-w-[480px] text-sm text-muted-foreground">
           Your words are copied: press {isMacOS ? "⌘V" : "Ctrl+V"} to paste them. Turn on Accessibility in
@@ -40,9 +47,12 @@ export function DoneStep({
         </p>
       ) : null}
       {consent}
-      <Button size="lg" disabled={saving} onClick={onFinish}>
-        {saving ? <Spinner /> : null}Start using Voicetypr
-      </Button>
+      <div className="flex flex-wrap items-center justify-center gap-[10px]">
+        <Button size="lg" variant="outline" disabled={saving} onClick={onBack}>Back</Button>
+        <Button size="lg" disabled={saving} onClick={onFinish}>
+          {saving ? <Spinner /> : null}Start using Voicetypr
+        </Button>
+      </div>
     </section>
   );
 }

@@ -35,6 +35,12 @@ pub(crate) fn take_enabled_options<R: tauri::Runtime>(store: &Store<R>) -> Enhan
     }
 }
 
+/// Whether Polish can run now, by the same model-and-key gate dictation uses.
+#[tauri::command]
+pub async fn polish_can_run(app: tauri::AppHandle) -> Result<bool, String> {
+    crate::commands::ai::has_ai_model_and_key(&app)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

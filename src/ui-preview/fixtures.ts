@@ -399,6 +399,7 @@ export function createFixtures(options: PreviewOptions) {
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
     get_ai_settings: aiSettings,
+    polish_can_run: !options.onboarding || options.onboardingCase === "polished",
     get_ai_settings_for_provider: aiSettings,
     list_ai_providers: providers,
     get_enhancement_options: enhancement,

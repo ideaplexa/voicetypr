@@ -1372,6 +1372,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::original::copy_last_original,
             get_ai_settings,
             get_ai_settings_for_provider,
+            ai::starting_style::polish_can_run,
             cache_ai_api_key,
             validate_ai_api_key,
             set_openai_config,
