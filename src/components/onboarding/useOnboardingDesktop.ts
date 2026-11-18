@@ -71,8 +71,6 @@ export function useOnboardingDesktop({
     verifyingModels,
     downloadErrors = NO_DOWNLOAD_ERRORS,
     cancelDownload,
-    deleteModel,
-    repairModel,
     isLoading,
   } = modelManagement;
 
@@ -164,15 +162,6 @@ export function useOnboardingDesktop({
   const isModelReady = useCallback(
     (name: string) => models[name]?.downloaded === true && !models[name]?.requires_setup && !verifyingModels.has(name),
     [models, verifyingModels],
-  );
-  const handleDeleteModel = useCallback(
-    async (modelName: string) => {
-      const deleted = await deleteModel(modelName);
-      if (deleted && settings?.current_model === modelName) {
-        await updateSettings({ current_model: "", current_model_engine: "whisper" });
-      }
-    },
-    [deleteModel, settings, updateSettings],
   );
   const localReady = Boolean(
     sourceType === "local" &&
@@ -746,10 +735,6 @@ export function useOnboardingDesktop({
       },
       onCancelDownload: (name: string) => {
         void cancelDownload(name);
-      },
-      onDelete: handleDeleteModel,
-      onRepair: (name: string) => {
-        void repairModel(name);
       },
       isModelReady,
       onGpuToggle: (checked: boolean) => {

@@ -1,4 +1,4 @@
-import { useState, type ComponentProps, type ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { Button } from "@/components/settings/SettingsButton";
 import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel";
@@ -14,8 +14,6 @@ export function VoiceSourceStep({
   modelName,
   modelSize,
   language,
-  modelsOpenAtStart,
-  preparing,
   local,
   cloud,
   remote,
@@ -30,10 +28,6 @@ export function VoiceSourceStep({
   modelName: string | null;
   modelSize: string | null;
   language: string;
-  /** Reached from "Choose a different model": the model list starts open. */
-  modelsOpenAtStart: boolean;
-  /** The download's progress, or why it stopped. */
-  preparing: (onChoose: () => void) => ReactNode;
   local: ComponentProps<typeof ReadinessLocalPanel>;
   cloud: ComponentProps<typeof ReadinessCloudPanel>;
   remote: ComponentProps<typeof ReadinessRemotePanel>;
@@ -45,7 +39,6 @@ export function VoiceSourceStep({
   onBack: () => void;
   onNext: () => void;
 }) {
-  const [modelsOpen, setModelsOpen] = useState(modelsOpenAtStart);
   return (
     <section className="flex w-full flex-col items-center gap-[18px]">
       <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
@@ -59,8 +52,7 @@ export function VoiceSourceStep({
         <LanguageSelection value={language} onValueChange={onLanguageChange} />
       </div>
       <SourceStep sourceType={sourceType} onConfirmSource={onConfirmSource} modelName={modelName} modelSize={modelSize} />
-      {sourceType === "local" && (modelsOpen ? <div className="w-full"><ReadinessLocalPanel {...local} /></div>
-        : preparing(() => setModelsOpen(true)))}
+      {sourceType === "local" && <div className="w-full"><ReadinessLocalPanel {...local} /></div>}
       {sourceType === "cloud" && <div className="w-full"><ReadinessCloudPanel {...cloud} /></div>}
       {sourceType === "remote" && <div className="w-full"><ReadinessRemotePanel {...remote} /></div>}
       {warning}

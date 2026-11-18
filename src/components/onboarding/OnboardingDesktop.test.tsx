@@ -423,11 +423,10 @@ describe("OnboardingDesktop", () => {
 
     renderOnboarding();
     await openSource(user);
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
     expect(
       await screen.findByRole("heading", { name: /where should your voice become text/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.getByText("In use")).toBeInTheDocument();
     expect(settingsState.current_model).toBe("base.en");
     expect(updateSettingsMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ current_model: expect.any(String) }),
@@ -509,7 +508,6 @@ describe("OnboardingDesktop", () => {
 
     renderOnboarding();
     await openSource(user);
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
     await user.click(await screen.findByText("Base English"));
 
     await act(async () => {
@@ -575,6 +573,31 @@ describe("OnboardingDesktop", () => {
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("set_active_remote_server", { serverId: null }));
   });
 
+  it("lists the models on the source step and downloads the one picked there", async () => {
+    modelManagement.models["small.en"] = {
+      ...modelManagement.models["base.en"],
+      name: "small.en",
+      display_name: "Small English",
+      size: 466 * 1024 * 1024,
+      downloaded: false,
+      accuracy_score: 8,
+      speed_score: 5,
+    } as ModelInfo;
+    modelManagement.modelOrder = ["base.en", "small.en"];
+    const user = userEvent.setup();
+    const view = renderOnboarding();
+    await openSource(user);
+    expect(screen.getByText("In use")).toBeInTheDocument();
+    expect(screen.getByText("Most accurate · English only · 466 MB")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /repair|delete/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("small.en"));
+    modelManagement.downloadProgress = { "small.en": 30 };
+    view.rerender(<OnboardingDesktop onComplete={onCompleteMock} licenseStatus={licensed} modelManagement={modelManagement as never} />);
+    expect(screen.getByRole("progressbar", { name: "Downloading Small English" })).toBeInTheDocument();
+    expect(screen.getByText("30%")).toBeInTheDocument();
+  });
+
   it("lets remote-first users switch to local setup from the empty remote state", async () => {
     const user = userEvent.setup();
     settingsState.current_model = "";
@@ -584,7 +607,6 @@ describe("OnboardingDesktop", () => {
     await user.click(screen.getByRole("button", { name: /another computer/i }));
 
     await user.click(await screen.findByRole("button", { name: /choose local instead/i }));
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     expect(
       screen.getByRole("heading", { name: /where should your voice become text/i }),
@@ -714,7 +736,6 @@ describe("OnboardingDesktop", () => {
     renderOnboarding();
 
     await openSource(user);
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     const gpuSwitch = screen.getByRole("switch", { name: /use gpu acceleration/i });
     expect(gpuSwitch).toBeInTheDocument();
@@ -733,7 +754,6 @@ describe("OnboardingDesktop", () => {
     renderOnboarding();
 
     await openSource(user);
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     const gpuSwitch = screen.getByRole("switch", { name: /use gpu acceleration/i });
     expect(gpuSwitch).toHaveAttribute("aria-checked", "false");
@@ -754,7 +774,6 @@ describe("OnboardingDesktop", () => {
     const user = userEvent.setup();
     renderOnboarding();
     await openSource(user);
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
     expect(screen.queryByRole("switch", { name: /use gpu acceleration/i })).not.toBeInTheDocument();
   });
 
@@ -765,7 +784,6 @@ describe("OnboardingDesktop", () => {
 
     // Navigate through macOS flow to readiness (welcome→source→permissions→readiness)
     await openSource(user);
-    await user.click(screen.getByRole("button", { name: "Choose a different model" }));
 
     expect(screen.queryByText(/use gpu acceleration/i)).not.toBeInTheDocument();
   });
@@ -1062,7 +1080,8 @@ describe("OnboardingDesktop", () => {
       await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en"));
       modelManagement.downloadProgress = { "base.en": 42 };
       rerender();
-      expect(screen.getByText("Getting the dictation engine ready · 42% of 670 MB. This happens once.")).toBeInTheDocument();
+      expect(screen.getByRole("progressbar", { name: /^Downloading / })).toBeInTheDocument();
+      expect(screen.getByText("42%")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
       expect(await screen.findByRole("heading", { name: /now let it type anywhere/i })).toBeInTheDocument();
       expect(screen.getByText("Dictation engine · 42% of 670 MB")).toBeInTheDocument();
@@ -1260,7 +1279,7 @@ describe("OnboardingDesktop", () => {
       expect(await screen.findByText("Start your free week, then say anything.")).toBeInTheDocument();
       expect(screen.queryByText(/nothing to set up/i)).not.toBeInTheDocument();
       await reachTrial(user);
-      expect(screen.getByRole("checkbox", { name: /share anonymous crash reports/i })).not.toBeChecked();
+      expect(screen.queryByRole("checkbox", { name: /share anonymous crash reports/i })).not.toBeInTheDocument();
       await fillContact(user);
       await user.click(screen.getByRole("button", { name: "Start 7-day trial" }));
       expect(start).toHaveBeenCalledWith("Priya Raman", "priya@example.com");

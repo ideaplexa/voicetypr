@@ -3,7 +3,7 @@ import { Progress } from "@/components/ui/progress";
 import { isMacOS } from "@/lib/platform";
 
 /** The download error in words a user can act on, never the raw message. */
-function failureReason(error: string) {
+export function failureReason(error: string) {
   const text = error.toLowerCase();
   if (/no space left|not enough (free )?(disk )?space|insufficient (disk )?space|disk (is )?full/.test(text)) {
     return "There isn’t enough free disk space for it.";

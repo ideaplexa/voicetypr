@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/settings/SettingsButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,9 +34,15 @@ export function validateTrialContact(name: string, email: string): FieldErrors {
 export function TrialStartForm({
   onStart,
   className,
+  large,
+  renderAction,
 }: {
   onStart: (name: string, email: string) => Promise<TrialStartError | null>;
   className?: string;
+  /** Full-size fields and a full-width button, for onboarding. */
+  large?: boolean;
+  /** Places the start button and the email notice, e.g. inside a choice card. */
+  renderAction?: (button: ReactNode, notice: ReactNode) => ReactNode;
 }) {
   const id = useId();
   const nameRef = useRef<HTMLInputElement>(null);
@@ -87,13 +93,14 @@ export function TrialStartForm({
     props: { ref: typeof nameRef; value: string; onChange: (value: string) => void; type: string; autoComplete: string; placeholder: string },
   ) => (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5 text-left">
-      <Label htmlFor={`${id}-${key}`} className="text-[12.5px] text-muted-foreground">{label}</Label>
+      <Label htmlFor={`${id}-${key}`} className={large ? "text-[13px]" : "text-[12.5px] text-muted-foreground"}>{label}</Label>
       <Input
         ref={props.ref}
         id={`${id}-${key}`}
         type={props.type}
         autoComplete={props.autoComplete}
         placeholder={props.placeholder}
+        className={large ? "h-11 px-4 md:text-[15px]" : undefined}
         value={props.value}
         aria-invalid={errors[key] ? true : undefined}
         aria-describedby={errors[key] ? `${id}-${key}-error` : undefined}
@@ -114,10 +121,12 @@ export function TrialStartForm({
         {field("name", "Name", { ref: nameRef, value: name, onChange: setName, type: "text", autoComplete: "name", placeholder: "Priya Raman" })}
         {field("email", "Email", { ref: emailRef, value: email, onChange: setEmail, type: "email", autoComplete: "email", placeholder: "priya@example.com" })}
       </div>
-      <Button type="submit" disabled={starting} aria-busy={starting}>
-        {starting ? <Spinner /> : null}Start 7-day trial
-      </Button>
-      <p className="max-w-[460px] text-center text-[12.5px] text-muted-foreground">{TRIAL_NOTICE}</p>
+      {(renderAction ?? ((button: ReactNode, notice: ReactNode) => <>{button}{notice}</>))(
+        <Button type="submit" size={large ? "lg" : undefined} className={large ? "w-full" : undefined} disabled={starting} aria-busy={starting}>
+          {starting ? <Spinner /> : null}Start 7-day trial
+        </Button>,
+        <p className="max-w-[460px] text-center text-[12.5px] text-muted-foreground">{TRIAL_NOTICE}</p>,
+      )}
       {emailUsed ? (
         <div role="alert" className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[13px]">
           <p className="font-medium text-foreground">This email has already been used for a trial</p>
