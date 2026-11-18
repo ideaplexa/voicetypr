@@ -148,6 +148,94 @@ async fn post(
         .ok_or(AiProviderError::BadResponse)
 }
 
+/// Whether built-in Polish would clean the next dictation if its switch is on.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Availability {
+    /// The user's own AI provider is set up, so it is used instead.
+    OwnProvider,
+    /// No trial or licence on this device yet.
+    NoAccess,
+    /// Voicetypr's server confirmed it will clean this device's dictation.
+    Ready,
+    /// The server refused this device, such as a trial started without an email.
+    NotEntitled,
+    /// The server could not be reached or is not taking Polish right now.
+    Unreachable,
+}
+
+fn availability_from_status(status: u16) -> Availability {
+    match status {
+        200..=299 => Availability::Ready,
+        403 => Availability::NotEntitled,
+        _ => Availability::Unreachable,
+    }
+}
+
+/// A confirmed "ready" is trusted for this long, so the Polish step and Settings
+/// don't ask the server on every render; a refusal or an outage is asked again.
+const READY_FOR: Duration = Duration::from_secs(10 * 60);
+
+/// Asks Voicetypr's server whether it will Polish for this device, sending only
+/// the device hash and the licence key, never text. Only asked once this
+/// device has a trial or a licence.
+pub(crate) async fn availability(app: &AppHandle, own_provider_ready: bool) -> Availability {
+    if own_provider_ready {
+        return Availability::OwnProvider;
+    }
+    let Some(state) = app.try_state::<crate::AppState>() else {
+        return Availability::NoAccess;
+    };
+    if !eligible(true, false, &*state.license_cache.read().await) {
+        return Availability::NoAccess;
+    }
+    static CONFIRMED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    if CONFIRMED
+        .lock()
+        .ok()
+        .and_then(|at| *at)
+        .is_some_and(|at| at.elapsed() < READY_FOR)
+    {
+        return Availability::Ready;
+    }
+    let Ok(device_hash) = device_hash() else {
+        return Availability::Unreachable;
+    };
+    let license_key = crate::license::keychain::get_license(app).ok().flatten();
+    let base_url = crate::license::api_client::get_api_base_url();
+    let answer = check(client(), &base_url, device_hash, license_key.as_deref()).await;
+    if let Ok(mut at) = CONFIRMED.lock() {
+        *at = (answer == Availability::Ready).then(Instant::now);
+    }
+    answer
+}
+
+async fn check(
+    client: &reqwest::Client,
+    base_url: &str,
+    device_hash: &str,
+    license_key: Option<&str>,
+) -> Availability {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StatusRequest<'a> {
+        device_hash: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        license_key: Option<&'a str>,
+    }
+    client
+        .post(format!("{base_url}/polish/status"))
+        .timeout(Duration::from_secs(5))
+        .json(&StatusRequest {
+            device_hash,
+            license_key,
+        })
+        .send()
+        .await
+        .map(|response| availability_from_status(response.status().as_u16()))
+        .unwrap_or(Availability::Unreachable)
+}
+
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new)
@@ -372,6 +460,30 @@ mod tests {
                 .unwrap();
             assert_eq!(error, AiProviderError::BadResponse);
         }
+    }
+
+    #[tokio::test]
+    async fn the_status_check_sends_no_text_and_reads_the_servers_answer() {
+        for (status, expected) in [
+            (200, Availability::Ready),
+            (403, Availability::NotEntitled),
+            (503, Availability::Unreachable),
+            (429, Availability::Unreachable),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/polish/status"))
+                .and(body_json(
+                    serde_json::json!({ "deviceHash": "abc", "licenseKey": "KEY" }),
+                ))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+            let answer = check(&reqwest::Client::new(), &server.uri(), "abc", Some("KEY")).await;
+            assert_eq!(answer, expected, "status {status}");
+        }
+        let offline = check(&reqwest::Client::new(), "http://127.0.0.1:9", "abc", None).await;
+        assert_eq!(offline, Availability::Unreachable);
     }
 
     #[tokio::test]

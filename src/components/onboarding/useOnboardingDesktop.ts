@@ -26,7 +26,7 @@ import type {
 } from "@/types/shortcuts";
 import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 import { useOfflinePreparation } from "@/components/onboarding/useOfflinePreparation";
-import type { StartingPolishStyle } from "@/components/onboarding/UseStep";
+import type { StartingPolishStyle } from "@/components/onboarding/PolishStep";
 
 // Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
 const defaultHotkey = () => (isMacOS ? "Alt+Space" : "Control+Space");
@@ -518,8 +518,6 @@ export function useOnboardingDesktop({
       await updateSettings({
         hotkey: "",
         recording_mode: holdToTalk ? "push_to_talk" : "toggle",
-        current_model: selectedModelName || "",
-        current_model_engine: selectedModel?.engine ?? "whisper",
         onboarding_completed: false,
       });
     } else {
@@ -542,8 +540,6 @@ export function useOnboardingDesktop({
       await updateSettings({
         hotkey,
         recording_mode: holdToTalk ? "push_to_talk" : "toggle",
-        current_model: selectedModelName || "",
-        current_model_engine: selectedModel?.engine ?? "whisper",
         onboarding_completed: false,
       });
     }
@@ -591,13 +587,15 @@ export function useOnboardingDesktop({
     return true;
   };
 
-  const preparingStarted = useRef(false);
+  // One automatic start per model, so a cancelled download stays cancelled
+  // while a model chosen for another language still starts.
+  const preparingStarted = useRef<string | null>(null);
   const startPreparing = () => {
-    if (preparingStarted.current || sourceReady || !preparation.recommended ||
-      models[preparation.recommended]?.downloaded) return;
-    preparingStarted.current = true;
+    const target = preparation.recommended;
+    if (!target || preparingStarted.current === target || sourceReady || models[target]?.downloaded) return;
+    preparingStarted.current = target;
     void prepareLocal().catch(() => {
-      preparingStarted.current = false;
+      preparingStarted.current = null;
     });
   };
 
@@ -605,43 +603,60 @@ export function useOnboardingDesktop({
   useEffect(() => {
     startPreparingRef.current = startPreparing;
   });
-  // The engine starts downloading on the first screen, so the try step is ready sooner.
+  // The on-device engine starts downloading on the source step, where its progress shows.
   useEffect(() => {
-    if (currentStep === "promise" && sourceType === "local" && sourceRestored) startPreparingRef.current();
+    if (currentStep === "source" && sourceType === "local" && sourceRestored) startPreparingRef.current();
   }, [currentStep, sourceType, sourceRestored, preparation.recommended]);
 
-  const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
-    if (style && polishOn) await invoke("update_enhancement_options", { options: { preset: style } });
-    else await updateSettings({ starting_polish_style: style });
+  /**
+   * `applyNow`: Polish can run here, so the pick becomes the style of the very next dictation.
+   * `keepForOwnProvider`: also keep it as the style a provider of the user's own starts in.
+   */
+  const chooseStartingStyle = async (
+    style: StartingPolishStyle | null,
+    { applyNow, keepForOwnProvider }: { applyNow: boolean; keepForOwnProvider: boolean },
+  ) => {
+    if (style && applyNow) await invoke("update_enhancement_options", { options: { preset: style } });
+    if (!style || !applyNow || keepForOwnProvider) await updateSettings({ starting_polish_style: style });
     setCurrentStep("done");
   };
 
-  const afterPromise: Step = needsTrial ? "trial" : "try";
+  const afterPromise: Step = needsTrial ? "trial" : "source";
+  // Reached from the first try: Continue goes straight back there.
+  const [sourceFromTry, setSourceFromTry] = useState(false);
 
   const handleNext = async () => {
     try {
       if (currentStep === "promise") {
-        if (sourceType === "local" && !sourceReady) {
-          if (models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
-          else startPreparing();
-        }
         setCurrentStep(afterPromise);
         return;
       }
 
       if (currentStep === "trial") {
-        setCurrentStep("try");
+        setCurrentStep("source");
         return;
       }
 
-      if (currentStep === "try") {
-        setCurrentStep("setup");
+      if (currentStep === "source") {
+        if (preparation.savingLanguage) return;
+        if (sourceType === "local" && !sourceReady) {
+          if (models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
+          else startPreparing();
+        }
+        await leaveSource();
+        setCurrentStep(sourceFromTry ? "try" : "setup");
+        setSourceFromTry(false);
         return;
       }
 
       if (currentStep === "setup") {
         await saveHotkeySettings();
-        setCurrentStep("use");
+        setCurrentStep("try");
+        return;
+      }
+
+      if (currentStep === "try") {
+        setCurrentStep("polish");
         return;
       }
     } catch (error) {
@@ -650,19 +665,42 @@ export function useOnboardingDesktop({
     }
   };
 
-  const handleBack = () => {
+  // Leaving the source step either way: a remote server stays active only when
+  // it is the chosen source, so "this Mac" never sends audio to the network.
+  const leaveSource = async () => {
+    if (sourceType !== "remote" && activeRemoteServerId) {
+      await invoke("set_active_remote_server", { serverId: null });
+      setActiveRemoteServerId(null);
+    }
+  };
+
+  const handleBack = async () => {
     const previous: Partial<Record<Step, Step>> = {
       trial: "promise",
-      try: needsTrial ? "trial" : "promise",
-      setup: "try",
-      use: "setup",
+      source: sourceFromTry ? "try" : needsTrial ? "trial" : "promise",
+      setup: "source",
+      try: "setup",
+      polish: "try",
+      done: "polish",
     };
     const step = previous[currentStep];
+    if (currentStep === "source") {
+      try {
+        await leaveSource();
+      } catch (error) {
+        log.error("Failed to leave the source step:", error);
+        toast.error("Couldn’t switch where dictation runs. Try again.");
+        return;
+      }
+      setSourceFromTry(false);
+    }
     if (step) setCurrentStep(step);
   };
 
   const canProceed = () => {
     switch (currentStep) {
+      case "source":
+        return !preparation.savingLanguage;
       case "setup":
         return !isEditingHotkey && (!isMacOS || accessibilitySkipped ||
           permissions.accessibility.status === "granted");
@@ -673,22 +711,6 @@ export function useOnboardingDesktop({
 
   const nextDisabled = !canProceed();
 
-  // Closing "Use something else": a remote server stays active only when that
-  // is the chosen source. Switching back to this computer prepares its model;
-  // a download the user cancelled on this computer stays cancelled.
-  const finishSource = async (switchedToLocal: boolean) => {
-    try {
-      if (switchedToLocal && sourceType === "local" && !localReady && await prepareLocal()) return;
-      if (sourceType !== "remote" && activeRemoteServerId) {
-        await invoke("set_active_remote_server", { serverId: null });
-        setActiveRemoteServerId(null);
-      }
-    } catch (error) {
-      log.error("Failed to apply the transcription source:", error);
-      toast.error("Couldn’t switch where dictation runs. Try again.");
-    }
-  };
-
   return {
     currentStep,
     chooseStartingStyle,
@@ -698,7 +720,11 @@ export function useOnboardingDesktop({
     preparation,
     sourceReady,
     confirmSource,
-    finishSource,
+    chooseSourceFromTry: () => {
+      setSourceFromTry(true);
+      setCurrentStep("source");
+    },
+    skipSetup: () => setCurrentStep("try"),
     handleBack,
     handleNext,
     nextDisabled,

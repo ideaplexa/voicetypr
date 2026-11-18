@@ -9,14 +9,11 @@ export function AppMark() {
 
 export function PromiseStep({
   polishAvailable,
-  downloadNote,
   nextLine,
   busy,
   onBegin,
 }: {
   polishAvailable: boolean;
-  /** One-time download the first try needs, such as "Downloads a 480 MB engine once." */
-  downloadNote: string | null;
   /** What comes after this screen, such as starting the free week. */
   nextLine: string;
   busy: boolean;
@@ -52,7 +49,6 @@ export function PromiseStep({
       </Button>
       <p className="text-[12.5px] text-muted-foreground">
         {nextLine}
-        {downloadNote ? <><br />{downloadNote}</> : null}
       </p>
     </section>
   );

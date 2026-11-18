@@ -7,7 +7,7 @@ import type { Step } from "@/components/onboarding/onboardingTypes";
 import { installPreviewPlatform } from "./platform";
 
 const query = new URLSearchParams(location.search);
-const STEPS: Step[] = ["promise", "trial", "try", "setup", "use", "done"];
+const STEPS: Step[] = ["promise", "trial", "source", "setup", "try", "polish", "done"];
 // The numbered phases of the previous onboarding still open its nearest step.
 const LEGACY: Record<string, Step> = { "1": "promise", "2": "setup", "3": "trial" };
 const onboardingParam = query.get("onboarding") ?? "";
@@ -22,7 +22,7 @@ const options: PreviewOptions = {
   onboarding: onboardingStep,
   onboardingCase,
   trialNotStarted: query.get("license") === "none",
-  polishOff: query.get("polish") === "off",
+  polish: (query.get("polish") || undefined) as PreviewOptions["polish"],
 };
 document.cookie = `sidebar_state=${options.sidebar !== "rail"}; path=/`;
 installPreviewPlatform(options.platform);

@@ -127,13 +127,15 @@ type User = ReturnType<typeof userEvent.setup>;
 
 const openSource = async (user: User) => {
   await user.click(await screen.findByRole("button", { name: /^continue$/i }));
-  await user.click(await screen.findByRole("button", { name: /use something else/i }));
   await screen.findByRole("heading", { name: /where should your voice become text/i });
 };
 
+const BUILTIN_READY = { will_run: false, own_provider_ready: false, own_provider_enabled: false, builtin_enabled: true, builtin: "ready" };
+let polishStatus: Record<string, unknown> = BUILTIN_READY;
+
 const reachSetup = async (user: User) => {
-  await user.click(await screen.findByRole("button", { name: /^continue$/i }));
-  await user.click(await screen.findByRole("button", { name: /skip for now/i }));
+  await openSource(user);
+  await user.click(screen.getByRole("button", { name: /^continue$/i }));
   await screen.findByRole("heading", { name: /now let it type anywhere/i });
 };
 
@@ -145,6 +147,7 @@ const skipUse = async (user: User) => {
 const finishSetup = async (user: User) => {
   await reachSetup(user);
   await user.click(screen.getByRole("button", { name: /^continue$/i }));
+  await user.click(await screen.findByRole("button", { name: /skip for now/i }));
   await skipUse(user);
 };
 
@@ -166,6 +169,7 @@ beforeEach(() => {
   delete (settingsState as Record<string, unknown>).transcription_acceleration;
   delete (settingsState as Record<string, unknown>).recording_mode;
   delete (settingsState as Record<string, unknown>).builtin_polish_enabled;
+  polishStatus = BUILTIN_READY;
   modelManagement.models = {
     "base.en": {
       name: "base.en",
@@ -203,6 +207,8 @@ beforeEach(() => {
         return Promise.resolve(true);
       case "get_audio_devices":
         return Promise.resolve([]);
+      case "polish_status":
+        return Promise.resolve(polishStatus);
       default:
         return Promise.resolve(null);
     }
@@ -348,9 +354,8 @@ describe("OnboardingDesktop", () => {
     await openSource(user);
     await user.click(screen.getByRole("button", { name: /another computer/i }));
     await user.click(await screen.findByRole("button", { name: /use this server/i }));
-    await user.click(screen.getByRole("button", { name: /^done$/i }));
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
 
-    await user.click(await screen.findByRole("button", { name: /skip for now/i }));
     await user.click(await screen.findByRole("button", { name: /^Change$/ }));
     await user.click(screen.getByTitle("Change hotkey"));
     fireEvent.keyDown(window, { key: "k", code: "KeyK", metaKey: true });
@@ -451,7 +456,7 @@ describe("OnboardingDesktop", () => {
     );
     expect(screen.getByRole("button", { name: /^Cloud, with your key$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /another computer/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^done$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
     expect(updateSettingsMock).not.toHaveBeenCalledWith(
       expect.objectContaining({
         current_model: "base.en",
@@ -528,23 +533,26 @@ describe("OnboardingDesktop", () => {
     });
   });
 
-  it("selects the recommended ready local model and goes straight to the first try", async () => {
+  it("selects the recommended ready local model when the source step continues", async () => {
     const user = userEvent.setup();
     settingsState.current_model = "";
     renderOnboarding();
 
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+    await openSource(user);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
 
     expect(updateSettingsMock).toHaveBeenCalledWith({ current_model: "base.en", current_model_engine: "whisper" });
-    expect(await screen.findByRole("button", { name: /click here to talk/i })).toBeEnabled();
+    expect(await screen.findByRole("heading", { name: /now let it type anywhere/i })).toBeInTheDocument();
   });
 
-  it("offers another source on the first try while the on-device model downloads", async () => {
+  it("goes back to the source step from the first try while the model downloads, and returns", async () => {
     const user = userEvent.setup();
     modelManagement.models["base.en"].downloaded = false;
     renderOnboarding();
 
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+    await reachSetup(user);
+    await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en"));
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
     expect(await screen.findByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /use something else/i }));
 
@@ -553,25 +561,24 @@ describe("OnboardingDesktop", () => {
     expect(screen.getByRole("button", { name: /^Cloud, with your key$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /another computer on your network/i })).toBeInTheDocument();
     expect(screen.getByText(/use only on a trusted network/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(await screen.findByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
+    expect(modelManagement.downloadModel).toHaveBeenCalledTimes(1);
   });
 
-  it("closing the source choice on this computer does not restart a download", async () => {
+  it("stops using the network computer when the user picks this Mac and goes back", async () => {
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
+      command === "get_active_remote_server" ? Promise.resolve("remote-1") : base?.(command, ...rest),
+    );
     const user = userEvent.setup();
-    modelManagement.models["base.en"].downloaded = false;
     renderOnboarding();
-
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
-    await user.click(await screen.findByRole("button", { name: /use something else/i }));
-    await screen.findByRole("heading", { name: /where should your voice become text/i });
-    updateSettingsMock.mockClear();
-    modelManagement.downloadModel.mockClear();
-    await user.click(screen.getByRole("button", { name: /^done$/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: /where should your voice become text/i })).not.toBeInTheDocument();
-    });
-    expect(modelManagement.downloadModel).not.toHaveBeenCalled();
-    expect(updateSettingsMock).not.toHaveBeenCalled();
+    await openSource(user);
+    await waitFor(() => expect(screen.getByRole("button", { name: /another computer/i })).toHaveAttribute("aria-pressed", "true"));
+    await user.click(screen.getByRole("button", { name: /on this Mac/i }));
+    await user.click(screen.getByRole("button", { name: /^back$/i }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("set_active_remote_server", { serverId: null }));
   });
 
   it("lets remote-first users switch to local setup from the empty remote state", async () => {
@@ -649,12 +656,9 @@ describe("OnboardingDesktop", () => {
     expect(invokeMock).toHaveBeenCalledWith("set_active_remote_server", {
       serverId: "remote-1",
     });
-    await user.click(screen.getByRole("button", { name: /^done$/i }));
-    await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: /where should your voice become text/i })).not.toBeInTheDocument();
-    });
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(await screen.findByRole("heading", { name: /now let it type anywhere/i })).toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith("set_active_remote_server", { serverId: null });
-    expect(await screen.findByRole("button", { name: /click here to talk/i })).toBeEnabled();
   });
 
   it("connects a cloud provider during onboarding", async () => {
@@ -704,7 +708,7 @@ describe("OnboardingDesktop", () => {
         current_model_engine: "soniox",
       });
     });
-    expect(screen.getByRole("button", { name: /^done$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
   });
 
   it("Windows GPU toggle ON→OFF persists 'cpu' (default state: acceleration undefined → switch ON)", async () => {
@@ -991,7 +995,7 @@ describe("OnboardingDesktop", () => {
   });
 
   it.each(["macos", "windows"] as const)(
-    "walks the promise, the first try, setup and done on %s",
+    "walks the promise, source, setup, first try, Polish and done on %s",
     async (platform) => {
       Object.assign(platformMock, {
         isMacOS: platform === "macos",
@@ -1002,10 +1006,8 @@ describe("OnboardingDesktop", () => {
       const user = userEvent.setup();
       renderOnboarding();
       expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Say it.It lands in any app.");
-      await user.click(screen.getByRole("button", { name: /^continue$/i }));
-      expect(await screen.findByRole("heading", { name: "Say something" })).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: /skip for now/i }));
-      await screen.findByRole("heading", { name: "Now let it type anywhere" });
+      await reachSetup(user);
+      expect(screen.getByRole("button", { name: "Press to start and stop" })).toHaveAttribute("aria-pressed", "true");
       if (platform === "macos") {
         expect(screen.getByRole("heading", { name: "Accessibility" })).toBeInTheDocument();
       } else {
@@ -1013,6 +1015,9 @@ describe("OnboardingDesktop", () => {
         expect(screen.getByRole("meter", { name: "Microphone input level" })).toBeInTheDocument();
       }
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      expect(await screen.findByRole("heading", { name: "Say something" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /skip for now/i }));
+      expect(await screen.findByRole("heading", { name: "Polish tidies what you say" })).toBeInTheDocument();
       await skipUse(user);
       await screen.findByRole("heading", { name: /welcome back/i });
       await user.click(screen.getByRole("button", { name: "Start using Voicetypr" }));
@@ -1025,6 +1030,7 @@ describe("OnboardingDesktop", () => {
     renderOnboarding();
     await waitFor(() => expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: true }));
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Say it messy.It lands clean.");
+    await reachSetup(user);
     await user.click(screen.getByRole("button", { name: /^continue$/i }));
     expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
     expect(screen.getByText(/Polish sends your words to Voicetypr’s server/)).toBeInTheDocument();
@@ -1054,17 +1060,15 @@ describe("OnboardingDesktop", () => {
     settingsState.hotkey = "";
     const user = userEvent.setup();
     renderOnboarding();
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
-    const keys = await screen.findAllByLabelText(`${cap} + Space`);
-    expect(keys.length).toBeGreaterThan(0);
-    expect(screen.getByText(/Press again when you’re done/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /skip for now/i }));
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+    await reachSetup(user);
+    expect((await screen.findAllByLabelText(`${cap} + Space`)).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("set_global_shortcut", { shortcut: hotkey }));
+    expect(await screen.findByText(/Press again when you’re done/)).toBeInTheDocument();
   });
 
   it.each(["macos", "windows"] as const)(
-    "starts the engine download from the promise and blocks the first try until it is ready on %s",
+    "downloads the engine on the source step, keeps its progress in view, and blocks the first try until ready on %s",
     async (platform) => {
       Object.assign(platformMock, {
         isMacOS: platform === "macos",
@@ -1078,19 +1082,27 @@ describe("OnboardingDesktop", () => {
         downloaded: false,
       };
       const view = renderOnboarding();
-      expect(await screen.findByText(/The dictation engine \(670 MB\) downloads once, in the background\./)).toBeInTheDocument();
-      await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en"));
-      await user.click(screen.getByRole("button", { name: /^continue$/i }));
-      expect(modelManagement.downloadModel).toHaveBeenCalledTimes(1);
-      modelManagement.downloadProgress = { "base.en": 42 };
-      view.rerender(
+      const rerender = () => view.rerender(
         <OnboardingDesktop
           onComplete={onCompleteMock}
           licenseStatus={licensed}
           modelManagement={modelManagement as never}
         />,
       );
-      expect(screen.getByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
+      const begin = await screen.findByRole("button", { name: /^continue$/i });
+      expect(modelManagement.downloadModel).not.toHaveBeenCalled();
+      await user.click(begin);
+      expect(await screen.findByText(/Parakeet · 670 MB, downloaded once/)).toBeInTheDocument();
+      await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("base.en"));
+      modelManagement.downloadProgress = { "base.en": 42 };
+      rerender();
+      expect(screen.getByText("Getting the dictation engine ready · 42% of 670 MB. This happens once.")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      expect(await screen.findByRole("heading", { name: /now let it type anywhere/i })).toBeInTheDocument();
+      expect(screen.getByText("Dictation engine · 42% of 670 MB")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      expect(await screen.findByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
+      expect(modelManagement.downloadModel).toHaveBeenCalledTimes(1);
       expect(screen.getByText("Getting the dictation engine ready · 42% of 670 MB. This happens once.")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /click here to talk/i })).not.toBeInTheDocument();
@@ -1122,12 +1134,17 @@ describe("OnboardingDesktop", () => {
       expect(screen.getByText("The dictation engine (670 MB) isn’t downloaded yet.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
       delete (modelManagement as { downloadErrors?: unknown }).downloadErrors;
+      modelManagement.downloadProgress = { "base.en": 42 };
+      rerender();
+      await user.click(screen.getByRole("button", { name: /skip for now/i }));
+      expect(await screen.findByRole("heading", { name: "Polish tidies what you say" })).toBeInTheDocument();
+      expect(screen.getByText("Dictation engine · 42% of 670 MB")).toBeInTheDocument();
     },
   );
 
   it("keeps the step count when a trial starts mid-flow", async () => {
     const view = renderOnboarding({ licenseStatus: { status: "none" } });
-    expect(await screen.findByRole("progressbar", { name: "Setup phase" })).toHaveAttribute("aria-valuemax", "6");
+    expect(await screen.findByRole("progressbar", { name: "Setup phase" })).toHaveAttribute("aria-valuemax", "7");
     view.rerender(
       <OnboardingDesktop
         onComplete={onCompleteMock}
@@ -1135,11 +1152,12 @@ describe("OnboardingDesktop", () => {
         modelManagement={modelManagement as never}
       />,
     );
-    expect(screen.getByRole("progressbar", { name: "Setup phase" })).toHaveAttribute("aria-valuemax", "6");
+    expect(screen.getByRole("progressbar", { name: "Setup phase" })).toHaveAttribute("aria-valuemax", "7");
   });
 
   const reachTry = async (user: User) => {
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
     await screen.findByRole("button", { name: /click here to talk/i });
   };
   const emit = (event: string, payload: unknown) =>
@@ -1157,7 +1175,7 @@ describe("OnboardingDesktop", () => {
     expect(screen.queryByText("You said")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Worked · 5 words · exactly what the engine heard");
     await user.click(screen.getByRole("button", { name: /^continue$/i }));
-    expect(await screen.findByRole("heading", { name: "Now let it type anywhere" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Polish tidies what you say" })).toBeInTheDocument();
   });
 
   it("falls back to the plain first try when built-in Polish didn't run", async () => {
@@ -1174,10 +1192,6 @@ describe("OnboardingDesktop", () => {
   });
 
   it("puts what was said beside the cleaned text when Polish changed it", async () => {
-    const base = invokeMock.getMockImplementation();
-    invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
-      command === "get_ai_settings" ? Promise.resolve({ enabled: true }) : base?.(command, ...rest),
-    );
     const user = userEvent.setup();
     renderOnboarding();
     await reachTry(user);
@@ -1206,7 +1220,8 @@ describe("OnboardingDesktop", () => {
     permissionState.microphone = "denied";
     const user = userEvent.setup();
     renderOnboarding();
-    await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
     expect(await screen.findByText(/The microphone is off for Voicetypr/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /click here to talk/i })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Open System Settings" }));
@@ -1231,6 +1246,7 @@ describe("OnboardingDesktop", () => {
     expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled();
     expect(screen.getByText(/Press to talk, press again to copy/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /skip, i’ll paste myself/i }));
+    await user.click(await screen.findByRole("button", { name: /skip for now/i }));
     await skipUse(user);
     await screen.findByRole("heading", { name: /welcome back/i });
     expect(screen.getByText(/press ⌘V to paste them/)).toBeInTheDocument();
@@ -1257,7 +1273,7 @@ describe("OnboardingDesktop", () => {
       resolveSave?.();
       await pendingSave;
     });
-    await screen.findByRole("heading", { name: "What will you mostly dictate?" });
+    await screen.findByRole("heading", { name: /^Say something/ });
     expect(
       invokeMock.mock.calls.filter(([command]) => command === "set_global_shortcut"),
     ).toHaveLength(1);
@@ -1284,11 +1300,13 @@ describe("OnboardingDesktop", () => {
       await fillContact(user);
       await user.click(screen.getByRole("button", { name: "Start 7-day trial" }));
       expect(start).toHaveBeenCalledWith("Priya Raman", "priya@example.com");
-      await screen.findByRole("heading", { name: "Say something messy" });
+      await screen.findByRole("heading", { name: /where should your voice become text/i });
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("heading", { name: /^Say something/ });
       await user.click(screen.getByRole("button", { name: /click here to talk/i }));
       expect(invokeMock).toHaveBeenCalledWith("start_recording", { source: "pointer" });
       await user.click(screen.getByRole("button", { name: /skip for now/i }));
-      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
       await skipUse(user);
       expect(await screen.findByRole("heading", { name: "You’re in, Priya" })).toBeInTheDocument();
     });
@@ -1298,6 +1316,8 @@ describe("OnboardingDesktop", () => {
       renderOnboarding({ licenseStatus: { status: "none" }, onStartTrial: vi.fn() });
       await reachTrial(user);
       await user.click(screen.getByRole("button", { name: "Decide later" }));
+      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
       expect(await screen.findByRole("heading", { name: "Dictation starts with your trial" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /click here to talk/i })).not.toBeInTheDocument();
       expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
@@ -1316,6 +1336,8 @@ describe("OnboardingDesktop", () => {
       expect(screen.getByRole("heading", { name: "Start with 7 days free" })).toBeInTheDocument();
       expect(screen.getByLabelText("Email")).toHaveValue("priya@example.com");
       await user.click(screen.getByRole("button", { name: "Decide later" }));
+      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
       expect(await screen.findByRole("heading", { name: "We couldn’t confirm your trial" })).toBeInTheDocument();
       expect(screen.queryByText(/expired|trial ended/i)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /click here to talk/i })).not.toBeInTheDocument();
@@ -1326,11 +1348,11 @@ describe("OnboardingDesktop", () => {
     it("skips the trial step when this device already has a license", async () => {
       const user = userEvent.setup();
       renderOnboarding({ onStartTrial: vi.fn() });
-      await user.click(await screen.findByRole("button", { name: /^continue$/i }));
-      expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
+      await openSource(user);
       expect(screen.queryByRole("button", { name: "Start 7-day trial" })).not.toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: /skip for now/i }));
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
       await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+      await user.click(await screen.findByRole("button", { name: /skip for now/i }));
       await skipUse(user);
       expect(await screen.findByRole("heading", { name: "Welcome back. Your license is active on this Mac." })).toBeInTheDocument();
     });
@@ -1363,9 +1385,10 @@ describe("OnboardingDesktop", () => {
       await user.type(screen.getByRole("textbox", { name: "License key" }), "VT-GOOD");
       await user.click(screen.getByRole("button", { name: "Activate" }));
       expect(activate).toHaveBeenLastCalledWith("VT-GOOD");
-      expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: /skip for now/i }));
+      expect(await screen.findByRole("heading", { name: /where should your voice become text/i })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
       await user.click(await screen.findByRole("button", { name: /^continue$/i }));
+      await user.click(await screen.findByRole("button", { name: /skip for now/i }));
       await skipUse(user);
       expect(await screen.findByRole("heading", { name: "License active. Voicetypr is yours." })).toBeInTheDocument();
     });
@@ -1397,6 +1420,7 @@ describe("OnboardingDesktop", () => {
     const reachUse = async (user: User) => {
       await reachSetup(user);
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await user.click(await screen.findByRole("button", { name: /skip for now/i }));
       await screen.findByRole("heading", { name: "What will you mostly dictate?" });
     };
 
@@ -1409,6 +1433,42 @@ describe("OnboardingDesktop", () => {
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
       await screen.findByRole("heading", { name: /welcome back/i });
       expect(invokeMock).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Message" } });
+      // Kept too, so a provider of the user's own starts in the same style.
+      expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: "Message" });
+    });
+
+    it("shows built-in Polish on by default and turns it off for the next dictation, as Settings does", async () => {
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachUse(user);
+      const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      await waitFor(() => expect(toggle).toBeChecked());
+      expect(screen.getByText(/Your words are sent to Voicetypr’s server to be cleaned, and nothing is kept/)).toBeInTheDocument();
+      expect(screen.getByText("Rather use your own AI provider? Add its key in Settings → Polish.")).toBeInTheDocument();
+      await user.click(toggle);
+      // The same saved setting Settings → Polish writes, which the next dictation reads.
+      expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false });
+    });
+
+    it.each([
+      ["no_access", "Works during your trial or with a license."],
+      ["not_entitled", "Not available on this device: built-in Polish needs a trial started with your email, or a license."],
+      ["unreachable", "Voicetypr’s server can’t be reached right now, so nothing is sent and you get exactly what you said."],
+    ])("never shows built-in Polish as on when the server says %s", async (builtin, line) => {
+      polishStatus = { ...BUILTIN_READY, builtin };
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachUse(user);
+      expect(await screen.findByText(line)).toBeInTheDocument();
+      const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      expect(toggle).not.toBeChecked();
+      expect(toggle).toHaveAttribute("aria-disabled", "true");
+      await user.click(screen.getByRole("button", { name: "Code and tech notes" }));
+      expect(screen.getByText("When Polish is on, it starts in the Code style.")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("heading", { name: /welcome back/i });
+      expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: "Code" });
+      expect(invokeMock).not.toHaveBeenCalledWith("update_enhancement_options", expect.anything());
     });
 
     it("saves the pick as the style Polish will start in, without claiming Polish is on", async () => {
@@ -1417,15 +1477,37 @@ describe("OnboardingDesktop", () => {
       const user = userEvent.setup();
       renderOnboarding();
       await reachUse(user);
+      expect(screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" })).not.toBeChecked();
+      expect(screen.getByText("Off: built-in Polish won’t send your text.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled();
       await user.click(screen.getByRole("button", { name: "Messages and email" }));
       expect(screen.getByRole("status")).toHaveTextContent(
-        "When you turn on Polish, it starts in the Message style, tidy sentences in your own wording.",
+        "When Polish is on, it starts in the Message style, tidy sentences in your own wording.",
       );
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
       await screen.findByRole("heading", { name: /welcome back/i });
       expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: "Message" });
-      expect(invokeMock).not.toHaveBeenCalledWith("update_enhancement_options", expect.anything());
+      // Built-in Polish could run, so turning it back on later cleans in the picked style.
+      expect(invokeMock).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Message" } });
+    });
+
+    it("shows the user's own first sentence before and after when Polish cleaned it", async () => {
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachSetup(user);
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("button", { name: /click here to talk/i });
+      act(() => {
+        for (const handler of eventListeners.get("transcription-added") ?? []) {
+          handler({ payload: { text: "Ship it on Friday.", writing: { ai_applied: true, original_text: "uh ship it on thursday no friday" } } });
+        }
+      });
+      await screen.findByText("uh ship it on thursday no friday");
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("heading", { name: "What will you mostly dictate?" });
+      expect(screen.getByText("Polish typed")).toBeInTheDocument();
+      expect(screen.getAllByText("Ship it on Friday.").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("uh ship it on thursday no friday").length).toBeGreaterThan(0);
     });
 
     it("leaves today's default when skipped", async () => {
@@ -1438,10 +1520,7 @@ describe("OnboardingDesktop", () => {
     });
 
     it("sets the Polish style right away when Polish is already on", async () => {
-      const base = invokeMock.getMockImplementation();
-      invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
-        command === "get_ai_settings" ? Promise.resolve({ enabled: true }) : base?.(command, ...rest),
-      );
+      polishStatus = { will_run: true, own_provider_ready: true, own_provider_enabled: true, builtin_enabled: false, builtin: "own_provider" };
       const user = userEvent.setup();
       renderOnboarding();
       await reachUse(user);

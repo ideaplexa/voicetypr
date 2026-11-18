@@ -299,6 +299,7 @@ let agentCliProbeHandler:
   | ((args?: Record<string, unknown>) => Promise<typeof agentCliProbeResponse>)
   | undefined;
 let enhancementOptionsResponse = { preset: "PersonalDictation" };
+let builtinAvailability = "ready";
 
 const baseAppSettings = {
   hotkey: "CommandOrControl+Shift+Space",
@@ -372,6 +373,7 @@ describe("EnhancementsSection", () => {
     aiSettingsHandler = undefined;
     aiSettingsResponse = baseAISettings;
     enhancementOptionsResponse = { preset: "PersonalDictation" };
+    builtinAvailability = "ready";
     agentCliProbeResponse = {
       state: "missing",
     };
@@ -383,6 +385,9 @@ describe("EnhancementsSection", () => {
         }
         if (cmd === "get_settings") {
           return Promise.resolve(baseAppSettings);
+        }
+        if (cmd === "polish_status") {
+          return Promise.resolve({ will_run: false, own_provider_ready: false, own_provider_enabled: false, builtin_enabled: false, builtin: builtinAvailability });
         }
         if (cmd === "save_settings") {
           return Promise.resolve(undefined);
@@ -471,7 +476,7 @@ describe("EnhancementsSection", () => {
       const toggle = await screen.findByRole("switch", { name: "Clean up on Voicetypr’s server" });
       await waitFor(() => expect(toggle).toBeChecked());
       expect(screen.getByText(/sent to\s+Voicetypr’s server/)).toBeInTheDocument();
-      expect(screen.getByText("On: used because you haven’t connected your own provider.")).toBeInTheDocument();
+      expect(screen.getByText("On: your words go to Voicetypr’s server to be cleaned, and nothing is kept.")).toBeInTheDocument();
 
       await user.click(toggle);
       await waitFor(() =>
@@ -500,9 +505,25 @@ describe("EnhancementsSection", () => {
 
     it("explains it needs a trial or a license once the trial has ended", async () => {
       licenseState.value = { status: "expired" };
+      builtinAvailability = "no_access";
       withSettings({ builtin_polish_enabled: true });
       renderWithProviders();
       expect(await screen.findByText("Works during your trial or with a license.")).toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" })).not.toBeChecked();
+    });
+
+    it("never reads as on when Voicetypr's server refuses this device or can't be reached", async () => {
+      withSettings({ builtin_polish_enabled: true });
+      builtinAvailability = "unreachable";
+      const { unmount } = renderWithProviders();
+      expect(await screen.findByText(/server can’t be reached right now/)).toBeInTheDocument();
+      const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      expect(toggle).not.toBeChecked();
+      expect(toggle).toHaveAttribute("aria-disabled", "true");
+      unmount();
+      builtinAvailability = "not_entitled";
+      renderWithProviders();
+      expect(await screen.findByText(/needs a trial started with your email, or a license/)).toBeInTheDocument();
     });
   });
 

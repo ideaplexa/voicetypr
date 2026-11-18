@@ -1,6 +1,6 @@
 import type { Step } from "@/components/onboarding/onboardingTypes";
 import { createUsageFixture } from "@/ui-preview/usageFixture";
-import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type LicenseStatus, type ModelInfo, type TranscriptionHistory } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type BuiltinPolishAvailability, type LicenseStatus, type ModelInfo, type PolishStatus, type TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
 import type { ShortcutActionDefinition, ShortcutSettings } from "@/types/shortcuts";
 import type { AiProvider, AIProviderModel } from "@/types/providers";
@@ -20,8 +20,11 @@ export type PreviewOptions = {
   onboardingCase?: OnboardingPreviewCase;
   /** `?license=none`: a device whose free trial has not been started. */
   trialNotStarted?: boolean;
-  /** `?polish=off`: built-in Polish switched off, so onboarding shows the plain promise. */
-  polishOff?: boolean;
+  /**
+   * `?polish=`: built-in Polish switched `off`, or what Voicetypr's server says about this device
+   * (`no_access`, `not_entitled`, `unreachable`). Default: on and confirmed.
+   */
+  polish?: "off" | BuiltinPolishAvailability;
 };
 
 const demoText = [
@@ -255,7 +258,7 @@ export function createFixtures(options: PreviewOptions) {
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
-    builtin_polish_enabled: options.polishOff ? false : undefined,
+    builtin_polish_enabled: options.polish === "off" ? false : undefined,
     check_updates_automatically: false,
     recording_mode: options.onboarding ? "toggle" : "push_to_talk",
     selected_microphone:
@@ -327,7 +330,7 @@ export function createFixtures(options: PreviewOptions) {
     { id: "gemini", name: "Gemini", status: "production", requires_api_key: true },
   ];
   const aiSettings: AISettings = {
-    enabled: !options.onboarding || options.onboardingCase === "polished",
+    enabled: !options.onboarding,
     provider: "openai",
     model: "gpt-6-luna",
     hasApiKey: true,
@@ -402,6 +405,14 @@ export function createFixtures(options: PreviewOptions) {
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
     get_ai_settings: aiSettings,
+    polish_status: {
+      will_run: !options.onboarding || !options.polish,
+      own_provider_ready: !options.onboarding,
+      own_provider_enabled: !options.onboarding,
+      builtin_enabled: options.polish !== "off",
+      builtin: !options.onboarding ? "own_provider" : options.polish && options.polish !== "off" ? options.polish : "ready",
+    } satisfies PolishStatus,
+    polish_can_run: !options.onboarding || !options.polish,
     get_ai_settings_for_provider: aiSettings,
     list_ai_providers: providers,
     get_enhancement_options: enhancement,

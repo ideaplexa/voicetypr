@@ -2,7 +2,7 @@ import { KeyCaps } from "@/components/KeyCaps";
 import { MicrophoneCheck } from "@/components/onboarding/MicrophoneCheck";
 import type { PermissionState } from "@/components/onboarding/onboardingTypes";
 import { PermissionsStep } from "@/components/onboarding/PermissionsStep";
-import { SettingsPaneCard } from "@/components/settings/settings-ui";
+import { ChoiceCard, SettingsPaneCard } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
 import { isMacOS } from "@/lib/platform";
 import { Keyboard } from "lucide-react";
@@ -11,7 +11,7 @@ import type { ReactNode } from "react";
 export function SetupStep({
   caps,
   holdToTalk,
-  heardYou,
+  onHoldToTalkChange,
   permissions,
   checkingPermissions,
   isRequestingPermission,
@@ -20,6 +20,7 @@ export function SetupStep({
   editor,
   onChangeShortcut,
   onBack,
+  onSkip,
   onSkipAccessibility,
   onNext,
   nextDisabled,
@@ -27,8 +28,7 @@ export function SetupStep({
 }: {
   caps: string[];
   holdToTalk: boolean;
-  /** A first dictation worked, so the microphone needs no separate check. */
-  heardYou: boolean;
+  onHoldToTalkChange: (hold: boolean) => void;
   permissions: { microphone: PermissionState; accessibility: PermissionState };
   checkingPermissions: Set<string>;
   isRequestingPermission: string | null;
@@ -38,6 +38,8 @@ export function SetupStep({
   editor: ReactNode;
   onChangeShortcut: () => void;
   onBack: () => void;
+  /** Moves on without saving a shortcut change. */
+  onSkip: () => void;
   onSkipAccessibility: () => void;
   onNext: () => void;
   nextDisabled: boolean;
@@ -51,8 +53,8 @@ export function SetupStep({
       </h2>
       <p className="text-center text-sm text-muted-foreground">
         {isMacOS
-          ? "One permission and your shortcut. Then Voicetypr works in every app."
-          : "Your shortcut works in every app. Keep it or pick another."}
+          ? "Your microphone, one permission and your shortcut. Then Voicetypr works in every app."
+          : "Your microphone and your shortcut. Then Voicetypr works in every app."}
       </p>
       {isMacOS ? (
         <PermissionsStep
@@ -63,7 +65,7 @@ export function SetupStep({
           onRequest={onRequest}
         />
       ) : null}
-      {!heardYou && !isMacOS ? <MicrophoneCheck /> : null}
+      {!isMacOS || permissions.microphone.status === "granted" ? <MicrophoneCheck /> : null}
       {editor ?? (
         <SettingsPaneCard className="w-full !px-[18px] !py-[14px]">
           <div className="flex items-center gap-[14px]">
@@ -83,11 +85,31 @@ export function SetupStep({
         </SettingsPaneCard>
       )}
       {!editor ? (
+        <div role="group" aria-label="How the shortcut works" className="grid w-full gap-2.5 sm:grid-cols-2">
+          <ChoiceCard
+            layout="row"
+            label="Press to start and stop"
+            description="Press once to talk, press again to finish."
+            selected={!holdToTalk}
+            onSelect={() => onHoldToTalkChange(false)}
+          />
+          <ChoiceCard
+            layout="row"
+            label="Hold to talk"
+            description="Talk while you hold it, let go to finish."
+            selected={holdToTalk}
+            onSelect={() => onHoldToTalkChange(true)}
+          />
+        </div>
+      ) : null}
+      {!editor ? (
         <div className="flex flex-wrap justify-center gap-[10px]">
           <Button variant="outline" onClick={onBack}>Back</Button>
           {isMacOS && !accessibilityAllowed ? (
             <Button variant="ghost" disabled={saving} onClick={onSkipAccessibility}>Skip, I’ll paste myself</Button>
-          ) : null}
+          ) : (
+            <Button variant="ghost" disabled={saving} onClick={onSkip}>Skip for now</Button>
+          )}
           <Button disabled={nextDisabled || saving} onClick={onNext}>Continue</Button>
         </div>
       ) : null}

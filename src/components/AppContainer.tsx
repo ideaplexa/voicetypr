@@ -78,10 +78,13 @@ export function AppContainer() {
     forceOnboardingNeedsFreshAvailabilityRef,
   });
 
+  // Finishing onboarding while the engine still downloads opens the app; the
+  // download carries on and Home shows what is still needed.
+  const [finishedOnboarding, setFinishedOnboarding] = useState(false);
   const showOnboarding = Boolean(
     settings?.onboarding_completed === false ||
     forceShowOnboarding ||
-    modelAvailability.hasModels === false,
+    (modelAvailability.hasModels === false && !finishedOnboarding),
   );
   // Progress is only needed by onboarding; subscribing elsewhere would re-render
   // this container on every tick.
@@ -115,6 +118,7 @@ export function AppContainer() {
           onCompletionStart={markOnboardingCompletionStarted}
           onCompletionError={clearOnboardingCompletionMarker}
           onComplete={() => {
+            setFinishedOnboarding(true);
             setForceShowOnboarding(false);
             refreshSettings();
             void modelAvailability.checkModels();

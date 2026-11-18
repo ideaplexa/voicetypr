@@ -1,8 +1,7 @@
 import { HotkeyStep } from "@/components/onboarding/HotkeyStep";
 import { StepDots } from "@/components/onboarding/OnboardingChrome";
-import { SourceSheet } from "@/components/onboarding/SourceSheet";
+import { VoiceSourceStep } from "@/components/onboarding/VoiceSourceStep";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/settings/SettingsButton";
 import { isMacOS } from "@/lib/platform";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
@@ -19,7 +18,9 @@ import { TryStep } from "@/components/onboarding/TryStep";
 import { SetupStep } from "@/components/onboarding/SetupStep";
 import { TrialStep } from "@/components/onboarding/TrialStep";
 import { DoneStep } from "@/components/onboarding/DoneStep";
-import { UseStep } from "@/components/onboarding/UseStep";
+import { PolishStep } from "@/components/onboarding/PolishStep";
+import { usePolishStatus } from "@/components/polish/usePolishStatus";
+import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { ConsentChoice } from "@/components/onboarding/ConsentChoice";
 import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
 import { useSettings } from "@/contexts/SettingsContext";
@@ -57,10 +58,9 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   } = flow;
   const { licenseStatus, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
 
-  const [aiEnabled, setAiEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState(false);
-  const [heardYou, setHeardYou] = useState(false);
+  const [firstTry, setFirstTry] = useState<FirstDictation | null>(null);
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const [sawTrial, setSawTrial] = useState(false);
@@ -75,21 +75,13 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     if (!NEW_USERS_GET_POLISH || props.previewStep || !settings || !newInstall || builtinPolishSetting != null) return;
     void Promise.resolve(updateSettings({ builtin_polish_enabled: true })).catch(() => undefined);
   }, [settings, newInstall, builtinPolishSetting, updateSettings, props.previewStep]);
-  const [sourceSheet, setSourceSheet] = useState<"closed" | "sources" | "models">("closed");
-  const [sourceAtOpen, setSourceAtOpen] = useState(sourceType);
-  const openSourceSheet = (view: "sources" | "models") => {
-    setSourceAtOpen(sourceType);
-    if (view === "models") confirmSource("local");
-    setSourceSheet(view);
+  const [modelsFirst, setModelsFirst] = useState(false);
+  const toSource = (models: boolean) => {
+    setModelsFirst(models);
+    flow.chooseSourceFromTry();
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    void invoke<{ enabled?: boolean } | null>("get_ai_settings")
-      .then((ai) => { if (!cancelled) setAiEnabled(Boolean(ai?.enabled)); })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, []);
+  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${currentStep === "polish"}`);
 
   if (currentStep === "trial" && !sawTrial) setSawTrial(true);
   // The step count is fixed by the licence as first known, so starting a
@@ -102,21 +94,22 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   // A key activated or a status recheck that finds a license or trial ends the trial step.
   const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
   useEffect(() => {
-    if (currentStep === "trial" && licensed) goTo("try");
+    if (currentStep === "trial" && licensed) goTo("source");
   }, [currentStep, licensed, goTo]);
 
-  const builtinPolish = !aiEnabled && NEW_USERS_GET_POLISH &&
-    (builtinPolishSetting === true || (newInstall && builtinPolishSetting == null));
-  const polishAvailable = aiEnabled || builtinPolish;
+  // Built-in Polish is the user's saved choice, or on for a new install that hasn't chosen yet.
+  const builtinChosen = builtinPolishSetting === true || (NEW_USERS_GET_POLISH && newInstall && builtinPolishSetting == null);
+  const ownPolishOn = polishStatus?.own_provider_ready === true && polishStatus.own_provider_enabled;
+  const builtinWillRun = builtinChosen && polishStatus?.own_provider_ready !== true && polishStatus?.builtin === "ready";
+  const polishOn = ownPolishOn || builtinWillRun;
+  // Before the trial starts the server can't confirm yet, so the promise follows the choice.
+  const polishAvailable = polishOn || (builtinChosen && (polishStatus === null || polishStatus.builtin === "no_access"));
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
-  const model = preparation.recommended ? local.models[preparation.recommended] : undefined;
+  const model = preparation.name ? local.models[preparation.name] : undefined;
   const modelSize = megabytes(model?.size);
-  const downloadNote = sourceType === "local" && model && !model.downloaded && modelSize
-    ? `The dictation engine (${modelSize}) downloads once, in the background.`
-    : null;
-  const flowSteps: Step[] = ["promise", ...(trialInFlow ? (["trial"] as Step[]) : []), "try", "setup", "use", "done"];
+  const flowSteps: Step[] = ["promise", ...(trialInFlow ? (["trial"] as Step[]) : []), "source", "setup", "try", "polish", "done"];
   const dotIndex = Math.max(0, flowSteps.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -127,16 +120,21 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     setKeyDialogOpen(true);
   };
   const consent = <ConsentChoice checked={flow.telemetryOptIn} onChange={flow.onTelemetryChange} />;
-  const preparing = sourceType === "local" ? (
+  const preparing = (onChoose: () => void, compact = false) => (
     <OfflinePreparationStatus
+      compact={compact}
+      ready={local.localReady}
       verifying={Boolean(preparation.name && local.verifyingModels.has(preparation.name))}
       progress={preparation.name ? local.downloadProgress[preparation.name] : undefined}
       size={megabytes(preparation.name ? local.models[preparation.name]?.size : undefined)}
       error={preparation.name ? local.downloadErrors[preparation.name] : undefined}
       onRetry={() => { if (preparation.name) local.onDownload(preparation.name); }}
-      onChoose={() => openSourceSheet("models")}
+      onChoose={onChoose}
     />
-  ) : null;
+  );
+  const downloadLine = sourceType === "local" && !local.localReady &&
+    (currentStep === "setup" || currentStep === "polish" || currentStep === "done")
+    ? preparing(() => toSource(true), true) : null;
 
   const languageWarning = preparation.warningModel ? (
     <div role="alert" className="flex flex-col items-center gap-3 text-sm">
@@ -160,12 +158,12 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   return (
     <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
       {trialInFlow === null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flowSteps.length} />}
+      <div className="mt-3 flex min-h-5 items-center justify-center">{downloadLine}</div>
       <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
         <div className="flex w-full max-w-[640px] flex-col items-center gap-[22px]">
           {currentStep === "promise" && (
             <PromiseStep
               polishAvailable={polishAvailable}
-              downloadNote={downloadNote}
               nextLine={licenseStatus?.status === "licensed" ? "Your license is active. Say anything."
                 : licenseStatus?.status === "trial" ? "Your free week is running. Say anything."
                 : licenseStatus?.status === "expired" ? "Upgrade or add your key, then say anything."
@@ -184,7 +182,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 setTrialError(error);
                 if (!error) {
                   setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
-                  goTo("try");
+                  goTo("source");
                 }
                 return error;
               }}
@@ -193,9 +191,29 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               onBack={handleBack}
               onDecideLater={() => {
                 setOutcome({ kind: "later" });
-                goTo("try");
+                goTo("source");
               }}
               consent={consent}
+            />
+          )}
+
+          {currentStep === "source" && (
+            <VoiceSourceStep
+              sourceType={sourceType}
+              modelName={model?.display_name ?? null}
+              modelSize={modelSize}
+              language={preparation.language}
+              modelsOpenAtStart={modelsFirst}
+              preparing={(onChoose) => preparing(onChoose)}
+              local={local}
+              cloud={flow.cloud}
+              remote={flow.remote}
+              warning={languageWarning}
+              busy={busy || nextDisabled}
+              onConfirmSource={confirmSource}
+              onLanguageChange={(value) => void preparation.changeLanguage(value)}
+              onBack={handleBack}
+              onNext={() => void run(handleNext)}
             />
           )}
 
@@ -204,21 +222,21 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               caps={caps}
               holdToTalk={holdToTalk}
               polishAvailable={polishAvailable}
-              builtinPolish={builtinPolish}
+              builtinPolish={builtinWillRun}
               engineReady={sourceReady}
               access={licensed || outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
                 : licenseStatus?.status === "expired" ? "ended"
                 : trialError === "trial_unreachable" ? "offline" : "none"}
               onStartTrial={() => goTo("trial")}
               onHaveKey={() => setKeyDialogOpen(true)}
-              preparing={preparing}
+              preparing={sourceType === "local" ? preparing(() => toSource(true)) : null}
               microphone={permissions.microphone.status}
               onAllowMicrophone={flow.ensureMicrophone}
               onBack={handleBack}
               localSource={sourceType === "local"}
-              onUseSomethingElse={() => openSourceSheet("sources")}
+              onUseSomethingElse={() => toSource(false)}
               onNext={() => void run(handleNext)}
-              onWorked={() => setHeardYou(true)}
+              onWorked={setFirstTry}
             />
           )}
 
@@ -226,7 +244,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             <SetupStep
               caps={caps}
               holdToTalk={holdToTalk}
-              heardYou={heardYou}
+              onHoldToTalkChange={flow.onHoldToTalkChange}
               permissions={permissions}
               checkingPermissions={flow.checkingPermissions}
               isRequestingPermission={flow.isRequestingPermission}
@@ -251,6 +269,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               ) : null}
               onChangeShortcut={() => setEditingShortcut(true)}
               onBack={handleBack}
+              onSkip={flow.skipSetup}
               onSkipAccessibility={() => {
                 flow.skipAccessibility();
                 void run(handleNext);
@@ -261,12 +280,18 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
-          {currentStep === "use" && (
-            <UseStep
-              polishAvailable={polishAvailable}
+          {currentStep === "polish" && (
+            <PolishStep
+              status={polishStatus}
+              builtinChosen={builtinChosen}
+              onBuiltinChange={(on) => void Promise.resolve(updateSettings({ builtin_polish_enabled: on })).catch(() => undefined)}
+              firstTry={firstTry}
               saving={busy}
               onBack={handleBack}
-              onChoose={(style) => void run(() => flow.chooseStartingStyle(style, polishAvailable))}
+              onChoose={(style) => void run(() => flow.chooseStartingStyle(style, {
+                applyNow: polishOn || polishStatus?.builtin === "ready",
+                keepForOwnProvider: !ownPolishOn,
+              }))}
             />
           )}
 
@@ -280,30 +305,13 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 permissions.accessibility.status === "not_determined")}
               consent={sawTrial ? null : consent}
               saving={flow.isSavingCompletion}
+              onBack={handleBack}
               onFinish={() => void flow.completeOnboarding()}
             />
           )}
 
-          {sourceSheet === "closed" && languageWarning}
         </div>
       </main>
-      <SourceSheet
-        open={sourceSheet !== "closed"}
-        showModels={sourceSheet === "models"}
-        sourceType={sourceType}
-        modelSize={modelSize}
-        language={preparation.language}
-        local={local}
-        cloud={flow.cloud}
-        remote={flow.remote}
-        onConfirmSource={confirmSource}
-        onLanguageChange={(value) => void preparation.changeLanguage(value)}
-        warning={languageWarning}
-        onDone={() => {
-          setSourceSheet("closed");
-          void flow.finishSource(sourceAtOpen !== "local");
-        }}
-      />
       <LicenseKeyDialog
         open={keyDialogOpen}
         onOpenChange={setKeyDialogOpen}
@@ -311,7 +319,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           const error = await (onActivateLicense ?? (async () => "Couldn’t activate the key. Try again."))(key);
           if (!error) {
             setOutcome({ kind: "key" });
-            if (currentStep === "trial") goTo("try");
+            if (currentStep === "trial") goTo("source");
           }
           return error;
         }}

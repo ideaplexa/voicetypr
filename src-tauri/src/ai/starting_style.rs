@@ -35,9 +35,76 @@ pub(crate) fn take_enabled_options<R: tauri::Runtime>(store: &Store<R>) -> Enhan
     }
 }
 
+/// Where Polish stands for the next dictation: the user's own provider, or
+/// Voicetypr's built-in Polish, by the same settings dictation reads.
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+pub struct PolishStatus {
+    /// The next dictation will be polished.
+    will_run: bool,
+    own_provider_ready: bool,
+    own_provider_enabled: bool,
+    builtin_enabled: bool,
+    builtin: crate::ai::builtin::Availability,
+}
+
+fn status(
+    own_provider_ready: bool,
+    own_provider_enabled: bool,
+    builtin_enabled: bool,
+    builtin: crate::ai::builtin::Availability,
+) -> PolishStatus {
+    let will_run = (own_provider_ready && own_provider_enabled)
+        || (builtin_enabled && builtin == crate::ai::builtin::Availability::Ready);
+    PolishStatus {
+        will_run,
+        own_provider_ready,
+        own_provider_enabled,
+        builtin_enabled,
+        builtin,
+    }
+}
+
+#[tauri::command]
+pub async fn polish_status(app: tauri::AppHandle) -> Result<PolishStatus, String> {
+    use tauri_plugin_store::StoreExt;
+    let own_provider_ready = crate::commands::ai::has_ai_model_and_key(&app)?;
+    let store = app.store("settings").map_err(|e| e.to_string())?;
+    let own_provider_enabled = store
+        .get("ai_enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let builtin_enabled = crate::ai::builtin::setting_on(&store);
+    let builtin = crate::ai::builtin::availability(&app, own_provider_ready).await;
+    Ok(status(
+        own_provider_ready,
+        own_provider_enabled,
+        builtin_enabled,
+        builtin,
+    ))
+}
+
+/// Whether the next dictation will be polished, by the user's own provider or
+/// by built-in Polish once Voicetypr's server has confirmed it for this device.
+#[tauri::command]
+pub async fn polish_can_run(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(polish_status(app).await?.will_run)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn polish_runs_only_when_switched_on_and_confirmed() {
+        use crate::ai::builtin::Availability::*;
+        assert!(status(true, true, false, OwnProvider).will_run);
+        assert!(!status(true, false, true, OwnProvider).will_run);
+        assert!(status(false, false, true, Ready).will_run);
+        assert!(!status(false, false, false, Ready).will_run);
+        for refused in [NoAccess, NotEntitled, Unreachable] {
+            assert!(!status(false, false, true, refused).will_run);
+        }
+    }
 
     #[test]
     fn polish_starts_in_the_style_picked_during_onboarding() {

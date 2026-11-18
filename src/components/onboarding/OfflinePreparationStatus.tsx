@@ -1,5 +1,6 @@
 import { Button } from "@/components/settings/SettingsButton";
 import { Progress } from "@/components/ui/progress";
+import { isMacOS } from "@/lib/platform";
 
 /** The download error in words a user can act on, never the raw message. */
 function failureReason(error: string) {
@@ -15,7 +16,11 @@ function failureReason(error: string) {
 }
 
 /** Where the on-device engine is: downloading, checking, or stopped. */
-export function OfflinePreparationStatus({ verifying, progress, size, error, onRetry, onChoose }: {
+export function OfflinePreparationStatus({ compact, ready, verifying, progress, size, error, onRetry, onChoose }: {
+  /** One small line, for the steps after the download started. */
+  compact?: boolean;
+  /** Downloaded, checked and selected. */
+  ready: boolean;
   verifying: boolean;
   /** Percent downloaded, while a download runs. */
   progress: number | undefined;
@@ -27,14 +32,29 @@ export function OfflinePreparationStatus({ verifying, progress, size, error, onR
   onChoose: () => void;
 }) {
   const of = size ? ` of ${size}` : "";
-  const idle = !error && !verifying && progress === undefined;
-  const line = error ? `The download stopped. ${failureReason(error)}`
+  const idle = !ready && !error && !verifying && progress === undefined;
+  const line = ready ? `The dictation engine${size ? ` (${size})` : ""} is ready on this ${isMacOS ? "Mac" : "PC"}.`
+    : error ? `The download stopped. ${failureReason(error)}`
     : verifying ? "Checking the dictation engine. This happens once."
     : idle ? `The dictation engine${size ? ` (${size})` : ""} isn’t downloaded yet.`
     : `Getting the dictation engine ready · ${Math.round(progress ?? 0)}%${of}. This happens once.`;
+  if (compact) {
+    const short = error ? "Dictation engine download stopped."
+      : verifying ? "Dictation engine: checking."
+      : idle ? "Dictation engine isn’t downloaded yet."
+      : `Dictation engine · ${Math.round(progress ?? 0)}%${of}`;
+    return (
+      <p role={error ? "alert" : "status"} className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
+        {short}
+        {(error || idle) && (
+          <Button variant="link" size="sm" className="h-auto p-0" onClick={onRetry}>{error ? "Retry" : "Download"}</Button>
+        )}
+      </p>
+    );
+  }
   return (
     <div className="flex w-full max-w-[420px] flex-col items-center gap-3 text-sm text-muted-foreground">
-      {!error && !idle && (
+      {!ready && !error && !idle && (
         <Progress
           aria-label="Dictation engine download"
           value={verifying ? 100 : progress ?? 0}

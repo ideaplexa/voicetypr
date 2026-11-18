@@ -17,7 +17,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
 import { KeepWordsSetting } from "@/components/polish/KeepWordsSetting";
 import { PolishContextSetting } from "@/components/polish/PolishContextSetting";
-import { BuiltInPolishSetting } from "@/components/polish/BuiltInPolishSetting";
+import { BuiltInPolishSetting, builtinPolishView } from "@/components/polish/BuiltInPolishSetting";
+import { usePolishStatus } from "@/components/polish/usePolishStatus";
 import { useLicense } from "@/contexts/LicenseContext";
 import { SettingsPage } from "@/components/settings/settings-ui";
 export function EnhancementsSection() {
@@ -105,8 +106,8 @@ export function EnhancementsSection() {
     (aiSettings.model || isAgentCliProvider(aiSettings.provider)) &&
     (isUsingCustomProvider || providerApiKeys[aiSettings.provider]),
   );
-  const builtinPolishEntitled = licenseStatus?.status === "trial" || licenseStatus?.status === "licensed";
-  const builtinPolishActive = !hasSelectedModel && builtinPolishEntitled && settings?.builtin_polish_enabled === true;
+  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${hasSelectedModel}`);
+  const builtinPolishActive = builtinPolishView(polishStatus?.builtin ?? null, settings?.builtin_polish_enabled === true).checked;
   const showAiModelReselectionNotice =
     aiModelNeedsReselection && aiSettings.enabled && !aiSettings.model;
   const effectiveFinalTextLanguage =
@@ -163,9 +164,8 @@ export function EnhancementsSection() {
         onOpenProviderSetup={openProviderSetup}
       />
 
-      <BuiltInPolishSetting checked={settings?.builtin_polish_enabled === true}
-        ownProvider={hasSelectedModel}
-        entitled={builtinPolishEntitled}
+      <BuiltInPolishSetting chosen={settings?.builtin_polish_enabled === true}
+        availability={polishStatus?.builtin ?? null}
         onCheckedChange={(checked) => void updateSettings({ builtin_polish_enabled: checked })} />
       <KeepWordsSetting checked={settings?.polish_keep_words ?? false}
         onCheckedChange={(checked) => void updateSettings({ polish_keep_words: checked })} />

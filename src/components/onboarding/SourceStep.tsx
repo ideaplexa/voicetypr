@@ -7,10 +7,12 @@ import { Cloud, Laptop, Network } from "lucide-react";
 export function SourceStep({
   sourceType,
   onConfirmSource,
+  modelName,
   modelSize,
 }: {
   sourceType: SourceType;
   onConfirmSource: (source: SourceType) => void;
+  modelName: string | null;
   modelSize: string | null;
 }) {
   return (
@@ -19,7 +21,9 @@ export function SourceStep({
         layout="row"
         label={isMacOS ? "On this Mac" : "On this PC"}
         icon={Laptop}
-        description={`Speech is recognised on this computer, even offline.${modelSize ? ` Needs a ${modelSize} download, once.` : " Needs a local model."}`}
+        description={modelName
+          ? `${modelName}${modelSize ? ` · ${modelSize}, downloaded once` : ""}. Recognised on this computer, even offline.`
+          : "Recognised on this computer, even offline. Needs a local model."}
         selected={sourceType === "local"}
         onSelect={() => onConfirmSource("local")}
       />

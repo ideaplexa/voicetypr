@@ -220,6 +220,18 @@ export interface TranscriptionHistory {
   writing?: TranscriptionWritingMeta;
 }
 
+/** Whether built-in Polish would clean the next dictation if its switch is on (`polish_status`). */
+export type BuiltinPolishAvailability = "own_provider" | "no_access" | "ready" | "not_entitled" | "unreachable";
+
+/** Where Polish stands for the next dictation, from the same settings dictation reads. */
+export interface PolishStatus {
+  will_run: boolean;
+  own_provider_ready: boolean;
+  own_provider_enabled: boolean;
+  builtin_enabled: boolean;
+  builtin: BuiltinPolishAvailability;
+}
+
 export interface LicenseStatus {
   status: "licensed" | "trial" | "expired" | "none";
   trial_days_left?: number;
