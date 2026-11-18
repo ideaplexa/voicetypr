@@ -2341,7 +2341,7 @@ mod tests {
             trial_days_left: None,
             license_type: None,
             license_key: None,
-            expires_at: None,
+            expires_at: Some((chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339()),
             verification_state: None,
             verification_expires_at: None,
         })
@@ -4582,7 +4582,14 @@ pub(crate) fn recording_license_state(
         {
             RecordingLicenseState::Blocked
         }
-        RuntimeLicenseCache::Ready(_) => RecordingLicenseState::Ready,
+        RuntimeLicenseCache::Ready(cached) => {
+            use crate::license::trial_clock::{trial_clock, TrialClock};
+            match trial_clock(&cached.status) {
+                TrialClock::Valid => RecordingLicenseState::Ready,
+                TrialClock::Expired => RecordingLicenseState::Blocked,
+                TrialClock::CheckRequired => RecordingLicenseState::CheckFailed,
+            }
+        }
         RuntimeLicenseCache::Loading => RecordingLicenseState::Loading,
         RuntimeLicenseCache::Failed => RecordingLicenseState::CheckFailed,
     }

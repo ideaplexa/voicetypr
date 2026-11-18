@@ -26,7 +26,8 @@ export function TryStep({
   microphone,
   onAllowMicrophone,
   onBack,
-  onChooseEngine,
+  localSource,
+  onUseSomethingElse,
   onNext,
   onWorked,
 }: {
@@ -45,7 +46,10 @@ export function TryStep({
   microphone: PermissionStatus;
   onAllowMicrophone: () => Promise<boolean>;
   onBack: () => void;
-  onChooseEngine: () => void;
+  /** Dictation runs on this computer, so "Almost ready" means a download. */
+  localSource: boolean;
+  /** Opens the choice of the cloud or another computer instead. */
+  onUseSomethingElse: () => void;
   onNext: () => void;
   onWorked: () => void;
 }) {
@@ -57,6 +61,19 @@ export function TryStep({
   // Both panes only when Polish could change the text and, once heard, did.
   const sideBySide = result ? result.polished : polishAvailable;
   const verb = holdToTalk ? "Hold" : "Press";
+  const somethingElse = (
+    <p className="text-[12.5px] text-muted-foreground">
+      Rather use your own cloud key or another computer on your network?{" "}
+      <button
+        type="button"
+        className="font-medium text-foreground underline-offset-4 hover:underline disabled:opacity-50"
+        disabled={listening || working}
+        onClick={onUseSomethingElse}
+      >
+        Use something else
+      </button>
+    </p>
+  );
 
   if (access !== "ok") {
     const blocked = {
@@ -86,10 +103,11 @@ export function TryStep({
       <section className="flex w-full flex-col items-center gap-[18px] text-center">
         <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Almost ready</h2>
         <p className="max-w-[480px] text-sm leading-8 text-muted-foreground">
-          The dictation engine downloads once. Finish downloading, then {verb.toLowerCase()}{" "}
-          <KeyCaps caps={caps} size="onboarding" /> and say your sentence.
+          {localSource ? "As soon as it’s ready, " : "As soon as your source is connected, "}
+          {verb.toLowerCase()} <KeyCaps caps={caps} size="onboarding" /> and say your sentence.
         </p>
         {preparing}
+        {somethingElse}
         <Button variant="outline" onClick={onBack}>Back</Button>
       </section>
     );
@@ -175,10 +193,8 @@ export function TryStep({
         <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={listening || working} onClick={onBack}>
           Back
         </Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={listening || working} onClick={onChooseEngine}>
-          Use a cloud provider or another computer
-        </Button>
       </div>
+      {somethingElse}
     </section>
   );
 }

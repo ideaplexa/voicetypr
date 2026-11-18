@@ -13,7 +13,6 @@ export function PromiseStep({
   nextLine,
   busy,
   onBegin,
-  onChooseEngine,
 }: {
   polishAvailable: boolean;
   /** One-time download the first try needs, such as "Downloads a 480 MB engine once." */
@@ -22,7 +21,6 @@ export function PromiseStep({
   nextLine: string;
   busy: boolean;
   onBegin: () => void;
-  onChooseEngine: () => void;
 }) {
   return (
     <section className="flex w-full flex-col items-center gap-[20px] text-center">
@@ -43,20 +41,17 @@ export function PromiseStep({
       </Card>
       <p className="max-w-[460px] text-base text-muted-foreground">
         {polishAvailable
-          ? "Voicetypr types what you meant, into any app, from your voice."
-          : "Voicetypr types what you say, into any app, from your voice."}
+          ? "Voicetypr types what you meant into any app."
+          : "Voicetypr types what you say into any app."}
       </p>
       <Button size="lg" disabled={busy} onClick={onBegin}>
-        Try it with your own voice
+        Continue
         <ChevronRight />
       </Button>
       <p className="text-[12.5px] text-muted-foreground">
         {nextLine}
         {downloadNote ? <><br />{downloadNote}</> : null}
       </p>
-      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onChooseEngine}>
-        Use a cloud provider or another computer
-      </Button>
     </section>
   );
 }

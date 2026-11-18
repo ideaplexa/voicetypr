@@ -242,14 +242,14 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
 ];
 
-export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed" | "no-access";
+export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "download-failed" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed" | "no-access";
 
 export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
   const settings: AppSettings = {
     hotkey,
     current_model: "parakeet-v3",
-    current_model_engine: options.onboarding && options.platform === "windows" ? "whisper" : "parakeet",
+    current_model_engine: "parakeet",
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
@@ -268,6 +268,7 @@ export function createFixtures(options: PreviewOptions) {
     update_channel: "beta",
     save_recordings: true,
   };
+  const downloadCase = options.onboardingCase === "downloading" || options.onboardingCase === "download-failed";
   const onboardingModels = options.onboarding
     ? demoModels.map((model) => {
         if (model.name !== "parakeet-v3") return model;
@@ -276,19 +277,18 @@ export function createFixtures(options: PreviewOptions) {
               ...model,
               display_name: "Parakeet V3",
               size: 500_000_000,
-              downloaded: options.onboarding !== "promise" && options.onboardingCase !== "downloading",
+              downloaded: options.onboarding !== "promise" && !downloadCase,
             }
           : {
               ...model,
-              display_name: "Large v3 Turbo",
-              engine: "whisper" as const,
-              size: 1_624_555_275,
-              downloaded: options.onboarding !== "promise" && options.onboardingCase !== "downloading",
+              display_name: "Parakeet V3",
+              size: 670_479_942,
+              downloaded: options.onboarding !== "promise" && !downloadCase,
             };
       })
     : demoModels;
   const beforeTrial = options.onboarding === "promise" || options.onboarding === "trial" ||
-    options.onboarding === "source" || options.onboarding === "readiness" || options.onboardingCase === "no-access";
+    options.onboardingCase === "no-access";
   const license: LicenseStatus = options.onboardingCase === "expired"
     ? { status: "expired" }
     : options.trialNotStarted || (options.onboarding && beforeTrial)

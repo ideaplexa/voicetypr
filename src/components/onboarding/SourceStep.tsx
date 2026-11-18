@@ -2,51 +2,40 @@ import { ChoiceCard } from "@/components/settings/settings-ui";
 import type { SourceType } from "@/components/onboarding/onboardingTypes";
 import { isMacOS } from "@/lib/platform";
 import { Cloud, Laptop, Network } from "lucide-react";
-import { LanguageSelection } from "@/components/LanguageSelection";
 
+/** The three places dictation can run, each saying what it needs up front. */
 export function SourceStep({
   sourceType,
   onConfirmSource,
   modelSize,
-  language,
-  onLanguageChange,
 }: {
   sourceType: SourceType;
   onConfirmSource: (source: SourceType) => void;
   modelSize: string | null;
-  language: string;
-  onLanguageChange: (value: string) => void;
 }) {
   return (
     <div className="flex w-full flex-col gap-[10px]">
-      <div className="mb-2 flex items-center justify-center gap-3 text-sm">
-        <span>I speak</span>
-        <LanguageSelection value={language} onValueChange={onLanguageChange} />
-      </div>
       <ChoiceCard
         layout="row"
         label={isMacOS ? "On this Mac" : "On this PC"}
         icon={Laptop}
-        description={`Speech is recognised on this computer, even offline.${modelSize ? ` Downloads a ${modelSize} model once.` : " Choose a local model."}`}
-        tag="Recommended"
+        description={`Speech is recognised on this computer, even offline.${modelSize ? ` Needs a ${modelSize} download, once.` : " Needs a local model."}`}
         selected={sourceType === "local"}
         onSelect={() => onConfirmSource("local")}
       />
       <ChoiceCard
         layout="row"
-        label="Cloud"
+        label="Cloud, with your key"
         icon={Cloud}
-        description="Paste an API key from Soniox, Deepgram, OpenAI…"
-        tag="Bring your key"
+        description="Soniox, Deepgram, OpenAI, Groq or Cohere. Needs a valid API key from that provider; your audio goes to that provider."
         selected={sourceType === "cloud"}
         onSelect={() => onConfirmSource("cloud")}
       />
       <ChoiceCard
         layout="row"
-        label="Another computer"
+        label="Another computer on your network"
         icon={Network}
-        description="Use Voicetypr running on a stronger machine nearby."
-        tag="Local network"
+        description="Needs a Mac or PC running Voicetypr with sharing on, on the same network. Use only on a trusted network: audio and transcripts travel unencrypted."
         selected={sourceType === "remote"}
         onSelect={() => onConfirmSource("remote")}
       />

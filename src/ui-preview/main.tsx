@@ -7,7 +7,7 @@ import type { Step } from "@/components/onboarding/onboardingTypes";
 import { installPreviewPlatform } from "./platform";
 
 const query = new URLSearchParams(location.search);
-const STEPS: Step[] = ["promise", "trial", "try", "source", "readiness", "setup", "use", "done"];
+const STEPS: Step[] = ["promise", "trial", "try", "setup", "use", "done"];
 // The numbered phases of the previous onboarding still open its nearest step.
 const LEGACY: Record<string, Step> = { "1": "promise", "2": "setup", "3": "trial" };
 const onboardingParam = query.get("onboarding") ?? "";
@@ -64,6 +64,17 @@ if (shot === "license" || shot?.startsWith("settings-")) {
       shot === "license" ? "license" : shot.slice("settings-".length),
     );
   }, 1200);
+}
+
+// The on-device engine mid-download, or stopped by a dropped connection.
+if (onboardingCase === "downloading" || onboardingCase === "download-failed") {
+  let emits = 0;
+  const timer = window.setInterval(() => {
+    if (++emits === 6) window.clearInterval(timer);
+    void (onboardingCase === "downloading"
+      ? emit("download-progress", { model: "parakeet-v3", engine: "parakeet", progress: 62, phase: "downloading" })
+      : emit("download-error", { model: "parakeet-v3", engine: "parakeet", error: "error sending request: connection reset" }));
+  }, 1000);
 }
 
 // A finished first dictation, as the backend reports it after saving history.

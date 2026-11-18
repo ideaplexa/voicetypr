@@ -255,12 +255,12 @@ export function useOnboardingDesktop({
   }, [currentStep]);
 
   useEffect(() => {
-    if (currentStep !== "readiness" || sourceType !== "remote") return;
+    if (sourceType !== "remote") return;
     void (async () => {
       await Promise.resolve();
       await loadRemoteServers();
     })();
-  }, [currentStep, sourceType, loadRemoteServers]);
+  }, [sourceType, loadRemoteServers]);
 
   const [sourceRestored, setSourceRestored] = useState(false);
   useEffect(() => {
@@ -621,29 +621,9 @@ export function useOnboardingDesktop({
   const handleNext = async () => {
     try {
       if (currentStep === "promise") {
-        if (sourceType === "local") {
-          if (!sourceReady && !preparation.recommended) return setCurrentStep("source");
-          if (!sourceReady && models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
+        if (sourceType === "local" && !sourceReady) {
+          if (models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
           else startPreparing();
-        } else if (!sourceReady) return setCurrentStep("readiness");
-        setCurrentStep(afterPromise);
-        return;
-      }
-
-      if (currentStep === "source") {
-        if (preparation.savingLanguage) return;
-        sourceChosenByUser.current = true;
-        if (sourceType === "local") {
-          if (!(await prepareLocal())) return;
-          setCurrentStep(afterPromise);
-        } else setCurrentStep("readiness");
-        return;
-      }
-
-      if (currentStep === "readiness") {
-        if (sourceType !== "remote") {
-          await invoke("set_active_remote_server", { serverId: null });
-          setActiveRemoteServerId(null);
         }
         setCurrentStep(afterPromise);
         return;
@@ -672,8 +652,6 @@ export function useOnboardingDesktop({
 
   const handleBack = () => {
     const previous: Partial<Record<Step, Step>> = {
-      source: "promise",
-      readiness: "source",
       trial: "promise",
       try: needsTrial ? "trial" : "promise",
       setup: "try",
@@ -685,10 +663,6 @@ export function useOnboardingDesktop({
 
   const canProceed = () => {
     switch (currentStep) {
-      case "source":
-        return !preparation.savingLanguage && (sourceType !== "local" || Boolean(preparation.recommended));
-      case "readiness":
-        return sourceType === "local" ? Boolean(preparation.name) : sourceReady;
       case "setup":
         return !isEditingHotkey && (!isMacOS || accessibilitySkipped ||
           permissions.accessibility.status === "granted");
@@ -699,6 +673,22 @@ export function useOnboardingDesktop({
 
   const nextDisabled = !canProceed();
 
+  // Closing "Use something else": a remote server stays active only when that
+  // is the chosen source. Switching back to this computer prepares its model;
+  // a download the user cancelled on this computer stays cancelled.
+  const finishSource = async (switchedToLocal: boolean) => {
+    try {
+      if (switchedToLocal && sourceType === "local" && !localReady && await prepareLocal()) return;
+      if (sourceType !== "remote" && activeRemoteServerId) {
+        await invoke("set_active_remote_server", { serverId: null });
+        setActiveRemoteServerId(null);
+      }
+    } catch (error) {
+      log.error("Failed to apply the transcription source:", error);
+      toast.error("Couldn’t switch where dictation runs. Try again.");
+    }
+  };
+
   return {
     currentStep,
     chooseStartingStyle,
@@ -707,8 +697,8 @@ export function useOnboardingDesktop({
     sourceType,
     preparation,
     sourceReady,
-    openModelChoices: () => { confirmSource("local"); setCurrentStep("readiness"); },
     confirmSource,
+    finishSource,
     handleBack,
     handleNext,
     nextDisabled,

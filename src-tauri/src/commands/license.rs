@@ -577,7 +577,7 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                     trial_days_left: Some(trial_days_left),
                     license_type: None,
                     license_key: None,
-                    expires_at: None,
+                    expires_at: response.data.expires_at.clone(),
                     verification_state: None,
                     verification_expires_at: None,
                 };
@@ -597,6 +597,11 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
 
                 // Cache the trial expiry date from server for offline validation
                 if let Some(expires_at) = &response.data.expires_at {
+                    crate::license::trial_clock::rebase_from_server(
+                        &app,
+                        expires_at,
+                        trial_days_left,
+                    );
                     log::info!("Caching trial expiry date from server: {}", expires_at);
                     let cache_options = Some(SetItemOptions {
                         ttl: Some(CACHE_TTL_HOURS * 60 * 60), // 8 hours TTL for trial cache
@@ -706,10 +711,7 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
                                 trial_days_left: Some(days_left.max(0)),
                                 license_type: None,
                                 license_key: None,
-                                expires_at: Some(format!(
-                                    "Offline grace: {} day remaining",
-                                    grace_days_remaining
-                                )),
+                                expires_at: Some(expires_at_str.clone()),
                                 verification_state: None,
                                 verification_expires_at: None,
                             };
