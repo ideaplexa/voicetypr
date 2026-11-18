@@ -4,6 +4,7 @@ import type { PermissionState } from "@/components/onboarding/onboardingTypes";
 import { PermissionsStep } from "@/components/onboarding/PermissionsStep";
 import { ChoiceCard, SettingsPaneCard } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
+import { Progress } from "@/components/ui/progress";
 import { isMacOS } from "@/lib/platform";
 import { Keyboard } from "lucide-react";
 import type { ReactNode } from "react";
@@ -46,6 +47,8 @@ export function SetupStep({
   saving: boolean;
 }) {
   const accessibilityAllowed = permissions.accessibility.status === "granted";
+  const checks = [permissions.microphone.status === "granted", accessibilityAllowed];
+  const done = checks.filter(Boolean).length;
   return (
     <section className="flex w-full flex-col items-center gap-[18px]">
       <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
@@ -56,6 +59,10 @@ export function SetupStep({
           ? "Your microphone, one permission and your shortcut. Then Voicetypr works in every app."
           : "Your microphone and your shortcut. Then Voicetypr works in every app."}
       </p>
+      {isMacOS ? <div className="flex w-full max-w-[300px] items-center gap-3">
+        <Progress value={(done / checks.length) * 100} aria-label="Setup progress" className="flex-1 [&_[data-slot=progress-indicator]]:bg-sage [&_[data-slot=progress-track]]:h-2" />
+        <span className="text-[13px] whitespace-nowrap text-muted-foreground">{done} of {checks.length} permissions</span>
+      </div> : null}
       {!isMacOS || permissions.microphone.status === "granted" ? <MicrophoneCheck allowed={isMacOS} /> : null}
       {isMacOS ? (
         <PermissionsStep

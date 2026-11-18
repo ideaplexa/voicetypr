@@ -4,6 +4,26 @@ import { cn } from "@/lib/utils";
 import { CheckCircle2, HardDrive, Server, Star, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
+/** The soft sage band that opens a step, as in the approved first-run design. */
+export function Band({ children }: { children: ReactNode }) {
+  return (
+    <div aria-hidden="true" className="relative flex h-[118px] w-full items-center justify-center overflow-hidden rounded-[22px] bg-sage-bg">
+      <span className="absolute -top-24 -left-12 size-[210px] rounded-full bg-sage/10" />
+      <span className="absolute -right-10 -bottom-28 size-[190px] rounded-full bg-sage/10" />
+      <div className="relative flex items-center justify-center">{children}</div>
+    </div>
+  );
+}
+
+/** A word floating in a band; struck when Polish would remove it. */
+export function BandWord({ children, struck, className }: { children: ReactNode; struck?: boolean; className?: string }) {
+  return (
+    <span className={cn("absolute rounded-full bg-card px-3 py-1 text-[13px] font-medium whitespace-nowrap shadow-sm", struck && "text-muted-foreground line-through decoration-destructive/70", className)}>
+      {children}
+    </span>
+  );
+}
+
 export function StepDots({ currentIndex, total }: { currentIndex: number; total: number }) {
   return (
     <div

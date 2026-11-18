@@ -81,11 +81,24 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
       return;
     }
     setTarget(modelName);
-    // Selection is explicit; practice remains gated by verified availability.
-    await updateSettings({ current_model: modelName, current_model_engine: info.engine });
+    // A model that still has to download leaves a working one in use until it is ready.
+    const current = selected ? management.models[selected] : undefined;
+    const keepCurrent = !info.downloaded && selected !== modelName && Boolean(current?.downloaded && !current.requires_setup);
+    if (!keepCurrent) await updateSettings({ current_model: modelName, current_model_engine: info.engine });
     if (!info.downloaded && management.downloadProgress[modelName] === undefined &&
       !management.verifyingModels.has(modelName)) await management.downloadModel(modelName);
   };
+
+  // The chosen model takes over once its download has been checked.
+  const targetInfo = target ? management.models[target] : undefined;
+  const targetArrived = Boolean(target && targetInfo?.downloaded && !targetInfo.requires_setup &&
+    !management.verifyingModels.has(target) && selected !== target);
+  useEffect(() => {
+    if (!targetArrived || !target || !targetInfo) return;
+    void updateSettings({ current_model: target, current_model_engine: targetInfo.engine }).catch(() => {
+      toast.error("Could not switch to the downloaded model. Pick it again.");
+    });
+  }, [targetArrived, target, targetInfo, updateSettings]);
 
   return {
     language, savingLanguage, recommended, bestMatch, name, model, ready, warningModel,
@@ -105,6 +118,8 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
       if (info && !supportsSpokenLanguage(info, language)) setWarningModel(modelName);
       else void prepare(modelName).catch(() => toast.error("Could not prepare offline dictation. Try again."));
     },
+    /** A cancelled download stops being the model later steps wait for. */
+    forget: (modelName: string) => setTarget((current) => (current === modelName ? null : current)),
     dismissWarning: () => setWarningModel(null),
     confirmDownload: () => {
       if (warningModel) void management.downloadModel(warningModel);

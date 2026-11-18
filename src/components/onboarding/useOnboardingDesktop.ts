@@ -71,14 +71,14 @@ export function useOnboardingDesktop({
     verifyingModels,
     downloadErrors = NO_DOWNLOAD_ERRORS,
     cancelDownload,
-    deleteModel,
-    repairModel,
     isLoading,
   } = modelManagement;
 
   const [currentStep, setCurrentStep] = useState<Step>(previewStep ?? "promise");
   // Sharing is opt-in: the box starts unticked unless the user already chose.
   const [telemetryOptIn, setTelemetryOptIn] = useState(false);
+  // Asked once: only when no sharing choice is stored; unknown after a failed read.
+  const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
   const [accessibilitySkipped, setAccessibilitySkipped] = useState(false);
   const [sourceType, setSourceType] = useState<SourceType>(() =>
     isCloudEngine(settings?.current_model_engine ?? "") ? "cloud" : "local",
@@ -111,8 +111,10 @@ export function useOnboardingDesktop({
     let cancelled = false;
     invoke<{ enabled: boolean; consent_required?: boolean } | null>("get_telemetry_status")
       .then((telemetry) => {
-        if (cancelled || !telemetry || telemetry.consent_required !== false) return;
-        setTelemetryOptIn(telemetry.enabled);
+        if (cancelled) return;
+        const answered = telemetry?.consent_required === false;
+        setConsentRequired(!answered);
+        if (answered) setTelemetryOptIn(telemetry.enabled);
       })
       .catch((error) => {
         log.error("Failed to read stored privacy choices:", error);
@@ -164,15 +166,6 @@ export function useOnboardingDesktop({
   const isModelReady = useCallback(
     (name: string) => models[name]?.downloaded === true && !models[name]?.requires_setup && !verifyingModels.has(name),
     [models, verifyingModels],
-  );
-  const handleDeleteModel = useCallback(
-    async (modelName: string) => {
-      const deleted = await deleteModel(modelName);
-      if (deleted && settings?.current_model === modelName) {
-        await updateSettings({ current_model: "", current_model_engine: "whisper" });
-      }
-    },
-    [deleteModel, settings, updateSettings],
   );
   const localReady = Boolean(
     sourceType === "local" &&
@@ -557,7 +550,7 @@ export function useOnboardingDesktop({
       // settings context updates optimistically, so setting onboarding_completed
       // first would mount the main app's consent dialog while these writes were
       // still pending. That dialog would then retain the old default-on state.
-      await invoke("set_telemetry_consent", { enabled: telemetryOptIn });
+      if (consentRequired) await invoke("set_telemetry_consent", { enabled: telemetryOptIn });
 
 
       await updateSettings({ onboarding_completed: true }, { publishAfterSave: true });
@@ -579,11 +572,16 @@ export function useOnboardingDesktop({
     }
   };
 
+  // An explicit pick wins over an automatic start still waiting on the network.
+  const picks = useRef(0);
   const prepareLocal = async () => {
     if (!preparation.recommended) return false;
+    const recommended = preparation.recommended;
+    const pick = picks.current;
     await invoke("set_active_remote_server", { serverId: null });
     setActiveRemoteServerId(null);
-    await preparation.prepare(preparation.recommended);
+    if (pick !== picks.current) return true;
+    await preparation.prepare(recommended);
     return true;
   };
 
@@ -748,15 +746,13 @@ export function useOnboardingDesktop({
       transcriptionAcceleration: settings?.transcription_acceleration,
       onDownload: preparation.download,
       onSelectLocal: (name: string) => {
+        picks.current += 1;
         confirmSource("local");
-        void preparation.prepare(name);
+        void preparation.prepare(name).catch(() => toast.error("Could not prepare this model. Try again."));
       },
       onCancelDownload: (name: string) => {
+        preparation.forget(name);
         void cancelDownload(name);
-      },
-      onDelete: handleDeleteModel,
-      onRepair: (name: string) => {
-        void repairModel(name);
       },
       isModelReady,
       onGpuToggle: (checked: boolean) => {
@@ -827,6 +823,7 @@ export function useOnboardingDesktop({
     skipAccessibility: () => setAccessibilitySkipped(true),
     saveHotkeySettings,
     telemetryOptIn,
+    consentRequired,
     isSavingCompletion,
     onTelemetryChange: setTelemetryOptIn,
     completeOnboarding,

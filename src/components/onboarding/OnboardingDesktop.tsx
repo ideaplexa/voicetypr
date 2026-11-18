@@ -73,11 +73,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     if (!NEW_USERS_GET_POLISH || props.previewStep || !settings || !newInstall || builtinPolishSetting != null) return;
     void Promise.resolve(updateSettings({ builtin_polish_enabled: true })).catch(() => undefined);
   }, [settings, newInstall, builtinPolishSetting, updateSettings, props.previewStep]);
-  const [modelsFirst, setModelsFirst] = useState(false);
-  const toSource = (models: boolean) => {
-    setModelsFirst(models);
-    flow.chooseSourceFromTry();
-  };
 
   const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${currentStep === "polish"}`);
 
@@ -117,7 +112,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     void (onOpenPricing ?? noop)();
     setKeyDialogOpen(true);
   };
-  const consent = <ConsentChoice checked={flow.telemetryOptIn} onChange={flow.onTelemetryChange} />;
+  const consent = flow.consentRequired
+    ? <ConsentChoice checked={flow.telemetryOptIn} onChange={flow.onTelemetryChange} disabled={flow.isSavingCompletion} terms={!sawTrial} />
+    : null;
+  const [trialPending, setTrialPending] = useState(false);
   const preparing = (onChoose: () => void, compact = false) => (
     <OfflinePreparationStatus
       compact={compact}
@@ -132,7 +130,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   );
   const downloadLine = sourceType === "local" && !local.localReady &&
     (currentStep === "setup" || currentStep === "polish" || currentStep === "done")
-    ? preparing(() => toSource(true), true) : null;
+    ? preparing(flow.chooseSourceFromTry, true) : null;
 
   const languageWarning = preparation.warningModel ? (
     <div role="alert" className="flex flex-col items-center gap-3 text-sm">
@@ -175,8 +173,11 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             <TrialStep
               trialEnded={licenseStatus?.status === "expired"}
               localDictation={sourceType === "local"}
+              pending={trialPending}
               onStartTrial={async (name, email) => {
-                const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email);
+                setTrialPending(true);
+                const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email)
+                  .finally(() => setTrialPending(false));
                 setTrialError(error);
                 if (!error) {
                   setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
@@ -191,7 +192,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 setOutcome({ kind: "later" });
                 goTo("source");
               }}
-              consent={consent}
             />
           )}
 
@@ -201,8 +201,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               modelName={model?.display_name ?? null}
               modelSize={modelSize}
               language={preparation.language}
-              modelsOpenAtStart={modelsFirst}
-              preparing={(onChoose) => preparing(onChoose)}
               local={local}
               cloud={flow.cloud}
               remote={flow.remote}
@@ -227,12 +225,12 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 : trialError === "trial_unreachable" ? "offline" : "none"}
               onStartTrial={() => goTo("trial")}
               onHaveKey={() => setKeyDialogOpen(true)}
-              preparing={sourceType === "local" ? preparing(() => toSource(true)) : null}
+              preparing={sourceType === "local" ? preparing(flow.chooseSourceFromTry) : null}
               microphone={permissions.microphone.status}
               onAllowMicrophone={flow.ensureMicrophone}
               onBack={handleBack}
               localSource={sourceType === "local"}
-              onUseSomethingElse={() => toSource(false)}
+              onUseSomethingElse={flow.chooseSourceFromTry}
               onNext={() => void run(handleNext)}
             />
           )}
@@ -300,7 +298,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               holdToTalk={holdToTalk}
               copyOnly={isMacOS && (flow.accessibilitySkipped || permissions.accessibility.status === "denied" ||
                 permissions.accessibility.status === "not_determined")}
-              consent={sawTrial ? null : consent}
+              consent={consent}
               saving={flow.isSavingCompletion}
               onBack={handleBack}
               onFinish={() => void flow.completeOnboarding()}
