@@ -43,8 +43,11 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
   const initialized = useRef(false);
   const [savingLanguage, setSavingLanguage] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
-  const [warningModel, setWarningModel] = useState<string | null>(null);
+  const [warning, setWarning] = useState<{ model: string; language: string } | null>(null);
   const language = settings?.speech_language ?? "en";
+  // A warning belongs to the language it was raised for.
+  const warningModel = warning?.language === language ? warning.model : null;
+  const setWarningModel = (model: string | null) => setWarning(model ? { model, language } : null);
   useEffect(() => {
     if (!settings || initialized.current || management.isLoading) return;
     initialized.current = true;
