@@ -30,6 +30,21 @@ const isDownloadCancellation = (error: unknown) =>
 
 const getErrorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** A download error as a fixed class for the logs: the raw text can hold file paths. */
+const downloadErrorClass = (text: string) => {
+  const lower = text.toLowerCase();
+  const classes: [string, string[]][] = [
+    ["cancelled", ["cancelled", "canceled"]],
+    ["verification_failed", ["verification", "checksum", "sha256", "did not confirm", "hash"]],
+    ["disk_full", ["no space", "disk full", "not enough space", "storage"]],
+    ["permission_denied", ["permission", "access is denied", "read-only"]],
+    ["network", ["network", "timed out", "timeout", "connect", "dns", "http", "request", "rate limit"]],
+    ["sidecar", ["sidecar"]],
+    ["unavailable", ["not available", "unknown"]],
+  ];
+  return classes.find(([, words]) => words.some((word) => lower.includes(word)))?.[0] ?? "other";
+};
+
 const createDownloadRequestId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -215,7 +230,10 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
           }
 
           const errorText = getErrorText(error);
-          log.error("[useModelManagement.downloadModel] Failed to download model:", error);
+          log.error(
+            "[useModelManagement.downloadModel] Failed to download model:",
+            downloadErrorClass(errorText),
+          );
           setDownloadErrors((prev) => ({
             ...prev,
             [modelName]: errorText,
@@ -230,8 +248,11 @@ export function useModelManagement(options: UseModelManagementOptions = {}) {
           }
         });
       } catch (error) {
-        log.error("[useModelManagement.downloadModel] Failed to start download:", error);
         const errorText = getErrorText(error);
+        log.error(
+          "[useModelManagement.downloadModel] Failed to start download:",
+          downloadErrorClass(errorText),
+        );
         if (showToasts) {
           toast.error(
             `Failed to start ${getModelDisplayName(modelName, models)} download: ${errorText}`,

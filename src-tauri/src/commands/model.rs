@@ -396,7 +396,7 @@ pub async fn download_model(
                     "Download failed for model {} (engine={}): {}",
                     model_name,
                     download_target.engine.as_str(),
-                    e
+                    download_error_class(e)
                 );
             }
         }
@@ -538,11 +538,15 @@ pub async fn download_model(
             Ok(())
         }
         Err(e) => {
-            log::error!("Download failed for model {}: {}", model_name, e);
+            log::error!(
+                "Download failed for model {}: {}",
+                model_name,
+                download_error_class(&e)
+            );
 
             // Log to onboarding if active
             onboarding_logger::with_onboarding_logger(|logger| {
-                logger.log_model_download_failed(&model_name, &e);
+                logger.log_model_download_failed(&model_name, download_error_class(&e));
             });
 
             // Emit download-error event
@@ -564,6 +568,46 @@ pub async fn download_model(
             clear_active_download(&active_downloads, &model_name);
             Err(e)
         }
+    }
+}
+
+/// A model download error as a fixed class for the logs. The raw text can come
+/// from the OS or the Parakeet sidecar and may hold file paths, so it never
+/// reaches a log line.
+pub(crate) fn download_error_class(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| lower.contains(word));
+    if has(&["cancelled", "canceled"]) {
+        "cancelled"
+    } else if has(&[
+        "verification",
+        "checksum",
+        "sha256",
+        "did not confirm",
+        "hash",
+    ]) {
+        "verification_failed"
+    } else if has(&["no space", "disk full", "not enough space", "storage"]) {
+        "disk_full"
+    } else if has(&["permission", "access is denied", "read-only"]) {
+        "permission_denied"
+    } else if has(&[
+        "network",
+        "timed out",
+        "timeout",
+        "connect",
+        "dns",
+        "http",
+        "request",
+        "rate limit",
+    ]) {
+        "network"
+    } else if has(&["sidecar"]) {
+        "sidecar"
+    } else if has(&["not available", "unknown"]) {
+        "unavailable"
+    } else {
+        "other"
     }
 }
 
@@ -1259,4 +1303,23 @@ pub async fn preload_model(
     log::info!("Model '{}' preloaded successfully", model_name);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod download_error_tests {
+    use super::download_error_class;
+
+    #[test]
+    fn download_error_logs_never_carry_a_path() {
+        for (raw, class) in [
+            ("Failed to download model: io: No space left on device (os error 28) at /Users/jane/Library/Application Support/model.bin", "disk_full"),
+            ("Failed to communicate with sidecar: Permission denied: C:\\Users\\jane\\AppData\\model", "permission_denied"),
+            ("Failed to download model: http: error sending request for url /Users/jane/x", "network"),
+            ("Failed to open /home/jane/.local/share/model.bin", "other"),
+        ] {
+            let logged = download_error_class(raw);
+            assert_eq!(logged, class);
+            assert!(!logged.contains('/') && !logged.contains('\\') && !logged.contains("jane"));
+        }
+    }
 }
