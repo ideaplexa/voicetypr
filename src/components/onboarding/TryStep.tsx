@@ -100,9 +100,7 @@ export function TryStep({
       <section className="flex w-full flex-col items-center gap-[18px] text-center">
         <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Almost ready</h2>
         <p className="max-w-[480px] text-sm leading-8 text-muted-foreground">
-          {localSource
-            ? "The dictation engine downloads once. Finish downloading, then "
-            : "Finish connecting where dictation runs, then "}
+          {localSource ? "As soon as it’s ready, " : "As soon as your source is connected, "}
           {verb.toLowerCase()} <KeyCaps caps={caps} size="onboarding" /> and say your sentence.
         </p>
         {preparing}

@@ -1062,10 +1062,52 @@ describe("OnboardingDesktop", () => {
         />,
       );
       expect(screen.getByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
-      expect(screen.getByText("Preparing offline dictation · 42%")).toBeInTheDocument();
+      expect(screen.getByText("Getting the dictation engine ready · 42% of 670 MB. This happens once.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /click here to talk/i })).not.toBeInTheDocument();
+
+      modelManagement.downloadProgress = {};
+      Object.assign(modelManagement, { downloadErrors: { "base.en": "error sending request: connection reset" } });
+      view.rerender(
+        <OnboardingDesktop
+          onComplete={onCompleteMock}
+          licenseStatus={licensed}
+          modelManagement={modelManagement as never}
+        />,
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "The download stopped. The connection dropped. Check your internet and try again.",
+      );
+      expect(screen.queryByText(/connection reset/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /retry/i }));
+      expect(modelManagement.downloadModel).toHaveBeenCalledTimes(2);
+
+      Object.assign(modelManagement, { downloadErrors: {} });
+      view.rerender(
+        <OnboardingDesktop
+          onComplete={onCompleteMock}
+          licenseStatus={licensed}
+          modelManagement={modelManagement as never}
+        />,
+      );
+      expect(screen.getByText("The dictation engine (670 MB) isn’t downloaded yet.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
+      delete (modelManagement as { downloadErrors?: unknown }).downloadErrors;
     },
   );
+
+  it("keeps the step count when a trial starts mid-flow", async () => {
+    const view = renderOnboarding({ licenseStatus: { status: "none" } });
+    expect(await screen.findByRole("progressbar", { name: "Setup phase" })).toHaveAttribute("aria-valuemax", "6");
+    view.rerender(
+      <OnboardingDesktop
+        onComplete={onCompleteMock}
+        licenseStatus={{ status: "trial", trial_days_left: 7 }}
+        modelManagement={modelManagement as never}
+      />,
+    );
+    expect(screen.getByRole("progressbar", { name: "Setup phase" })).toHaveAttribute("aria-valuemax", "6");
+  });
 
   const reachTry = async (user: User) => {
     await user.click(await screen.findByRole("button", { name: /^continue$/i }));

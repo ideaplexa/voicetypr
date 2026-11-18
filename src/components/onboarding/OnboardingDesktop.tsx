@@ -25,6 +25,7 @@ import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
 import type { LicenseStatus, TrialStartError } from "@/types";
 
 const noop = async () => {};
+const megabytes = (bytes: number | undefined) => bytes ? `${Math.round(bytes / (1024 * 1024))} MB` : null;
 
 function trialEnds(status: LicenseStatus | null | undefined) {
   const expires = status?.expires_at ? new Date(status.expires_at) : null;
@@ -80,6 +81,12 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   }, []);
 
   if (currentStep === "trial" && !sawTrial) setSawTrial(true);
+  // The step count is fixed by the licence as first known, so starting a
+  // trial or adding a key never changes it mid-flow.
+  const [trialInFlow, setTrialInFlow] = useState<boolean | null>(null);
+  if (trialInFlow === null && licenseStatus != null) {
+    setTrialInFlow(licenseStatus?.status !== "licensed" && licenseStatus?.status !== "trial");
+  }
 
   // A key activated or a status recheck that finds a license or trial ends the trial step.
   const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
@@ -92,11 +99,11 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
   const model = preparation.recommended ? local.models[preparation.recommended] : undefined;
-  const modelSize = model?.size ? `${Math.round(model.size / (1024 * 1024))} MB` : null;
+  const modelSize = megabytes(model?.size);
   const downloadNote = sourceType === "local" && model && !model.downloaded && modelSize
     ? `The dictation engine (${modelSize}) downloads once, in the background.`
     : null;
-  const flowSteps: Step[] = ["promise", ...(sawTrial || !licensed ? (["trial"] as Step[]) : []), "try", "setup", "use", "done"];
+  const flowSteps: Step[] = ["promise", ...(trialInFlow ? (["trial"] as Step[]) : []), "try", "setup", "use", "done"];
   const dotIndex = Math.max(0, flowSteps.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -109,12 +116,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const consent = <ConsentChoice checked={flow.telemetryOptIn} onChange={flow.onTelemetryChange} />;
   const preparing = sourceType === "local" ? (
     <OfflinePreparationStatus
-      ready={local.localReady}
-      hideWhenReady
       verifying={Boolean(preparation.name && local.verifyingModels.has(preparation.name))}
       progress={preparation.name ? local.downloadProgress[preparation.name] : undefined}
-      failed={Boolean(preparation.name && local.downloadErrors[preparation.name])}
-      onCancel={() => { if (preparation.name) local.onCancelDownload(preparation.name); }}
+      size={megabytes(preparation.name ? local.models[preparation.name]?.size : undefined)}
+      error={preparation.name ? local.downloadErrors[preparation.name] : undefined}
       onRetry={() => { if (preparation.name) local.onDownload(preparation.name); }}
       onChoose={() => openSourceSheet("models")}
     />
@@ -141,7 +146,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
-      <StepDots currentIndex={dotIndex} total={flowSteps.length} />
+      {trialInFlow === null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flowSteps.length} />}
       <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
         <div className="flex w-full max-w-[640px] flex-col items-center gap-[22px]">
           {currentStep === "promise" && (

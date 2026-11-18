@@ -66,6 +66,17 @@ if (shot === "license" || shot?.startsWith("settings-")) {
   }, 1200);
 }
 
+// The on-device engine mid-download, or stopped by a dropped connection.
+if (onboardingCase === "downloading" || onboardingCase === "download-failed") {
+  let emits = 0;
+  const timer = window.setInterval(() => {
+    if (++emits === 6) window.clearInterval(timer);
+    void (onboardingCase === "downloading"
+      ? emit("download-progress", { model: "parakeet-v3", engine: "parakeet", progress: 62, phase: "downloading" })
+      : emit("download-error", { model: "parakeet-v3", engine: "parakeet", error: "error sending request: connection reset" }));
+  }, 1000);
+}
+
 // A finished first dictation, as the backend reports it after saving history.
 if (onboardingCase === "heard" || onboardingCase === "polished") {
   // Repeat until the try step has subscribed; each emit shows the same result.

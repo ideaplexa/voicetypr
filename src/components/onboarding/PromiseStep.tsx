@@ -41,8 +41,8 @@ export function PromiseStep({
       </Card>
       <p className="max-w-[460px] text-base text-muted-foreground">
         {polishAvailable
-          ? "Voicetypr types what you meant, into any app, from your voice."
-          : "Voicetypr types what you say, into any app, from your voice."}
+          ? "Voicetypr types what you meant into any app."
+          : "Voicetypr types what you say into any app."}
       </p>
       <Button size="lg" disabled={busy} onClick={onBegin}>
         Continue
