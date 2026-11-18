@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LicenseStatus, ModelInfo } from "@/types";
@@ -1072,6 +1073,31 @@ describe("OnboardingDesktop", () => {
     await screen.findByRole("heading", { level: 1 });
     expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: true });
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Say it.It lands in any app.");
+  });
+
+  it("keeps built-in Polish off for an existing user after Setup saves onboarding as unfinished", async () => {
+    const user = userEvent.setup();
+    Object.assign(settingsState, { onboarding_completed: true });
+    renderOnboarding();
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    await screen.findByRole("heading", { name: "What will you mostly dictate?" });
+    expect(settingsState.onboarding_completed).toBe(false);
+    expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: true });
+    expect(screen.getByRole("switch", { name: "Clean up what I say" })).not.toBeChecked();
+  });
+
+  it("says so when switching built-in Polish off could not be saved, and keeps it showing on", async () => {
+    const user = userEvent.setup();
+    const toastError = vi.spyOn(toast, "error");
+    renderOnboarding();
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    await screen.findByRole("heading", { name: "What will you mostly dictate?" });
+    updateSettingsMock.mockImplementationOnce(() => Promise.reject(new Error("disk")));
+    await user.click(screen.getByRole("switch", { name: "Clean up what I say" }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn’t save the Polish switch. Try again."));
+    expect(screen.getByRole("switch", { name: "Clean up what I say" })).toBeChecked();
   });
 
   it("keeps a user's earlier choice to leave built-in Polish off", async () => {

@@ -23,6 +23,7 @@ import { usePolishStatus } from "@/components/polish/usePolishStatus";
 import { ConsentChoice } from "@/components/onboarding/ConsentChoice";
 import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
 import { useSettings } from "@/contexts/SettingsContext";
+import { toast } from "sonner";
 import type { LicenseStatus, TrialStartError } from "@/types";
 
 const noop = async () => {};
@@ -68,7 +69,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   // Only a new install starts with built-in Polish on. A user who finished onboarding
   // before (onboarding reopened to recover a missing model) keeps it off until they choose.
-  const newInstall = settings?.onboarding_completed !== true;
+  // Latched on first load: Setup saves onboarding_completed false, which must not make a returning user look new.
+  const [startedCompleted, setStartedCompleted] = useState<boolean | null>(null);
+  if (settings && startedCompleted === null) setStartedCompleted(settings.onboarding_completed === true);
+  const newInstall = startedCompleted === false;
   useEffect(() => {
     if (!NEW_USERS_GET_POLISH || props.previewStep || !settings || !newInstall || builtinPolishSetting != null) return;
     void Promise.resolve(updateSettings({ builtin_polish_enabled: true })).catch(() => undefined);
@@ -279,7 +283,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             <PolishStep
               status={polishStatus}
               builtinChosen={builtinChosen}
-              onBuiltinChange={(on) => void Promise.resolve(updateSettings({ builtin_polish_enabled: on })).catch(() => undefined)}
+              onBuiltinChange={(on) => void Promise.resolve(updateSettings({ builtin_polish_enabled: on }))
+                .catch(() => toast.error("Couldn’t save the Polish switch. Try again."))}
               saving={busy}
               onBack={handleBack}
               onChoose={(style) => void run(() => flow.chooseStartingStyle(style, {
