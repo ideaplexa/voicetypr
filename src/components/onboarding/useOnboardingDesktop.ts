@@ -618,7 +618,7 @@ export function useOnboardingDesktop({
   ) => {
     if (style && applyNow) await invoke("update_enhancement_options", { options: { preset: style } });
     if (!style || !applyNow || keepForOwnProvider) await updateSettings({ starting_polish_style: style });
-    setCurrentStep("done");
+    setCurrentStep("try");
   };
 
   const afterPromise: Step = needsTrial ? "trial" : "source";
@@ -651,12 +651,12 @@ export function useOnboardingDesktop({
 
       if (currentStep === "setup") {
         await saveHotkeySettings();
-        setCurrentStep("try");
+        setCurrentStep("polish");
         return;
       }
 
       if (currentStep === "try") {
-        setCurrentStep("polish");
+        setCurrentStep("done");
         return;
       }
     } catch (error) {
@@ -679,9 +679,9 @@ export function useOnboardingDesktop({
       trial: "promise",
       source: sourceFromTry ? "try" : needsTrial ? "trial" : "promise",
       setup: "source",
-      try: "setup",
-      polish: "try",
-      done: "polish",
+      polish: "setup",
+      try: "polish",
+      done: "try",
     };
     const step = previous[currentStep];
     if (currentStep === "source") {
@@ -724,7 +724,7 @@ export function useOnboardingDesktop({
       setSourceFromTry(true);
       setCurrentStep("source");
     },
-    skipSetup: () => setCurrentStep("try"),
+    skipSetup: () => setCurrentStep("polish"),
     handleBack,
     handleNext,
     nextDisabled,

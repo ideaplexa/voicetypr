@@ -2,7 +2,6 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { builtinPolishView } from "@/components/polish/BuiltInPolishSetting";
 import { Card } from "@/components/ui/card";
-import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type { AppSettings, PolishStatus } from "@/types";
@@ -30,7 +29,6 @@ export function PolishStep({
   status,
   builtinChosen,
   onBuiltinChange,
-  firstTry,
   saving,
   onBack,
   onChoose,
@@ -40,8 +38,6 @@ export function PolishStep({
   /** The saved built-in Polish choice, shared with Settings → Polish. */
   builtinChosen: boolean;
   onBuiltinChange: (on: boolean) => void;
-  /** The user's first dictation, when Polish cleaned it. */
-  firstTry: FirstDictation | null;
   saving: boolean;
   onBack: () => void;
   /** null when the user skips; today's default stays. */
@@ -50,8 +46,6 @@ export function PolishStep({
   const [picked, setPicked] = useState<string | null>(null);
   const use = USES.find((item) => item.id === picked);
   const style = use ? `the ${use.name} style${use.detail ? `, ${use.detail}` : ""}` : "";
-  const own = firstTry?.polished ? firstTry : null;
-  const pair = own ?? EXAMPLE;
   const ownReady = status?.own_provider_ready === true;
   const builtin = builtinPolishView(ownReady ? "own_provider" : status?.builtin ?? null, builtinChosen);
   const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
@@ -68,15 +62,15 @@ export function PolishStep({
       <div className="grid w-full gap-3 sm:grid-cols-2">
         <Card className="gap-2 px-[18px] py-4">
           <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            {own ? "You said" : "Example · you say"}
+            Example · you say
           </span>
-          <p className="text-[15px] leading-[22px] text-muted-foreground">{pair.heard}</p>
+          <p className="text-[15px] leading-[22px] text-muted-foreground">{EXAMPLE.heard}</p>
         </Card>
         <Card className="gap-2 px-[18px] py-4 outline-[1.5px] outline-sage -outline-offset-1">
           <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            {own ? "Polish typed" : "With Polish"}
+            With Polish
           </span>
-          <p className="text-[15px] leading-[22px]">{pair.typed}</p>
+          <p className="text-[15px] leading-[22px]">{EXAMPLE.typed}</p>
         </Card>
       </div>
       {ownReady ? (

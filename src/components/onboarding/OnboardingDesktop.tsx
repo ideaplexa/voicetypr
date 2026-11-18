@@ -20,7 +20,6 @@ import { TrialStep } from "@/components/onboarding/TrialStep";
 import { DoneStep } from "@/components/onboarding/DoneStep";
 import { PolishStep } from "@/components/onboarding/PolishStep";
 import { usePolishStatus } from "@/components/polish/usePolishStatus";
-import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { ConsentChoice } from "@/components/onboarding/ConsentChoice";
 import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
 import { useSettings } from "@/contexts/SettingsContext";
@@ -60,7 +59,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   const [busy, setBusy] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState(false);
-  const [firstTry, setFirstTry] = useState<FirstDictation | null>(null);
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const [sawTrial, setSawTrial] = useState(false);
@@ -109,7 +107,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
   const model = preparation.name ? local.models[preparation.name] : undefined;
   const modelSize = megabytes(model?.size);
-  const flowSteps: Step[] = ["promise", ...(trialInFlow ? (["trial"] as Step[]) : []), "source", "setup", "try", "polish", "done"];
+  const flowSteps: Step[] = ["promise", ...(trialInFlow ? (["trial"] as Step[]) : []), "source", "setup", "polish", "try", "done"];
   const dotIndex = Math.max(0, flowSteps.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -236,7 +234,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               localSource={sourceType === "local"}
               onUseSomethingElse={() => toSource(false)}
               onNext={() => void run(handleNext)}
-              onWorked={setFirstTry}
             />
           )}
 
@@ -285,7 +282,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               status={polishStatus}
               builtinChosen={builtinChosen}
               onBuiltinChange={(on) => void Promise.resolve(updateSettings({ builtin_polish_enabled: on })).catch(() => undefined)}
-              firstTry={firstTry}
               saving={busy}
               onBack={handleBack}
               onChoose={(style) => void run(() => flow.chooseStartingStyle(style, {
