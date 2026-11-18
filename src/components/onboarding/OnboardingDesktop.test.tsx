@@ -1044,7 +1044,7 @@ describe("OnboardingDesktop", () => {
         expect(screen.getByRole("meter", { name: "Microphone input level" })).toBeInTheDocument();
       }
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
-      expect(await screen.findByRole("heading", { name: "Polish tidies what you say" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "What will you mostly dictate?" })).toBeInTheDocument();
       await skipUse(user);
       expect(await screen.findByRole("heading", { name: "Say something" })).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: /skip for now/i }));
@@ -1133,7 +1133,7 @@ describe("OnboardingDesktop", () => {
       expect(await screen.findByRole("heading", { name: /now let it type anywhere/i })).toBeInTheDocument();
       expect(screen.getByText("Dictation engine · 42% of 670 MB")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
-      expect(await screen.findByRole("heading", { name: "Polish tidies what you say" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "What will you mostly dictate?" })).toBeInTheDocument();
       expect(screen.getByText("Dictation engine · 42% of 670 MB")).toBeInTheDocument();
       await skipUse(user);
       expect(await screen.findByRole("heading", { name: "Almost ready" })).toBeInTheDocument();
@@ -1547,7 +1547,7 @@ describe("OnboardingDesktop", () => {
       const user = userEvent.setup();
       renderOnboarding();
       await reachUse(user);
-      expect(screen.getByText("Example · you say")).toBeInTheDocument();
+      expect(screen.getByText("You say")).toBeInTheDocument();
       await user.click(screen.getByRole("switch", { name: "Clean up what I say" }));
       expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false });
       await user.click(screen.getByRole("button", { name: /^continue$/i }));

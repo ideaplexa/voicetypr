@@ -1,22 +1,24 @@
 import { Button } from "@/components/settings/SettingsButton";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { builtinPolishView } from "@/components/polish/BuiltInPolishSetting";
+import { Band, BandWord } from "@/components/onboarding/OnboardingChrome";
+import { AppMark } from "@/components/onboarding/PromiseStep";
 import { Card } from "@/components/ui/card";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type { AppSettings, PolishStatus } from "@/types";
-import { Check, Sparkles } from "lucide-react";
+import { BookA, Bot, Check, Code, FileText, Layers, Send, Sparkles, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 export type StartingPolishStyle = NonNullable<AppSettings["starting_polish_style"]>;
 
-const USES: { id: string; label: string; style: StartingPolishStyle; name: string; detail?: string }[] = [
-  { id: "messages", label: "Messages and email", style: "Message", name: "Message", detail: "tidy sentences in your own wording" },
-  { id: "ai", label: "Prompts for AI", style: "CleanDictation", name: "Clean" },
-  { id: "code", label: "Code and tech notes", style: "Code", name: "Code" },
-  { id: "docs", label: "Notes and documents", style: "Writing", name: "Writing", detail: "for longer text" },
-  { id: "clinical", label: "Medical or legal work", style: "CleanDictation", name: "Clean" },
-  { id: "mix", label: "A bit of everything", style: "CleanDictation", name: "Clean", detail: "the default" },
+const USES: { id: string; label: string; icon: LucideIcon; style: StartingPolishStyle; name: string; detail?: string }[] = [
+  { id: "messages", label: "Messages and email", icon: Send, style: "Message", name: "Message", detail: "tidy sentences in your own wording" },
+  { id: "ai", label: "Prompts for AI", icon: Bot, style: "CleanDictation", name: "Clean" },
+  { id: "code", label: "Code and tech notes", icon: Code, style: "Code", name: "Code" },
+  { id: "docs", label: "Notes and documents", icon: FileText, style: "Writing", name: "Writing", detail: "for longer text" },
+  { id: "clinical", label: "Medical or legal work", icon: BookA, style: "CleanDictation", name: "Clean" },
+  { id: "mix", label: "A bit of everything", icon: Layers, style: "CleanDictation", name: "Clean", detail: "the default" },
 ];
 
 const EXAMPLE = {
@@ -51,41 +53,59 @@ export function PolishStep({
   const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
 
   return (
-    <section className="flex w-full flex-col items-center gap-[18px]">
+    <section className="flex w-full flex-col items-center gap-[16px]">
+      <Band>
+        <BandWord struck className="-left-[210px] top-5">um</BandWord>
+        <BandWord className="-left-[150px] -top-6">Messages</BandWord>
+        <BandWord className="-left-[100px] top-6">Prompts</BandWord>
+        <AppMark />
+        <BandWord struck className="left-[70px] -top-6">no wait</BandWord>
+        <BandWord className="left-[100px] top-6">Code</BandWord>
+        <BandWord className="left-[170px] -top-5">Notes</BandWord>
+      </Band>
       <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        Polish tidies what you say
+        What will you mostly dictate?
       </h2>
-      <p className="max-w-[520px] text-center text-sm text-muted-foreground">
-        It removes filler words and false starts, follows your corrections and fixes punctuation, in the style
-        you choose.
+      <p className="-mt-1 text-center text-base text-muted-foreground">
+        Optional. It picks a starting point you can change any time.
       </p>
-      <div className="grid w-full gap-3 sm:grid-cols-2">
-        <Card className="gap-2 px-[18px] py-4">
-          <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            Example · you say
-          </span>
-          <p className="text-[15px] leading-[22px] text-muted-foreground">{EXAMPLE.heard}</p>
-        </Card>
-        <Card className="gap-2 px-[18px] py-4 outline-[1.5px] outline-sage -outline-offset-1">
-          <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            With Polish
-          </span>
-          <p className="text-[15px] leading-[22px]">{EXAMPLE.typed}</p>
-        </Card>
+      <div role="group" aria-label="What you mostly dictate" className="grid w-full gap-2.5 sm:grid-cols-2">
+        {USES.map((item) => {
+          const checked = item.id === picked;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={checked}
+              onClick={() => setPicked(item.id)}
+              className={cn(
+                "flex items-center gap-3 rounded-2xl bg-card px-4 py-3.5 text-left text-[15px] font-medium ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                checked && "ring-[1.5px] ring-sage",
+              )}
+            >
+              <item.icon className={cn("size-[18px] shrink-0", checked ? "text-sage" : "text-muted-foreground")} />
+              <span className="flex-1">{item.label}</span>
+              <Check className={cn("size-4 shrink-0 text-sage", !checked && "invisible")} />
+            </button>
+          );
+        })}
       </div>
-      {ownReady ? (
-        <Card className="w-full flex-row items-start gap-3 px-4 py-3 text-left">
-          <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
-          <p className="text-sm">
-            {on ? (
-              <><span className="font-semibold">Polish is on</span> and set up with your AI provider.</>
-            ) : (
-              <><span className="font-semibold">Polish is set up but off.</span> Turn it on in Settings → Polish, or from Voicetypr’s {isMacOS ? "menu bar" : "tray"} menu.</>
-            )}
-          </p>
-        </Card>
-      ) : (
-        <Card className="w-full gap-2 px-4 py-3 text-left">
+      <p role="status" className="min-h-5 text-center text-sm">
+        {use ? on ? `Polish will use ${style}.` : `When Polish is on, it starts in ${style}.` : null}
+      </p>
+      <Card className="w-full gap-3 px-[18px] py-4 text-left">
+        {ownReady ? (
+          <div className="flex items-start gap-3">
+            <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
+            <p className="text-sm">
+              {on ? (
+                <><span className="font-semibold">Polish is on</span> and set up with your AI provider.</>
+              ) : (
+                <><span className="font-semibold">Polish is set up but off.</span> Turn it on in Settings → Polish, or from Voicetypr’s {isMacOS ? "menu bar" : "tray"} menu.</>
+              )}
+            </p>
+          </div>
+        ) : (
           <div className="flex items-start gap-3">
             <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
             <div className="flex-1 text-sm">
@@ -99,37 +119,17 @@ export function PolishStep({
             <Switch id="onboarding-builtin-polish" checked={builtin.checked} disabled={builtin.disabled || saving}
               onCheckedChange={onBuiltinChange} />
           </div>
-          <p className="pl-7 text-[12.5px] text-muted-foreground">
-            Rather use your own AI provider? Add its key in Settings → Polish.
-          </p>
-        </Card>
-      )}
-      <h3 className="mt-1 text-center text-base font-semibold">What will you mostly dictate?</h3>
-      <div role="group" aria-label="What you mostly dictate" className="grid w-full gap-2.5 sm:grid-cols-3">
-        {USES.map((item) => {
-          const checked = item.id === picked;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              aria-pressed={checked}
-              onClick={() => setPicked(item.id)}
-              className={cn(
-                "flex items-center justify-between rounded-2xl bg-card px-4 py-3 text-left text-[13px] font-medium ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                checked && "ring-[1.5px] ring-sage",
-              )}
-            >
-              {item.label}
-              <Check className={cn("size-4 shrink-0 text-sage", !checked && "invisible")} />
-            </button>
-          );
-        })}
-      </div>
-      <p role="status" className="min-h-5 text-center text-[13px] text-muted-foreground">
-        {use
-          ? on ? `Polish will use ${style}.` : `When Polish is on, it starts in ${style}.`
-          : "Optional. It sets the style Polish starts in; you can change it any time in Settings."}
-      </p>
+        )}
+        <div className="grid gap-2 rounded-xl bg-sage-bg px-4 py-3 text-[15px] leading-[22px] sm:grid-cols-[auto_1fr] sm:gap-x-4">
+          <span className="text-sm font-medium text-muted-foreground">You say</span>
+          <p className="text-muted-foreground">{EXAMPLE.heard}</p>
+          <span className="text-sm font-medium text-sage">With Polish</span>
+          <p>{EXAMPLE.typed}</p>
+        </div>
+        {ownReady ? null : (
+          <p className="pl-7 text-sm text-muted-foreground">Rather use your own AI provider? Add its key in Settings → Polish.</p>
+        )}
+      </Card>
       <div className="flex flex-wrap justify-center gap-[10px]">
         <Button variant="outline" disabled={saving} onClick={onBack}>Back</Button>
         <Button variant="ghost" disabled={saving} onClick={() => onChoose(null)}>Skip</Button>
