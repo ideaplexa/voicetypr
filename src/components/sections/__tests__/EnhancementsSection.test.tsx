@@ -516,7 +516,7 @@ describe("EnhancementsSection", () => {
       withSettings({ builtin_polish_enabled: true });
       builtinAvailability = "unreachable";
       const { unmount } = renderWithProviders();
-      expect(await screen.findByText(/server can’t be reached right now/)).toBeInTheDocument();
+      expect(await screen.findByText(/server can’t take Polish right now/)).toBeInTheDocument();
       const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
       expect(toggle).not.toBeChecked();
       expect(toggle).toHaveAttribute("aria-disabled", "true");

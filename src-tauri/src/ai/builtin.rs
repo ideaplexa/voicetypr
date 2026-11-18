@@ -186,28 +186,55 @@ pub(crate) async fn availability(app: &AppHandle, own_provider_ready: bool) -> A
     let Some(state) = app.try_state::<crate::AppState>() else {
         return Availability::NoAccess;
     };
-    if !eligible(true, false, &*state.license_cache.read().await) {
-        return Availability::NoAccess;
-    }
-    static CONFIRMED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
-    if CONFIRMED
-        .lock()
-        .ok()
-        .and_then(|at| *at)
-        .is_some_and(|at| at.elapsed() < READY_FOR)
-    {
+    let licence_state = {
+        let cache = state.license_cache.read().await;
+        if !eligible(true, false, &cache) {
+            return Availability::NoAccess;
+        }
+        match &*cache {
+            RuntimeLicenseCache::Ready(cached) => format!("{:?}", cached.status.status),
+            _ => return Availability::NoAccess,
+        }
+    };
+    let license_key = crate::license::keychain::get_license(app).ok().flatten();
+    let entitlement = entitlement_fingerprint(&licence_state, license_key.as_deref());
+    if confirmed(entitlement) {
         return Availability::Ready;
     }
     let Ok(device_hash) = device_hash() else {
         return Availability::Unreachable;
     };
-    let license_key = crate::license::keychain::get_license(app).ok().flatten();
     let base_url = crate::license::api_client::get_api_base_url();
     let answer = check(client(), &base_url, device_hash, license_key.as_deref()).await;
-    if let Ok(mut at) = CONFIRMED.lock() {
-        *at = (answer == Availability::Ready).then(Instant::now);
+    if let Ok(mut slot) = CONFIRMED.lock() {
+        *slot = (answer == Availability::Ready).then(|| (entitlement, Instant::now()));
     }
     answer
+}
+
+/// The last server confirmation, bound to the licence state and key it was given for.
+static CONFIRMED: std::sync::Mutex<Option<(u64, Instant)>> = std::sync::Mutex::new(None);
+
+fn entitlement_fingerprint(licence_state: &str, license_key: Option<&str>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (licence_state, license_key).hash(&mut hasher);
+    hasher.finish()
+}
+
+fn confirmed(entitlement: u64) -> bool {
+    CONFIRMED
+        .lock()
+        .ok()
+        .and_then(|slot| *slot)
+        .is_some_and(|(confirmed_for, at)| confirmed_for == entitlement && at.elapsed() < READY_FOR)
+}
+
+/// A refusal from the server ends the confirmation, so the next dictation asks again first.
+fn forget_confirmation() {
+    if let Ok(mut slot) = CONFIRMED.lock() {
+        *slot = None;
+    }
 }
 
 async fn check(
@@ -223,7 +250,15 @@ async fn check(
         #[serde(skip_serializing_if = "Option::is_none")]
         license_key: Option<&'a str>,
     }
-    client
+    #[derive(Deserialize)]
+    struct StatusEnvelope {
+        data: Option<StatusData>,
+    }
+    #[derive(Deserialize)]
+    struct StatusData {
+        available: bool,
+    }
+    let Ok(response) = client
         .post(format!("{base_url}/polish/status"))
         .timeout(Duration::from_secs(5))
         .json(&StatusRequest {
@@ -232,8 +267,19 @@ async fn check(
         })
         .send()
         .await
-        .map(|response| availability_from_status(response.status().as_u16()))
-        .unwrap_or(Availability::Unreachable)
+    else {
+        return Availability::Unreachable;
+    };
+    let answer = availability_from_status(response.status().as_u16());
+    if answer != Availability::Ready {
+        return answer;
+    }
+    match response.json::<StatusEnvelope>().await {
+        Ok(StatusEnvelope {
+            data: Some(StatusData { available: true }),
+        }) => Availability::Ready,
+        _ => Availability::Unreachable,
+    }
 }
 
 fn client() -> &'static reqwest::Client {
@@ -289,7 +335,17 @@ pub(crate) async fn polish(
     let result = tokio::select! {
         biased;
         _ = cancellation.cancelled() => Err(AiProviderError::Canceled),
-        result = post(client(), &base_url, &request) => result,
+        result = async {
+            // Text goes out only after the server has confirmed this device's entitlement.
+            if availability(app, false).await != Availability::Ready {
+                return Err(AiProviderError::ServiceUnavailable);
+            }
+            let result = post(client(), &base_url, &request).await;
+            if matches!(result, Err(AiProviderError::ServiceUnavailable)) {
+                forget_confirmation();
+            }
+            result
+        } => result,
     }
     .and_then(|data| {
         let output = data.text.trim().to_string();
@@ -476,7 +532,9 @@ mod tests {
                 .and(body_json(
                     serde_json::json!({ "deviceHash": "abc", "licenseKey": "KEY" }),
                 ))
-                .respond_with(ResponseTemplate::new(status))
+                .respond_with(ResponseTemplate::new(status).set_body_json(
+                    serde_json::json!({ "success": status == 200, "data": { "available": true } }),
+                ))
                 .mount(&server)
                 .await;
             let answer = check(&reqwest::Client::new(), &server.uri(), "abc", Some("KEY")).await;
@@ -484,6 +542,33 @@ mod tests {
         }
         let offline = check(&reqwest::Client::new(), "http://127.0.0.1:9", "abc", None).await;
         assert_eq!(offline, Availability::Unreachable);
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<html>proxy</html>"))
+            .mount(&server)
+            .await;
+        let unexpected = check(&reqwest::Client::new(), &server.uri(), "abc", None).await;
+        assert_eq!(
+            unexpected,
+            Availability::Unreachable,
+            "a 200 without the answer is not ready"
+        );
+    }
+
+    #[test]
+    fn a_confirmation_belongs_to_the_licence_it_was_given_for() {
+        let trial = entitlement_fingerprint("Trial", None);
+        assert_ne!(trial, entitlement_fingerprint("Licensed", Some("KEY")));
+        assert_ne!(
+            entitlement_fingerprint("Licensed", Some("KEY")),
+            entitlement_fingerprint("Licensed", Some("OTHER"))
+        );
+        *CONFIRMED.lock().unwrap() = Some((trial, Instant::now()));
+        assert!(confirmed(trial));
+        assert!(!confirmed(entitlement_fingerprint("Licensed", Some("KEY"))));
+        forget_confirmation();
+        assert!(!confirmed(trial));
     }
 
     #[tokio::test]

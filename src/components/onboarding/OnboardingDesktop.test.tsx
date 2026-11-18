@@ -1453,7 +1453,7 @@ describe("OnboardingDesktop", () => {
     it.each([
       ["no_access", "Works during your trial or with a license."],
       ["not_entitled", "Not available on this device: built-in Polish needs a trial started with your email, or a license."],
-      ["unreachable", "Voicetypr’s server can’t be reached right now, so nothing is sent and you get exactly what you said."],
+      ["unreachable", "Voicetypr’s server can’t take Polish right now (offline or busy), so nothing is sent and you get exactly what you said."],
     ])("never shows built-in Polish as on when the server says %s", async (builtin, line) => {
       polishStatus = { ...BUILTIN_READY, builtin };
       const user = userEvent.setup();
@@ -1465,6 +1465,19 @@ describe("OnboardingDesktop", () => {
       expect(toggle).toHaveAttribute("aria-disabled", "true");
       await user.click(screen.getByRole("button", { name: "Code and tech notes" }));
       expect(screen.getByText("When Polish is on, it starts in the Code style.")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("heading", { name: /welcome back/i });
+      expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: "Code" });
+      // Saved now, so the first take after the server answers uses the pick.
+      expect(invokeMock).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Code" } });
+    });
+
+    it("waits to apply the pick when the user's own provider is set up but off", async () => {
+      polishStatus = { will_run: false, own_provider_ready: true, own_provider_enabled: false, builtin_enabled: false, builtin: "own_provider" };
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachUse(user);
+      await user.click(screen.getByRole("button", { name: "Code and tech notes" }));
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
       await screen.findByRole("heading", { name: /welcome back/i });
       expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: "Code" });

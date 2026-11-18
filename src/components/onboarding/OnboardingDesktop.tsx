@@ -221,7 +221,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             <TryStep
               caps={caps}
               holdToTalk={holdToTalk}
-              polishAvailable={polishAvailable}
+              polishAvailable={polishOn}
               builtinPolish={builtinWillRun}
               engineReady={sourceReady}
               access={licensed || outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
@@ -289,7 +289,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               saving={busy}
               onBack={handleBack}
               onChoose={(style) => void run(() => flow.chooseStartingStyle(style, {
-                applyNow: polishOn || polishStatus?.builtin === "ready",
+                // Set it now unless a provider of the user's own is set up but off; that waits for it to turn on.
+                applyNow: ownPolishOn || polishStatus?.own_provider_ready !== true,
                 keepForOwnProvider: !ownPolishOn,
               }))}
             />
