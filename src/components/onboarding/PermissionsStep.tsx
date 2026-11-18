@@ -9,16 +9,18 @@ export function PermissionsStep({
   isRequestingPermission,
   onCheck,
   onRequest,
+  types = ["microphone", "accessibility"],
 }: {
   permissions: { microphone: PermissionState; accessibility: PermissionState };
   checkingPermissions: Set<string>;
   isRequestingPermission: string | null;
   onCheck: (type: "microphone" | "accessibility") => void | Promise<void>;
   onRequest: (type: "microphone" | "accessibility") => void | Promise<void>;
+  types?: ("microphone" | "accessibility")[];
 }) {
   return (
     <SettingsPaneCard className="w-full !px-[18px] !py-1">
-      {(["microphone", "accessibility"] as const).map((type) => {
+      {types.map((type) => {
         const allowed = permissions[type].status === "granted";
         const Icon = type === "microphone" ? Mic : Keyboard;
         return (

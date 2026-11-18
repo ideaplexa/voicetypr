@@ -56,8 +56,10 @@ export function SetupStep({
           ? "Your microphone, one permission and your shortcut. Then Voicetypr works in every app."
           : "Your microphone and your shortcut. Then Voicetypr works in every app."}
       </p>
+      {!isMacOS || permissions.microphone.status === "granted" ? <MicrophoneCheck allowed={isMacOS} /> : null}
       {isMacOS ? (
         <PermissionsStep
+          types={permissions.microphone.status === "granted" ? ["accessibility"] : ["microphone", "accessibility"]}
           permissions={permissions}
           checkingPermissions={checkingPermissions}
           isRequestingPermission={isRequestingPermission}
@@ -65,7 +67,6 @@ export function SetupStep({
           onRequest={onRequest}
         />
       ) : null}
-      {!isMacOS || permissions.microphone.status === "granted" ? <MicrophoneCheck /> : null}
       {editor ?? (
         <SettingsPaneCard className="w-full !px-[18px] !py-[14px]">
           <div className="flex items-center gap-[14px]">

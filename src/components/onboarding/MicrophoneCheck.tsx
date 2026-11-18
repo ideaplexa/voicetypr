@@ -3,16 +3,34 @@ import { MicrophoneSelection } from "@/components/MicrophoneSelection";
 import { SettingsPaneCard } from "@/components/settings/settings-ui";
 import { useSettings } from "@/contexts/SettingsContext";
 import { invoke } from "@tauri-apps/api/core";
+import { Mic } from "lucide-react";
 import { toast } from "sonner";
 import { useMicrophoneTest } from "@/components/onboarding/useMicrophoneTest";
 
-export function MicrophoneCheck() {
+/** The one Microphone block: permission, device, live level. */
+export function MicrophoneCheck({ allowed = false }: { allowed?: boolean }) {
   const { settings, refreshSettings } = useSettings();
   const { level, status, visible } = useMicrophoneTest(settings?.selected_microphone || undefined);
   return (
     <SettingsPaneCard className="w-full !p-[18px]">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">Microphone</h3>
+        <div className="flex items-center gap-[14px]">
+          <span className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-sage-bg">
+            <Mic className="size-[18px] text-sage" />
+          </span>
+          <div className="space-y-0.5">
+            <h3 className="flex items-center gap-2 text-sm leading-[normal] font-semibold">
+              Microphone
+              {allowed ? (
+                <span className="flex items-center gap-[5px] rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] font-medium text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-sage" />
+                  Allowed
+                </span>
+              ) : null}
+            </h3>
+            <p className="text-[12.5px] leading-[normal] text-muted-foreground">So Voicetypr can hear you.</p>
+          </div>
+        </div>
         <MicrophoneSelection
           value={settings?.selected_microphone || undefined}
           className="h-[34px] w-auto max-w-[360px] rounded-[10px] px-[10px] text-[13px] text-muted-foreground hover:text-muted-foreground aria-expanded:text-muted-foreground"
