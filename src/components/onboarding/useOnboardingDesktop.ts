@@ -41,7 +41,7 @@ export function useOnboardingDesktop({
   modelManagement,
   previewStep,
   licenseStatus,
-}: OnboardingDesktopProps) {
+}: OnboardingDesktopProps, showKeep: boolean) {
   const needsTrial = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "trial";
   const { settings, updateSettings } = useSettings();
   const preparation = useOfflinePreparation(modelManagement);
@@ -75,6 +75,33 @@ export function useOnboardingDesktop({
   } = modelManagement;
 
   const [currentStep, setCurrentStep] = useState<Step>(previewStep ?? "promise");
+  // The steps in order. The shape is fixed by the licence as first known, so
+  // starting a trial or adding a key never changes the count mid-flow; a step
+  // that no longer applies is skipped instead.
+  const [shape, setShape] = useState<{ trial: boolean; keep: boolean } | null>(null);
+  if (shape === null && licenseStatus != null) {
+    setShape({ trial: needsTrial, keep: licenseStatus.status !== "licensed" });
+  }
+  const steps: Step[] = [
+    "promise",
+    ...((shape?.trial ?? needsTrial) ? (["trial"] as Step[]) : []),
+    "source",
+    "engine",
+    "setup",
+    "polish",
+    "try",
+    ...(shape?.keep ? (["keep"] as Step[]) : []),
+    "done",
+  ];
+  const skipped = (step: Step) => (step === "trial" && !needsTrial) || (step === "keep" && !showKeep);
+  const walk = (from: Step, by: 1 | -1): Step => {
+    for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
+      if (!skipped(steps[i])) return steps[i];
+    }
+    return from;
+  };
+  const after = (step: Step) => walk(step, 1);
+  const before = (step: Step) => walk(step, -1);
   // Sharing is opt-in: the box starts unticked unless the user already chose.
   const [telemetryOptIn, setTelemetryOptIn] = useState(false);
   // Asked once: only when no sharing choice is stored; unknown after a failed read.
@@ -601,62 +628,49 @@ export function useOnboardingDesktop({
   useEffect(() => {
     startPreparingRef.current = startPreparing;
   });
-  // The on-device engine starts downloading on the source step, where its progress shows.
+  // The on-device engine starts downloading from the source steps; its progress shows on the engine step.
   useEffect(() => {
-    if (currentStep === "source" && sourceType === "local" && sourceRestored) startPreparingRef.current();
+    if ((currentStep === "source" || currentStep === "engine") && sourceType === "local" && sourceRestored) startPreparingRef.current();
   }, [currentStep, sourceType, sourceRestored, preparation.recommended]);
 
   const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
     if (style && polishOn) await invoke("update_enhancement_options", { options: { preset: style } });
     else await updateSettings({ starting_polish_style: style });
-    setCurrentStep("try");
+    setCurrentStep(after("polish"));
   };
 
-  const afterPromise: Step = needsTrial ? "trial" : "source";
-  // Reached from the first try: Continue goes straight back there.
+  // Reached from the first try: the engine step's Continue goes straight back there.
   const [sourceFromTry, setSourceFromTry] = useState(false);
 
   const handleNext = async () => {
     try {
-      if (currentStep === "promise") {
-        setCurrentStep(afterPromise);
-        return;
-      }
-
-      if (currentStep === "trial") {
-        setCurrentStep("source");
-        return;
-      }
-
       if (currentStep === "source") {
+        if (preparation.savingLanguage) return;
+        setCurrentStep("engine");
+        return;
+      }
+
+      if (currentStep === "engine") {
         if (preparation.savingLanguage) return;
         if (sourceType === "local" && !sourceReady) {
           if (models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
           else startPreparing();
         }
         await leaveSource();
-        setCurrentStep(sourceFromTry ? "try" : "setup");
+        setCurrentStep(sourceFromTry ? "try" : after("engine"));
         setSourceFromTry(false);
         return;
       }
 
-      if (currentStep === "setup") {
-        await saveHotkeySettings();
-        setCurrentStep("polish");
-        return;
-      }
-
-      if (currentStep === "try") {
-        setCurrentStep("done");
-        return;
-      }
+      if (currentStep === "setup") await saveHotkeySettings();
+      setCurrentStep(after(currentStep));
     } catch (error) {
       log.error("Failed to advance onboarding:", error);
       toast.error(error instanceof Error ? error.message : "Failed to continue onboarding");
     }
   };
 
-  // Leaving the source step either way: a remote server stays active only when
+  // Leaving the source steps either way: a remote server stays active only when
   // it is the chosen source, so "this Mac" never sends audio to the network.
   const leaveSource = async () => {
     if (sourceType !== "remote" && activeRemoteServerId) {
@@ -666,15 +680,6 @@ export function useOnboardingDesktop({
   };
 
   const handleBack = async () => {
-    const previous: Partial<Record<Step, Step>> = {
-      trial: "promise",
-      source: sourceFromTry ? "try" : needsTrial ? "trial" : "promise",
-      setup: "source",
-      polish: "setup",
-      try: "polish",
-      done: "try",
-    };
-    const step = previous[currentStep];
     if (currentStep === "source") {
       try {
         await leaveSource();
@@ -683,14 +688,17 @@ export function useOnboardingDesktop({
         toast.error("Couldn’t switch where dictation runs. Try again.");
         return;
       }
+      setCurrentStep(sourceFromTry ? "try" : before("source"));
       setSourceFromTry(false);
+      return;
     }
-    if (step) setCurrentStep(step);
+    setCurrentStep(before(currentStep));
   };
 
   const canProceed = () => {
     switch (currentStep) {
       case "source":
+      case "engine":
         return !preparation.savingLanguage;
       case "setup":
         return !isEditingHotkey && (!isMacOS || accessibilitySkipped ||
@@ -711,11 +719,12 @@ export function useOnboardingDesktop({
     preparation,
     sourceReady,
     confirmSource,
+    steps,
     chooseSourceFromTry: () => {
       setSourceFromTry(true);
       setCurrentStep("source");
     },
-    skipSetup: () => setCurrentStep("polish"),
+    skipSetup: () => setCurrentStep(after("setup")),
     handleBack,
     handleNext,
     nextDisabled,

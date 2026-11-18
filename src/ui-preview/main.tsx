@@ -7,7 +7,7 @@ import type { Step } from "@/components/onboarding/onboardingTypes";
 import { installPreviewPlatform } from "./platform";
 
 const query = new URLSearchParams(location.search);
-const STEPS: Step[] = ["promise", "trial", "source", "setup", "polish", "try", "done"];
+const STEPS: Step[] = ["promise", "trial", "source", "engine", "setup", "polish", "try", "keep", "done"];
 // The numbered phases of the previous onboarding still open its nearest step.
 const LEGACY: Record<string, Step> = { "1": "promise", "2": "setup", "3": "trial" };
 const onboardingParam = query.get("onboarding") ?? "";
@@ -72,8 +72,8 @@ if (onboardingCase === "downloading" || onboardingCase === "download-failed") {
   const timer = window.setInterval(() => {
     if (++emits === 6) window.clearInterval(timer);
     void (onboardingCase === "downloading"
-      ? emit("download-progress", { model: "parakeet-v3", engine: "parakeet", progress: 62, phase: "downloading" })
-      : emit("download-error", { model: "parakeet-v3", engine: "parakeet", error: "error sending request: connection reset" }));
+      ? emit("download-progress", { model: "parakeet-tdt-0.6b-v3", engine: "parakeet", progress: 62, phase: "downloading" })
+      : emit("download-error", { model: "parakeet-tdt-0.6b-v3", engine: "parakeet", error: "error sending request: connection reset" }));
   }, 1000);
 }
 
@@ -87,13 +87,13 @@ if (onboardingCase === "heard" || onboardingCase === "polished") {
       ? {
           timestamp: "2026-11-17T09:41:00Z",
           text: "Let’s move the sync to Friday at 3, and I’ll send the notes before.",
-          model: "parakeet-v3",
+          model: "parakeet-tdt-0.6b-v3",
           writing: { ai_applied: true, original_text: "um so let's move the sync to thursday no wait friday at three and I'll send the notes before" },
         }
       : {
           timestamp: "2026-11-17T09:41:00Z",
           text: "Um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before.",
-          model: "parakeet-v3",
+          model: "parakeet-tdt-0.6b-v3",
           writing: { ai_applied: false },
         });
   }, 1000);

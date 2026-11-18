@@ -1,6 +1,5 @@
 import { TrialStartForm } from "@/components/TrialStartForm";
 import { Button } from "@/components/settings/SettingsButton";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -29,7 +28,7 @@ export function TrialStep({
   onBack,
   onDecideLater,
 }: {
-  /** This device already used its trial, so only buying or a key can unlock it. */
+  /** This device already used its trial, so only buying or a key can unlock it; only then is Upgrade here. */
   trialEnded: boolean;
   localDictation: boolean;
   /** A trial start is in flight: leaving now would let it be sent twice. */
@@ -55,22 +54,16 @@ export function TrialStep({
       </Button>
     </Card>
   );
-  const choices = (start: ReactNode, notice: ReactNode) => (
-    <div className="grid w-full gap-3 sm:grid-cols-2">
-      <Card className="gap-3 px-5 py-5 text-left outline-[1.5px] outline-sage -outline-offset-1">
-        <h3 className="flex items-center gap-2 text-[17px] font-semibold">
-          7 days free <Badge variant="secondary" className="bg-sage-bg text-sage">Recommended</Badge>
-        </h3>
-        <ul className="flex flex-col gap-2">
-          <Point>No card.</Point>
-          <Point>The clock starts when you click, not before.</Point>
-        </ul>
-        <span className="flex-1" />
-        {start}
-        {notice}
-      </Card>
-      {upgradeCard}
-    </div>
+  const trialCard = (start: ReactNode, notice: ReactNode) => (
+    <Card className="w-full max-w-[420px] gap-3 self-center px-5 py-5 text-left">
+      <h3 className="text-[17px] font-semibold">7 days free</h3>
+      <ul className="flex flex-col gap-2">
+        <Point>No card.</Point>
+        <Point>The clock starts when you click, not before.</Point>
+      </ul>
+      {start}
+      {notice}
+    </Card>
   );
   return (
     <section className="flex w-full flex-col items-center gap-5">
@@ -93,7 +86,7 @@ export function TrialStep({
           large
           onStart={onStartTrial}
           className="gap-4"
-          renderAction={(button, notice) => choices(button, <div className="[&>p]:text-left [&>p]:text-xs">{notice}</div>)}
+          renderAction={(button, notice) => trialCard(button, <div className="[&>p]:text-left [&>p]:text-xs">{notice}</div>)}
         />
       )}
       <p className="text-sm text-muted-foreground">

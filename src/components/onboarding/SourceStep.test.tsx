@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { SourceStep } from "@/components/onboarding/SourceStep";
 
 it("keeps every phase-one source card's title above its description", () => {
-  render(<SourceStep sourceType="local" modelName="Parakeet V3" modelSize="2 GB" onConfirmSource={vi.fn()} />);
+  render(<SourceStep sourceType="local" onConfirmSource={vi.fn()} />);
   const cards = screen.getAllByRole("button", { pressed: false }).concat(screen.getAllByRole("button", { pressed: true }));
   expect(cards).toHaveLength(3);
   for (const card of cards) {

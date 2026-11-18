@@ -1,20 +1,8 @@
-import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import { ApiKeyModal } from "@/components/ApiKeyModal";
-import { Badge } from "@/components/ui/badge";
+import { SettingsPaneCard } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
-import {
-  Card,
-  CardAction,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { getCloudProviderByModel } from "@/lib/cloudProviders";
-import { cn } from "@/lib/utils";
+import { CLOUD_PROVIDERS, getCloudProviderByModel } from "@/lib/cloudProviders";
 import type { ModelInfo } from "@/types";
-import { Cloud } from "lucide-react";
 
 export interface ReadinessCloudPanelProps {
   cloudModelNames: string[];
@@ -29,11 +17,10 @@ export interface ReadinessCloudPanelProps {
   onCloudKeySubmit: (apiKey: string) => void;
 }
 
+/** Every cloud provider the app supports, one row each, with its key as the control. */
 export function ReadinessCloudPanel({
   cloudModelNames,
-  models,
   currentModel,
-  isLoading,
   cloudModelSetup,
   isSavingCloudKey,
   isModelReady,
@@ -41,79 +28,41 @@ export function ReadinessCloudPanel({
   onSetCloudModelSetup,
   onCloudKeySubmit,
 }: ReadinessCloudPanelProps) {
-  const activeCloudProvider = cloudModelSetup
-    ? getCloudProviderByModel(cloudModelSetup)
-    : undefined;
-
+  const activeCloudProvider = cloudModelSetup ? getCloudProviderByModel(cloudModelSetup) : undefined;
+  const providers = Object.values(CLOUD_PROVIDERS).filter(
+    (provider) => cloudModelNames.length === 0 || cloudModelNames.includes(provider.modelName),
+  );
   return (
     <div className="flex flex-col gap-4">
-      <Card className="rounded-[14px] border border-border bg-card py-0">
-        <ScrollArea className="h-[320px]">
-          <div className="flex flex-col gap-3 p-4">
-            {cloudModelNames.map((name) => {
-              const model = models[name];
-              const provider = getCloudProviderByModel(name);
-              if (!model || !provider) return null;
-              const ready = isModelReady(name);
-              const selected = currentModel === name;
-              return (
-                <Card
-                  key={name}
-                  size="sm"
-                  className={cn(
-                    "rounded-none border-0 border-b border-border bg-transparent shadow-none last:border-b-0",
-                    selected && "border-sage/50 bg-sage-bg/40 ring-1 ring-sage/30",
-                  )}
-                >
-                  <CardHeader>
-                    <CardAction>
-                      <Badge
-                        variant={ready ? "secondary" : "outline"}
-                        className="text-xs text-muted-foreground"
-                      >
-                        {ready ? "Connected" : "API key required"}
-                      </Badge>
-                    </CardAction>
-                    <div className="flex items-start gap-3">
-                      <div className="flex size-10 items-center justify-center rounded-xl bg-sage-bg text-sage">
-                        <Cloud className="size-5" />
-                      </div>
-                      <div>
-                        <CardTitle>{provider.displayName}</CardTitle>
-                        <CardDescription>{provider.description}</CardDescription>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardFooter className="justify-end">
-                    <Button
-                      size="sm"
-                      variant={selected ? "default" : "outline"}
-                      onClick={() => {
-                        if (ready) {
-                          void onSelectCloud(name);
-                        } else {
-                          onSetCloudModelSetup(name);
-                        }
-                      }}
-                    >
-                      {selected ? "Selected" : ready ? "Use provider" : "Add API key"}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              );
-            })}
-            {isLoading && cloudModelNames.length === 0 ? (
-              <LoadingState label="Loading cloud providers" />
-            ) : null}
-            {!isLoading && cloudModelNames.length === 0 ? (
-              <EmptyState
-                title="No cloud providers available"
-                description="Choose Local or Remote Voicetypr to continue."
-              />
-            ) : null}
-          </div>
-        </ScrollArea>
-      </Card>
+      <SettingsPaneCard className="!px-[18px] !py-1">
+        {providers.map((provider) => {
+          const name = provider.modelName;
+          const keyAdded = isModelReady(name);
+          const inUse = keyAdded && currentModel === name;
+          return (
+            <div key={name} className="flex items-center gap-3 border-b border-border py-3.5 last:border-0">
+              <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                <span className="text-sm font-semibold">{provider.displayName}</span>
+                <span className="text-[13px] text-muted-foreground">{provider.description}</span>
+              </div>
+              {inUse ? (
+                <span className="text-[13px] font-medium text-sage">In use</span>
+              ) : keyAdded ? (
+                <>
+                  <span className="text-[13px] text-muted-foreground">Key added</span>
+                  <Button size="sm" variant="outline" aria-label={`Use ${provider.displayName}`} onClick={() => void onSelectCloud(name)}>
+                    Use
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" variant="outline" aria-label={`Add key for ${provider.displayName}`} onClick={() => onSetCloudModelSetup(name)}>
+                  Add key
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </SettingsPaneCard>
       {activeCloudProvider ? (
         <ApiKeyModal
           inline

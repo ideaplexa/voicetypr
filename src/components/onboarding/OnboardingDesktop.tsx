@@ -1,6 +1,8 @@
 import { HotkeyStep } from "@/components/onboarding/HotkeyStep";
 import { StepDots } from "@/components/onboarding/OnboardingChrome";
 import { VoiceSourceStep } from "@/components/onboarding/VoiceSourceStep";
+import { EngineStep } from "@/components/onboarding/EngineStep";
+import { KeepStep } from "@/components/onboarding/KeepStep";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/settings/SettingsButton";
@@ -10,7 +12,6 @@ import {
   formatBareModifierLabel,
   NEW_USERS_GET_POLISH,
   type OnboardingDesktopProps,
-  type Step,
 } from "@/components/onboarding/onboardingTypes";
 import { useOnboardingDesktop } from "@/components/onboarding/useOnboardingDesktop";
 import { OfflinePreparationStatus } from "@/components/onboarding/OfflinePreparationStatus";
@@ -37,7 +38,12 @@ function trialEnds(status: LicenseStatus | null | undefined) {
 }
 
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
-  const flow = useOnboardingDesktop(props);
+  const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
+  const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
+  // Upgrading comes after the first try, only for someone on a trial.
+  const showKeep = licenseStatus?.status !== "licensed" && outcome?.kind !== "key" &&
+    (licenseStatus?.status === "trial" || outcome?.kind === "trial");
+  const flow = useOnboardingDesktop(props, showKeep);
   const {
     currentStep,
     goTo,
@@ -54,14 +60,12 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     holdToTalk,
     capturedBareModifier,
   } = flow;
-  const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
 
   const [aiEnabled, setAiEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState(false);
   const [polishCanRun, setPolishCanRun] = useState(false);
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
-  const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const [sawTrial, setSawTrial] = useState(false);
   const [trialError, setTrialError] = useState<TrialStartError | null>(null);
 
@@ -77,13 +81,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   }, []);
 
   if (currentStep === "trial" && !sawTrial) setSawTrial(true);
-  // The step count is fixed by the licence as first known, so starting a
-  // trial or adding a key never changes it mid-flow.
-  const [trialInFlow, setTrialInFlow] = useState<boolean | null>(null);
-  if (trialInFlow === null && licenseStatus != null) {
-    setTrialInFlow(licenseStatus?.status !== "licensed" && licenseStatus?.status !== "trial");
-  }
-
   // A key activated or a status recheck that finds a license or trial ends the trial step.
   const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
   useEffect(() => {
@@ -95,10 +92,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
-  const model = preparation.name ? local.models[preparation.name] : undefined;
-  const modelSize = megabytes(model?.size);
-  const flowSteps: Step[] = ["promise", ...(trialInFlow ? (["trial"] as Step[]) : []), "source", "setup", "polish", "try", "done"];
-  const dotIndex = Math.max(0, flowSteps.indexOf(currentStep));
+  const dotIndex = Math.max(0, flow.steps.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try { await action(); } finally { setBusy(false); }
@@ -124,7 +118,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     />
   );
   const downloadLine = sourceType === "local" && !local.localReady &&
-    (currentStep === "setup" || currentStep === "polish" || currentStep === "done")
+    (currentStep === "setup" || currentStep === "polish" || currentStep === "keep" || currentStep === "done")
     ? preparing(flow.chooseSourceFromTry, true) : null;
 
   const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
@@ -149,7 +143,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
-      {trialInFlow === null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flowSteps.length} />}
+      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flow.steps.length} />}
       <div className="mt-3 flex min-h-5 items-center justify-center">{downloadLine}</div>
       <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
         <div className="flex w-full max-w-[640px] flex-col items-center gap-[22px]">
@@ -194,16 +188,23 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           {currentStep === "source" && (
             <VoiceSourceStep
               sourceType={sourceType}
-              modelName={model?.display_name ?? null}
-              modelSize={modelSize}
               language={preparation.language}
+              busy={busy || nextDisabled}
+              onConfirmSource={confirmSource}
+              onLanguageChange={(value) => void preparation.changeLanguage(value)}
+              onBack={handleBack}
+              onNext={() => void run(handleNext)}
+            />
+          )}
+
+          {currentStep === "engine" && (
+            <EngineStep
+              sourceType={sourceType}
               local={local}
               cloud={flow.cloud}
               remote={flow.remote}
               warning={languageWarning}
               busy={busy || nextDisabled}
-              onConfirmSource={confirmSource}
-              onLanguageChange={(value) => void preparation.changeLanguage(value)}
               onBack={handleBack}
               onNext={() => void run(handleNext)}
             />
@@ -281,6 +282,15 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               saving={busy}
               onBack={handleBack}
               onChoose={(style) => void run(() => flow.chooseStartingStyle(style, polishOn))}
+            />
+          )}
+
+          {currentStep === "keep" && (
+            <KeepStep
+              trialEnds={trialEnds(licenseStatus)}
+              onUpgrade={upgrade}
+              onKeepGoing={() => void run(handleNext)}
+              onBack={handleBack}
             />
           )}
 
