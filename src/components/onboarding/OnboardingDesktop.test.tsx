@@ -1228,6 +1228,20 @@ describe("OnboardingDesktop", () => {
     expect(screen.getByText("Voicetypr cleaned it")).toBeInTheDocument();
   });
 
+  it("offers Recheck, never Trial ended, when the license check failed", async () => {
+    const recheck = vi.fn(async () => undefined);
+    const user = userEvent.setup();
+    renderOnboarding({ licenseCheckFailed: true, onRecheckLicense: recheck });
+    await reachSetup(user);
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    await skipUse(user);
+    expect(await screen.findByRole("heading", { name: "We couldn’t check your license" })).toBeInTheDocument();
+    expect(screen.queryByText("Trial ended")).not.toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
+    await user.click(screen.getByRole("button", { name: "Recheck" }));
+    expect(recheck).toHaveBeenCalledTimes(1);
+  });
+
   it("asks for the microphone on the first try, then starts dictation", async () => {
     permissionState.microphone = "not_determined";
     const user = userEvent.setup();

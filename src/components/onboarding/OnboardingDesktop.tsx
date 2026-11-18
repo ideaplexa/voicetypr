@@ -54,7 +54,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     holdToTalk,
     capturedBareModifier,
   } = flow;
-  const { licenseStatus, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
+  const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
 
   const [aiEnabled, setAiEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -215,10 +215,13 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               holdToTalk={holdToTalk}
               polishAvailable={polishAvailable}
               engineReady={sourceReady}
-              access={licensed || outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
+              access={outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
+                : licenseCheckFailed ? "check"
+                : licensed ? "ok"
                 : licenseStatus?.status === "expired" ? "ended"
                 : trialError === "trial_unreachable" ? "offline" : "none"}
               onStartTrial={() => goTo("trial")}
+              onRecheck={() => void onRecheckLicense?.()}
               onHaveKey={() => setKeyDialogOpen(true)}
               preparing={sourceType === "local" ? preparing(flow.chooseSourceFromTry) : null}
               microphone={permissions.microphone.status}

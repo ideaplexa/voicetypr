@@ -53,7 +53,7 @@ export function AppContainer() {
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
   const { settings, refreshSettings } = useSettings();
   const { checkAccessibilityPermission, checkMicrophonePermission } = useReadiness();
-  const { status: licenseStatus, startTrial, activateLicense, checkStatus, openPurchasePage } = useLicense();
+  const { status: licenseStatus, checkFailed, startTrial, activateLicense, checkStatus, openPurchasePage } = useLicense();
   const modelAvailability = useModelAvailabilityContext();
 
   // Use the model management context for onboarding
@@ -124,6 +124,7 @@ export function AppContainer() {
             void modelAvailability.checkModels();
           }}
           licenseStatus={licenseStatus}
+          licenseCheckFailed={checkFailed}
           onStartTrial={startTrial}
           onActivateLicense={(key) => activateLicense(key, { quiet: true })}
           onRecheckLicense={checkStatus}
