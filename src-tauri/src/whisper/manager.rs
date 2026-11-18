@@ -286,7 +286,7 @@ impl WhisperManager {
                     );
 
                     if let Err(e) = fs::remove_file(&output_path).await {
-                        log::error!("Failed to remove stale/corrupt model file: {}", e);
+                        log::error!("Failed to remove stale/corrupt model file: {:?}", e.kind());
                         return Err(format!("Failed to remove stale/corrupt model file: {}", e));
                     }
 
