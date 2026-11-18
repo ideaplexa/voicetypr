@@ -22,6 +22,7 @@ export function TryStep({
   engineReady,
   access,
   onStartTrial,
+  onRecheck,
   onHaveKey,
   preparing,
   microphone,
@@ -38,8 +39,10 @@ export function TryStep({
   builtinPolish?: boolean;
   engineReady: boolean;
   /** Whether this device may dictate: a trial or license is needed first. */
-  access: "ok" | "none" | "offline" | "ended";
+  access: "ok" | "none" | "offline" | "ended" | "check";
   onStartTrial: () => void;
+  /** Checks the license again after a failed check. */
+  onRecheck: () => void;
   onHaveKey: () => void;
   /** Download progress for the engine while it is not ready. */
   preparing: ReactNode;
@@ -75,6 +78,7 @@ export function TryStep({
     const blocked = {
       none: ["Dictation starts with your trial", "Start your free 7-day trial or add a license key, and you can say your first sentence straight away.", "Start 7-day trial"],
       offline: ["We couldn’t confirm your trial", "Check your connection and try again. Dictation starts as soon as your trial is confirmed.", "Try again"],
+      check: ["We couldn’t check your license", "Connect to the internet, then recheck. Dictation starts again as soon as it’s confirmed.", "Recheck"],
       ended: ["Trial ended", "This device’s free week has been used. Upgrade, or activate a key you already have, to keep dictating.", "Upgrade or add a key"],
     }[access];
     return (
@@ -82,7 +86,7 @@ export function TryStep({
         <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">{blocked[0]}</h2>
         <p role="alert" className="max-w-[480px] text-sm leading-6 text-muted-foreground">{blocked[1]}</p>
         <div className="flex flex-wrap items-center justify-center gap-[10px]">
-          <Button onClick={onStartTrial}>{blocked[2]}</Button>
+          <Button onClick={access === "check" ? onRecheck : onStartTrial}>{blocked[2]}</Button>
           <Button variant="ghost" onClick={onHaveKey}>I have a key</Button>
         </div>
         <div className="flex items-center gap-[10px]">

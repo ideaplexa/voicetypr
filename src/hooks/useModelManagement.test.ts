@@ -298,6 +298,31 @@ describe("useModelManagement", () => {
     expect(result.current.downloadPhases["parakeet-tdt-0.6b-v3"]).toBe("downloading 1/4");
   });
 
+  it("logs a failed download's class, never the path in its error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_model_status") return Promise.resolve({ models: [parakeetModel] });
+      if (command === "download_model") {
+        return Promise.reject(
+          new Error("No space left on device (os error 28): /Users/jane/Library/Models/parakeet"),
+        );
+      }
+      return Promise.resolve(null);
+    });
+    const { result } = renderHook(() => useModelManagement());
+    await waitFor(() => expect(result.current.models["parakeet-tdt-0.6b-v3"]).toBeDefined());
+
+    await act(async () => {
+      await result.current.downloadModel("parakeet-tdt-0.6b-v3");
+    });
+
+    await waitFor(() => expect(result.current.downloadErrors["parakeet-tdt-0.6b-v3"]).toBeTruthy());
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).toContain("disk_full");
+    expect(logged).not.toContain("/Users/jane");
+    consoleError.mockRestore();
+  });
+
   it("does not double-handle a failure delivered via both the command rejection and the download-error event", async () => {
     mockInvoke.mockImplementation((command: string) => {
       if (command === "get_model_status") {

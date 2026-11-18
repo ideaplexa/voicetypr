@@ -1,5 +1,6 @@
 import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import { failureReason } from "@/components/onboarding/OfflinePreparationStatus";
+import { supportsSpokenLanguage } from "@/components/onboarding/useOfflinePreparation";
 import { SettingsPaneCard } from "@/components/settings/settings-ui";
 import { Button } from "@/components/settings/SettingsButton";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,8 @@ import { CircleCheck } from "lucide-react";
 export interface ReadinessLocalPanelProps {
   localModelNames: string[];
   recommendedModel: string | undefined;
+  /** The spoken language: "Most accurate" and "Fastest" rank only the models that support it. */
+  language: string;
   models: Record<string, ModelInfo>;
   downloadProgress: Record<string, number>;
   verifyingModels: Set<string>;
@@ -29,12 +32,14 @@ export interface ReadinessLocalPanelProps {
 }
 
 /** What a model is good for, in the app's own terms: its scores, size and languages. */
-function strengths(model: ModelInfo, others: ModelInfo[]) {
-  const best = (score: (m: ModelInfo) => number) => others.every((other) => score(model) >= score(other));
+function strengths(model: ModelInfo, others: ModelInfo[], language: string) {
+  const fits = others.filter((other) => supportsSpokenLanguage(other, language));
+  const ranked = supportsSpokenLanguage(model, language);
+  const best = (score: (m: ModelInfo) => number) => ranked && fits.every((other) => score(model) >= score(other));
   const words = [
     best((m) => m.accuracy_score ?? 0) ? "Most accurate" : null,
     best((m) => m.speed_score ?? 0) ? "Fastest" : null,
-    best((m) => -(m.size ?? 0)) ? "Smallest" : null,
+    others.every((other) => (model.size ?? 0) <= (other.size ?? 0)) ? "Smallest" : null,
     (model.supported_languages?.length ?? 0) > 1 ? "Many languages" : /\.en$/i.test(model.name) ? "English only" : null,
   ].filter(Boolean);
   return words.join(" · ");
@@ -44,6 +49,7 @@ function strengths(model: ModelInfo, others: ModelInfo[]) {
 export function ReadinessLocalPanel({
   localModelNames,
   recommendedModel,
+  language,
   models,
   downloadProgress,
   verifyingModels,
@@ -84,7 +90,7 @@ export function ReadinessLocalPanel({
                     ) : null}
                   </span>
                   <span className="text-[13px] text-muted-foreground">
-                    {[strengths(model, list), `${Math.round((model.size ?? 0) / (1024 * 1024))} MB`].filter(Boolean).join(" · ")}
+                    {[strengths(model, list, language), `${Math.round((model.size ?? 0) / (1024 * 1024))} MB`].filter(Boolean).join(" · ")}
                   </span>
                 </div>
                 {inUse ? (

@@ -106,6 +106,40 @@ fn hours_to_days(hours: i64) -> i32 {
     (hours as f64 / 24.0).ceil() as i32
 }
 
+const LICENSE_CHECK_FAILED: &str = "License check failed. Connect to the internet, then recheck.";
+
+/// What a cached trial is when the status call fails.
+#[derive(Debug, PartialEq, Eq)]
+enum OfflineTrial {
+    /// Ended by the trial clock; only then does the app say the trial ended.
+    Ended,
+    /// Before its end and within the offline grace period.
+    Active { days_left: i32 },
+    /// Not past its end, but grace has run out or the clock can't be trusted.
+    CheckFailed,
+}
+
+fn offline_trial(
+    clock: crate::license::trial_clock::TrialClock,
+    expires: DateTime<Utc>,
+    now: DateTime<Utc>,
+    grace_days_remaining: Option<i64>,
+) -> OfflineTrial {
+    use crate::license::trial_clock::TrialClock;
+    match clock {
+        TrialClock::Expired => OfflineTrial::Ended,
+        TrialClock::CheckRequired => OfflineTrial::CheckFailed,
+        TrialClock::Valid if grace_days_remaining.is_none() => OfflineTrial::CheckFailed,
+        TrialClock::Valid => {
+            let seconds_left = (expires - now).num_seconds().max(0);
+            let days_left = (seconds_left + 86_399) / 86_400;
+            OfflineTrial::Active {
+                days_left: days_left.max(1) as i32,
+            }
+        }
+    }
+}
+
 fn last_successful_validation(app: &AppHandle) -> Option<DateTime<Utc>> {
     scache::get(app, LAST_VALIDATION_KEY)
         .ok()
@@ -666,61 +700,43 @@ async fn check_license_status_impl(app: AppHandle) -> Result<LicenseStatus, Stri
             if let Ok(Some(expires_json)) = scache::get(&app, TRIAL_EXPIRES_KEY) {
                 if let Ok(expires_at_str) = serde_json::from_value::<String>(expires_json) {
                     if let Ok(expires_at) = DateTime::parse_from_rfc3339(&expires_at_str) {
-                        let expires_utc = expires_at.with_timezone(&Utc);
-                        let now = Utc::now();
-
-                        // Check if trial has already expired
-                        if now >= expires_utc {
-                            log::info!("Trial has expired (was valid until {}). No need to check grace period.", expires_at_str);
-                            // Clear the expired trial cache
-                            let _ = scache::remove(&app, TRIAL_EXPIRES_KEY);
-                            let _ = scache::remove(&app, LAST_TRIAL_VALIDATION_KEY);
-
-                            return Ok(LicenseStatus {
-                                status: LicenseState::Expired,
-                                trial_days_left: Some(0),
-                                license_type: None,
-                                license_key: None,
-                                expires_at: None,
-                                verification_state: None,
-                                verification_expires_at: None,
-                            });
-                        }
-
-                        // Trial is still valid, now check grace period
-                        if let Some(grace_days_remaining) = is_within_trial_grace_period(&app) {
-                            log::info!("Trial still valid AND within {}-day grace period. {} days grace remaining",
-                                     TRIAL_OFFLINE_GRACE_PERIOD_DAYS, grace_days_remaining);
-
-                            // Calculate actual trial days left
-                            let hours_left = (expires_utc - now).num_hours();
-                            let days_left = hours_to_days(hours_left).max(0);
-
-                            log::info!(
-                                "Offline trial access: {} trial days left (expires: {})",
-                                days_left,
-                                expires_at_str
-                            );
-
-                            let status = LicenseStatus {
-                                status: if days_left > 0 {
-                                    LicenseState::Trial
-                                } else {
-                                    LicenseState::Expired
-                                },
-                                trial_days_left: Some(days_left.max(0)),
-                                license_type: None,
-                                license_key: None,
-                                expires_at: Some(expires_at_str.clone()),
-                                verification_state: None,
-                                verification_expires_at: None,
-                            };
-
-                            return Ok(status);
-                        } else {
-                            log::error!("Trial is valid but grace period expired. Requires online validation.");
-                            // Don't delete anything - user just needs to reconnect
-                            return Err("Trial grace period expired. Please connect to internet to continue trial.".to_string());
+                        crate::license::trial_clock::observe(&app);
+                        let cached_trial = LicenseStatus {
+                            status: LicenseState::Trial,
+                            trial_days_left: None,
+                            license_type: None,
+                            license_key: None,
+                            expires_at: Some(expires_at_str.clone()),
+                            verification_state: None,
+                            verification_expires_at: None,
+                        };
+                        match offline_trial(
+                            crate::license::trial_clock::trial_clock(&cached_trial),
+                            expires_at.with_timezone(&Utc),
+                            Utc::now(),
+                            is_within_trial_grace_period(&app),
+                        ) {
+                            OfflineTrial::Ended => {
+                                log::info!("Trial has expired by the trial clock");
+                                let _ = scache::remove(&app, TRIAL_EXPIRES_KEY);
+                                let _ = scache::remove(&app, LAST_TRIAL_VALIDATION_KEY);
+                                return Ok(LicenseStatus {
+                                    status: LicenseState::Expired,
+                                    trial_days_left: Some(0),
+                                    ..cached_trial
+                                });
+                            }
+                            OfflineTrial::Active { days_left } => {
+                                log::info!("Offline trial access: {} trial days left", days_left);
+                                return Ok(LicenseStatus {
+                                    trial_days_left: Some(days_left),
+                                    ..cached_trial
+                                });
+                            }
+                            OfflineTrial::CheckFailed => {
+                                log::error!("Trial is not past its end but needs an online check");
+                                return Err(LICENSE_CHECK_FAILED.to_string());
+                            }
                         }
                     } else {
                         log::warn!(
@@ -1200,6 +1216,69 @@ pub async fn invalidate_license_cache(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn a_failed_check_in_the_last_partial_hour_keeps_the_trial() {
+        use crate::license::trial_clock::TrialClock;
+        let expires = at("2026-11-24T12:00:00Z");
+        assert_eq!(
+            offline_trial(
+                TrialClock::Valid,
+                expires,
+                at("2026-11-24T11:20:00Z"),
+                Some(2)
+            ),
+            OfflineTrial::Active { days_left: 1 }
+        );
+        assert_eq!(
+            offline_trial(
+                TrialClock::Valid,
+                expires,
+                at("2026-11-24T11:59:59Z"),
+                Some(1)
+            ),
+            OfflineTrial::Active { days_left: 1 }
+        );
+        assert_eq!(
+            offline_trial(
+                TrialClock::Valid,
+                expires,
+                at("2026-11-21T12:00:00Z"),
+                Some(1)
+            ),
+            OfflineTrial::Active { days_left: 3 }
+        );
+    }
+
+    #[test]
+    fn a_failed_check_never_ends_a_trial_before_its_end() {
+        use crate::license::trial_clock::TrialClock;
+        let expires = at("2026-11-24T12:00:00Z");
+        let now = at("2026-11-24T11:30:00Z");
+        assert_eq!(
+            offline_trial(TrialClock::Valid, expires, now, None),
+            OfflineTrial::CheckFailed
+        );
+        assert_eq!(
+            offline_trial(TrialClock::CheckRequired, expires, now, Some(1)),
+            OfflineTrial::CheckFailed
+        );
+        assert_eq!(
+            offline_trial(
+                TrialClock::Expired,
+                expires,
+                at("2026-11-24T12:00:00Z"),
+                Some(1)
+            ),
+            OfflineTrial::Ended
+        );
+    }
 
     #[test]
     fn failed_license_check_is_terminal_until_successful_recovery() {

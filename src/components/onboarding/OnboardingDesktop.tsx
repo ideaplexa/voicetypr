@@ -56,7 +56,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     holdToTalk,
     capturedBareModifier,
   } = flow;
-  const { licenseStatus, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
+  const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
 
   const [busy, setBusy] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState(false);
@@ -136,9 +136,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     (currentStep === "setup" || currentStep === "polish" || currentStep === "done")
     ? preparing(flow.chooseSourceFromTry, true) : null;
 
-  const languageWarning = preparation.warningModel ? (
+  const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
+  const languageWarning = warned && sourceType === "local" ? (
     <div role="alert" className="flex flex-col items-center gap-3 text-sm">
-      <p>This model does not support your chosen language. Download it without selecting it?</p>
+      <p>{warned.display_name} doesn't support your chosen language. Download it without selecting it?</p>
       <div className="flex gap-2">
         <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
         <Button onClick={preparation.confirmDownload}>Download anyway</Button>
@@ -224,10 +225,13 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               polishAvailable={polishOn}
               builtinPolish={builtinWillRun}
               engineReady={sourceReady}
-              access={licensed || outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
+              access={outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
+                : licenseCheckFailed ? "check"
+                : licensed ? "ok"
                 : licenseStatus?.status === "expired" ? "ended"
                 : trialError === "trial_unreachable" ? "offline" : "none"}
               onStartTrial={() => goTo("trial")}
+              onRecheck={() => void onRecheckLicense?.()}
               onHaveKey={() => setKeyDialogOpen(true)}
               preparing={sourceType === "local" ? preparing(flow.chooseSourceFromTry) : null}
               microphone={permissions.microphone.status}
