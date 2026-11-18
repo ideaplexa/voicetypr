@@ -127,9 +127,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     (currentStep === "setup" || currentStep === "polish" || currentStep === "done")
     ? preparing(flow.chooseSourceFromTry, true) : null;
 
-  const languageWarning = preparation.warningModel ? (
+  const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
+  const languageWarning = warned && sourceType === "local" ? (
     <div role="alert" className="flex flex-col items-center gap-3 text-sm">
-      <p>This model does not support your chosen language. Download it without selecting it?</p>
+      <p>{warned.display_name} doesn't support your chosen language. Download it without selecting it?</p>
       <div className="flex gap-2">
         <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
         <Button onClick={preparation.confirmDownload}>Download anyway</Button>

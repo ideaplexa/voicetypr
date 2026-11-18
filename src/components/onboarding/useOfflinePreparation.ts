@@ -108,6 +108,7 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
         await updateSettings({ speech_language: value, ...languageModelPatch(management, settings?.current_model, value) });
         localStorage.setItem(LANGUAGE_CHOSEN, "true");
         setTarget(null);
+        setWarningModel(null);
       } catch {
         toast.error("Could not save your language. Try again.");
       } finally { setSavingLanguage(false); }

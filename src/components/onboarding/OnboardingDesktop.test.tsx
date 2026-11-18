@@ -604,6 +604,37 @@ describe("OnboardingDesktop", () => {
     await waitFor(() => expect(settingsState.current_model).toBe("small.en"));
   });
 
+  it("ranks models only among those that speak the chosen language and names the one it warns about", async () => {
+    settingsState.speech_language = "fr";
+    localStorage.setItem("onboarding-language-chosen", "true");
+    modelManagement.models["small.en"] = {
+      ...modelManagement.models["base.en"],
+      name: "small.en",
+      display_name: "Small English",
+      size: 466 * 1024 * 1024,
+      downloaded: false,
+      accuracy_score: 9,
+      speed_score: 9,
+    } as ModelInfo;
+    modelManagement.models.base = {
+      ...modelManagement.models["base.en"],
+      name: "base",
+      display_name: "Base",
+      size: 142 * 1024 * 1024,
+      downloaded: false,
+      accuracy_score: 6,
+      speed_score: 4,
+    } as ModelInfo;
+    modelManagement.modelOrder = ["base.en", "small.en", "base"];
+    const user = userEvent.setup();
+    renderOnboarding();
+    await openSource(user);
+    expect(screen.getByText("English only · 466 MB")).toBeInTheDocument();
+    expect(screen.getByText("Most accurate · Fastest · 142 MB")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Download Small English" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Small English doesn't support your chosen language.");
+  });
+
   it("lets remote-first users switch to local setup from the empty remote state", async () => {
     const user = userEvent.setup();
     settingsState.current_model = "";

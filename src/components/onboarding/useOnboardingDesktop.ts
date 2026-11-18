@@ -728,6 +728,7 @@ export function useOnboardingDesktop({
     local: {
       localModelNames,
       recommendedModel: preparation.bestMatch,
+      language: preparation.language,
       models,
       downloadProgress,
       verifyingModels,
