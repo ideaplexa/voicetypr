@@ -476,7 +476,7 @@ describe("EnhancementsSection", () => {
       const toggle = await screen.findByRole("switch", { name: "Clean up on Voicetypr’s server" });
       await waitFor(() => expect(toggle).toBeChecked());
       expect(screen.getByText(/sent to\s+Voicetypr’s server/)).toBeInTheDocument();
-      expect(screen.getByText("On: your words go to Voicetypr’s server to be cleaned, and nothing is kept.")).toBeInTheDocument();
+      expect(screen.getByText("On: used because you haven’t connected your own provider.")).toBeInTheDocument();
 
       await user.click(toggle);
       await waitFor(() =>

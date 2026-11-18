@@ -15,7 +15,7 @@ export function builtinPolishView(availability: BuiltinPolishAvailability | null
       ? "Not available on this device: built-in Polish needs a trial started with your email, or a license."
     : availability === "unreachable"
       ? "Voicetypr’s server can’t be reached right now, so nothing is sent and you get exactly what you said."
-    : chosen ? "On: your words go to Voicetypr’s server to be cleaned, and nothing is kept."
+    : chosen ? "On: used because you haven’t connected your own provider."
     : "Off: built-in Polish won’t send your text.";
   return { checked: chosen && canRun, disabled: !canRun, status };
 }
