@@ -3,12 +3,12 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { PermissionStatus } from "@/components/onboarding/onboardingTypes";
-import { useFirstDictation, type FirstDictation } from "@/components/onboarding/useFirstDictation";
+import { useFirstDictation } from "@/components/onboarding/useFirstDictation";
 import { FounderLine } from "@/components/onboarding/FounderLine";
 import { isMacOS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { CircleCheck, Mic, MicOff, Square } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 const MESSY = "um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before";
 const PLAIN = "Let’s move the sync to Friday at three, and I’ll send the notes before.";
@@ -28,7 +28,6 @@ export function TryStep({
   localSource,
   onUseSomethingElse,
   onNext,
-  onWorked,
 }: {
   caps: string[];
   holdToTalk: boolean;
@@ -48,12 +47,8 @@ export function TryStep({
   /** Opens the choice of the cloud or another computer instead. */
   onUseSomethingElse: () => void;
   onNext: () => void;
-  onWorked: (result: FirstDictation) => void;
 }) {
   const { listening, working, result, busy, talk, reset } = useFirstDictation(engineReady && access === "ok");
-  useEffect(() => {
-    if (result) onWorked(result);
-  }, [result, onWorked]);
   const micOff = microphone === "denied" || microphone === "restricted";
   // Both panes only when Polish could change the text and, once heard, did.
   const sideBySide = result ? result.polished : polishAvailable;
