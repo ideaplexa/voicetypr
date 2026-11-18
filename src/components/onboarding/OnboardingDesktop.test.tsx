@@ -1160,6 +1160,19 @@ describe("OnboardingDesktop", () => {
     expect(await screen.findByRole("heading", { name: "Now let it type anywhere" })).toBeInTheDocument();
   });
 
+  it("falls back to the plain first try when built-in Polish didn't run", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    await reachTry(user);
+    expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
+    expect(screen.getByText("You said")).toBeInTheDocument();
+    emit("transcription-added", { text: "um so Friday at three", writing: { ai_applied: false } });
+    expect(await screen.findByText("um so Friday at three")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Say something" })).toBeInTheDocument();
+    expect(screen.getByText("Voicetypr typed")).toBeInTheDocument();
+    expect(screen.queryByText("You said")).not.toBeInTheDocument();
+  });
+
   it("puts what was said beside the cleaned text when Polish changed it", async () => {
     const base = invokeMock.getMockImplementation();
     invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>

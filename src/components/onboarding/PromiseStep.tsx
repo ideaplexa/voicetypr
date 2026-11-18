@@ -31,10 +31,12 @@ export function PromiseStep({
       <Card aria-hidden="true" className="w-full max-w-[520px] gap-2 px-5 py-4 text-left">
         <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">Example</span>
         {polishAvailable ? (
-          <p className="text-[16px] leading-6">
-            <s className="text-muted-foreground">um, so</s> Let’s move the sync to{" "}
-            <s className="text-muted-foreground">Thursday, no wait,</s> Friday at 3.
-          </p>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+            <dt className="text-[13px] leading-6 text-muted-foreground">You say</dt>
+            <dd className="text-[15px] leading-6 text-muted-foreground">um, so let’s move the sync to Thursday, no wait, Friday at three</dd>
+            <dt className="text-[13px] leading-6 text-muted-foreground">It lands</dt>
+            <dd className="text-[16px] leading-6">Let’s move the sync to Friday at 3.</dd>
+          </dl>
         ) : (
           <p className="text-[16px] leading-6">Let’s move the sync to Friday at three, and I’ll send the notes before.</p>
         )}

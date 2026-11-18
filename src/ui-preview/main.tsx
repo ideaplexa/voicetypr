@@ -22,6 +22,7 @@ const options: PreviewOptions = {
   onboarding: onboardingStep,
   onboardingCase,
   trialNotStarted: query.get("license") === "none",
+  polishOff: query.get("polish") === "off",
 };
 document.cookie = `sidebar_state=${options.sidebar !== "rail"}; path=/`;
 installPreviewPlatform(options.platform);

@@ -20,6 +20,8 @@ export type PreviewOptions = {
   onboardingCase?: OnboardingPreviewCase;
   /** `?license=none`: a device whose free trial has not been started. */
   trialNotStarted?: boolean;
+  /** `?polish=off`: built-in Polish switched off, so onboarding shows the plain promise. */
+  polishOff?: boolean;
 };
 
 const demoText = [
@@ -253,6 +255,7 @@ export function createFixtures(options: PreviewOptions) {
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
+    builtin_polish_enabled: options.polishOff ? false : undefined,
     check_updates_automatically: false,
     recording_mode: options.onboarding ? "toggle" : "push_to_talk",
     selected_microphone:

@@ -58,7 +58,7 @@ export function TryStep({
     if (result) onWorked();
   }, [result, onWorked]);
   const micOff = microphone === "denied" || microphone === "restricted";
-  // Both panes only when Polish could change the text and, once heard, did.
+  // Polish wording and both panes only when Polish could change the text and, once heard, did.
   const sideBySide = result ? result.polished : polishAvailable;
   const verb = holdToTalk ? "Hold" : "Press";
   const somethingElse = (
@@ -121,15 +121,15 @@ export function TryStep({
   return (
     <section className="flex w-full flex-col items-center gap-[18px] text-center">
       <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        {polishAvailable ? "Say something messy" : "Say something"}
+        {sideBySide ? "Say something messy" : "Say something"}
       </h2>
       <p className="max-w-[560px] text-base leading-9 text-muted-foreground">
         {verb} <KeyCaps caps={caps} size="onboarding" /> and talk.{" "}
         {holdToTalk ? "Let go when you’re done." : "Press again when you’re done."}
-        {polishAvailable ? " Change your mind halfway." : null}
+        {sideBySide ? " Change your mind halfway." : null}
       </p>
       <p className="max-w-[520px] text-[13px] text-muted-foreground">
-        Not sure what to say? Read this out: <q>{polishAvailable ? MESSY : PLAIN}</q>
+        Not sure what to say? Read this out: <q>{sideBySide ? MESSY : PLAIN}</q>
       </p>
 
       {micOff ? (
