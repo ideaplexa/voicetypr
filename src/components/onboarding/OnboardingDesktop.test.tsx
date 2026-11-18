@@ -1441,10 +1441,11 @@ describe("OnboardingDesktop", () => {
       const user = userEvent.setup();
       renderOnboarding();
       await reachUse(user);
-      const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
       await waitFor(() => expect(toggle).toBeChecked());
-      expect(screen.getByText(/Your words are sent to Voicetypr’s server to be cleaned, and nothing is kept/)).toBeInTheDocument();
+      expect(screen.getByText(/Your words go to Voicetypr’s server to be cleaned, and nothing is kept/)).toBeInTheDocument();
       expect(screen.getByText("Rather use your own AI provider? Add its key in Settings → Polish.")).toBeInTheDocument();
+      expect(screen.queryByText(/On: used because/)).not.toBeInTheDocument();
       await user.click(toggle);
       // The same saved setting Settings → Polish writes, which the next dictation reads.
       expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false });
@@ -1460,7 +1461,7 @@ describe("OnboardingDesktop", () => {
       renderOnboarding();
       await reachUse(user);
       expect(await screen.findByText(line)).toBeInTheDocument();
-      const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
+      const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
       expect(toggle).not.toBeChecked();
       expect(toggle).toHaveAttribute("aria-disabled", "true");
       await user.click(screen.getByRole("button", { name: "Code and tech notes" }));
@@ -1490,9 +1491,8 @@ describe("OnboardingDesktop", () => {
       const user = userEvent.setup();
       renderOnboarding();
       await reachUse(user);
-      expect(screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" })).not.toBeChecked();
+      expect(screen.getByRole("switch", { name: "Clean up what I say" })).not.toBeChecked();
       expect(screen.getByText("Off: built-in Polish won’t send your text.")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled();
       await user.click(screen.getByRole("button", { name: "Messages and email" }));
       expect(screen.getByRole("status")).toHaveTextContent(
         "When Polish is on, it starts in the Message style, tidy sentences in your own wording.",
@@ -1521,6 +1521,19 @@ describe("OnboardingDesktop", () => {
       expect(screen.getByText("Polish typed")).toBeInTheDocument();
       expect(screen.getAllByText("Ship it on Friday.").length).toBeGreaterThan(0);
       expect(screen.getAllByText("uh ship it on thursday no friday").length).toBeGreaterThan(0);
+    });
+
+    it("continues without a pick, keeping Polish on and today's default style", async () => {
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachUse(user);
+      const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
+      await waitFor(() => expect(toggle).toBeChecked());
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      await screen.findByRole("heading", { name: /welcome back/i });
+      expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: null });
+      expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: false });
+      expect(invokeMock).not.toHaveBeenCalledWith("update_enhancement_options", expect.anything());
     });
 
     it("leaves today's default when skipped", async () => {

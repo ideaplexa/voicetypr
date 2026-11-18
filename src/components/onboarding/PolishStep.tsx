@@ -95,12 +95,12 @@ export function PolishStep({
           <div className="flex items-start gap-3">
             <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
             <div className="flex-1 text-sm">
-              <label htmlFor="onboarding-builtin-polish" className="font-semibold">Clean up on Voicetypr’s server</label>
+              <label htmlFor="onboarding-builtin-polish" className="font-semibold">Clean up what I say</label>
               <p className="text-muted-foreground">
-                Your words are sent to Voicetypr’s server to be cleaned, and nothing is kept. Turn it off and nothing
-                is sent; you get exactly what you said.
+                Your words go to Voicetypr’s server to be cleaned, and nothing is kept. Off sends nothing; you get
+                exactly what you said.
               </p>
-              <p className="mt-1">{builtin.status}</p>
+              {builtin.checked ? null : <p className="mt-1">{builtin.status}</p>}
             </div>
             <Switch id="onboarding-builtin-polish" checked={builtin.checked} disabled={builtin.disabled || saving}
               onCheckedChange={onBuiltinChange} />
@@ -139,7 +139,7 @@ export function PolishStep({
       <div className="flex flex-wrap justify-center gap-[10px]">
         <Button variant="outline" disabled={saving} onClick={onBack}>Back</Button>
         <Button variant="ghost" disabled={saving} onClick={() => onChoose(null)}>Skip</Button>
-        <Button disabled={!use || saving} onClick={() => use && onChoose(use.style)}>Continue</Button>
+        <Button disabled={saving} onClick={() => onChoose(use?.style ?? null)}>Continue</Button>
       </div>
     </section>
   );
