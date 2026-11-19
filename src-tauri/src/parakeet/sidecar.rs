@@ -8,6 +8,7 @@ use base64::{engine::general_purpose, Engine as _};
 use log::{debug, error, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tauri::async_runtime::{Receiver, RwLock};
 use tauri::AppHandle;
@@ -167,6 +168,29 @@ fn parse_response_line(raw: &str) -> Result<ParakeetResponse, ParakeetError> {
     }
 }
 
+/// Replaces every absolute path in a sidecar diagnostic with `<path>`, so a
+/// line can be logged for diagnosis without naming files on this computer.
+fn scrub_absolute_paths(line: &str) -> String {
+    static FILE_URL: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"(?i)file://[^\s"'<>]*"#).unwrap());
+    static QUOTED: LazyLock<[regex::Regex; 2]> = LazyLock::new(|| {
+        [
+            regex::Regex::new(r#""(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^"\r\n]*""#).unwrap(),
+            regex::Regex::new(r#"'(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^'\r\n]*'"#).unwrap(),
+        ]
+    });
+    static BARE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(^|[\s(=\[,])(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^\s"'),\]]*(?:[ \t][^\s/\\"'),\]]*[/\\][^\s"'),\]]*)*"#,
+        )
+        .unwrap()
+    });
+    let line = FILE_URL.replace_all(line, "file://<path>");
+    let line = QUOTED[0].replace_all(&line, "\"<path>\"");
+    let line = QUOTED[1].replace_all(&line, "'<path>'");
+    BARE.replace_all(&line, "${1}<path>").into_owned()
+}
+
 fn log_parakeet_stderr(line: &str) {
     let lower = line.to_ascii_lowercase();
     let looks_like_error = lower.contains("error")
@@ -178,13 +202,12 @@ fn log_parakeet_stderr(line: &str) {
         log::info!(
             "Parakeet sidecar: Core ML shape probe emitted a benign diagnostic; model loading continued"
         );
-    // The sidecar no longer writes recognized text or paths to stderr, and the
-    // log sinks scrub home directories and URL credentials, so its diagnostics
-    // stay in the log: without them a Parakeet failure cannot be diagnosed.
+    // Diagnostics stay in the log, since without them a Parakeet failure
+    // cannot be diagnosed, but every absolute path is scrubbed first.
     } else if looks_like_error {
-        warn!("Parakeet sidecar: {}", line);
+        warn!("Parakeet sidecar: {}", scrub_absolute_paths(line));
     } else {
-        log::info!("Parakeet sidecar: {}", line);
+        log::info!("Parakeet sidecar: {}", scrub_absolute_paths(line));
     }
 }
 
@@ -1005,9 +1028,33 @@ mod tests {
     use super::{
         dispatch_cancellable, drain_buffered_preview_chunks, extract_json_payload,
         finalize_terminal_command_sequence, is_benign_coreml_shape_probe, parse_response_line,
-        request_with_timeout, ParakeetStreamHandle, StreamTerminalControl,
+        request_with_timeout, scrub_absolute_paths, ParakeetStreamHandle, StreamTerminalControl,
     };
     use crate::parakeet::error::ParakeetError;
+
+    #[test]
+    fn sidecar_diagnostics_keep_their_words_but_lose_every_absolute_path() {
+        for (raw, logged) in [
+            (
+                "downloadFailed: couldn't write /Users/jane/Library/Application Support/FluidAudio/Models/x.mlmodelc (No space left)",
+                "downloadFailed: couldn't write <path> (No space left)",
+            ),
+            (
+                "Error at \"/private/var/folders/ab/T/model.bin\": permission denied",
+                "Error at \"<path>\": permission denied",
+            ),
+            ("failed to open '/opt/models/v3' now", "failed to open '<path>' now"),
+            ("CoreML error: file:///Volumes/disk/m.mlmodelc missing", "CoreML error: file://<path> missing"),
+            (r"load failed: C:\Users\jane\AppData\Local\model", "load failed: <path>"),
+            ("cache=~/Library/Caches/x failed", "cache=<path> failed"),
+            (
+                "HuggingFace rate limit for https://huggingface.co/FluidInference/parakeet",
+                "HuggingFace rate limit for https://huggingface.co/FluidInference/parakeet",
+            ),
+        ] {
+            assert_eq!(scrub_absolute_paths(raw), logged);
+        }
+    }
     use crate::parakeet::messages::{
         ParakeetCommand, ParakeetResponse, SHORT_REQUEST_TIMEOUT_SECS,
     };

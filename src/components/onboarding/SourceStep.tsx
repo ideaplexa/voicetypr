@@ -7,13 +7,9 @@ import { Cloud, Laptop, Network } from "lucide-react";
 export function SourceStep({
   sourceType,
   onConfirmSource,
-  modelName,
-  modelSize,
 }: {
   sourceType: SourceType;
   onConfirmSource: (source: SourceType) => void;
-  modelName: string | null;
-  modelSize: string | null;
 }) {
   return (
     <div className="flex w-full flex-col gap-[10px]">
@@ -21,9 +17,7 @@ export function SourceStep({
         layout="row"
         label={isMacOS ? "On this Mac" : "On this PC"}
         icon={Laptop}
-        description={modelName
-          ? `${modelName}${modelSize ? ` · ${modelSize}, downloaded once` : ""}. Recognised on this computer, even offline.`
-          : "Recognised on this computer, even offline. Needs a local model."}
+        description="Private, works offline. You choose the model next."
         selected={sourceType === "local"}
         onSelect={() => onConfirmSource("local")}
       />
@@ -31,7 +25,7 @@ export function SourceStep({
         layout="row"
         label="Cloud, with your key"
         icon={Cloud}
-        description="Soniox, Deepgram, OpenAI, Groq or Cohere. Needs a valid API key from that provider; your audio goes to that provider."
+        description="Your own key from a provider such as Soniox or Deepgram. Your audio goes to that provider."
         selected={sourceType === "cloud"}
         onSelect={() => onConfirmSource("cloud")}
       />
@@ -39,7 +33,7 @@ export function SourceStep({
         layout="row"
         label="Another computer on your network"
         icon={Network}
-        description="Needs a Mac or PC running Voicetypr with sharing on, on the same network. Use only on a trusted network: audio and transcripts travel unencrypted."
+        description="A Mac or PC running Voicetypr with sharing on, on a trusted network."
         selected={sourceType === "remote"}
         onSelect={() => onConfirmSource("remote")}
       />

@@ -86,7 +86,7 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
     setTarget(modelName);
     // A model that still has to download leaves a working one in use until it is ready.
     const current = selected ? management.models[selected] : undefined;
-    const keepCurrent = !info.downloaded && selected !== modelName && Boolean(current?.downloaded && !current.requires_setup);
+    const keepCurrent = !info.downloaded && selected !== modelName && Boolean(current && isLocalModel(current) && current.downloaded && !current.requires_setup);
     if (!keepCurrent) await updateSettings({ current_model: modelName, current_model_engine: info.engine });
     if (!info.downloaded && management.downloadProgress[modelName] === undefined &&
       !management.verifyingModels.has(modelName)) await management.downloadModel(modelName);

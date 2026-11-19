@@ -73,7 +73,7 @@ export const demoHistory: HistoryWireItem[] = demoText.map((text, index) => ({
           : 48 * 60 * 60 * 1000 + (index - 10) * 60 * 60 * 1000),
   ).toISOString(),
   text,
-  model: index === 7 || index === 12 ? "whisper-small" : "parakeet-v3",
+  model: index === 7 || index === 12 ? "small.en" : "parakeet-tdt-0.6b-v3",
   status: "completed",
   writing: {
     source: index === 7 || index === 12 ? "audio_file" : "desktop_recording",
@@ -94,7 +94,7 @@ export const demoHistory: HistoryWireItem[] = demoText.map((text, index) => ({
 }));
 
 export const demoDownloadProgress = {
-  model: "whisper-medium",
+  model: "large-v3-turbo",
   engine: "whisper",
   downloaded: 241_000_000,
   total: 574_000_000,
@@ -103,48 +103,29 @@ export const demoDownloadProgress = {
 };
 
 export const demoModels: ModelInfo[] = [
-  {
-    name: "parakeet-v3",
-    display_name: "Parakeet v3",
-    engine: "parakeet",
+  ...([
+    ["parakeet-tdt-0.6b-v3", "Parakeet V3", "parakeet", true, true, 500_000_000, 9, 9],
+    ["parakeet-tdt-0.6b-v2", "Parakeet V2 (English)", "parakeet", false, false, 480_000_000, 9, 8],
+    ["parakeet-unified-640ms", "Parakeet Unified (English)", "parakeet", false, false, 620_000_000, 9, 10],
+    ["nemotron-multilingual-1120ms", "Nemotron 3.5", "parakeet", false, false, 665_000_000, 8, 9],
+    ["base.en", "Base (English)", "whisper", false, true, 147_964_211, 8, 5],
+    ["small.en", "Small (English)", "whisper", false, false, 487_614_201, 7, 6],
+    ["large-v3-turbo", "Large v3 Turbo", "whisper", false, false, 1_624_555_275, 7, 9],
+    ["large-v3", "Large v3", "whisper", false, false, 3_095_033_483, 2, 9],
+  ] as const).map(([name, display_name, engine, recommended, downloaded, size, speed_score, accuracy_score]): ModelInfo => ({
+    name,
+    display_name,
+    engine,
     kind: "local",
-    recommended: true,
-    downloaded: true,
+    recommended,
+    downloaded,
     requires_setup: false,
-    size: 2_300_000_000,
+    size,
     url: "",
     sha256: "",
-    speed_score: 10,
-    accuracy_score: 9,
-  },
-  {
-    name: "whisper-small",
-    display_name: "Whisper Small English",
-    engine: "whisper",
-    kind: "local",
-    recommended: false,
-    downloaded: true,
-    requires_setup: false,
-    size: 252_000_000,
-    url: "",
-    sha256: "",
-    speed_score: 8,
-    accuracy_score: 7,
-  },
-  {
-    name: "whisper-medium",
-    display_name: "Whisper Turbo",
-    engine: "whisper",
-    kind: "local",
-    recommended: false,
-    downloaded: false,
-    requires_setup: false,
-    size: 574_000_000,
-    url: "",
-    sha256: "",
-    speed_score: 6,
-    accuracy_score: 8,
-  },
+    speed_score,
+    accuracy_score,
+  })),
   ...(["soniox", "deepgram", "openai", "groq", "cohere"] as const).map((engine): ModelInfo => ({
     name: engine,
     display_name: engine[0].toUpperCase() + engine.slice(1),
@@ -253,7 +234,7 @@ export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
   const settings: AppSettings = {
     hotkey,
-    current_model: "parakeet-v3",
+    current_model: "parakeet-tdt-0.6b-v3",
     current_model_engine: "parakeet",
     speech_language: "en",
     theme: options.theme,
@@ -277,7 +258,7 @@ export function createFixtures(options: PreviewOptions) {
   const downloadCase = options.onboardingCase === "downloading" || options.onboardingCase === "download-failed";
   const onboardingModels = options.onboarding
     ? demoModels.map((model) => {
-        if (model.name !== "parakeet-v3") return model;
+        if (model.name !== "parakeet-tdt-0.6b-v3") return model;
         return options.platform === "macos"
           ? {
               ...model,

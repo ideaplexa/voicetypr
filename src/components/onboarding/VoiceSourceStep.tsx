@@ -1,23 +1,13 @@
-import type { ComponentProps, ReactNode } from "react";
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { Button } from "@/components/settings/SettingsButton";
-import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel";
-import { ReadinessLocalPanel } from "@/components/onboarding/ReadinessLocalPanel";
-import { ReadinessRemotePanel } from "@/components/onboarding/ReadinessRemotePanel";
 import { SourceStep } from "@/components/onboarding/SourceStep";
 import type { SourceType } from "@/components/onboarding/onboardingTypes";
 import { isMacOS } from "@/lib/platform";
 
-/** "Where should your voice become text?": the on-device model downloads here. */
+/** "Where should your voice become text?": only the choice; the engine comes next. */
 export function VoiceSourceStep({
   sourceType,
-  modelName,
-  modelSize,
   language,
-  local,
-  cloud,
-  remote,
-  warning,
   busy,
   onConfirmSource,
   onLanguageChange,
@@ -25,14 +15,7 @@ export function VoiceSourceStep({
   onNext,
 }: {
   sourceType: SourceType;
-  modelName: string | null;
-  modelSize: string | null;
   language: string;
-  local: ComponentProps<typeof ReadinessLocalPanel>;
-  cloud: ComponentProps<typeof ReadinessCloudPanel>;
-  remote: ComponentProps<typeof ReadinessRemotePanel>;
-  /** A model that doesn't support the chosen language asks before downloading. */
-  warning: ReactNode;
   busy: boolean;
   onConfirmSource: (source: SourceType) => void;
   onLanguageChange: (value: string) => void;
@@ -51,11 +34,7 @@ export function VoiceSourceStep({
         <span>I speak</span>
         <LanguageSelection value={language} onValueChange={onLanguageChange} />
       </div>
-      <SourceStep sourceType={sourceType} onConfirmSource={onConfirmSource} modelName={modelName} modelSize={modelSize} />
-      {sourceType === "local" && <div className="w-full"><ReadinessLocalPanel {...local} /></div>}
-      {sourceType === "cloud" && <div className="w-full"><ReadinessCloudPanel {...cloud} /></div>}
-      {sourceType === "remote" && <div className="w-full"><ReadinessRemotePanel {...remote} /></div>}
-      {warning}
+      <SourceStep sourceType={sourceType} onConfirmSource={onConfirmSource} />
       <div className="flex flex-wrap justify-center gap-[10px]">
         <Button variant="outline" disabled={busy} onClick={onBack}>Back</Button>
         <Button disabled={busy} onClick={onNext}>Continue</Button>
