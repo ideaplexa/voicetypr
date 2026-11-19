@@ -10,6 +10,7 @@ import { Keyboard } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function SetupStep({
+  part,
   caps,
   holdToTalk,
   onHoldToTalkChange,
@@ -27,6 +28,8 @@ export function SetupStep({
   nextDisabled,
   saving,
 }: {
+  /** Permissions (microphone and Accessibility) or the shortcut, each its own page. */
+  part: "permissions" | "shortcut";
   caps: string[];
   holdToTalk: boolean;
   onHoldToTalkChange: (hold: boolean) => void;
@@ -49,22 +52,23 @@ export function SetupStep({
   const accessibilityAllowed = permissions.accessibility.status === "granted";
   const checks = [permissions.microphone.status === "granted", accessibilityAllowed];
   const done = checks.filter(Boolean).length;
+  const permissionsPage = part === "permissions";
   return (
     <section className="flex w-full flex-col items-center gap-[18px]">
       <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        Now let it type anywhere
+        {permissionsPage ? "Now let it type anywhere" : "Your shortcut"}
       </h2>
       <p className="text-center text-sm text-muted-foreground">
-        {isMacOS
-          ? "Your microphone, one permission and your shortcut. Then Voicetypr works in every app."
-          : "Your microphone and your shortcut. Then Voicetypr works in every app."}
+        {!permissionsPage ? "Press it in any app to start dictating."
+          : isMacOS ? "Your microphone and one permission. Then Voicetypr works in every app."
+          : "Your microphone. Then Voicetypr works in every app."}
       </p>
-      {isMacOS ? <div className="flex w-full max-w-[300px] items-center gap-3">
+      {permissionsPage && isMacOS ? <div className="flex w-full max-w-[300px] items-center gap-3">
         <Progress value={(done / checks.length) * 100} aria-label="Setup progress" className="flex-1 [&_[data-slot=progress-indicator]]:bg-sage [&_[data-slot=progress-track]]:h-2" />
         <span className="text-[13px] whitespace-nowrap text-muted-foreground">{done} of {checks.length} permissions</span>
       </div> : null}
-      {!isMacOS || permissions.microphone.status === "granted" ? <MicrophoneCheck allowed={isMacOS} /> : null}
-      {isMacOS ? (
+      {permissionsPage && (!isMacOS || permissions.microphone.status === "granted") ? <MicrophoneCheck allowed={isMacOS} /> : null}
+      {permissionsPage && isMacOS ? (
         <PermissionsStep
           types={permissions.microphone.status === "granted" ? ["accessibility"] : ["microphone", "accessibility"]}
           permissions={permissions}
@@ -74,7 +78,7 @@ export function SetupStep({
           onRequest={onRequest}
         />
       ) : null}
-      {editor ?? (
+      {permissionsPage ? null : editor ?? (
         <SettingsPaneCard className="w-full !px-[18px] !py-[14px]">
           <div className="flex items-center gap-[14px]">
             <span className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-sage-bg">
@@ -92,7 +96,7 @@ export function SetupStep({
           </div>
         </SettingsPaneCard>
       )}
-      {!editor ? (
+      {!permissionsPage && !editor ? (
         <div role="group" aria-label="How the shortcut works" className="grid w-full gap-2.5 sm:grid-cols-2">
           <ChoiceCard
             layout="row"
@@ -110,14 +114,15 @@ export function SetupStep({
           />
         </div>
       ) : null}
-      {!editor ? (
+      {permissionsPage || !editor ? (
         <div className="flex flex-wrap justify-center gap-[10px]">
           <Button variant="outline" onClick={onBack}>Back</Button>
-          {isMacOS && !accessibilityAllowed ? (
+          {permissionsPage && isMacOS && !accessibilityAllowed ? (
             <Button variant="ghost" disabled={saving} onClick={onSkipAccessibility}>Skip, I’ll paste myself</Button>
-          ) : (
+          ) : null}
+          {!permissionsPage ? (
             <Button variant="ghost" disabled={saving} onClick={onSkip}>Skip for now</Button>
-          )}
+          ) : null}
           <Button disabled={nextDisabled || saving} onClick={onNext}>Continue</Button>
         </div>
       ) : null}

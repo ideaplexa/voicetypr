@@ -1,24 +1,19 @@
-import { LanguageSelection } from "@/components/LanguageSelection";
 import { Button } from "@/components/settings/SettingsButton";
 import { SourceStep } from "@/components/onboarding/SourceStep";
 import type { SourceType } from "@/components/onboarding/onboardingTypes";
 import { isMacOS } from "@/lib/platform";
 
-/** "Where should your voice become text?": only the choice; the engine comes next. */
+/** "Where should your voice become text?": only the choice; language and engine come next. */
 export function VoiceSourceStep({
   sourceType,
-  language,
   busy,
   onConfirmSource,
-  onLanguageChange,
   onBack,
   onNext,
 }: {
   sourceType: SourceType;
-  language: string;
   busy: boolean;
   onConfirmSource: (source: SourceType) => void;
-  onLanguageChange: (value: string) => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -30,10 +25,6 @@ export function VoiceSourceStep({
       <p className="text-center text-sm text-muted-foreground">
         Most people start on this {isMacOS ? "Mac" : "PC"}. You can change this any time in Settings.
       </p>
-      <div className="flex items-center gap-3 self-start text-sm">
-        <span>I speak</span>
-        <LanguageSelection value={language} onValueChange={onLanguageChange} />
-      </div>
       <SourceStep sourceType={sourceType} onConfirmSource={onConfirmSource} />
       <div className="flex flex-wrap justify-center gap-[10px]">
         <Button variant="outline" disabled={busy} onClick={onBack}>Back</Button>

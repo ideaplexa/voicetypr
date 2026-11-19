@@ -7,9 +7,9 @@ import type { Step } from "@/components/onboarding/onboardingTypes";
 import { installPreviewPlatform } from "./platform";
 
 const query = new URLSearchParams(location.search);
-const STEPS: Step[] = ["promise", "trial", "source", "engine", "setup", "polish", "try", "keep", "done"];
+const STEPS: Step[] = ["promise", "source", "language", "engine", "permissions", "shortcut", "fork", "polish", "trial", "try", "done"];
 // The numbered phases of the previous onboarding still open its nearest step.
-const LEGACY: Record<string, Step> = { "1": "promise", "2": "setup", "3": "trial" };
+const LEGACY: Record<string, Step> = { "1": "promise", "2": "permissions", "3": "trial", setup: "permissions" };
 const onboardingParam = query.get("onboarding") ?? "";
 const onboardingStep = LEGACY[onboardingParam] ?? STEPS.find((step) => step === onboardingParam);
 if (onboardingStep) installOnboardingPreview(onboardingStep);

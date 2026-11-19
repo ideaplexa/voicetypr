@@ -41,7 +41,7 @@ export function useOnboardingDesktop({
   modelManagement,
   previewStep,
   licenseStatus,
-}: OnboardingDesktopProps, showKeep: boolean) {
+}: OnboardingDesktopProps) {
   const needsTrial = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "trial";
   const { settings, updateSettings } = useSettings();
   const preparation = useOfflinePreparation(modelManagement);
@@ -75,27 +75,27 @@ export function useOnboardingDesktop({
   } = modelManagement;
 
   const [currentStep, setCurrentStep] = useState<Step>(previewStep ?? "promise");
-  // The steps in order. The shape is fixed by the licence as first known, so
-  // starting a trial or adding a key never changes the count mid-flow; a step
-  // that no longer applies is skipped instead.
-  const [shape, setShape] = useState<{ trial: boolean; keep: boolean } | null>(null);
-  if (shape === null && licenseStatus != null) {
-    setShape({ trial: needsTrial, keep: licenseStatus.status !== "licensed" });
-  }
+  // The steps in order: the essentials, a fork (go deeper or done for now), then
+  // the trial and upgrade, and the first dictation last. The dots count the
+  // shape the licence started with; a step that no longer applies is skipped.
+  const [shape, setShape] = useState<{ trial: boolean } | null>(null);
+  if (shape === null && licenseStatus != null) setShape({ trial: needsTrial });
+  const [deeper, setDeeper] = useState(false);
   const steps: Step[] = [
     "promise",
-    "trial",
     "source",
+    "language",
     "engine",
-    "setup",
+    "permissions",
+    "shortcut",
+    "fork",
     "polish",
+    "trial",
     "try",
-    "keep",
     "done",
   ];
-  const skipped = (step: Step) => (step === "trial" && !needsTrial) || (step === "keep" && !showKeep);
-  // The dots count the steps this licence started with; a step re-entered later shares its neighbour's dot.
-  const dots = steps.filter((step) => (step !== "trial" || (shape?.trial ?? needsTrial)) && (step !== "keep" || shape?.keep));
+  const skipped = (step: Step) => (step === "trial" && !needsTrial) || (step === "polish" && !deeper);
+  const dots = steps.filter((step) => step !== "trial" || (shape?.trial ?? needsTrial));
   const walk = (from: Step, by: 1 | -1): Step => {
     for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
       if (!skipped(steps[i])) return steps[i];
@@ -262,12 +262,12 @@ export function useOnboardingDesktop({
   }, []);
 
   useEffect(() => {
-    if (currentStep !== "try" && currentStep !== "setup" && currentStep !== "done") return;
+    if (currentStep !== "try" && currentStep !== "permissions" && currentStep !== "shortcut" && currentStep !== "done") return;
     void checkPermissions();
   }, [currentStep, checkPermissions]);
 
   useEffect(() => {
-    if (currentStep !== "try" && currentStep !== "setup") return;
+    if (currentStep !== "try" && currentStep !== "permissions") return;
     const handleFocus = () => {
       void checkPermissionsRef.current();
     };
@@ -629,9 +629,9 @@ export function useOnboardingDesktop({
   useEffect(() => {
     startPreparingRef.current = startPreparing;
   });
-  // The on-device engine starts downloading from the source steps; its progress shows on the engine step.
+  // The on-device engine starts downloading on the model step, where its progress shows.
   useEffect(() => {
-    if ((currentStep === "source" || currentStep === "engine") && sourceType === "local" && sourceRestored) startPreparingRef.current();
+    if (currentStep === "engine" && sourceType === "local" && sourceRestored) startPreparingRef.current();
   }, [currentStep, sourceType, sourceRestored, preparation.recommended]);
 
   const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
@@ -645,11 +645,6 @@ export function useOnboardingDesktop({
 
   const handleNext = async () => {
     try {
-      if (currentStep === "source") {
-        if (preparation.savingLanguage) return;
-        setCurrentStep(after("source"));
-        return;
-      }
 
       if (currentStep === "engine") {
         if (preparation.savingLanguage) return;
@@ -663,7 +658,8 @@ export function useOnboardingDesktop({
         return;
       }
 
-      if (currentStep === "setup") await saveHotkeySettings();
+      if (currentStep === "language" && preparation.savingLanguage) return;
+      if (currentStep === "shortcut") await saveHotkeySettings();
       setCurrentStep(after(currentStep));
     } catch (error) {
       log.error("Failed to advance onboarding:", error);
@@ -699,12 +695,13 @@ export function useOnboardingDesktop({
 
   const canProceed = () => {
     switch (currentStep) {
-      case "source":
+      case "language":
       case "engine":
         return !preparation.savingLanguage;
-      case "setup":
-        return !isEditingHotkey && (!isMacOS || accessibilitySkipped ||
-          permissions.accessibility.status === "granted");
+      case "permissions":
+        return !isMacOS || accessibilitySkipped || permissions.accessibility.status === "granted";
+      case "shortcut":
+        return !isEditingHotkey;
       default:
         return true;
     }
@@ -727,7 +724,12 @@ export function useOnboardingDesktop({
       setSourceFromTry(true);
       setCurrentStep("source");
     },
-    skipSetup: () => setCurrentStep(after("setup")),
+    skipSetup: () => setCurrentStep(after("shortcut")),
+    /** The fork after the essentials: Polish and the rest, or straight on. */
+    chooseDepth: (goDeeper: boolean) => {
+      setDeeper(goDeeper);
+      setCurrentStep(goDeeper ? "polish" : walk("polish", 1));
+    },
     handleBack,
     handleNext,
     nextDisabled,

@@ -2,7 +2,8 @@ import { HotkeyStep } from "@/components/onboarding/HotkeyStep";
 import { StepDots } from "@/components/onboarding/OnboardingChrome";
 import { VoiceSourceStep } from "@/components/onboarding/VoiceSourceStep";
 import { EngineStep } from "@/components/onboarding/EngineStep";
-import { KeepStep } from "@/components/onboarding/KeepStep";
+import { LanguageStep } from "@/components/onboarding/LanguageStep";
+import { ForkStep } from "@/components/onboarding/ForkStep";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/settings/SettingsButton";
@@ -40,10 +41,7 @@ function trialEnds(status: LicenseStatus | null | undefined) {
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
   const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
-  // Upgrading comes after the first try, only for someone on a trial.
-  const showKeep = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "expired" &&
-    outcome?.kind !== "key" && (licenseStatus?.status === "trial" || outcome?.kind === "trial");
-  const flow = useOnboardingDesktop(props, showKeep);
+  const flow = useOnboardingDesktop(props);
   const {
     currentStep,
     goTo,
@@ -86,9 +84,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const { after } = flow;
   useEffect(() => {
     if (currentStep === "trial" && licensed) goTo(after("trial"));
-    // A key activated on the upgrade step: nothing is left to upgrade.
-    if (currentStep === "keep" && !showKeep) goTo(after("keep"));
-  }, [currentStep, licensed, showKeep, goTo, after]);
+  }, [currentStep, licensed, goTo, after]);
 
   const polishOn = aiEnabled && polishCanRun;
   const polishAvailable = NEW_USERS_GET_POLISH || polishOn;
@@ -121,7 +117,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     />
   );
   const downloadLine = sourceType === "local" && !local.localReady &&
-    (currentStep === "setup" || currentStep === "polish" || currentStep === "keep" || currentStep === "done")
+    ["permissions", "shortcut", "fork", "polish", "trial", "done"].includes(currentStep)
     ? preparing(flow.chooseSourceFromTry, true) : null;
 
   const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
@@ -191,9 +187,17 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           {currentStep === "source" && (
             <VoiceSourceStep
               sourceType={sourceType}
-              language={preparation.language}
               busy={busy || nextDisabled}
               onConfirmSource={confirmSource}
+              onBack={handleBack}
+              onNext={() => void run(handleNext)}
+            />
+          )}
+
+          {currentStep === "language" && (
+            <LanguageStep
+              language={preparation.language}
+              busy={busy || nextDisabled}
               onLanguageChange={(value) => void preparation.changeLanguage(value)}
               onBack={handleBack}
               onNext={() => void run(handleNext)}
@@ -237,8 +241,17 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
-          {currentStep === "setup" && (
+          {currentStep === "fork" && (
+            <ForkStep
+              onDeeper={() => flow.chooseDepth(true)}
+              onDoneForNow={() => flow.chooseDepth(false)}
+              onBack={handleBack}
+            />
+          )}
+
+          {(currentStep === "permissions" || currentStep === "shortcut") && (
             <SetupStep
+              part={currentStep}
               caps={caps}
               holdToTalk={holdToTalk}
               onHoldToTalkChange={flow.onHoldToTalkChange}
@@ -285,15 +298,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               saving={busy}
               onBack={handleBack}
               onChoose={(style) => void run(() => flow.chooseStartingStyle(style, polishOn))}
-            />
-          )}
-
-          {currentStep === "keep" && (
-            <KeepStep
-              trialEnds={trialEnds(licenseStatus)}
-              onUpgrade={upgrade}
-              onKeepGoing={() => void run(handleNext)}
-              onBack={handleBack}
             />
           )}
 
