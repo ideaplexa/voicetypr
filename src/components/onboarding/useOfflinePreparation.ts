@@ -42,6 +42,7 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
   const { settings, updateSettings } = useSettings();
   const initialized = useRef(false);
   const [savingLanguage, setSavingLanguage] = useState(false);
+  const savingLanguageRef = useRef(false);
   const [target, setTarget] = useState<string | null>(null);
   const [warning, setWarning] = useState<{ model: string; language: string } | null>(null);
   const language = settings?.speech_language ?? "en";
@@ -106,6 +107,9 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
   return {
     language, savingLanguage, recommended, bestMatch, name, model, ready, warningModel,
     changeLanguage: async (value: string) => {
+      // One save at a time, so a later pick can never be overtaken by an earlier one.
+      if (savingLanguageRef.current) return;
+      savingLanguageRef.current = true;
       setSavingLanguage(true);
       try {
         await updateSettings({ speech_language: value, ...languageModelPatch(management, settings?.current_model, value) });
@@ -114,7 +118,10 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
         setWarningModel(null);
       } catch {
         toast.error("Could not save your language. Try again.");
-      } finally { setSavingLanguage(false); }
+      } finally {
+        savingLanguageRef.current = false;
+        setSavingLanguage(false);
+      }
     },
     prepare,
     download: (modelName: string) => {
@@ -124,6 +131,8 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
     },
     /** A cancelled download stops being the model later steps wait for. */
     forget: (modelName: string) => setTarget((current) => (current === modelName ? null : current)),
+    /** Leaving this computer as the source: a download finishing later must not take over. */
+    leaveLocal: () => setTarget(null),
     dismissWarning: () => setWarningModel(null),
     confirmDownload: () => {
       if (warningModel) void management.downloadModel(warningModel);

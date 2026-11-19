@@ -336,6 +336,7 @@ export function useOnboardingDesktop({
 
   const confirmSource = (nextSourceType: SourceType) => {
     sourceChosenByUser.current = true;
+    if (nextSourceType !== "local") preparation.leaveLocal();
     setSourceType(nextSourceType);
   };
 
@@ -719,12 +720,18 @@ export function useOnboardingDesktop({
     sourceReady,
     confirmSource,
     dots,
+    // A step outside the dots (re-entered later) shows the dot of the step before it.
+    dotIndex: Math.max(0, dots.filter((step) => steps.indexOf(step) <= steps.indexOf(currentStep)).length - 1),
     after,
     chooseSourceFromTry: () => {
       setSourceFromTry(true);
       setCurrentStep("source");
     },
-    skipSetup: () => setCurrentStep(after("shortcut")),
+    // Skip saves nothing, so the screens go back to what is saved.
+    skipSetup: () => {
+      setHoldToTalk(settings?.recording_mode === "push_to_talk");
+      setCurrentStep(after("shortcut"));
+    },
     /** The fork after the essentials: Polish and the rest, or straight on. */
     chooseDepth: (goDeeper: boolean) => {
       setDeeper(goDeeper);

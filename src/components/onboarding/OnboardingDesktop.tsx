@@ -91,7 +91,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
-  const dotIndex = Math.max(0, flow.dots.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try { await action(); } finally { setBusy(false); }
@@ -142,7 +141,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
-      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flow.dots.length} />}
+      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={flow.dotIndex} total={flow.dots.length} />}
       <div className="mt-3 flex min-h-5 items-center justify-center">{downloadLine}</div>
       <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
         <div className="flex w-full max-w-[640px] flex-col items-center gap-[22px]">
@@ -269,7 +268,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                   onEditingChange={flow.onEditingChange}
                   onBareModifier={flow.onBareModifier}
                   onHoldToTalkChange={flow.onHoldToTalkChange}
-                  onBack={() => setEditingShortcut(false)}
+                  onBack={() => {
+                    flow.onEditingChange(false);
+                    setEditingShortcut(false);
+                  }}
                   onNext={() => void run(async () => {
                     await flow.saveHotkeySettings();
                     setEditingShortcut(false);

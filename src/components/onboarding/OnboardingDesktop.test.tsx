@@ -663,6 +663,28 @@ describe("OnboardingDesktop", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Small English doesn't support your chosen language.");
   });
 
+  it("lets a cloud choice stand when a model picked earlier finishes downloading", async () => {
+    modelManagement.models["small.en"] = {
+      ...modelManagement.models["base.en"],
+      name: "small.en",
+      display_name: "Small English",
+      downloaded: false,
+    } as ModelInfo;
+    modelManagement.modelOrder = ["base.en", "small.en"];
+    const user = userEvent.setup();
+    const view = renderOnboarding();
+    await openEngine(user);
+    await user.click(screen.getByRole("button", { name: "Download Small English" }));
+    await waitFor(() => expect(modelManagement.downloadModel).toHaveBeenCalledWith("small.en"));
+    await user.click(screen.getByRole("button", { name: /^back$/i }));
+    await user.click(await screen.findByRole("button", { name: /^back$/i }));
+    await user.click(await screen.findByRole("button", { name: /^Cloud, with your key$/i }));
+    modelManagement.models["small.en"] = { ...modelManagement.models["small.en"], downloaded: true };
+    view.rerender(<OnboardingDesktop onComplete={onCompleteMock} licenseStatus={licensed} modelManagement={modelManagement as never} />);
+    await act(async () => {});
+    expect(updateSettingsMock).not.toHaveBeenCalledWith(expect.objectContaining({ current_model: "small.en" }));
+  });
+
   it("lets remote-first users switch to local setup from the empty remote state", async () => {
     const user = userEvent.setup();
     settingsState.current_model = "";
@@ -1124,7 +1146,7 @@ describe("OnboardingDesktop", () => {
   });
 
   it.each(["macos", "windows"] as const)(
-    "downloads the engine on the source step, keeps its progress in view, and blocks the first try until ready on %s",
+    "downloads the engine on the model step, keeps its progress in view, and blocks the first try until ready on %s",
     async (platform) => {
       Object.assign(platformMock, {
         isMacOS: platform === "macos",
@@ -1273,7 +1295,7 @@ describe("OnboardingDesktop", () => {
     await skipUse(user);
     expect(await screen.findByRole("heading", { name: "We couldn’t check your license" })).toBeInTheDocument();
     expect(screen.queryByText("Trial ended")).not.toBeInTheDocument();
-    expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
+    expect(invokeMock.mock.calls.some(([command]) => command === "start_recording")).toBe(false);
     await user.click(screen.getByRole("button", { name: "Recheck" }));
     expect(recheck).toHaveBeenCalledTimes(1);
   });
@@ -1319,7 +1341,7 @@ describe("OnboardingDesktop", () => {
     emit("recording-state-changed", { state: "recording", error: null, generation: 1 });
     await user.click(await screen.findByRole("button", { name: "Stop" }));
     expect(invokeMock).toHaveBeenCalledWith("stop_recording");
-    expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
+    expect(invokeMock.mock.calls.some(([command]) => command === "start_recording")).toBe(false);
   });
 
   it("lets Accessibility be skipped and says how to paste", async () => {
@@ -1393,7 +1415,7 @@ describe("OnboardingDesktop", () => {
       await screen.findByRole("heading", { name: "Start with 7 days free" });
       expect(screen.getByRole("button", { name: "Upgrade now" })).toBeInTheDocument();
       expect(screen.queryByRole("checkbox", { name: /share anonymous crash reports/i })).not.toBeInTheDocument();
-      expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
+      expect(invokeMock.mock.calls.some(([command]) => command === "start_recording")).toBe(false);
       await fillContact(user);
       await user.click(screen.getByRole("button", { name: "Start 7-day trial" }));
       expect(start).toHaveBeenCalledWith("Priya Raman", "priya@example.com");
@@ -1411,7 +1433,7 @@ describe("OnboardingDesktop", () => {
       await user.click(screen.getByRole("button", { name: "Decide later" }));
       expect(await screen.findByRole("heading", { name: "Dictation starts with your trial" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /click here to talk/i })).not.toBeInTheDocument();
-      expect(invokeMock).not.toHaveBeenCalledWith("start_recording", expect.anything());
+      expect(invokeMock.mock.calls.some(([command]) => command === "start_recording")).toBe(false);
       await user.click(screen.getByRole("button", { name: "Start 7-day trial" }));
       expect(await screen.findByRole("heading", { name: "Start with 7 days free" })).toBeInTheDocument();
     });
