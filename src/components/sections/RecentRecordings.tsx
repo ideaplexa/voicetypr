@@ -104,7 +104,9 @@ export function RecentRecordings({
   };
   const detail = selected ? (
     <RecentRecordingDetail
+      key={selected.id}
       item={selected}
+      onEdited={onHistoryUpdate}
       verified={recordings.verifiedRecordings.has(selected.id)}
       checked={recordings.checkedRecordings.has(selected.id)}
       reTranscribing={recordings.reTranscribingIds.has(selected.id)}

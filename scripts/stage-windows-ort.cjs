@@ -67,18 +67,24 @@ function verifySourceNotices(manifest) {
   }
 }
 
+// Member prefix inside the archive: the GitHub release ZIP nests everything under
+// archive_root; the NuGet package of the same release keeps notices at its root.
+function archivePrefix(hash, manifest) {
+  if (hash === manifest.archive_sha256) return { root: `${manifest.archive_root}/`, dll: manifest.dll_path };
+  if (hash === manifest.fallback?.archive_sha256) return { root: "", dll: manifest.fallback.dll_path };
+  throw new Error("ONNX Runtime archive SHA256 mismatch. Refusing to package.");
+}
+
 // Read only named members, never extract paths from the archive. The entire ZIP
 // is hash-checked first; no PDB, import/static library or provider DLL is staged.
 function readArchive(archive, triple, manifest = provenance) {
   assertTriple(triple, manifest);
   const zip = fs.readFileSync(archive);
-  if (digest(zip) !== manifest.archive_sha256) {
-    throw new Error("ONNX Runtime archive SHA256 mismatch. Refusing to package.");
-  }
-  const dllMember = `${manifest.archive_root}/${manifest.dll_path}`;
+  const prefix = archivePrefix(digest(zip), manifest);
+  const dllMember = `${prefix.root}${prefix.dll}`;
   const wanted = new Map([
     [dllMember, null],
-    ...Object.keys(manifest.notice_sha256).map((name) => [`${manifest.archive_root}/${name}`, null]),
+    ...Object.keys(manifest.notice_sha256).map((name) => [`${prefix.root}${name}`, null]),
   ]);
   let end = zip.length - 22;
   for (; end >= Math.max(0, zip.length - 65557); end--) {
@@ -114,7 +120,7 @@ function readArchive(archive, triple, manifest = provenance) {
   const dll = wanted.get(dllMember);
   verifyDll(dll, triple, manifest);
   for (const [name, hash] of Object.entries(manifest.notice_sha256)) {
-    if (digest(wanted.get(`${manifest.archive_root}/${name}`)) !== hash) {
+    if (digest(wanted.get(`${prefix.root}${name}`)) !== hash) {
       throw new Error("ONNX Runtime archive notice SHA256 mismatch.");
     }
   }
@@ -132,19 +138,36 @@ async function acquireArchive({ archive, target, triple, manifest = provenance }
     readArchive(cached, triple, manifest);
     return cached;
   }
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "voicetypr-ort-download-"));
-  try {
-    const response = await fetch(manifest.source, { signal: AbortSignal.timeout(180000) });
-    if (!response.ok) throw new Error(`ONNX Runtime download failed (HTTP ${response.status}).`);
-    const download = path.join(temporary, "runtime.zip");
-    fs.writeFileSync(download, Buffer.from(await response.arrayBuffer()));
-    readArchive(download, triple, manifest);
-    fs.mkdirSync(path.dirname(cached), { recursive: true });
-    fs.copyFileSync(download, cached);
-    return cached;
-  } finally {
-    fs.rmSync(temporary, { recursive: true, force: true });
+  // The same release from NuGet: its own pinned package hash, and the identical
+  // DLL and notice hashes, so a different binary can never be staged.
+  const sources = [[manifest.source, cached]];
+  if (manifest.fallback) {
+    const cachedFallback = path.join(target, "onnxruntime", `${manifest.archive_root}.nupkg`);
+    if (fs.existsSync(cachedFallback)) {
+      readArchive(cachedFallback, triple, manifest);
+      return cachedFallback;
+    }
+    sources.push([manifest.fallback.source, cachedFallback]);
   }
+  const failures = [];
+  for (const [source, destination] of sources) {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "voicetypr-ort-download-"));
+    try {
+      const response = await fetch(source, { signal: AbortSignal.timeout(180000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const download = path.join(temporary, "runtime.zip");
+      fs.writeFileSync(download, Buffer.from(await response.arrayBuffer()));
+      readArchive(download, triple, manifest);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(download, destination);
+      return destination;
+    } catch (error) {
+      failures.push(`${new URL(source).host}: ${error.code ?? error.message}`);
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true });
+    }
+  }
+  throw new Error(`ONNX Runtime download failed (${failures.join("; ")}).`);
 }
 
 function stageDll({ archive, triple, destination, manifest = provenance }) {

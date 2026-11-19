@@ -233,8 +233,6 @@ pub fn redact_log_content(content: &str) -> String {
     static LICENSE_RE: OnceLock<regex::Regex> = OnceLock::new();
     static EMAIL_RE: OnceLock<regex::Regex> = OnceLock::new();
     static HOME_RE: OnceLock<regex::Regex> = OnceLock::new();
-    static ABSOLUTE_PATH_RE: OnceLock<regex::Regex> = OnceLock::new();
-    static UNC_PATH_RE: OnceLock<regex::Regex> = OnceLock::new();
 
     let mut result = content.to_string();
 
@@ -305,27 +303,7 @@ pub fn redact_log_content(content: &str) -> String {
     });
     result = home_re.replace_all(&result, "[HOME_DIR]").to_string();
 
-    // Other absolute local paths commonly emitted by diagnostics/logging.
-    let absolute_path_re = ABSOLUTE_PATH_RE.get_or_init(|| {
-        regex::Regex::new(
-            r#"(^|[\s\"'(=])(/(?:Volumes|tmp|private|var|opt|Applications|Library|System|etc|usr|proc)/[^\r\n\"',)]+|[A-Za-z]:\\[^\r\n\"',)]+)"#,
-        )
-        .unwrap()
-    });
-    result = absolute_path_re
-        .replace_all(&result, "$1[PATH_REDACTED]")
-        .to_string();
-
-    // UNC paths (\\server\share\...): the drive-letter and unix roots above
-    // do not match these; user-selected save targets can be on network shares.
-    let unc_path_re = UNC_PATH_RE.get_or_init(|| {
-        regex::Regex::new(r#"\\\\[^\\/\"\s]+\\[^\\/\r\n\"',)]+(?:\\[^\r\n\"',)]+)*"#).unwrap()
-    });
-    result = unc_path_re
-        .replace_all(&result, "[PATH_REDACTED]")
-        .to_string();
-
-    result
+    crate::utils::ring_log::redact_local_paths(&result)
 }
 
 /// Tauri command: returns the latest log file content (redacted, tail-bounded) for bug reports.

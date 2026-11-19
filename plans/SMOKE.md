@@ -8,6 +8,8 @@ reproduced failure against the named plan.
 
 Latest published releases: stable **2.0.12** and beta **2.1.0-beta.7**.
 The integration branch is `release/2.1.0-beta.9`; it is not a published build.
+Its next published beta is **2.1.0-beta.10**, because the local candidate below
+already carries 2.1.0-beta.9.
 Old candidate names below describe historical checks, not the current release.
 `OBSOLETE` rows preserve historical instructions and are not pending checks.
 
@@ -92,6 +94,62 @@ Findings to triage:
 - While another app's password prompt held Secure Input, the shortcut could
   not fire; the CLI reported the tray and pill fallback.
 
+### Driven run on a dev build of the integration branch (2026-11-16)
+
+Debug build of `release/2.1.0-beta.9` at `b71f7ae1` (with #157, #163, #164,
+#158 and #165), run on the founder's Mac (M4 Pro, macOS 27.2) by an agent, not
+a human. This is development evidence, not beta-to-beta proof:
+
+- Separate identity: `tauri.dev.conf.json` (`com.ideaplexa.voicetypr.dev`)
+  and an isolated `HOME`; the installed app kept running and was never
+  driven. Model files were symlinked from the real profile and only read.
+  The OS temporary folder was not isolated: Reset app sweeps it for kept and
+  legacy recovery audio, which dev and installed builds share. The installed
+  app was idle; the shared `kept-dictation` folder was empty and unchanged
+  since 2 November, and legacy recovery files cannot be checked after the
+  fact.
+- Licence: no trial for a fresh debug profile, so a local stub on
+  `localhost:4000` answered `/trial/check` with a running trial.
+- Speech: the founder's own recorded dictations played into BlackHole 2ch
+  with `ffmpeg`; Parakeet V2. No physical microphone. Command words were cut
+  from longer recordings and kept only when the app's engine heard exactly
+  the command. No recording has the founder saying "new line", "new
+  paragraph", "undo that" or "select all" (spliced words were misheard).
+- Hotkey ⌃⌥F9 posted at the HID tap (`scripts/e2e/hidkey.swift`); pill read
+  from screenshots with `VOICETYPR_E2E_CAPTURE_PILL=1`.
+
+| Check | Result |
+|---|---|
+| Plain dictation into TextEdit | Pass: pill shows the app icon, timer, Stop, live level, "Transcribing", then "Pasted · 12 words"; text lands; the clipboard is restored. |
+| Pill Stop and Cancel (90fb4047) | Pass: Stop sits inside the rounded end; Cancel appears only on hover, and the pill's Cancel discarded the take with nothing pasted. |
+| "Opening microphone…" | Pass: shown for about the first frame with the built-in microphone selected; with BlackHole the microphone opened too fast for the label. |
+| Copied card (MOI-28, #157) | Pass: a take stopped while a Secure Input field was focused showed "Copied — press ⌘V · TextEdit didn't accept the paste" and the card stayed while idle; the next successful paste replaced it, and it did not return after a restart. |
+| Learned dictionary (MOI-36, #163) | Pass with a finding (below): fixing a misheard name in History offered it with Add and Dismiss; Add and Undo work (Undo returns the offer); a later take of the same recording came out as "in Voicetypr"; Reset app emptied the suggestions file. |
+| Voice commands (MOI-50, #164) | Partly run: "send" alone pressed Return and typed nothing; "delete that" alone removed only the previous dictation; "send it, bro…" and "…can't delete that…" inside sentences were typed. "New line", "new paragraph", "undo that" and "select all" not run (no real speech). |
+| Spoken punctuation on and off | Pass with local Parakeet only: off kept "…a certain period."; on turned the phrase-end "period" into ".". No cloud engine, Polish off, macOS only. |
+| Rapid settings changes then restart | Pass: Spoken punctuation toggled five times and Voice commands four times in one driver batch; the switches (read through accessibility) and the saved settings file agreed (off, on), and both read the same after a restart. Restart was SIGTERM, not Quit. |
+| Log privacy (debug log) | Pass with a finding, for the log written after Reset app (voice commands, punctuation, restarts): no home directory, no `user:pass@` URL and none of the dictated phrases; paths are written as `~/…`; Parakeet timing lines still appear. Debug-level lines name the sidecar's full path (here on `/Volumes`): the packaged file log is Info and drops them, but release builds keep Debug in the in-memory ring that bug reports attach, and the scrubber only removes home prefixes and URL credentials. Packaged logs and a report dump stay NEEDS-SMOKE. |
+
+Findings to triage:
+
+- After any accessibility (background) click on a Voicetypr window, every
+  later paste is deferred ("Paste deferred: native menu or focus unavailable")
+  and lands as Copied, until Voicetypr is really brought to the front once.
+  Probably the same automation artifact as the 2026-11-14 finding; real
+  pointer clicks in the main window were not tried. The log still says "Text inserted at
+  cursor successfully" for these takes.
+- The learned word can include a neighbour the engine merged: "in voice
+  typer" heard as "invoice typer" is offered and saved as **"in Voicetypr"**
+  (sounds like "invoice typer"). The next take heard "in voice typer" and was
+  not corrected. Fixing that take offered "Voicetypr" for "voice typer".
+- History shows "Polish: PersonalDictation" (an internal name) on every entry
+  while Polish is off.
+- Reset app in a dev build sweeps the shared OS temporary folder for
+  kept-dictation and legacy recovery audio (`recording/storage.rs`
+  `clear_storage`), so resetting a dev build can delete the installed
+  app's temporary recovery audio.
+- The dev config still says version 2.0.5, so a dev build shows "2.0.5".
+
 ## Blocks 2.1 stable
 
 Plan 087 §5 requires the packaged plan 083 §13 follow-ups and a Windows
@@ -99,6 +157,7 @@ real-speech pass before stable. Eight unchecked checks block stable:
 
 - [ ] **087-S1** Packaged macOS and Windows: exercise delayed Island readiness and renderer replacement; confirm live recovery and mic-blocker state is revalidated and stale cards do not return.
   - Evidence 2026-11-14, macOS half only: see "Driven run on the installed candidate", steps 2 and the stuck "Copied" card finding. Stays unchecked.
+  - Evidence 2026-11-16, macOS dev build at `b71f7ae1`: a Copied card did not return after a restart, and a take started 1.5 s after launch pasted. Renderer replacement and the mic-blocker revalidation were not exercised; Windows not run. Stays unchecked.
 - [ ] **087-S2** Packaged Windows: exercise recording timer updates during tray recovery/rebuild and confirm neither deadlocks.
 - [ ] **087-S3** Packaged candidate: unplug the mic, retry a kept recording, and confirm the mic blocker remains visible and retry works.
 - [ ] **087-S4** Real Windows: exercise Whisper full audio context and Island fixes with real speech.

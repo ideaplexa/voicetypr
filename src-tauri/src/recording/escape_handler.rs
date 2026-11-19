@@ -2,7 +2,36 @@ use crate::commands::recording_runtime::RecordingRuntime;
 use crate::{cancel_recording, get_recording_state, AppState, RecordingState};
 use keytrigger::KeyPhase;
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Which route reported an Esc press. On Windows the low-level hook gets
+/// nothing while our own window has focus, so the main window reports Esc too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EscapeSource {
+    Hook,
+    InApp,
+}
+
+/// The last counted press, and whether the other route already reported it.
+pub type EscapePress = (Instant, EscapeSource, bool);
+
+/// Both routes seeing one physical press report it within a few ms of each
+/// other; a real second press from the other route cannot come this fast.
+const DUPLICATE_ESCAPE_WINDOW: Duration = Duration::from_millis(150);
+
+/// One physical press counts once: the first report from the other route
+/// inside the window is the same press. Presses from one route always count.
+fn claim_escape_at(last: &mut Option<EscapePress>, source: EscapeSource, now: Instant) -> bool {
+    if let Some((at, from, paired)) = last {
+        if *from != source && !*paired && now.duration_since(*at) < DUPLICATE_ESCAPE_WINDOW {
+            *paired = true;
+            return false;
+        }
+    }
+    *last = Some((now, source, false));
+    true
+}
 
 /// Handle ESC key press during recording
 ///
@@ -14,6 +43,7 @@ pub async fn handle_escape_key_press<R: RecordingRuntime>(
     app_state: &AppState,
     app_handle: &AppHandle<R>,
     event_state: KeyPhase,
+    source: EscapeSource,
 ) {
     // Only react to ESC key press events (ignore key release)
     if event_state != KeyPhase::Pressed {
@@ -21,6 +51,15 @@ pub async fn handle_escape_key_press<R: RecordingRuntime>(
             "Ignoring ESC event since it is not a key press: {:?}",
             event_state
         );
+        return;
+    }
+
+    let claimed = match app_state.last_escape_press.lock() {
+        Ok(mut last) => claim_escape_at(&mut last, source, Instant::now()),
+        Err(_) => true,
+    };
+    if !claimed {
+        log::debug!("ESC press already handled by the other route");
         return;
     }
 
@@ -39,7 +78,7 @@ pub async fn handle_escape_key_press<R: RecordingRuntime>(
         return;
     }
 
-    let was_pressed_once = app_state.esc_pressed_once.load(Ordering::SeqCst);
+    let was_pressed_once = app_state.esc_pressed_once.swap(true, Ordering::SeqCst);
 
     if !was_pressed_once {
         handle_first_esc_press(app_state, app_handle).await;
@@ -130,6 +169,67 @@ fn escape_phase(state: RecordingState) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn one_press_seen_by_both_routes_counts_once() {
+        let mut last = None;
+        let t0 = Instant::now();
+        assert!(claim_escape_at(&mut last, EscapeSource::InApp, t0));
+        assert!(!claim_escape_at(
+            &mut last,
+            EscapeSource::Hook,
+            t0 + Duration::from_millis(20)
+        ));
+        assert!(claim_escape_at(
+            &mut last,
+            EscapeSource::Hook,
+            t0 + Duration::from_millis(400)
+        ));
+    }
+
+    #[test]
+    fn a_second_press_right_after_a_paired_one_still_counts() {
+        for (a, b) in [
+            (EscapeSource::Hook, EscapeSource::InApp),
+            (EscapeSource::InApp, EscapeSource::Hook),
+        ] {
+            let mut last = None;
+            let t0 = Instant::now();
+            assert!(claim_escape_at(&mut last, a, t0));
+            assert!(!claim_escape_at(
+                &mut last,
+                b,
+                t0 + Duration::from_millis(20)
+            ));
+            assert!(claim_escape_at(
+                &mut last,
+                b,
+                t0 + Duration::from_millis(80)
+            ));
+        }
+    }
+
+    #[test]
+    fn a_fast_double_press_from_one_route_counts_twice() {
+        let mut last = None;
+        let t0 = Instant::now();
+        assert!(claim_escape_at(&mut last, EscapeSource::InApp, t0));
+        assert!(claim_escape_at(
+            &mut last,
+            EscapeSource::InApp,
+            t0 + Duration::from_millis(60)
+        ));
+        assert!(claim_escape_at(
+            &mut last,
+            EscapeSource::Hook,
+            t0 + Duration::from_millis(500)
+        ));
+        assert!(claim_escape_at(
+            &mut last,
+            EscapeSource::Hook,
+            t0 + Duration::from_millis(560)
+        ));
+    }
+
     #[test]
     fn first_escape_names_the_transcribing_phase_including_polish() {
         assert_eq!(escape_phase(RecordingState::Transcribing), "transcribing");

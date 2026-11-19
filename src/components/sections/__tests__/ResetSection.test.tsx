@@ -160,9 +160,45 @@ describe("ResetSection", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Reset App Data" }));
 
     expect(ask).toHaveBeenCalledWith(
-      "This action cannot be undone. This will permanently delete all your Voicetypr data except your license and API keys.\n\nThe app will restart after reset.\n\nAre you absolutely sure?",
+      "This can't be undone. It permanently deletes your settings, history, recordings and downloaded models. Your license and API keys are kept.\n\nVoicetypr restarts when the reset is done.\n\nAre you sure?",
       expect.objectContaining({ title: "Reset App Data", kind: "warning" }),
     );
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("says the settings row also removes downloaded models", () => {
+    render(<ResetSection pane />);
+
+    expect(
+      screen.getByText(
+        "Clears settings, history and downloaded models, then restarts. Keeps your license and API keys.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("tells the user to reopen the app when the restart fails", async () => {
+    vi.useFakeTimers();
+    vi.mocked(ask).mockResolvedValue(true);
+    vi.mocked(relaunch).mockRejectedValueOnce(new Error("restart refused"));
+    vi.mocked(invoke).mockResolvedValue({
+      success: true,
+      errors: [],
+      warnings: [],
+      cleared_items: ["Settings store"],
+    });
+    render(<ResetSection pane />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reset…" }));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(relaunch).toHaveBeenCalledOnce();
+    expect(toast.error).toHaveBeenCalledWith(
+      "Reset finished, but Voicetypr couldn't restart. Quit and reopen it.",
+      { duration: Infinity },
+    );
   });
 });

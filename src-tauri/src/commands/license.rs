@@ -56,7 +56,7 @@ pub enum RuntimeLicenseCache {
 }
 
 impl RuntimeLicenseCache {
-    fn from_check(result: &Result<LicenseStatus, String>) -> Self {
+    pub(crate) fn from_check(result: &Result<LicenseStatus, String>) -> Self {
         match result {
             Ok(status) => Self::Ready(CachedLicense::new(status.clone())),
             Err(_) => Self::Failed,

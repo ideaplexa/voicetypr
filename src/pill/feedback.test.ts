@@ -20,6 +20,7 @@ const notes: Array<[DictationNote,string]> = [
   [{generation:1,kind:'model_fallback',engine_short:'Whisper',alt_engine_short:'Parakeet'},"Using Parakeet · Whisper isn't downloaded"],
   [{generation:1,kind:'gpu_fallback',engine_short:'Whisper'},'GPU unavailable · using the CPU'],
   ...(['timeout','rate_limited','network','guard','error'] as const).map((reason,i):[DictationNote,string]=>[{generation:1,kind:'polish_skipped',reason},`Pasted unpolished · ${['Polish timed out','Polish rate limited','Polish unavailable offline','Polish kept the original','Polish failed'][i]}`]),
+  [{generation:1,kind:'command_skipped',reason:'typed_since'},"Didn't delete · you typed since"],
 ];
 const fixture=(key:string,duration:number|null=1000):FeedbackCard=>({key,title:key,sub:'',tone:'neutral',duration,actions:[]});
 describe('feedback stack rules',()=>{
