@@ -1,79 +1,133 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { RecordingStatePayload, TranscriptionHistory } from "@/types";
 
-export type DictationPhase = RecordingStatePayload["state"];
+export type DictationPhase = "idle" | "starting" | "listening" | "transcribing";
 
 export interface FirstDictation {
-  /** What the engine heard, before Polish. */
+  /** What the engine returned: no library rules or Polish ran on it. */
   heard: string;
-  /** What Voicetypr typed; differs from `heard` only when Polish changed it. */
+  /** What built-in Polish made of it, or the same text when Polish didn't run. */
   typed: string;
   polished: boolean;
   words: number;
 }
 
-/** The text of the user's first dictation, read from the history entry it saved. */
-export function readFirstDictation(entry: Pick<TranscriptionHistory, "text" | "writing">): FirstDictation {
-  const original = entry.writing?.original_text;
-  const polished = Boolean(entry.writing?.ai_applied && original && original !== entry.text);
-  return {
-    heard: polished && original ? original : entry.text,
-    typed: entry.text,
-    polished,
-    words: entry.text.trim().split(/\s+/).filter(Boolean).length,
-  };
+/** Whether this device may try dictation before a trial or license. */
+export type TryAllowance = { kind: "access" } | { kind: "tries"; left: number } | { kind: "usedUp" };
+
+export function readFirstDictation(heard: string, cleaned?: string | null): FirstDictation {
+  const typed = cleaned?.trim() || heard;
+  return { heard, typed, polished: Boolean(cleaned?.trim()), words: typed.split(/\s+/).filter(Boolean).length };
 }
 
-export function useFirstDictation(active: boolean) {
+/**
+ * The First try: recorded and transcribed for this window alone, never pasted
+ * or saved. The user's shortcut reaches it while the step is on screen.
+ */
+export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult: (result: FirstDictation) => void) {
   const [phase, setPhase] = useState<DictationPhase>("idle");
-  const [result, setResult] = useState<FirstDictation | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [allowance, setAllowance] = useState<TryAllowance | null>(null);
+  // `epoch` changes on blur and unmount, so a late reply from an ended try is ignored.
+  const session = useRef({ id: null as string | null, stopQueued: false, phase: "idle" as DictationPhase, epoch: 0 });
+  const onResultRef = useRef(onResult);
+  useEffect(() => {
+    onResultRef.current = onResult;
+  });
+  const move = useCallback((next: DictationPhase) => {
+    session.current.phase = next;
+    setPhase(next);
+  }, []);
+  const end = useCallback(() => {
+    session.current.epoch++;
+    session.current.id = null;
+    session.current.stopQueued = false;
+    move("idle");
+  }, [move]);
+
+  const stop = useCallback(async () => {
+    if (session.current.phase === "starting") {
+      session.current.stopQueued = true;
+      return;
+    }
+    const { id, epoch } = session.current;
+    if (id === null || session.current.phase !== "listening") return;
+    session.current.id = null;
+    move("transcribing");
+    try {
+      const { heard, cleaned } = await invoke<{ heard: string; cleaned?: string | null }>("stop_onboarding_try", { id });
+      if (epoch !== session.current.epoch) return;
+      move("idle");
+      if (heard) onResultRef.current(readFirstDictation(heard, cleaned));
+      else toast.error("Voicetypr didn’t hear any words. Try again.");
+    } catch (error) {
+      if (epoch !== session.current.epoch) return;
+      move("idle");
+      toast.error(typeof error === "string" ? error : "Voicetypr could not transcribe that. Try again.");
+    }
+  }, [move]);
+
+  const start = useCallback(async () => {
+    if (session.current.phase !== "idle") return;
+    const { epoch } = session.current;
+    session.current.stopQueued = false;
+    move("starting");
+    try {
+      const started = await invoke<{ id: string; left: number | null }>("start_onboarding_try");
+      if (epoch !== session.current.epoch) return;
+      session.current.id = started.id;
+      setAllowance(started.left === null ? { kind: "access" } : { kind: "tries", left: started.left });
+      move("listening");
+      if (session.current.stopQueued) await stop();
+    } catch (error) {
+      if (epoch !== session.current.epoch) return;
+      move("idle");
+      const allowed = await invoke<TryAllowance>("get_onboarding_try").catch(() => null);
+      setAllowance(allowed);
+      if (allowed?.kind !== "usedUp") toast.error(typeof error === "string" ? error : "Could not start dictation. Try again.");
+    }
+  }, [move, stop]);
 
   useEffect(() => {
     if (!active) return;
     let disposed = false;
-    let revision = 0;
+    void invoke<TryAllowance>("get_onboarding_try")
+      .then((allowed) => { if (!disposed) setAllowance(allowed); })
+      .catch(() => undefined);
     const subscriptions = [
-      listen<RecordingStatePayload>("recording-state-changed", ({ payload }) => {
-        revision++;
+      listen<boolean>("onboarding-try-key", ({ payload: pressed }) => {
         if (disposed) return;
-        setPhase(payload.state);
-        if (payload.state === "starting") setResult(null);
+        const current = session.current.phase;
+        if (pressed && current === "idle") void start();
+        else if (pressed && !holdToTalk) void stop();
+        else if (!pressed && holdToTalk) void stop();
       }),
-      listen<Pick<TranscriptionHistory, "text" | "writing">>("transcription-added", ({ payload }) => {
-        if (disposed || !payload?.text?.trim()) return;
-        setResult(readFirstDictation(payload));
+      listen<string>("onboarding-try-capped", ({ payload }) => {
+        if (!disposed && payload === session.current.id) void stop();
       }),
     ];
-    void subscriptions[0]
-      .then(async () => {
-        const observed = revision;
-        const current = await invoke<RecordingStatePayload | null>("get_current_recording_state");
-        if (!disposed && current && revision === observed) setPhase(current.state);
-      })
+    // The shortcut is handed over only once both listeners are in place.
+    void Promise.all(subscriptions)
+      .then(() => (disposed ? undefined : invoke("arm_onboarding_try", { armed: true })))
       .catch(() => undefined);
+    // Leaving the window ends the try in the app as well.
+    const blur = () => {
+      if (session.current.phase !== "idle") end();
+    };
+    window.addEventListener("blur", blur);
     return () => {
       disposed = true;
-      for (const subscription of subscriptions) void subscription.then((stop) => stop());
+      window.removeEventListener("blur", blur);
+      end();
+      void invoke("arm_onboarding_try", { armed: false }).catch(() => undefined);
+      for (const subscription of subscriptions) void subscription.then((unlisten) => unlisten());
     };
-  }, [active]);
+  }, [active, holdToTalk, start, stop, end]);
 
-  const listening = phase === "recording" || phase === "starting";
-  const working = phase === "stopping" || phase === "transcribing";
+  const listening = phase === "listening" || phase === "starting";
+  const working = phase === "transcribing";
+  const talk = useCallback(() => (listening ? stop() : start()), [listening, start, stop]);
 
-  const talk = useCallback(async () => {
-    setBusy(true);
-    try {
-      await (listening ? invoke("stop_recording") : invoke("start_recording", { source: "pointer" }));
-    } catch {
-      toast.error(listening ? "Could not stop dictation. Try again." : "Could not start dictation. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  }, [listening]);
-
-  return { phase, listening, working, result, busy, talk, reset: () => setResult(null) };
+  return { phase, listening, working, allowance, busy: phase === "starting", talk };
 }

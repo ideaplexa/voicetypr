@@ -190,6 +190,7 @@ impl StartRequest<'_> {
             let source = self.pending.source;
             if !self.pending.permit.is_current_state(&state)
                 || ptt_key_released(&state, source)
+                || super::onboarding_try::active()
                 || matches!(
                     state.get_current_state(),
                     RecordingState::Starting | RecordingState::Recording

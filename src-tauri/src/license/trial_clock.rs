@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Runtime};
 
-const KEY: &str = "trial_clock_latest";
+pub(crate) const KEY: &str = "trial_clock_latest";
 /// Small clock corrections (NTP) are not treated as moving the clock back.
 const TOLERANCE_SECS: i64 = 5 * 60;
 const PERSIST_EVERY_SECS: i64 = 60;

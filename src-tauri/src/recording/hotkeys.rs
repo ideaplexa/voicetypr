@@ -25,6 +25,9 @@ fn handle_toggle_mode(app: &tauri::AppHandle, app_state: &AppState, event_state:
         log::debug!("Toggle: Ignoring duplicate key press while hotkey is held");
         return;
     }
+    if super::onboarding_try::claim_hotkey(app, KeyPhase::Pressed) {
+        return;
+    }
 
     let should_throttle = {
         let now = std::time::Instant::now();
@@ -173,6 +176,9 @@ fn handle_ptt_mode(
     current_state: RecordingState,
     event_state: KeyPhase,
 ) {
+    if super::onboarding_try::claim_hotkey(app, event_state) {
+        return;
+    }
     if app_state.pointer_recording.load(Ordering::SeqCst)
         && matches!(
             current_state,

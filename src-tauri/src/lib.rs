@@ -640,6 +640,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let exit_code = builder
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+            recording::onboarding_try::discard_leftovers(app.handle());
+            if let Ok(store) = app.store("settings") {
+                ai::builtin::default_on_for_fresh_install(&store);
+            }
             app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
@@ -1355,6 +1359,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             audio::mic_test::get_microphone_permission_status,
             audio::mic_test::start_microphone_test,
             audio::mic_test::stop_microphone_test,
+            recording::onboarding_try::arm_onboarding_try,
+            recording::onboarding_try::get_onboarding_try,
+            recording::onboarding_try::start_onboarding_try,
+            recording::onboarding_try::stop_onboarding_try,
             request_microphone_permission,
             test_automation_permission,
             check_license_status,
@@ -1460,6 +1468,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
             {
                 crate::pill::level::reset_main_meter();
+                crate::recording::onboarding_try::window_gone();
             }
         })
         .on_window_event(|window, event| {
@@ -1478,10 +1487,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     titlebar::align(&webview);
                 }
             }
+            if let ("main", tauri::WindowEvent::Focused(focused)) = (window.label(), event) {
+                recording::onboarding_try::focus_changed(*focused);
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Only hide the window instead of closing it (except for pill)
                 if window.label() == "main" {
                     audio::mic_test::stop_all();
+                    recording::onboarding_try::focus_changed(false);
                     // Close-to-tray ONLY when a tray icon exists. If tray creation
                     // failed at startup, prevent_close + hide would strand the app as a
                     // background process with no way back -> let the close proceed (quit).
@@ -1521,6 +1534,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // emptied: the local dictation cache (managed `TranscriberCache`), and the
             // strong-host remote server's cache, dropped by stopping/joining its tasks.
             tauri::RunEvent::Exit => {
+                recording::onboarding_try::forget_on_exit();
                 let mut vad_quit = audio::vad_shadow::begin_shutdown();
                 tauri::async_runtime::block_on(async {
                     if let Some(cache) = app_handle.try_state::<AsyncMutex<TranscriberCache>>() {

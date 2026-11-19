@@ -23,7 +23,7 @@ pub(crate) mod windows_identity;
 static ENCRYPTION_KEY: OnceCell<[u8; 32]> = OnceCell::new();
 
 /// Store file (relative to the app data directory) managed via tauri-plugin-store.
-const SECURE_STORE_FILE: &str = "secure.dat";
+pub(crate) const SECURE_STORE_FILE: &str = "secure.dat";
 
 /// Initialize the encryption key using the device hash with PBKDF2
 #[cfg(any(not(target_os = "windows"), test))]

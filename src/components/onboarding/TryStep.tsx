@@ -4,46 +4,36 @@ import { Button } from "@/components/settings/SettingsButton";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { PermissionStatus } from "@/components/onboarding/onboardingTypes";
-import { useFirstDictation } from "@/components/onboarding/useFirstDictation";
-import { FounderLine } from "@/components/onboarding/FounderLine";
+import { useFirstDictation, type FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { isMacOS } from "@/lib/platform";
-import { cn } from "@/lib/utils";
-import { CircleCheck, Mic, MicOff, Square } from "lucide-react";
+import { Mic, MicOff, Square } from "lucide-react";
 import type { ReactNode } from "react";
 
-const MESSY = "um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before";
-const PLAIN = "Let’s move the sync to Friday at three, and I’ll send the notes before.";
+export const MESSY = "um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before";
+export const PLAIN = "Let’s move the sync to Friday at three, and I’ll send the notes before.";
 
+/** The First try: a real dictation shown only in this window. */
 export function TryStep({
   caps,
   holdToTalk,
   polishAvailable,
   builtinPolish = false,
   engineReady,
-  access,
-  onStartTrial,
-  onRecheck,
-  onHaveKey,
   preparing,
   microphone,
   onAllowMicrophone,
   onBack,
   localSource,
   onUseSomethingElse,
+  onResult,
   onNext,
 }: {
   caps: string[];
   holdToTalk: boolean;
   polishAvailable: boolean;
-  /** Polish runs on Voicetypr's server rather than the user's own provider. */
+  /** This try is cleaned on Voicetypr's server rather than the user's own provider. */
   builtinPolish?: boolean;
   engineReady: boolean;
-  /** Whether this device may dictate: a trial or license is needed first. */
-  access: "ok" | "none" | "offline" | "ended" | "check";
-  onStartTrial: () => void;
-  /** Checks the license again after a failed check. */
-  onRecheck: () => void;
-  onHaveKey: () => void;
   /** Download progress for the engine while it is not ready. */
   preparing: ReactNode;
   microphone: PermissionStatus;
@@ -53,12 +43,12 @@ export function TryStep({
   localSource: boolean;
   /** Opens the choice of the cloud or another computer instead. */
   onUseSomethingElse: () => void;
+  onResult: (result: FirstDictation) => void;
+  /** Moves on without a dictation of their own. */
   onNext: () => void;
 }) {
-  const { listening, working, result, busy, talk, reset } = useFirstDictation(engineReady && access === "ok");
+  const { listening, working, allowance, busy, talk } = useFirstDictation(engineReady, holdToTalk, onResult);
   const micOff = microphone === "denied" || microphone === "restricted";
-  // Polish wording and both panes only when Polish could change the text and, once heard, did.
-  const sideBySide = result ? result.polished : polishAvailable;
   const verb = holdToTalk ? "Hold" : "Press";
   const somethingElse = (
     <p className="text-[12.5px] text-muted-foreground">
@@ -73,31 +63,20 @@ export function TryStep({
       </button>
     </p>
   );
-
-  if (access !== "ok") {
-    const blocked = {
-      none: ["Dictation starts with your trial", "Start your free 7-day trial or add a license key, and you can say your first sentence straight away.", "Start 7-day trial"],
-      offline: ["We couldn’t confirm your trial", "Check your connection and try again. Dictation starts as soon as your trial is confirmed.", "Try again"],
-      check: ["We couldn’t check your license", "Connect to the internet, then recheck. Dictation starts again as soon as it’s confirmed.", "Recheck"],
-      ended: ["Trial ended", "This device’s free week has been used. Upgrade, or activate a key you already have, to keep dictating.", "Upgrade or add a key"],
-    }[access];
+  if (allowance?.kind === "usedUp") {
     return (
       <section className="flex w-full flex-col items-center gap-[18px] text-center">
-        <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">{blocked[0]}</h2>
-        <p role="alert" className="max-w-[480px] text-sm leading-6 text-muted-foreground">{blocked[1]}</p>
-        <div className="flex flex-wrap items-center justify-center gap-[10px]">
-          <Button onClick={access === "check" ? onRecheck : onStartTrial}>{blocked[2]}</Button>
-          <Button variant="ghost" onClick={onHaveKey}>I have a key</Button>
+        <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Your first tries are used up</h2>
+        <p className="max-w-[480px] text-sm leading-6 text-muted-foreground">
+          This device has had its first tries. Here’s what a dictation looks like instead.
+        </p>
+        <div className="flex flex-wrap justify-center gap-[10px]">
+          <Button variant="outline" onClick={onBack}>Back</Button>
+          <Button onClick={onNext}>Continue</Button>
         </div>
-        <div className="flex items-center gap-[10px]">
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onBack}>Back</Button>
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onNext}>Skip for now</Button>
-        </div>
-        {access === "ended" ? <FounderLine /> : null}
       </section>
     );
   }
-
   if (!engineReady) {
     return (
       <section className="flex w-full flex-col items-center gap-[18px] text-center">
@@ -115,12 +94,10 @@ export function TryStep({
       </section>
     );
   }
-
   const start = async () => {
-    if (microphone === "not_determined" && !(await onAllowMicrophone())) return;
+    if (!listening && microphone === "not_determined" && !(await onAllowMicrophone())) return;
     await talk();
   };
-
   return (
     <section className="flex w-full flex-col items-center gap-[18px] text-center">
       <Band>
@@ -130,17 +107,20 @@ export function TryStep({
         </span>
       </Band>
       <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        {sideBySide ? "Say something messy" : "Say something"}
+        {polishAvailable ? "Say something messy" : "Say something"}
       </h2>
       <p className="max-w-[560px] text-base leading-9 text-muted-foreground">
         {verb} <KeyCaps caps={caps} size="onboarding" /> and talk.{" "}
         {holdToTalk ? "Let go when you’re done." : "Press again when you’re done."}
-        {sideBySide ? " Change your mind halfway." : null}
+        {polishAvailable ? " Change your mind halfway." : null}
       </p>
       <p className="max-w-[520px] text-[13px] text-muted-foreground">
-        Not sure what to say? Read this out: <q>{sideBySide ? MESSY : PLAIN}</q>
+        Not sure what to say? Read this out: <q>{polishAvailable ? MESSY : PLAIN}</q>
       </p>
-
+      <p className="max-w-[520px] text-[12.5px] text-muted-foreground">
+        Your words stay in this window: nothing is typed into other apps or saved.
+        {builtinPolish ? " Polish sends them to Voicetypr’s server to clean them up. Voicetypr’s server keeps nothing." : null}
+      </p>
       {micOff ? (
         <Card role="alert" className="w-full flex-row items-center gap-3 px-4 py-3 text-left">
           <MicOff className="size-5 shrink-0 text-destructive" />
@@ -153,50 +133,15 @@ export function TryStep({
           </Button>
         </Card>
       ) : null}
-
-      <div className={cn("grid w-full gap-3 text-left", sideBySide && "sm:grid-cols-2")}>
-        {sideBySide ? (
-          <Pane label="You said">
-            {result ? result.heard : <span className="text-muted-foreground">{listening ? "Listening…" : "Your words, as spoken."}</span>}
-          </Pane>
-        ) : null}
-        <Pane label={sideBySide ? "Voicetypr cleaned it" : "Voicetypr typed"} highlight={Boolean(result)}>
-          {result ? result.typed : (
-            <span className="text-muted-foreground">
-              {working ? "Transcribing…" : listening ? "Listening…" : "Your words land here."}
-            </span>
-          )}
-        </Pane>
-      </div>
-
-      {result ? (
-        <p role="status" className="flex items-center gap-2 text-[12.5px] font-medium text-muted-foreground">
-          <CircleCheck className="size-4 text-sage" />
-          Worked · {result.words} {result.words === 1 ? "word" : "words"}
-          {!result.polished ? " · exactly what the engine heard" : null}
-        </p>
-      ) : null}
-      {builtinPolish ? (
-        <p className="max-w-[520px] text-[12.5px] text-muted-foreground">
-          Polish sends your words to Voicetypr’s server to clean them up. Voicetypr’s server keeps nothing. You can turn this off in Settings → Polish.
-        </p>
-      ) : null}
-
+      <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
+        {working ? "Transcribing…" : listening ? "Listening…" : null}
+      </p>
       <div className="flex flex-wrap items-center justify-center gap-[10px]">
-        {result ? (
-          <>
-            <Button variant="ghost" onClick={reset}>Try again</Button>
-            <Button onClick={onNext}>Continue</Button>
-          </>
-        ) : (
-          <>
-            <Button variant="outline" disabled={busy || working || micOff} onClick={() => void start()}>
-              {working ? <Spinner /> : listening ? <Square className="size-3.5" /> : <Mic className="size-4" />}
-              {listening ? "Stop" : "Or click here to talk"}
-            </Button>
-            <Button variant="ghost" disabled={listening || working} onClick={onNext}>Skip for now</Button>
-          </>
-        )}
+        <Button variant="outline" disabled={busy || working || micOff} onClick={() => void start()}>
+          {working ? <Spinner /> : listening ? <Square className="size-3.5" /> : <Mic className="size-4" />}
+          {listening ? "Stop" : "Or click here to talk"}
+        </Button>
+        <Button variant="ghost" disabled={listening || working} onClick={onNext}>Skip for now</Button>
       </div>
       <div className="flex items-center gap-[10px]">
         <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={listening || working} onClick={onBack}>
@@ -205,14 +150,5 @@ export function TryStep({
       </div>
       {somethingElse}
     </section>
-  );
-}
-
-function Pane({ label, highlight, children }: { label: string; highlight?: boolean; children: ReactNode }) {
-  return (
-    <Card className={cn("min-h-[120px] gap-2 px-[18px] py-4", highlight && "outline-[1.5px] outline-sage -outline-offset-1")}>
-      <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">{label}</span>
-      <p className="text-[16px] leading-[24px] text-foreground" aria-live="polite">{children}</p>
-    </Card>
   );
 }

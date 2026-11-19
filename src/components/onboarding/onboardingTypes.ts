@@ -12,10 +12,13 @@ export type Step =
   | "engine"
   | "permissions"
   | "shortcut"
-  | "fork"
   | "polish"
-  | "trial"
   | "try"
+  | "result"
+  | "fork"
+  | "use"
+  | "buy"
+  | "trial"
   | "done";
 
 export interface OnboardingDesktopProps {
@@ -26,8 +29,6 @@ export interface OnboardingDesktopProps {
   onComplete: () => void;
   /** The licence as last checked; null when the check has not answered. */
   licenseStatus?: LicenseStatus | null;
-  /** The last license check failed, so the status may be stale. */
-  licenseCheckFailed?: boolean;
   onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
   /** Resolves to a message the user can act on, or null once the key is active. */
   onActivateLicense?: (key: string) => Promise<string | null>;
@@ -35,13 +36,6 @@ export interface OnboardingDesktopProps {
   onOpenPricing?: () => Promise<void>;
   modelManagement: ReturnType<typeof useModelManagement>;
 }
-
-/**
- * New users get Voicetypr's built-in Polish (`builtin_polish_enabled`) without a
- * key of their own. It runs only during an active trial or with a licence, and
- * any failure pastes the engine's own text.
- */
-export const NEW_USERS_GET_POLISH = true;
 
 export type SourceType = "local" | "cloud" | "remote";
 export type PermissionStatus = "checking" | "granted" | "not_determined" | "denied" | "restricted" | "error";

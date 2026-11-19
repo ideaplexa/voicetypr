@@ -4,9 +4,10 @@
 //! `builtin_polish_enabled` setting is on. Any failure returns an error the
 //! writing pipeline turns into the engine's own text, without a notice.
 //!
-//! Before any trial or licence, onboarding's first try may use a small
-//! allowance of its own (`/polish/onboarding`, capped per device on the
-//! server), and only while that step has opened its gate.
+//! Before any trial or licence, onboarding's First try may be polished
+//! through a small allowance of its own (`/polish/onboarding`, capped per
+//! device on the server). Only `recording/onboarding_try.rs` asks for it, for
+//! the try it owns; the dictation pipeline never does.
 use crate::ai::contract::AiPolishResult;
 use crate::ai::error::AiProviderError;
 use crate::ai::prompts::EnhancementPreset;
@@ -14,7 +15,6 @@ use crate::commands::ai::AiPolishAttemptError;
 use crate::commands::license::RuntimeLicenseCache;
 use crate::license::LicenseState;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -44,32 +44,44 @@ fn trial_or_licence(licence: &RuntimeLicenseCache) -> bool {
     )
 }
 
-/// Open only while onboarding's first try runs, before a trial or licence exists.
-static ONBOARDING_TRY: AtomicBool = AtomicBool::new(false);
-
-/// Opened and closed by onboarding's first-try gate; nothing else may open it.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn set_onboarding_try(active: bool) {
-    ONBOARDING_TRY.store(active, Ordering::SeqCst);
-}
-
-pub(crate) fn onboarding_try_open() -> bool {
-    ONBOARDING_TRY.load(Ordering::SeqCst)
-}
-
-/// Onboarding's first try, with the switch on, no provider of the user's own,
-/// and no trial or licence yet (those use the normal route).
+/// Onboarding's First try before a trial or licence, with the switch on and no
+/// provider of the user's own; a trial or licence uses the normal route.
 pub(crate) fn eligible_first_try(
     setting_on: bool,
     own_provider_ready: bool,
     licence: &RuntimeLicenseCache,
-    try_open: bool,
 ) -> bool {
     setting_on
         && !own_provider_ready
-        && try_open
         && !trial_or_licence(licence)
         && !matches!(licence, RuntimeLicenseCache::Loading)
+}
+
+/// A fresh install, whose settings never recorded onboarding, starts with
+/// built-in Polish on; an existing install keeps it off until the user chooses.
+pub(crate) fn default_on_for_fresh_install<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+) {
+    if store.get("onboarding_completed").is_none() && store.get(SETTING_KEY).is_none() {
+        store.set(SETTING_KEY, serde_json::json!(true));
+    }
+}
+
+/// Runs `work` while the First try is still current; dropping it cancels the
+/// request, so nothing more goes out once the try ends.
+async fn while_current<T>(
+    still_current: &impl Fn() -> bool,
+    work: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    let ended = async {
+        while still_current() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    };
+    tokio::select! {
+        out = work => Some(out),
+        () = ended => None,
+    }
 }
 
 pub(crate) fn setting_on<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) -> bool {
@@ -93,10 +105,7 @@ pub(crate) fn active(app: &AppHandle, own_provider_ready: bool) -> bool {
     state
         .license_cache
         .try_read()
-        .map(|cache| {
-            eligible(setting, own_provider_ready, &cache)
-                || eligible_first_try(setting, own_provider_ready, &cache, onboarding_try_open())
-        })
+        .map(|cache| eligible(setting, own_provider_ready, &cache))
         .unwrap_or(false)
 }
 
@@ -267,13 +276,6 @@ fn onboarding_unfinished(app: &AppHandle) -> bool {
         != Some(true)
 }
 
-/// Whether built-in Polish runs on the next take, counting the first-try allowance only while its gate is open.
-pub(crate) fn will_run(builtin_enabled: bool, availability: Availability, try_open: bool) -> bool {
-    builtin_enabled
-        && (availability == Availability::Ready
-            || (availability == Availability::FirstTry && try_open))
-}
-
 /// The last server confirmation, bound to the licence state and key it was given for.
 static CONFIRMED: std::sync::Mutex<Option<(u64, Instant)>> = std::sync::Mutex::new(None);
 
@@ -381,18 +383,7 @@ pub(crate) async fn polish(
         });
     }
     let device_hash = device_hash().map_err(|_| fail(AiProviderError::Internal))?;
-    let first_try = {
-        let Some(state) = app.try_state::<crate::AppState>() else {
-            return Err(fail(AiProviderError::ServiceUnavailable));
-        };
-        let cache = state.license_cache.read().await;
-        eligible_first_try(true, false, &cache, onboarding_try_open())
-    };
-    let license_key = if first_try {
-        None
-    } else {
-        crate::license::keychain::get_license(app).ok().flatten()
-    };
+    let license_key = crate::license::keychain::get_license(app).ok().flatten();
     let request = PolishRequest {
         device_hash,
         license_key: license_key.as_deref(),
@@ -415,12 +406,6 @@ pub(crate) async fn polish(
                 .unwrap_or(false);
             if !switch_on {
                 return Err(AiProviderError::Canceled);
-            }
-            if first_try {
-                if !onboarding_try_open() {
-                    return Err(AiProviderError::Canceled);
-                }
-                return post(client(), &base_url, "polish/onboarding", &request).await;
             }
             // Text goes out only after the server has confirmed this device's entitlement.
             if availability(app, false).await != Availability::Ready {
@@ -467,6 +452,112 @@ pub(crate) async fn polish(
     }
 }
 
+/// Who is asking, for a First try: read outside the settings store.
+pub(crate) struct FirstTryIdentity<'a> {
+    pub(crate) device_hash: &'a str,
+    pub(crate) license_key: Option<&'a str>,
+    pub(crate) own_provider_ready: bool,
+}
+
+/// Cleans onboarding's First try for the setup window alone: nothing is pasted
+/// or saved. `still_current` is the try's own gate; once it closes, nothing is
+/// sent and no text comes back. None means the try shows the engine's text.
+pub(crate) async fn polish_first_try(
+    app: &AppHandle,
+    text: &str,
+    still_current: impl Fn() -> bool,
+) -> Option<String> {
+    let device_hash = device_hash().ok()?;
+    let license_key = crate::license::keychain::get_license(app).ok().flatten();
+    let identity = FirstTryIdentity {
+        device_hash,
+        license_key: license_key.as_deref(),
+        own_provider_ready: crate::commands::ai::has_ai_model_and_key(app).unwrap_or(true),
+    };
+    let base_url = crate::license::api_client::get_api_base_url();
+    first_try_with(app, client(), &base_url, identity, text, still_current).await
+}
+
+pub(crate) async fn first_try_with<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    client: &reqwest::Client,
+    base_url: &str,
+    identity: FirstTryIdentity<'_>,
+    text: &str,
+    still_current: impl Fn() -> bool,
+) -> Option<String> {
+    let store = app.store("settings").ok()?;
+    let switch_on = || setting_on(&store);
+    if !switch_on() || identity.own_provider_ready || text.trim().is_empty() {
+        return None;
+    }
+    let entitled = {
+        let state = app.try_state::<crate::AppState>()?;
+        let cache = state.license_cache.read().await;
+        if trial_or_licence(&cache) {
+            true
+        } else if eligible_first_try(true, false, &cache) {
+            false
+        } else {
+            return None;
+        }
+    };
+    let preset = crate::ai::prompts::enhancement_options_for_ai_enabled(
+        store.get("enhancement_options").as_ref(),
+        true,
+    )
+    .map(|options| options.preset)
+    .unwrap_or(EnhancementPreset::CleanDictation);
+    let language = store
+        .get("speech_language")
+        .and_then(|value| value.as_str().map(str::to_owned));
+    let keep_words = crate::ai::keep_words::enabled(store.get("polish_keep_words").as_ref(), false);
+    let request = PolishRequest {
+        device_hash: identity.device_hash,
+        license_key: identity.license_key.filter(|_| entitled),
+        text,
+        style: style(preset).unwrap_or("clean"),
+        language: language_code(language.as_deref()),
+        keep_words,
+    };
+    if !still_current() {
+        return None;
+    }
+    if entitled
+        && while_current(
+            &still_current,
+            check(client, base_url, identity.device_hash, identity.license_key),
+        )
+        .await?
+            != Availability::Ready
+    {
+        return None;
+    }
+    if !still_current() || !switch_on() {
+        return None;
+    }
+    let route = if entitled {
+        "polish"
+    } else {
+        "polish/onboarding"
+    };
+    let started = Instant::now();
+    let result = while_current(&still_current, post(client, base_url, route, &request)).await?;
+    let output = result.ok().map(|data| data.text.trim().to_string());
+    let output = output.filter(|output| crate::ai::output_guard::check(text, output).is_ok());
+    log::info!(
+        "First try Polish {} (input chars: {}, duration_ms: {})",
+        if output.is_some() {
+            "applied"
+        } else {
+            "unavailable"
+        },
+        text.chars().count(),
+        started.elapsed().as_millis()
+    );
+    output.filter(|_| still_current())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,43 +600,315 @@ mod tests {
     }
 
     #[test]
-    fn the_first_try_allowance_is_only_for_an_open_gate_before_any_trial_or_licence() {
+    fn the_first_try_allowance_is_only_before_any_trial_or_licence() {
         let none = ready(LicenseState::None);
-        assert!(eligible_first_try(true, false, &none, true));
+        assert!(eligible_first_try(true, false, &none));
         assert!(eligible_first_try(
             true,
             false,
-            &RuntimeLicenseCache::Failed,
-            true
+            &RuntimeLicenseCache::Failed
         ));
         assert!(
-            !eligible_first_try(true, false, &none, false),
-            "outside the first try the gate stays closed"
-        );
-        assert!(
-            !eligible_first_try(false, false, &none, true),
+            !eligible_first_try(false, false, &none),
             "the off switch sends nothing"
         );
         assert!(
-            !eligible_first_try(true, true, &none, true),
+            !eligible_first_try(true, true, &none),
             "the user's own provider wins"
         );
         assert!(
-            !eligible_first_try(true, false, &RuntimeLicenseCache::Loading, true),
+            !eligible_first_try(true, false, &RuntimeLicenseCache::Loading),
             "as polish_status says while the licence loads"
         );
         for access in [LicenseState::Trial, LicenseState::Licensed] {
             assert!(
-                !eligible_first_try(true, false, &ready(access), true),
+                !eligible_first_try(true, false, &ready(access)),
                 "a trial or licence uses the normal route"
             );
         }
-        set_onboarding_try(true);
-        assert!(onboarding_try_open());
-        set_onboarding_try(false);
+    }
+
+    fn mock_app(dir: &std::path::Path) -> tauri::App<tauri::test::MockRuntime> {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.config_mut().identifier = dir.to_str().unwrap().to_string();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(context)
+            .unwrap();
+        app.manage(crate::AppState::new());
+        app.store("settings")
+            .unwrap()
+            .set(SETTING_KEY, serde_json::json!(true));
+        app
+    }
+
+    async fn licence(app: &tauri::App<tauri::test::MockRuntime>, cache: RuntimeLicenseCache) {
+        *app.state::<crate::AppState>().license_cache.write().await = cache;
+    }
+
+    const HEARD: &str = "um so let's move the sync to thursday no friday at three";
+    const CLEANED: &str = "Let's move the sync to Friday at three.";
+
+    fn identity(own_provider_ready: bool) -> FirstTryIdentity<'static> {
+        FirstTryIdentity {
+            device_hash: "abc",
+            license_key: Some("KEY"),
+            own_provider_ready,
+        }
+    }
+
+    fn cleaned_reply() -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({ "success": true, "data": { "text": CLEANED } }))
+    }
+
+    #[tokio::test]
+    async fn a_first_try_before_any_trial_is_cleaned_on_the_onboarding_route_and_leaves_no_history()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        licence(&app, ready(LicenseState::None)).await;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish/onboarding"))
+            .and(body_json(serde_json::json!({
+                "deviceHash": "abc",
+                "text": HEARD,
+                "style": "clean",
+                "keepWords": false
+            })))
+            .respond_with(cleaned_reply())
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let cleaned = first_try_with(
+            app.handle(),
+            &reqwest::Client::new(),
+            &server.uri(),
+            identity(false),
+            HEARD,
+            || true,
+        )
+        .await;
+
+        assert_eq!(cleaned.as_deref(), Some(CLEANED));
         assert!(
-            !onboarding_try_open(),
-            "closing the first try closes the allowance"
+            app.store("transcriptions").unwrap().keys().is_empty(),
+            "a First try is never a History row"
+        );
+        assert!(!dir.path().join("transcriptions").exists());
+    }
+
+    #[tokio::test]
+    async fn a_first_try_with_a_trial_uses_the_normal_route_after_the_servers_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        licence(&app, ready(LicenseState::Trial)).await;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "success": true, "data": { "available": true } }),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/polish"))
+            .and(body_json(serde_json::json!({
+                "deviceHash": "abc",
+                "licenseKey": "KEY",
+                "text": HEARD,
+                "style": "clean",
+                "keepWords": false
+            })))
+            .respond_with(cleaned_reply())
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/polish/onboarding"))
+            .respond_with(cleaned_reply())
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let cleaned = first_try_with(
+            app.handle(),
+            &reqwest::Client::new(),
+            &server.uri(),
+            identity(false),
+            HEARD,
+            || true,
+        )
+        .await;
+        assert_eq!(cleaned.as_deref(), Some(CLEANED));
+    }
+
+    #[tokio::test]
+    async fn a_first_try_sends_nothing_when_off_owned_ended_or_still_loading() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(cleaned_reply())
+            .expect(0)
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::new();
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        licence(&app, ready(LicenseState::None)).await;
+        app.store("settings")
+            .unwrap()
+            .set(SETTING_KEY, serde_json::json!(false));
+        let off = first_try_with(
+            app.handle(),
+            &client,
+            &server.uri(),
+            identity(false),
+            HEARD,
+            || true,
+        )
+        .await;
+        assert_eq!(off, None, "switched off");
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        licence(&app, ready(LicenseState::None)).await;
+        let own = first_try_with(
+            app.handle(),
+            &client,
+            &server.uri(),
+            identity(true),
+            HEARD,
+            || true,
+        )
+        .await;
+        assert_eq!(own, None, "the user's own provider");
+        let ended = first_try_with(
+            app.handle(),
+            &client,
+            &server.uri(),
+            identity(false),
+            HEARD,
+            || false,
+        )
+        .await;
+        assert_eq!(ended, None, "the try ended before the send");
+        licence(&app, RuntimeLicenseCache::Loading).await;
+        let loading = first_try_with(
+            app.handle(),
+            &client,
+            &server.uri(),
+            identity(false),
+            HEARD,
+            || true,
+        )
+        .await;
+        assert_eq!(loading, None, "the licence is still loading");
+    }
+
+    #[tokio::test]
+    async fn a_first_try_that_ends_while_its_request_is_out_gets_nothing_back() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish/onboarding"))
+            .respond_with(cleaned_reply().set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        licence(&app, ready(LicenseState::None)).await;
+        let started = Instant::now();
+        let cleaned = first_try_with(
+            app.handle(),
+            &reqwest::Client::new(),
+            &server.uri(),
+            identity(false),
+            HEARD,
+            || started.elapsed() < Duration::from_millis(200),
+        )
+        .await;
+        assert_eq!(cleaned, None);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the request is dropped when the try ends"
+        );
+    }
+
+    #[test]
+    fn only_a_fresh_install_starts_with_built_in_polish_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        let store = app.store("settings").unwrap();
+        store.clear();
+        default_on_for_fresh_install(&store);
+        assert_eq!(store.get(SETTING_KEY), Some(serde_json::json!(true)));
+
+        for (completed, choice) in [(false, None), (true, None), (false, Some(false))] {
+            store.clear();
+            store.set("onboarding_completed", serde_json::json!(completed));
+            if let Some(choice) = choice {
+                store.set(SETTING_KEY, serde_json::json!(choice));
+            }
+            default_on_for_fresh_install(&store);
+            assert_eq!(
+                store.get(SETTING_KEY),
+                choice.map(|on| serde_json::json!(on))
+            );
+        }
+        store.clear();
+        store.set(SETTING_KEY, serde_json::json!(false));
+        default_on_for_fresh_install(&store);
+        assert_eq!(store.get(SETTING_KEY), Some(serde_json::json!(false)));
+    }
+
+    #[tokio::test]
+    async fn a_used_up_allowance_or_an_ended_try_keeps_the_engines_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        licence(&app, ready(LicenseState::None)).await;
+        let used_up = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(
+                serde_json::json!({ "success": false, "error": "polish_onboarding_used_up" }),
+            ))
+            .mount(&used_up)
+            .await;
+        let client = reqwest::Client::new();
+        assert_eq!(
+            first_try_with(
+                app.handle(),
+                &client,
+                &used_up.uri(),
+                identity(false),
+                HEARD,
+                || true
+            )
+            .await,
+            None
+        );
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(cleaned_reply())
+            .mount(&server)
+            .await;
+        let calls = std::sync::atomic::AtomicU32::new(0);
+        let ends_during_the_send = || calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+        assert_eq!(
+            first_try_with(
+                app.handle(),
+                &client,
+                &server.uri(),
+                identity(false),
+                HEARD,
+                ends_during_the_send
+            )
+            .await,
+            None,
+            "a try that ended while Polish ran gets no text"
         );
     }
 
