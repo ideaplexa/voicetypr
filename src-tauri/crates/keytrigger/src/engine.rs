@@ -35,6 +35,9 @@ pub enum Control {
     ReEnable,
     /// Swap the binding set.
     SetBindings(Vec<(TriggerId, Trigger)>),
+    /// The OS hook matched (and swallowed) a configured chord. Diagnostic only:
+    /// logged here, off the hook callback's time budget.
+    ChordMatched,
     /// Reset the matcher and stop the dispatcher loop.
     Stop,
 }
@@ -369,6 +372,9 @@ impl TriggerEngine {
                             consume_for_dispatch.store(Arc::new(next_consume));
                         }
                         Msg::Control(Control::ReEnable) => matcher.reset(&mut emit),
+                        Msg::Control(Control::ChordMatched) => {
+                            log::debug!("keytrigger: configured chord matched at the hook");
+                        }
                         Msg::Control(Control::Stop) => {
                             if gate.transition(false) {
                                 secure_input.store(gate.state.packed(), Ordering::SeqCst);

@@ -64,6 +64,19 @@ export function eventToShortcut(event: KeyboardEvent): string | null {
 }
 
 /**
+ * Order-free form of a normalized shortcut. Off macOS, Control and
+ * CommandOrControl name the same key: the Windows default primary is stored as
+ * "Control+Space" while a Ctrl keydown derives "CommandOrControl".
+ */
+function canonicalShortcut(shortcut: string): string {
+  return normalizeShortcutKeys(shortcut)
+    .split("+")
+    .map((part) => (!isMacOS && part === "Control" ? "CommandOrControl" : part))
+    .sort()
+    .join("+");
+}
+
+/**
  * True when the keydown event matches the configured hotkey string. Both sides
  * are normalized so stored variants (e.g. "Ctrl+Space") compare equal.
  */
@@ -71,5 +84,5 @@ export function eventMatchesShortcut(event: KeyboardEvent, hotkey: string): bool
   if (!hotkey || !hotkey.trim()) return false;
   const derived = eventToShortcut(event);
   if (!derived) return false;
-  return normalizeShortcutKeys(derived) === normalizeShortcutKeys(hotkey);
+  return canonicalShortcut(derived) === canonicalShortcut(hotkey);
 }

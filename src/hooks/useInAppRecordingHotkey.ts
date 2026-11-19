@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 import { useSetting } from "@/contexts/SettingsContext";
@@ -27,10 +28,9 @@ const MODIFIER_CODE_PREFIX: Record<ModifierSpec["modifier"], string> = {
 
 /**
  * True when focus is inside an editable element (text input / textarea /
- * contenteditable) — the ONLY context where the OS-level keytrigger hook can be
- * bypassed by the browser/IME (e.g. Ctrl+Space in our own bug-report box).
- * Restricting the fallback to this case avoids double-triggering everywhere the
- * native engine already handles the hotkey.
+ * contenteditable). Bare-modifier emulation, and every path on macOS, is
+ * limited to these: a tap fires on key-up while the native hook fires on
+ * key-down, so emulating it where the hook works would double-trigger.
  */
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -91,12 +91,12 @@ function bareModifierFallback(binding: ShortcutBinding | null): BareModifierFall
 /**
  * In-app fallback for the recording hotkey.
  *
- * The OS-level `keytrigger` engine starts/stops recording globally, but when
- * focus is inside one of our own WebView2 text fields the browser/IME can
- * swallow the trigger before the low-level hook sees it, so the global hotkey
- * silently does nothing. Because the keys still reach the DOM, this hook
- * re-handles them when an editable element is focused:
- *   - combos (e.g. Ctrl+Space) — matched on keydown against `settings.hotkey`;
+ * The OS-level `keytrigger` engine starts/stops recording globally, but on
+ * Windows its low-level hook receives nothing while one of our own WebView2
+ * windows has focus, so the global hotkey silently does nothing. Because the
+ * keys still reach the DOM, this hook re-handles them:
+ *   - combos (e.g. Ctrl+Space) — matched on keydown against `settings.hotkey`,
+ *     anywhere in the window on Windows, in editable fields on macOS;
  *   - bare-modifier isolated-tap (e.g. Control alone) — a clean modifier
  *     keydown→keyup with no other key, matched against the native primary
  *     binding (which leaves `settings.hotkey` empty).
@@ -263,12 +263,25 @@ export function useInAppRecordingHotkey(): void {
         pendingTap = null;
       }
       if (event.isComposing) return;
-      if (!isEditableTarget(event.target)) return;
+
+      // Esc Esc cancel: the Windows hook is blind in our window, so report Esc
+      // here. The backend counts a press both routes saw once and decides
+      // whether this is the first or second press. Esc is never consumed.
+      if (!isMacOS && event.key === "Escape") {
+        const state = latest.current.recording.state;
+        if (!event.repeat && state !== "idle" && state !== "error") {
+          void invoke("in_app_escape").catch(() => undefined);
+        }
+        return;
+      }
+
+      const editable = isEditableTarget(event.target);
 
       const currentHotkey = latest.current.hotkey;
       const bareModifier = bareModifierRef.current;
 
       if (bareModifier) {
+        if (!editable) return;
         if (eventMatchesBareModifier(event, bareModifier.modifier)) {
           if (event.repeat) return; // held modifier auto-repeats; keep the pending tap/hold
           if (hasOtherModifierHeld(event, bareModifier.modifier) || hasAltGraph(event)) {
@@ -301,6 +314,11 @@ export function useInAppRecordingHotkey(): void {
       }
 
       // ── Combo path (e.g. Ctrl+Space) ─────────────────────────────────────
+      // On Windows the low-level hook is not called at all while one of our
+      // WebView2 windows has focus (wry#1761), so the DOM is the only route
+      // there: handle the combo anywhere in the window. The backend collapses
+      // a press that both routes saw into one toggle.
+      if (!editable && isMacOS) return;
       if (currentHotkey) {
         if (event.repeat) return;
         // Only Ctrl/Cmd-class combos (the IME-swallowed class); leave bare keys

@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/settings/SettingsButton";
 import { createLogger } from "@/lib/logger";
+import { isWindows } from "@/lib/platform";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Copy, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -24,7 +25,11 @@ const AGENT_PROMPT = `Use Voicetypr for local audio transcription.
 When I give you an audio file, run:
 voicetypr transcribe --file <file> --json
 
-Read the JSON response, use the transcript for the task I requested, and report any CLI error exactly. Do not upload the audio to another service unless I explicitly ask.`;
+Read the JSON response, use the transcript for the task I requested, and report any CLI error exactly. Do not upload the audio to another service unless I explicitly ask.${
+  isWindows
+    ? "\n\nIn PowerShell, run it as `cmd /c voicetypr ...` so the shell waits for the result and the exit code."
+    : ""
+}`;
 
 /**
  * Surfaces the `voicetypr` command-line tool: install/remove status and a
@@ -193,6 +198,12 @@ export function AgentCliSection() {
         {status?.manageable === false && !status.detail ? (
           <p className="border-t border-border py-2 text-xs text-muted-foreground">
             CLI management is unavailable on this platform.
+          </p>
+        ) : null}
+        {isWindows && status?.manageable ? (
+          <p className="border-t border-border py-2 text-xs text-muted-foreground">
+            In PowerShell, run <code>cmd /c voicetypr …</code> so the shell waits for the result and
+            sets the exit code. Command Prompt works as is.
           </p>
         ) : null}
         {status?.detail ? (
