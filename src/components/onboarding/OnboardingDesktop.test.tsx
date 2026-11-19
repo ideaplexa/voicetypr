@@ -1631,7 +1631,7 @@ describe("OnboardingDesktop", () => {
       await reachUse(user);
       const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
       await waitFor(() => expect(toggle).toBeChecked());
-      expect(screen.getByText(/Your words go to Voicetypr’s server to be cleaned, and nothing is kept/)).toBeInTheDocument();
+      expect(screen.getByText(/Your words go to Voicetypr’s server to be cleaned. Voicetypr’s server keeps nothing/)).toBeInTheDocument();
       expect(screen.getByText("Rather use your own AI provider? Add its key in Settings → Polish.")).toBeInTheDocument();
       expect(screen.queryByText(/On: used because/)).not.toBeInTheDocument();
       await user.click(toggle);
@@ -1735,7 +1735,7 @@ describe("OnboardingDesktop", () => {
       await reachUse(user);
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
       expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
-      expect(screen.getByText(/Polish sends your words to Voicetypr’s server to clean them up, and nothing is kept\. You can turn this off in Settings → Polish\./)).toBeInTheDocument();
+      expect(screen.getByText(/Polish sends your words to Voicetypr’s server to clean them up\. Voicetypr’s server keeps nothing\. You can turn this off in Settings → Polish\./)).toBeInTheDocument();
     });
 
     it("continues without a pick, keeping Polish on and today's default style", async () => {

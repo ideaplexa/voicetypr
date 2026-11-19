@@ -178,7 +178,7 @@ export function TryStep({
       ) : null}
       {builtinPolish ? (
         <p className="max-w-[520px] text-[12.5px] text-muted-foreground">
-          Polish sends your words to Voicetypr’s server to clean them up, and nothing is kept. You can turn this off in Settings → Polish.
+          Polish sends your words to Voicetypr’s server to clean them up. Voicetypr’s server keeps nothing. You can turn this off in Settings → Polish.
         </p>
       ) : null}
 

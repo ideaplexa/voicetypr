@@ -111,7 +111,7 @@ export function PolishStep({
             <div className="flex-1 text-sm">
               <label htmlFor="onboarding-builtin-polish" className="font-semibold">Clean up what I say</label>
               <p className="text-muted-foreground">
-                Your words go to Voicetypr’s server to be cleaned, and nothing is kept. Off sends nothing; you get
+                Your words go to Voicetypr’s server to be cleaned. Voicetypr’s server keeps nothing. Off sends nothing; you get
                 exactly what you said.
               </p>
               {builtin.checked ? null : <p className="mt-1">{builtin.status}</p>}
