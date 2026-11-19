@@ -65,7 +65,11 @@ pub(crate) fn eligible_first_try(
     licence: &RuntimeLicenseCache,
     try_open: bool,
 ) -> bool {
-    setting_on && !own_provider_ready && try_open && !trial_or_licence(licence)
+    setting_on
+        && !own_provider_ready
+        && try_open
+        && !trial_or_licence(licence)
+        && !matches!(licence, RuntimeLicenseCache::Loading)
 }
 
 pub(crate) fn setting_on<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) -> bool {
@@ -405,8 +409,17 @@ pub(crate) async fn polish(
         biased;
         _ = cancellation.cancelled() => Err(AiProviderError::Canceled),
         result = async {
+            let switch_on = app
+                .store("settings")
+                .map(|store| setting_on(&store))
+                .unwrap_or(false);
+            if !switch_on {
+                return Err(AiProviderError::Canceled);
+            }
             if first_try {
-                // The server counts this against the device's small onboarding allowance.
+                if !onboarding_try_open() {
+                    return Err(AiProviderError::Canceled);
+                }
                 return post(client(), &base_url, "polish/onboarding", &request).await;
             }
             // Text goes out only after the server has confirmed this device's entitlement.
@@ -516,6 +529,10 @@ mod tests {
         assert!(
             !eligible_first_try(true, true, &none, true),
             "the user's own provider wins"
+        );
+        assert!(
+            !eligible_first_try(true, false, &RuntimeLicenseCache::Loading, true),
+            "as polish_status says while the licence loads"
         );
         for access in [LicenseState::Trial, LicenseState::Licensed] {
             assert!(
