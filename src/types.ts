@@ -221,7 +221,7 @@ export interface TranscriptionHistory {
 }
 
 /** Whether built-in Polish would clean the next dictation if its switch is on (`polish_status`). */
-export type BuiltinPolishAvailability = "own_provider" | "no_access" | "ready" | "not_entitled" | "unreachable";
+export type BuiltinPolishAvailability = "own_provider" | "no_access" | "first_try" | "ready" | "not_entitled" | "unreachable";
 
 /** Where Polish stands for the next dictation, from the same settings dictation reads. */
 export interface PolishStatus {

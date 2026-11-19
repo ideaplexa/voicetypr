@@ -3,6 +3,10 @@
 //! with a licence. Text leaves the device only while the user's
 //! `builtin_polish_enabled` setting is on. Any failure returns an error the
 //! writing pipeline turns into the engine's own text, without a notice.
+//!
+//! Before any trial or licence, onboarding's first try may use a small
+//! allowance of its own (`/polish/onboarding`, capped per device on the
+//! server), and only while that step has opened its gate.
 use crate::ai::contract::AiPolishResult;
 use crate::ai::error::AiProviderError;
 use crate::ai::prompts::EnhancementPreset;
@@ -10,6 +14,7 @@ use crate::commands::ai::AiPolishAttemptError;
 use crate::commands::license::RuntimeLicenseCache;
 use crate::license::LicenseState;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -28,13 +33,39 @@ pub(crate) fn eligible(
     own_provider_ready: bool,
     licence: &RuntimeLicenseCache,
 ) -> bool {
-    setting_on
-        && !own_provider_ready
-        && matches!(
-            licence,
-            RuntimeLicenseCache::Ready(cached)
-                if matches!(cached.status.status, LicenseState::Trial | LicenseState::Licensed)
-        )
+    setting_on && !own_provider_ready && trial_or_licence(licence)
+}
+
+fn trial_or_licence(licence: &RuntimeLicenseCache) -> bool {
+    matches!(
+        licence,
+        RuntimeLicenseCache::Ready(cached)
+            if matches!(cached.status.status, LicenseState::Trial | LicenseState::Licensed)
+    )
+}
+
+/// Open only while onboarding's first try runs, before a trial or licence exists.
+static ONBOARDING_TRY: AtomicBool = AtomicBool::new(false);
+
+/// Opened and closed by onboarding's first-try gate; nothing else may open it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn set_onboarding_try(active: bool) {
+    ONBOARDING_TRY.store(active, Ordering::SeqCst);
+}
+
+pub(crate) fn onboarding_try_open() -> bool {
+    ONBOARDING_TRY.load(Ordering::SeqCst)
+}
+
+/// Onboarding's first try, with the switch on, no provider of the user's own,
+/// and no trial or licence yet (those use the normal route).
+pub(crate) fn eligible_first_try(
+    setting_on: bool,
+    own_provider_ready: bool,
+    licence: &RuntimeLicenseCache,
+    try_open: bool,
+) -> bool {
+    setting_on && !own_provider_ready && try_open && !trial_or_licence(licence)
 }
 
 pub(crate) fn setting_on<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) -> bool {
@@ -58,7 +89,10 @@ pub(crate) fn active(app: &AppHandle, own_provider_ready: bool) -> bool {
     state
         .license_cache
         .try_read()
-        .map(|cache| eligible(setting, own_provider_ready, &cache))
+        .map(|cache| {
+            eligible(setting, own_provider_ready, &cache)
+                || eligible_first_try(setting, own_provider_ready, &cache, onboarding_try_open())
+        })
         .unwrap_or(false)
 }
 
@@ -116,6 +150,7 @@ fn map_status(status: u16) -> AiProviderError {
 async fn post(
     client: &reqwest::Client,
     base_url: &str,
+    route: &str,
     request: &PolishRequest<'_>,
 ) -> Result<PolishData, AiProviderError> {
     let transport = |error: reqwest::Error| {
@@ -126,7 +161,7 @@ async fn post(
         }
     };
     let response = client
-        .post(format!("{base_url}/polish"))
+        .post(format!("{base_url}/{route}"))
         .timeout(TIMEOUT)
         .json(request)
         .send()
@@ -156,6 +191,9 @@ pub(crate) enum Availability {
     OwnProvider,
     /// No trial or licence on this device yet.
     NoAccess,
+    /// No trial or licence yet, but onboarding's first try may use its small
+    /// allowance; nothing is asked of the server for this answer.
+    FirstTry,
     /// Voicetypr's server confirmed it will clean this device's dictation.
     Ready,
     /// The server refused this device, such as a trial started without an email.
@@ -189,7 +227,12 @@ pub(crate) async fn availability(app: &AppHandle, own_provider_ready: bool) -> A
     let licence_state = {
         let cache = state.license_cache.read().await;
         if !eligible(true, false, &cache) {
-            return Availability::NoAccess;
+            return if onboarding_unfinished(app) && !matches!(&*cache, RuntimeLicenseCache::Loading)
+            {
+                Availability::FirstTry
+            } else {
+                Availability::NoAccess
+            };
         }
         match &*cache {
             RuntimeLicenseCache::Ready(cached) => format!("{:?}", cached.status.status),
@@ -210,6 +253,21 @@ pub(crate) async fn availability(app: &AppHandle, own_provider_ready: bool) -> A
         *slot = (answer == Availability::Ready).then(|| (entitlement, Instant::now()));
     }
     answer
+}
+
+fn onboarding_unfinished(app: &AppHandle) -> bool {
+    app.store("settings")
+        .ok()
+        .and_then(|store| store.get("onboarding_completed"))
+        .and_then(|value| value.as_bool())
+        != Some(true)
+}
+
+/// Whether built-in Polish runs on the next take, counting the first-try allowance only while its gate is open.
+pub(crate) fn will_run(builtin_enabled: bool, availability: Availability, try_open: bool) -> bool {
+    builtin_enabled
+        && (availability == Availability::Ready
+            || (availability == Availability::FirstTry && try_open))
 }
 
 /// The last server confirmation, bound to the licence state and key it was given for.
@@ -319,7 +377,18 @@ pub(crate) async fn polish(
         });
     }
     let device_hash = device_hash().map_err(|_| fail(AiProviderError::Internal))?;
-    let license_key = crate::license::keychain::get_license(app).ok().flatten();
+    let first_try = {
+        let Some(state) = app.try_state::<crate::AppState>() else {
+            return Err(fail(AiProviderError::ServiceUnavailable));
+        };
+        let cache = state.license_cache.read().await;
+        eligible_first_try(true, false, &cache, onboarding_try_open())
+    };
+    let license_key = if first_try {
+        None
+    } else {
+        crate::license::keychain::get_license(app).ok().flatten()
+    };
     let request = PolishRequest {
         device_hash,
         license_key: license_key.as_deref(),
@@ -336,11 +405,15 @@ pub(crate) async fn polish(
         biased;
         _ = cancellation.cancelled() => Err(AiProviderError::Canceled),
         result = async {
+            if first_try {
+                // The server counts this against the device's small onboarding allowance.
+                return post(client(), &base_url, "polish/onboarding", &request).await;
+            }
             // Text goes out only after the server has confirmed this device's entitlement.
             if availability(app, false).await != Availability::Ready {
                 return Err(AiProviderError::ServiceUnavailable);
             }
-            let result = post(client(), &base_url, &request).await;
+            let result = post(client(), &base_url, "polish", &request).await;
             if matches!(result, Err(AiProviderError::ServiceUnavailable)) {
                 forget_confirmation();
             }
@@ -423,6 +496,93 @@ mod tests {
     }
 
     #[test]
+    fn the_first_try_allowance_is_only_for_an_open_gate_before_any_trial_or_licence() {
+        let none = ready(LicenseState::None);
+        assert!(eligible_first_try(true, false, &none, true));
+        assert!(eligible_first_try(
+            true,
+            false,
+            &RuntimeLicenseCache::Failed,
+            true
+        ));
+        assert!(
+            !eligible_first_try(true, false, &none, false),
+            "outside the first try the gate stays closed"
+        );
+        assert!(
+            !eligible_first_try(false, false, &none, true),
+            "the off switch sends nothing"
+        );
+        assert!(
+            !eligible_first_try(true, true, &none, true),
+            "the user's own provider wins"
+        );
+        for access in [LicenseState::Trial, LicenseState::Licensed] {
+            assert!(
+                !eligible_first_try(true, false, &ready(access), true),
+                "a trial or licence uses the normal route"
+            );
+        }
+        set_onboarding_try(true);
+        assert!(onboarding_try_open());
+        set_onboarding_try(false);
+        assert!(
+            !onboarding_try_open(),
+            "closing the first try closes the allowance"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_first_try_goes_to_the_onboarding_route_without_a_licence_key() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish/onboarding"))
+            .and(body_json(serde_json::json!({
+                "deviceHash": "abc",
+                "text": "um so tuesday no wednesday",
+                "style": "clean",
+                "language": "en",
+                "keepWords": false
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true, "data": {"text": "Wednesday."}
+            })))
+            .mount(&server)
+            .await;
+        let data = post(
+            &reqwest::Client::new(),
+            &server.uri(),
+            "polish/onboarding",
+            &request(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(data.text, "Wednesday.");
+
+        let used_up = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
+                "success": false, "error": "polish_onboarding_used_up"
+            })))
+            .mount(&used_up)
+            .await;
+        let error = post(
+            &reqwest::Client::new(),
+            &used_up.uri(),
+            "polish/onboarding",
+            &request(),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            error,
+            AiProviderError::RateLimited,
+            "used up falls back to the engine's text"
+        );
+    }
+
+    #[test]
     fn personal_dictation_never_calls_the_server() {
         assert_eq!(style(EnhancementPreset::PersonalDictation), None);
         assert_eq!(style(EnhancementPreset::CleanDictation), Some("clean"));
@@ -466,7 +626,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let data = post(&reqwest::Client::new(), &server.uri(), &request())
+        let data = post(&reqwest::Client::new(), &server.uri(), "polish", &request())
             .await
             .unwrap();
         assert_eq!(data.text, "Wednesday.");
@@ -491,7 +651,7 @@ mod tests {
                 )
                 .mount(&server)
                 .await;
-            let error = post(&reqwest::Client::new(), &server.uri(), &request())
+            let error = post(&reqwest::Client::new(), &server.uri(), "polish", &request())
                 .await
                 .err()
                 .unwrap();
@@ -510,7 +670,7 @@ mod tests {
                 .respond_with(ResponseTemplate::new(200).set_body_json(body))
                 .mount(&server)
                 .await;
-            let error = post(&reqwest::Client::new(), &server.uri(), &request())
+            let error = post(&reqwest::Client::new(), &server.uri(), "polish", &request())
                 .await
                 .err()
                 .unwrap();
@@ -573,10 +733,15 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreachable_server_is_a_network_error() {
-        let error = post(&reqwest::Client::new(), "http://127.0.0.1:9", &request())
-            .await
-            .err()
-            .unwrap();
+        let error = post(
+            &reqwest::Client::new(),
+            "http://127.0.0.1:9",
+            "polish",
+            &request(),
+        )
+        .await
+        .err()
+        .unwrap();
         assert_eq!(error, AiProviderError::Network);
     }
 
@@ -592,7 +757,7 @@ mod tests {
             .mount(&server)
             .await;
         let started = Instant::now();
-        let error = post(&reqwest::Client::new(), &server.uri(), &request())
+        let error = post(&reqwest::Client::new(), &server.uri(), "polish", &request())
             .await
             .err()
             .unwrap();

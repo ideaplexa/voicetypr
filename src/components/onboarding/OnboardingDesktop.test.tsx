@@ -1684,6 +1684,30 @@ describe("OnboardingDesktop", () => {
       expect(invokeMock).toHaveBeenCalledWith("update_enhancement_options", { options: { preset: "Message" } });
     });
 
+    it("offers the switch before any trial, and claims Polish on the first try only once its allowance is open", async () => {
+      polishStatus = { ...BUILTIN_READY, builtin: "first_try", will_run: false };
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachUse(user);
+      const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
+      await waitFor(() => expect(toggle).toBeChecked());
+      expect(toggle).toBeEnabled();
+      expect(screen.queryByText("Works during your trial or with a license.")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      expect(await screen.findByRole("heading", { name: "Say something" })).toBeInTheDocument();
+      expect(screen.queryByText(/Polish sends your words/)).not.toBeInTheDocument();
+    });
+
+    it("says the first try is polished on Voicetypr's server while the first-try allowance is open", async () => {
+      polishStatus = { ...BUILTIN_READY, builtin: "first_try", will_run: true };
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachUse(user);
+      await user.click(screen.getByRole("button", { name: /^continue$/i }));
+      expect(await screen.findByRole("heading", { name: "Say something messy" })).toBeInTheDocument();
+      expect(screen.getByText(/Polish sends your words to Voicetypr’s server/)).toBeInTheDocument();
+    });
+
     it("sends nothing on the first try once Polish is switched off in the step before", async () => {
       const user = userEvent.setup();
       renderOnboarding();

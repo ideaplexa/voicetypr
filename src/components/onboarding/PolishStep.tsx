@@ -49,7 +49,7 @@ export function PolishStep({
   const use = USES.find((item) => item.id === picked);
   const style = use ? `the ${use.name} style${use.detail ? `, ${use.detail}` : ""}` : "";
   const ownReady = status?.own_provider_ready === true;
-  const builtin = builtinPolishView(ownReady ? "own_provider" : status?.builtin ?? null, builtinChosen);
+  const builtin = builtinPolishView(ownReady ? "own_provider" : status?.builtin === "first_try" ? "ready" : status?.builtin ?? null, builtinChosen);
   const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
 
   return (

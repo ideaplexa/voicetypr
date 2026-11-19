@@ -52,9 +52,10 @@ fn status(
     own_provider_enabled: bool,
     builtin_enabled: bool,
     builtin: crate::ai::builtin::Availability,
+    first_try_open: bool,
 ) -> PolishStatus {
     let will_run = (own_provider_ready && own_provider_enabled)
-        || (builtin_enabled && builtin == crate::ai::builtin::Availability::Ready);
+        || crate::ai::builtin::will_run(builtin_enabled, builtin, first_try_open);
     PolishStatus {
         will_run,
         own_provider_ready,
@@ -80,6 +81,7 @@ pub async fn polish_status(app: tauri::AppHandle) -> Result<PolishStatus, String
         own_provider_enabled,
         builtin_enabled,
         builtin,
+        crate::ai::builtin::onboarding_try_open(),
     ))
 }
 
@@ -97,13 +99,28 @@ mod tests {
     #[test]
     fn polish_runs_only_when_switched_on_and_confirmed() {
         use crate::ai::builtin::Availability::*;
-        assert!(status(true, true, false, OwnProvider).will_run);
-        assert!(!status(true, false, true, OwnProvider).will_run);
-        assert!(status(false, false, true, Ready).will_run);
-        assert!(!status(false, false, false, Ready).will_run);
+        assert!(status(true, true, false, OwnProvider, false).will_run);
+        assert!(!status(true, false, true, OwnProvider, false).will_run);
+        assert!(status(false, false, true, Ready, false).will_run);
+        assert!(!status(false, false, false, Ready, false).will_run);
         for refused in [NoAccess, NotEntitled, Unreachable] {
-            assert!(!status(false, false, true, refused).will_run);
+            assert!(!status(false, false, true, refused, false).will_run);
+            assert!(!status(false, false, true, refused, true).will_run);
         }
+    }
+
+    #[test]
+    fn the_first_try_allowance_runs_only_while_its_gate_is_open_and_the_switch_is_on() {
+        use crate::ai::builtin::Availability::FirstTry;
+        assert!(status(false, false, true, FirstTry, true).will_run);
+        assert!(
+            !status(false, false, true, FirstTry, false).will_run,
+            "gate closed"
+        );
+        assert!(
+            !status(false, false, false, FirstTry, true).will_run,
+            "switch off sends nothing"
+        );
     }
 
     #[test]

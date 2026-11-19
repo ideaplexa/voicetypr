@@ -82,7 +82,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     void Promise.resolve(updateSettings({ builtin_polish_enabled: true })).catch(() => undefined);
   }, [settings, newInstall, builtinPolishSetting, updateSettings, props.previewStep]);
 
-  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${currentStep === "polish"}`);
+  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${currentStep}`);
 
   if (currentStep === "trial" && !sawTrial) setSawTrial(true);
   // A key activated or a status recheck that finds a license or trial ends the trial step.
@@ -97,10 +97,11 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   // Built-in Polish is the user's saved choice, or on for a new install that hasn't chosen yet.
   const builtinChosen = builtinPolishSetting === true || (NEW_USERS_GET_POLISH && newInstall && builtinPolishSetting == null);
   const ownPolishOn = polishStatus?.own_provider_ready === true && polishStatus.own_provider_enabled;
-  const builtinWillRun = builtinChosen && polishStatus?.own_provider_ready !== true && polishStatus?.builtin === "ready";
+  const builtinWillRun = builtinChosen && polishStatus?.own_provider_ready !== true
+    && (polishStatus?.builtin === "ready" || (polishStatus?.builtin === "first_try" && polishStatus.will_run));
   const polishOn = ownPolishOn || builtinWillRun;
   // Before the trial starts the server can't confirm yet, so the promise follows the choice.
-  const polishAvailable = polishOn || (builtinChosen && (polishStatus === null || polishStatus.builtin === "no_access"));
+  const polishAvailable = polishOn || (builtinChosen && (polishStatus === null || polishStatus.builtin === "no_access" || polishStatus.builtin === "first_try"));
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
