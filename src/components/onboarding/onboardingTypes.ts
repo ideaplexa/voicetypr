@@ -12,10 +12,12 @@ export type Step =
   | "engine"
   | "permissions"
   | "shortcut"
-  | "fork"
   | "polish"
-  | "trial"
   | "try"
+  | "result"
+  | "fork"
+  | "buy"
+  | "trial"
   | "done";
 
 export interface OnboardingDesktopProps {
@@ -26,8 +28,6 @@ export interface OnboardingDesktopProps {
   onComplete: () => void;
   /** The licence as last checked; null when the check has not answered. */
   licenseStatus?: LicenseStatus | null;
-  /** The last license check failed, so the status may be stale. */
-  licenseCheckFailed?: boolean;
   onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
   /** Resolves to a message the user can act on, or null once the key is active. */
   onActivateLicense?: (key: string) => Promise<string | null>;

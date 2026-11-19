@@ -20,11 +20,14 @@ import { PromiseStep } from "@/components/onboarding/PromiseStep";
 import { TryStep } from "@/components/onboarding/TryStep";
 import { SetupStep } from "@/components/onboarding/SetupStep";
 import { TrialStep } from "@/components/onboarding/TrialStep";
+import { BuyStep } from "@/components/onboarding/BuyStep";
+import { ResultStep } from "@/components/onboarding/ResultStep";
+import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { DoneStep } from "@/components/onboarding/DoneStep";
 import { PolishStep } from "@/components/onboarding/PolishStep";
 import { ConsentChoice } from "@/components/onboarding/ConsentChoice";
 import { LicenseKeyDialog } from "@/components/LicenseKeyDialog";
-import type { LicenseStatus, TrialStartError } from "@/types";
+import type { LicenseStatus } from "@/types";
 
 const noop = async () => {};
 const megabytes = (bytes: number | undefined) => bytes ? `${Math.round(bytes / (1024 * 1024))} MB` : null;
@@ -39,7 +42,7 @@ function trialEnds(status: LicenseStatus | null | undefined) {
 }
 
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
-  const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
+  const { licenseStatus, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
   const flow = useOnboardingDesktop(props);
   const {
@@ -65,7 +68,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const [polishCanRun, setPolishCanRun] = useState(false);
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [sawTrial, setSawTrial] = useState(false);
-  const [trialError, setTrialError] = useState<TrialStartError | null>(null);
+  const [firstTry, setFirstTry] = useState<FirstDictation | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,13 +81,12 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     return () => { cancelled = true; };
   }, []);
 
-  if (currentStep === "trial" && !sawTrial) setSawTrial(true);
-  // A key activated or a status recheck that finds a license or trial ends the trial step.
+  if ((currentStep === "buy" || currentStep === "trial") && !sawTrial) setSawTrial(true);
+  // A key activated or a status recheck that finds a license or trial goes straight to Done.
   const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
-  const { after } = flow;
   useEffect(() => {
-    if (currentStep === "trial" && licensed) goTo(after("trial"));
-  }, [currentStep, licensed, goTo, after]);
+    if ((currentStep === "buy" || currentStep === "trial") && licensed) goTo("done");
+  }, [currentStep, licensed, goTo]);
 
   const polishOn = aiEnabled && polishCanRun;
   const polishAvailable = NEW_USERS_GET_POLISH || polishOn;
@@ -116,7 +118,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     />
   );
   const downloadLine = sourceType === "local" && !local.localReady &&
-    ["permissions", "shortcut", "fork", "polish", "trial", "done"].includes(currentStep)
+    ["permissions", "shortcut", "polish", "result", "fork", "buy", "trial", "done"].includes(currentStep)
     ? preparing(flow.chooseSourceFromTry, true) : null;
 
   const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
@@ -150,36 +152,42 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               polishAvailable={polishAvailable}
               nextLine={licenseStatus?.status === "licensed" ? "Your license is active. Say anything."
                 : licenseStatus?.status === "trial" ? "Your free week is running. Say anything."
-                : licenseStatus?.status === "expired" ? "Upgrade or add your key, then say anything."
-                : "Start your free week, then say anything."}
+                : licenseStatus?.status === "expired" ? "Set it up, try it, then buy Voicetypr or add your key."
+                : "Set it up, then try it in your own voice."}
               busy={busy || preparation.savingLanguage}
               onBegin={() => void run(handleNext)}
             />
           )}
 
+          {currentStep === "buy" && (
+            <BuyStep
+              trialEnded={licenseStatus?.status === "expired"}
+              pending={trialPending}
+              onBuy={upgrade}
+              onStartTrial={flow.chooseTrial}
+              onHaveKey={() => setKeyDialogOpen(true)}
+              onBack={handleBack}
+              onDecideLater={() => {
+                setOutcome({ kind: "later" });
+                goTo("done");
+              }}
+            />
+          )}
+
           {currentStep === "trial" && (
             <TrialStep
-              trialEnded={licenseStatus?.status === "expired"}
-              localDictation={sourceType === "local"}
               pending={trialPending}
               onStartTrial={async (name, email) => {
                 setTrialPending(true);
                 const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email)
                   .finally(() => setTrialPending(false));
-                setTrialError(error);
                 if (!error) {
                   setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
-                  goTo(after("trial"));
+                  goTo("done");
                 }
                 return error;
               }}
-              onUpgrade={upgrade}
-              onHaveKey={() => setKeyDialogOpen(true)}
               onBack={handleBack}
-              onDecideLater={() => {
-                setOutcome({ kind: "later" });
-                goTo(after("trial"));
-              }}
             />
           )}
 
@@ -222,28 +230,37 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               holdToTalk={holdToTalk}
               polishAvailable={polishAvailable}
               engineReady={sourceReady}
-              access={outcome?.kind === "trial" || outcome?.kind === "key" ? "ok"
-                : licenseCheckFailed ? "check"
-                : licensed ? "ok"
-                : licenseStatus?.status === "expired" ? "ended"
-                : trialError === "trial_unreachable" ? "offline" : "none"}
-              onStartTrial={() => goTo("trial")}
-              onRecheck={() => void onRecheckLicense?.()}
-              onHaveKey={() => setKeyDialogOpen(true)}
               preparing={sourceType === "local" ? preparing(flow.chooseSourceFromTry) : null}
               microphone={permissions.microphone.status}
               onAllowMicrophone={flow.ensureMicrophone}
               onBack={handleBack}
               localSource={sourceType === "local"}
               onUseSomethingElse={flow.chooseSourceFromTry}
+              onResult={(result) => {
+                setFirstTry(result);
+                goTo("result");
+              }}
+              onNext={() => {
+                setFirstTry(null);
+                goTo("result");
+              }}
+            />
+          )}
+
+          {currentStep === "result" && (
+            <ResultStep
+              result={firstTry}
+              polishAvailable={polishAvailable}
+              onTryAgain={() => goTo("try")}
+              onBack={() => goTo("try")}
               onNext={() => void run(handleNext)}
             />
           )}
 
           {currentStep === "fork" && (
             <ForkStep
-              onDeeper={() => flow.chooseDepth(true)}
-              onDoneForNow={() => flow.chooseDepth(false)}
+              onDeeper={flow.leaveFork}
+              onDoneForNow={flow.leaveFork}
               onBack={handleBack}
             />
           )}
@@ -327,7 +344,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           const error = await (onActivateLicense ?? (async () => "Couldn’t activate the key. Try again."))(key);
           if (!error) {
             setOutcome({ kind: "key" });
-            if (currentStep === "trial") goTo(after("trial"));
+            goTo("done");
           }
           return error;
         }}

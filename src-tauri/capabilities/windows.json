@@ -21,7 +21,6 @@
     "core:window:allow-start-dragging",
     "core:webview:allow-create-webview-window",
     "opener:default",
-    "store:default",
     "dialog:default",
     "fs:scope-appdata",
     "shell:allow-open",

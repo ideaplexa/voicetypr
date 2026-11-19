@@ -75,12 +75,13 @@ export function useOnboardingDesktop({
   } = modelManagement;
 
   const [currentStep, setCurrentStep] = useState<Step>(previewStep ?? "promise");
-  // The steps in order: the essentials, a fork (go deeper or done for now), then
-  // the trial and upgrade, and the first dictation last. The dots count the
-  // shape the licence started with; a step that no longer applies is skipped.
+  // The steps in order: the essentials, Polish, the first try and its result,
+  // a fork (go deeper or done for now), then Buy, and the trial's name and
+  // email only after "Start 7-day trial". The dots count the shape the licence
+  // started with; a step that no longer applies is skipped.
   const [shape, setShape] = useState<{ trial: boolean } | null>(null);
   if (shape === null && licenseStatus != null) setShape({ trial: needsTrial });
-  const [deeper, setDeeper] = useState(false);
+  const [wantsTrial, setWantsTrial] = useState(false);
   const steps: Step[] = [
     "promise",
     "source",
@@ -88,14 +89,17 @@ export function useOnboardingDesktop({
     "engine",
     "permissions",
     "shortcut",
-    "fork",
     "polish",
-    "trial",
     "try",
+    "result",
+    "fork",
+    "buy",
+    "trial",
     "done",
   ];
-  const skipped = (step: Step) => (step === "trial" && !needsTrial) || (step === "polish" && !deeper);
-  const dots = steps.filter((step) => step !== "trial" || (shape?.trial ?? needsTrial));
+  const paid = (step: Step) => step === "buy" || step === "trial";
+  const skipped = (step: Step) => (paid(step) && !needsTrial) || (step === "trial" && !wantsTrial);
+  const dots = steps.filter((step) => !paid(step) || (shape?.trial ?? needsTrial));
   const walk = (from: Step, by: 1 | -1): Step => {
     for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
       if (!skipped(steps[i])) return steps[i];
@@ -732,10 +736,12 @@ export function useOnboardingDesktop({
       setHoldToTalk(settings?.recording_mode === "push_to_talk");
       setCurrentStep(after("shortcut"));
     },
-    /** The fork after the essentials: Polish and the rest, or straight on. */
-    chooseDepth: (goDeeper: boolean) => {
-      setDeeper(goDeeper);
-      setCurrentStep(goDeeper ? "polish" : walk("polish", 1));
+    /** The fork after the result. The deeper steps are not built yet, so both ways go on. */
+    leaveFork: () => setCurrentStep(after("fork")),
+    /** From Buy: the name and email page that starts the trial. */
+    chooseTrial: () => {
+      setWantsTrial(true);
+      setCurrentStep("trial");
     },
     handleBack,
     handleNext,

@@ -268,8 +268,7 @@ export function createFixtures(options: PreviewOptions) {
             };
       })
     : demoModels;
-  const beforeTrial = options.onboarding === "promise" || options.onboarding === "trial" ||
-    options.onboardingCase === "no-access";
+  const beforeTrial = options.onboarding !== "done" || options.onboardingCase === "no-access";
   const license: LicenseStatus = options.onboardingCase === "expired"
     ? { status: "expired" }
     : options.trialNotStarted || (options.onboarding && beforeTrial)
@@ -400,6 +399,8 @@ export function createFixtures(options: PreviewOptions) {
     get_product_analytics_status: { enabled: true, available: true, consent_required: false },
     get_autostart_status: false,
     get_current_recording_state: { state: "idle" },
+    get_onboarding_try: { kind: "tries", left: 10 },
+    arm_onboarding_try: null,
     cli_tool_status: {
       installed: true,
       manageable: true,
