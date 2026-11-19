@@ -405,7 +405,7 @@ export function createFixtures(options: PreviewOptions) {
     ],
     validate_microphone_selection: false,
     check_microphone_permission: true,
-    check_accessibility_permission: !(options.onboarding === "setup" || options.onboardingCase === "ax-skipped"),
+    check_accessibility_permission: !(options.onboarding === "permissions" || options.onboardingCase === "ax-skipped"),
     get_tray_status: { available: true, attempts: 0, lastError: null },
     get_distribution_info: distribution,
     check_for_app_update: null,

@@ -2,7 +2,8 @@ import { HotkeyStep } from "@/components/onboarding/HotkeyStep";
 import { StepDots } from "@/components/onboarding/OnboardingChrome";
 import { VoiceSourceStep } from "@/components/onboarding/VoiceSourceStep";
 import { EngineStep } from "@/components/onboarding/EngineStep";
-import { KeepStep } from "@/components/onboarding/KeepStep";
+import { LanguageStep } from "@/components/onboarding/LanguageStep";
+import { ForkStep } from "@/components/onboarding/ForkStep";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/settings/SettingsButton";
 import { isMacOS } from "@/lib/platform";
@@ -42,10 +43,7 @@ function trialEnds(status: LicenseStatus | null | undefined) {
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
   const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
   const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | { kind: "later" } | null>(null);
-  // Upgrading comes after the first try, only for someone on a trial.
-  const showKeep = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "expired" &&
-    outcome?.kind !== "key" && (licenseStatus?.status === "trial" || outcome?.kind === "trial");
-  const flow = useOnboardingDesktop(props, showKeep);
+  const flow = useOnboardingDesktop(props);
   const {
     currentStep,
     goTo,
@@ -90,9 +88,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const { after } = flow;
   useEffect(() => {
     if (currentStep === "trial" && licensed) goTo(after("trial"));
-    // A key activated on the upgrade step: nothing is left to upgrade.
-    if (currentStep === "keep" && !showKeep) goTo(after("keep"));
-  }, [currentStep, licensed, showKeep, goTo, after]);
+  }, [currentStep, licensed, goTo, after]);
 
   // Built-in Polish is the user's saved choice, or on for a new install that hasn't chosen yet.
   const builtinChosen = builtinPolishSetting === true || (NEW_USERS_GET_POLISH && newInstall && builtinPolishSetting == null);
@@ -105,7 +101,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
   const caps = capturedBareModifier
     ? [formatBareModifierLabel(capturedBareModifier)]
     : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
-  const dotIndex = Math.max(0, flow.dots.indexOf(currentStep));
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try { await action(); } finally { setBusy(false); }
@@ -131,7 +126,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
     />
   );
   const downloadLine = sourceType === "local" && !local.localReady &&
-    (currentStep === "setup" || currentStep === "polish" || currentStep === "keep" || currentStep === "done")
+    ["permissions", "shortcut", "fork", "polish", "trial", "done"].includes(currentStep)
     ? preparing(flow.chooseSourceFromTry, true) : null;
 
   const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
@@ -156,7 +151,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
-      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={dotIndex} total={flow.dots.length} />}
+      {licenseStatus == null ? <div aria-hidden="true" className="h-[6px]" /> : <StepDots currentIndex={flow.dotIndex} total={flow.dots.length} />}
       <div className="mt-3 flex min-h-5 items-center justify-center">{downloadLine}</div>
       <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
         <div className="flex w-full max-w-[640px] flex-col items-center gap-[22px]">
@@ -201,9 +196,17 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           {currentStep === "source" && (
             <VoiceSourceStep
               sourceType={sourceType}
-              language={preparation.language}
               busy={busy || nextDisabled}
               onConfirmSource={confirmSource}
+              onBack={handleBack}
+              onNext={() => void run(handleNext)}
+            />
+          )}
+
+          {currentStep === "language" && (
+            <LanguageStep
+              language={preparation.language}
+              busy={busy || nextDisabled}
               onLanguageChange={(value) => void preparation.changeLanguage(value)}
               onBack={handleBack}
               onNext={() => void run(handleNext)}
@@ -248,8 +251,17 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             />
           )}
 
-          {currentStep === "setup" && (
+          {currentStep === "fork" && (
+            <ForkStep
+              onDeeper={() => flow.chooseDepth(true)}
+              onDoneForNow={() => flow.chooseDepth(false)}
+              onBack={handleBack}
+            />
+          )}
+
+          {(currentStep === "permissions" || currentStep === "shortcut") && (
             <SetupStep
+              part={currentStep}
               caps={caps}
               holdToTalk={holdToTalk}
               onHoldToTalkChange={flow.onHoldToTalkChange}
@@ -267,7 +279,10 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                   onEditingChange={flow.onEditingChange}
                   onBareModifier={flow.onBareModifier}
                   onHoldToTalkChange={flow.onHoldToTalkChange}
-                  onBack={() => setEditingShortcut(false)}
+                  onBack={() => {
+                    flow.onEditingChange(false);
+                    setEditingShortcut(false);
+                  }}
                   onNext={() => void run(async () => {
                     await flow.saveHotkeySettings();
                     setEditingShortcut(false);
@@ -301,15 +316,6 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
                 applyNow: ownPolishOn || polishStatus?.own_provider_ready !== true,
                 keepForOwnProvider: !ownPolishOn,
               }))}
-            />
-          )}
-
-          {currentStep === "keep" && (
-            <KeepStep
-              trialEnds={trialEnds(licenseStatus)}
-              onUpgrade={upgrade}
-              onKeepGoing={() => void run(handleNext)}
-              onBack={handleBack}
             />
           )}
 
