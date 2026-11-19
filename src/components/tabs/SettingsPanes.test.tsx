@@ -231,7 +231,7 @@ describe("Settings pane controls", () => {
     expect(screen.queryByText("Input monitoring")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Reset…" }));
     expect(ask).toHaveBeenCalledWith(
-      expect.stringContaining("except your license and API keys"),
+      expect.stringContaining("Your license and API keys are kept"),
       expect.objectContaining({ title: "Reset App Data" }),
     );
   });

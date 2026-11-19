@@ -78,11 +78,7 @@ pub(super) async fn cancel<R: RecordingRuntime>(app: AppHandle<R>) -> Result<(),
             RecordingState::Recording => {
                 update_recording_state(&app, RecordingState::Stopping, None)
             }
-            RecordingState::Transcribing => update_recording_state(
-                &app,
-                RecordingState::Error,
-                Some("Transcription cancelled".into()),
-            ),
+            RecordingState::Transcribing => log::info!("Transcription cancelled by the user"),
             _ => {}
         }
         update_recording_state(&app, RecordingState::Idle, None);

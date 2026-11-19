@@ -190,6 +190,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     if down && side.is_none() && !consumed {
                         crate::note_text_key_down();
                     }
+                    if consumed {
+                        let _ = state
+                            .tx
+                            .send(Msg::Control(crate::engine::Control::ChordMatched));
+                    }
                     consumed
                 } else {
                     false
