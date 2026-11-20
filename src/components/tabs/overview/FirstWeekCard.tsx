@@ -37,7 +37,7 @@ function firstWeekCopy(id: FirstWeekCardId, accessibilityMissing: boolean, polis
     case "dictionary":
       return { title: "Teach it your words", line: "Add names and terms so Voicetypr gets them right.", action: "Open Dictionary" };
     case "polish":
-      return { title: "Polish", line: "Clean up fillers, false starts and punctuation, with a style per app.", needs: polishReady === "needs_provider" ? "Needs a provider" : polishReady === "waiting" ? "Not available yet" : undefined, action: "Set up Polish" };
+      return { title: "Polish", line: "Clean up fillers, false starts and punctuation, with a style per app.", needs: polishReady === "needs_provider" ? "Needs a provider" : polishReady === "waiting" ? "Not available yet" : polishReady === "turn_on" ? "Turn on first" : undefined, action: "Set up Polish" };
     case "voice_commands":
       return {
         title: "Say “new line”",

@@ -32,7 +32,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const trigger = useActiveTrigger(settings);
   const polishReady = usePolishCanRun();
   const remoteLabel = useActiveRemoteLabel(readiness.remoteSelected);
-  const [polish, setPolish] = useState<{ label: string; on: boolean | null }>({ label: "Off", on: null });
+  const [ownPolish, setOwnPolish] = useState<{ style: string; on: boolean | null }>({ style: "", on: null });
   const { kept, refresh: refreshKept } = useKeptRecordings();
   const update = useUpdateStatus();
   const writing = useWritingSettings((state) => state.settings);
@@ -51,11 +51,14 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   useEffect(() => {
     let active = true;
     void Promise.all([invoke<AISettings>("get_ai_settings"), invoke<EnhancementOptions>("get_enhancement_options")]).then(([ai, options]) => {
-      if (active) setPolish({ on: ai.enabled, label: ai.enabled ? presetDisplayLabel(options.preset).replace(" Dictation", "") : "Off" });
-    }).catch(() => { if (active) setPolish({ label: "Off", on: null }); });
+      if (active) setOwnPolish({ on: ai.enabled, style: presetDisplayLabel(options.preset).replace(" Dictation", "") });
+    }).catch(() => { if (active) setOwnPolish({ style: "", on: null }); });
     return () => { active = false; };
   }, []);
   useEffect(() => { void loadWriting(); }, [loadWriting]);
+  // Built-in Polish confirmed by Voicetypr's server counts as on, as the user's own provider does.
+  const polish = { on: polishReady === "works" ? true : ownPolish.on, label: "Off" };
+  if (polish.on && ownPolish.style) polish.label = ownPolish.style;
 
   const needs = homeNeeds({ kept, updateVersion: update.install === "restart_pending" ? update.restartVersion : (update.available?.version ?? null), updateInstall: update.install, status, accessibilityMissing: isMacOS && readiness.hasAccessibilityPermission === false });
   const dictionaryEmpty = writingLoaded ? writing.custom_words.length + writing.replacements.length + writing.snippets.length === 0 : null;

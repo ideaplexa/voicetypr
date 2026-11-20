@@ -317,6 +317,15 @@ export function createFixtures(options: PreviewOptions) {
     { id: "anthropic", name: "Anthropic", status: "production", requires_api_key: true },
     { id: "gemini", name: "Gemini", status: "production", requires_api_key: true },
   ];
+  const ownProvider = !options.fresh && !options.onboarding;
+  const builtinAvailability: BuiltinPolishAvailability = ownProvider ? "own_provider" : options.polish && options.polish !== "off" ? options.polish : "ready";
+  const previewPolish: PolishStatus = {
+    will_run: ownProvider || (options.polish !== "off" && builtinAvailability === "ready"),
+    own_provider_ready: ownProvider,
+    own_provider_enabled: ownProvider,
+    builtin_enabled: options.polish !== "off",
+    builtin: builtinAvailability,
+  };
   const aiSettings: AISettings = {
     enabled: !options.fresh && (!options.onboarding || options.onboardingCase === "polished"),
     provider: "openai",
@@ -402,14 +411,8 @@ export function createFixtures(options: PreviewOptions) {
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
     get_ai_settings: aiSettings,
-    polish_status: {
-      will_run: !options.onboarding || !options.polish,
-      own_provider_ready: !options.onboarding,
-      own_provider_enabled: !options.onboarding,
-      builtin_enabled: options.polish !== "off",
-      builtin: !options.onboarding ? "own_provider" : options.polish && options.polish !== "off" ? options.polish : "ready",
-    } satisfies PolishStatus,
-    polish_can_run: !options.onboarding || !options.polish,
+    polish_status: previewPolish,
+    polish_can_run: previewPolish.will_run,
     get_ai_settings_for_provider: aiSettings,
     list_ai_providers: providers,
     get_enhancement_options: enhancement,

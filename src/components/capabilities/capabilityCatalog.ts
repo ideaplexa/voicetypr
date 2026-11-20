@@ -23,7 +23,7 @@ export function capabilityGroups(streams: boolean, polish: PolishReadiness | nul
     {
       title: "Write better",
       items: [
-        { id: "polish", art: "polish", title: "Polish", line: "Cleans up fillers, false starts and punctuation, with a style per app.", badge: polish === "works" ? "Works now" : polish === "needs_provider" ? "Needs a provider" : "Not available yet", target: { screen: "polish", label: "Open Polish" } },
+        { id: "polish", art: "polish", title: "Polish", line: "Cleans up fillers, false starts and punctuation, with a style per app.", badge: polish === "works" ? "Works now" : polish === "turn_on" ? "Turn on first" : polish === "needs_provider" ? "Needs a provider" : "Not available yet", target: { screen: "polish", label: "Open Polish" } },
         { id: "dictionary", art: "dictionary", title: "Dictionary", line: "Add names and terms so Voicetypr gets them right.", badge: "Works now", target: { screen: "dictionary", label: "Open Dictionary" } },
         { id: "suggestions", art: "suggestion", title: "Dictionary suggestions", line: "Fix a word in History and the Dictionary offers to learn it.", badge: "Works now", target: { screen: "history", label: "Open History" } },
         { id: "voice_commands", art: "voice_commands", title: "Voice commands and spoken punctuation", line: `Say only the command, like “new line” or “semicolon”, then stop${isMacOS ? "; needs Accessibility" : ""}.`, badge: "Turn on first", target: { screen: "polish", label: "Open Polish" } },
