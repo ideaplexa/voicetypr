@@ -9,7 +9,7 @@ import type { BuiltinPolishAvailability } from "@/types";
 export function builtinPolishView(availability: BuiltinPolishAvailability | null, chosen: boolean) {
   const canRun = availability === "ready";
   const status = availability === null ? "Checking with Voicetypr’s server…"
-    : availability === "own_provider" ? "Not used: your own provider polishes your dictation."
+    : availability === "own_provider" ? "Not used: you’ve set up your own AI provider."
     : availability === "no_access" || availability === "first_try" ? "Works during your trial or with a license."
     : availability === "not_entitled"
       ? "Not available on this device: built-in Polish needs a trial started with your email, or a license."

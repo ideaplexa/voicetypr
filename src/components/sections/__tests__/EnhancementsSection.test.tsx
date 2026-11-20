@@ -300,6 +300,7 @@ let agentCliProbeHandler:
   | undefined;
 let enhancementOptionsResponse = { preset: "PersonalDictation" };
 let builtinAvailability = "ready";
+let builtinChosenForStatus = false;
 
 const baseAppSettings = {
   hotkey: "CommandOrControl+Shift+Space",
@@ -374,6 +375,7 @@ describe("EnhancementsSection", () => {
     aiSettingsResponse = baseAISettings;
     enhancementOptionsResponse = { preset: "PersonalDictation" };
     builtinAvailability = "ready";
+    builtinChosenForStatus = false;
     agentCliProbeResponse = {
       state: "missing",
     };
@@ -387,7 +389,9 @@ describe("EnhancementsSection", () => {
           return Promise.resolve(baseAppSettings);
         }
         if (cmd === "polish_status") {
-          return Promise.resolve({ will_run: false, own_provider_ready: false, own_provider_enabled: false, builtin_enabled: false, builtin: builtinAvailability });
+          const ownReady = builtinAvailability === "own_provider";
+          const ownOn = ownReady && aiSettingsResponse.enabled;
+          return Promise.resolve({ will_run: ownOn || (builtinChosenForStatus && builtinAvailability === "ready"), own_provider_ready: ownReady, own_provider_enabled: ownOn, builtin_enabled: builtinChosenForStatus, builtin: builtinAvailability });
         }
         if (cmd === "save_settings") {
           return Promise.resolve(undefined);
@@ -458,6 +462,7 @@ describe("EnhancementsSection", () => {
 
   describe("Voicetypr Polish setting", () => {
     const withSettings = (overrides: Record<string, unknown>) => {
+      builtinChosenForStatus = overrides.builtin_polish_enabled === true;
       const original = (invoke as ReturnType<typeof vi.fn>).getMockImplementation() as
         | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
         | undefined;
@@ -524,6 +529,19 @@ describe("EnhancementsSection", () => {
       builtinAvailability = "not_entitled";
       renderWithProviders();
       expect(await screen.findByText(/needs a trial started with your email, or a license/)).toBeInTheDocument();
+    });
+
+    it.each([
+      ["confirmed by the server", true, "ready", "Polish is on"],
+      ["waiting for the server", true, "unreachable", "Polish isn’t available yet"],
+      ["switched off with no provider", false, "ready", "Polish is off"],
+      ["set aside for an own provider that is switched off", true, "own_provider", "Polish is off"],
+    ] as const)("heads the page with what the next dictation gets when built-in Polish is %s", async (_, chosen, availability, label) => {
+      withSettings({ builtin_polish_enabled: chosen });
+      builtinAvailability = availability;
+      renderWithProviders();
+      expect(await screen.findByText(label)).toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Your AI provider" })).not.toBeChecked();
     });
   });
 
@@ -678,7 +696,7 @@ describe("EnhancementsSection", () => {
         name: "Choose provider and model",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Polish" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Your AI provider" })).toBeInTheDocument();
 
     const providersPanel = await getProviderSetupPanel();
     expect(
@@ -1096,7 +1114,7 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     await waitFor(() => {
-      const polishSwitch = screen.getByRole("switch", { name: "Polish" });
+      const polishSwitch = screen.getByRole("switch", { name: "Your AI provider" });
       const providerSummary = screen.getByRole("button", {
         name: "Choose provider and model",
       });
@@ -1124,7 +1142,7 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     await waitFor(() => {
-      const polishSwitch = screen.getByRole("switch", { name: "Polish" });
+      const polishSwitch = screen.getByRole("switch", { name: "Your AI provider" });
       expect(polishSwitch).not.toHaveAttribute("aria-disabled", "true");
     });
   });
@@ -1272,7 +1290,7 @@ describe("EnhancementsSection", () => {
     const user = userEvent.setup();
     renderWithProviders();
 
-    const aiToggle = await screen.findByRole("switch", { name: /polish/i });
+    const aiToggle = await screen.findByRole("switch", { name: /your ai provider/i });
     await waitFor(() => expect(aiToggle).toBeEnabled());
     await user.click(aiToggle);
 
@@ -1300,7 +1318,7 @@ describe("EnhancementsSection", () => {
     const user = userEvent.setup();
     renderWithProviders();
 
-    const aiToggle = await screen.findByRole("switch", { name: /polish/i });
+    const aiToggle = await screen.findByRole("switch", { name: /your ai provider/i });
     await waitFor(() => expect(aiToggle).toBeEnabled());
     enhancementOptionsResponse = { preset };
     await user.click(aiToggle);

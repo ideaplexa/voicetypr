@@ -3,12 +3,24 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { useState } from "react";
 
+/** What the next dictation gets: polished, not yet (built-in Polish waits for the server), or not polished. */
+export type PolishOutcome = "on" | "waiting" | "off";
+
+const OUTCOME_LABEL: Record<PolishOutcome, string> = {
+  on: "Polish is on",
+  waiting: "Polish isn’t available yet",
+  off: "Polish is off",
+};
+
 export function EnhancementsHeader({
-  hasSelectedModel, polishEnabled, onToggleEnabled, onOpenProviderSetup,
+  hasSelectedModel, outcome, polishEnabled, onToggleEnabled, onOpenProviderSetup,
 }: {
   hasSelectedModel: boolean;
   activeProviderName: string;
   activeModelName: string;
+  /** null while built-in Polish is still being asked about. */
+  outcome: PolishOutcome | null;
+  /** The user's own AI provider switch. */
   polishEnabled: boolean;
   onToggleEnabled: (enabled: boolean) => void;
   onOpenProviderSetup: () => void;
@@ -18,9 +30,12 @@ export function EnhancementsHeader({
     <PageHeader title="Polish" description="AI cleans up fillers, false starts and punctuation. Your words stay yours."
       action={<>
         <InfoButton label="Polish guide" onClick={() => setGuideOpen(true)} />
-        <div className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2 text-[13px] font-medium text-muted-foreground">
-          Polish is {polishEnabled ? "on" : "off"}
-          <Switch id="polish-enabled" aria-label="Polish" checked={polishEnabled} onCheckedChange={hasSelectedModel ? onToggleEnabled : onOpenProviderSetup} />
+        <div className="flex flex-col items-end gap-1.5">
+          <label htmlFor="polish-enabled" className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2 text-[13px] font-medium text-muted-foreground">
+            Your AI provider
+            <Switch id="polish-enabled" checked={polishEnabled} onCheckedChange={hasSelectedModel ? onToggleEnabled : onOpenProviderSetup} />
+          </label>
+          <span role="status" className="text-[13px] font-medium text-foreground">{outcome ? OUTCOME_LABEL[outcome] : ""}</span>
         </div>
       </>} />
     <Dialog open={guideOpen} onOpenChange={setGuideOpen}>

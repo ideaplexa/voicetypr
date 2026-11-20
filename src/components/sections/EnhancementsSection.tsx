@@ -1,6 +1,6 @@
 import { ProviderSetupDialog } from "@/components/polish/ProviderSetupDialog";
 import { useSettings } from "@/contexts/SettingsContext";
-import { EnhancementsHeader } from "@/components/polish/EnhancementsHeader";
+import { EnhancementsHeader, type PolishOutcome } from "@/components/polish/EnhancementsHeader";
 import { EnhancementSettingsPanel } from "@/components/polish/EnhancementSettingsPanel";
 import { EnhancementsProviderModals } from "@/components/polish/EnhancementsProviderModals";
 import { useAiProviderSettings, type ProviderTab } from "@/components/polish/useAiProviderSettings";
@@ -109,8 +109,14 @@ export function EnhancementsSection() {
     (aiSettings.model || isAgentCliProvider(aiSettings.provider)) &&
     (isUsingCustomProvider || providerApiKeys[aiSettings.provider]),
   );
-  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${hasSelectedModel}`);
-  const builtinPolishActive = builtinPolishView(polishStatus?.builtin ?? null, settings?.builtin_polish_enabled === true).checked;
+  const builtinChosen = settings?.builtin_polish_enabled === true;
+  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${hasSelectedModel}:${aiSettings.enabled}:${builtinChosen}`);
+  const builtinPolishActive = builtinPolishView(polishStatus?.builtin ?? null, builtinChosen).checked;
+  // The gate dictation uses, as Home and Capabilities read it.
+  const polishOutcome: PolishOutcome | null = !polishStatus ? null
+    : polishStatus.will_run ? "on"
+    : !polishStatus.own_provider_ready && polishStatus.builtin_enabled ? "waiting"
+    : "off";
   const showAiModelReselectionNotice =
     aiModelNeedsReselection && aiSettings.enabled && !aiSettings.model;
   const effectiveFinalTextLanguage =
@@ -162,13 +168,14 @@ export function EnhancementsSection() {
         hasSelectedModel={hasSelectedModel}
         activeProviderName={activeProviderName}
         activeModelName={activeModelName}
+        outcome={polishOutcome}
         polishEnabled={aiSettings.enabled}
         onToggleEnabled={handleToggleEnabled}
         onOpenProviderSetup={openProviderSetup}
       />
       <SectionIntro
         art="polish"
-        line={!settingsLoaded || hasSelectedModel ? "Pick a default style, and give any app its own." : "Polish needs an AI provider below: a key, or a tool you already have like Claude Code."}
+        line={!settingsLoaded || hasSelectedModel || builtinChosen ? "Pick a default style, and give any app its own." : "Polish needs an AI provider below: a key, or a tool you already have like Claude Code."}
       />
       <VoiceCommandsField
         enabled={writingSettings.editing_commands}
