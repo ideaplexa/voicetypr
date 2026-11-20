@@ -14,7 +14,10 @@ export interface SharingStatus {
   password_configured: boolean;
   binding_results: BindingResult[];
   allow_model_control: boolean;
+  host_license_refusal?: HostLicenseRefusal | null;
 }
+
+export type HostLicenseRefusal = "host_license_required" | "host_license_unverified";
 
 export interface FirewallStatus {
   firewall_enabled: boolean;

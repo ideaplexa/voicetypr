@@ -44,6 +44,7 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
             pane
             enabled={sharing.status.enabled}
             loading={sharing.loading}
+            hostLicenseRefusal={sharing.status.host_license_refusal}
             activeRemoteServer={sharing.activeRemoteServer}
             hasShareableModel={sharing.hasShareableModel}
             currentSelectionShareable={sharing.currentSelectionShareable}
@@ -190,6 +191,7 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
       <SharingStatusHeader
         enabled={sharing.status.enabled}
         loading={sharing.loading}
+        hostLicenseRefusal={sharing.status.host_license_refusal}
         activeRemoteServer={sharing.activeRemoteServer}
         hasShareableModel={sharing.hasShareableModel}
         currentSelectionShareable={sharing.currentSelectionShareable}
