@@ -235,6 +235,15 @@ export interface LicenseStatus {
   verification_expires_at?: string;
 }
 
+/** Why `start_trial` failed; mirrors `TrialStartError::code` in Rust. */
+export type TrialStartError =
+  | "trial_unreachable"
+  | "trial_email_used"
+  | "trial_invalid_name"
+  | "trial_invalid_email"
+  | "trial_rate_limited"
+  | "trial_failed";
+
 /** Backend-only app identity: icon_key is opaque and never contains a path. */
 export interface DictationContext {
   generation: number;
