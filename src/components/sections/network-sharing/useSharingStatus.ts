@@ -27,6 +27,7 @@ const INITIAL_STATUS: SharingStatus = {
   password_configured: false,
   binding_results: [],
   allow_model_control: false,
+  host_license_refusal: null,
 };
 
 export function useSharingAutoRestart({

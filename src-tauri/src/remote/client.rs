@@ -13,6 +13,8 @@ use futures_util::StreamExt;
 use reqwest::StatusCode;
 use sha2::{Digest, Sha256};
 
+use crate::remote::server::{host_license_refusal_message, ErrorResponse};
+
 /// Upper bound (in bytes) on how much of a `/api/v1/transcribe` response the
 /// client buffers into memory before parsing. A real reply is JSON and is many
 /// orders of magnitude smaller; this is purely a guard against a hostile or
@@ -146,6 +148,11 @@ pub enum RemoteClientError {
         endpoint: RemoteEndpoint,
         body: Option<String>,
     },
+    /// The host has no active license or trial; `message` is fixed copy.
+    HostLicense {
+        endpoint: RemoteEndpoint,
+        message: &'static str,
+    },
     Timeout {
         endpoint: RemoteEndpoint,
         timeout_ms: u64,
@@ -184,6 +191,7 @@ impl fmt::Display for RemoteClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AuthFailed { .. } => f.write_str("Authentication failed"),
+            Self::HostLicense { message, .. } => f.write_str(message),
             Self::Timeout {
                 timeout_ms, detail, ..
             } => {
@@ -214,6 +222,7 @@ impl RemoteClientError {
     pub fn endpoint(&self) -> RemoteEndpoint {
         match self {
             Self::AuthFailed { endpoint, .. }
+            | Self::HostLicense { endpoint, .. }
             | Self::Timeout { endpoint, .. }
             | Self::ConnectFailed { endpoint, .. }
             | Self::HttpStatus { endpoint, .. }
@@ -631,6 +640,15 @@ pub async fn transcribe_audio(
             endpoint,
             body: Some("Remote authentication failed".to_string()),
         });
+    }
+
+    if status == StatusCode::FORBIDDEN {
+        if let Some(message) = serde_json::from_slice::<ErrorResponse>(body.as_ref())
+            .ok()
+            .and_then(|error| host_license_refusal_message(&error.error))
+        {
+            return Err(RemoteClientError::HostLicense { endpoint, message });
+        }
     }
 
     if !status.is_success() {
