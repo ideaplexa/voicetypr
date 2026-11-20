@@ -25,6 +25,13 @@ pub async fn toggle_recording(
     crate::recording::toggle::toggle_recording(app, source).await
 }
 
+/// The main window's shortcut release on Windows, where the low-level hook is
+/// blind while our window has focus: it ends a First try held to talk.
+#[tauri::command]
+pub fn in_app_hotkey_released(app: AppHandle) {
+    crate::recording::onboarding_try::claim_hotkey(&app, keytrigger::KeyPhase::Released);
+}
+
 /// The main window's Esc on Windows, where the low-level hook is blind while
 /// our window has focus. Shares the double-press cancel with the hook.
 #[tauri::command]

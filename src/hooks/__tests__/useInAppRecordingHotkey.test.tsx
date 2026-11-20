@@ -261,6 +261,60 @@ describe("useInAppRecordingHotkey", () => {
     expect(mockRecording.startRecording).not.toHaveBeenCalled();
   });
 
+  describe("combo release", () => {
+    const releases = () => mockInvoke.mock.calls.filter(([command]) => command === "in_app_hotkey_released");
+    const release = (target: Element) =>
+      target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, code: "Space", key: " " }));
+
+    it("on Windows reports the release of a press it handled once, for hold to talk", async () => {
+      renderHook(() => useInAppRecordingHotkey());
+
+      fireHotkey(nonEditable);
+      fireHotkey(nonEditable, { repeat: true });
+      release(nonEditable);
+      release(nonEditable);
+
+      await vi.waitFor(() => expect(releases()).toHaveLength(1));
+    });
+
+    it("reports a quick release only after the press reached the backend", async () => {
+      let pressed: (route: null) => void = () => {};
+      mockRecording.toggleRecording.mockImplementationOnce(() => new Promise((resolve) => (pressed = resolve)));
+      renderHook(() => useInAppRecordingHotkey());
+
+      fireHotkey(nonEditable);
+      release(nonEditable);
+      await Promise.resolve();
+      expect(releases()).toHaveLength(0);
+
+      pressed(null);
+      await vi.waitFor(() => expect(releases()).toHaveLength(1));
+    });
+
+    it("keeps a hold going when another key is let go", () => {
+      renderHook(() => useInAppRecordingHotkey());
+
+      fireHotkey(nonEditable);
+      nonEditable.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, code: "KeyA", key: "a" }));
+      expect(releases()).toHaveLength(0);
+      nonEditable.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, code: "ControlLeft", key: "Control" }));
+
+      return vi.waitFor(() => expect(releases()).toHaveLength(1));
+    });
+
+    it("reports nothing for a key that was not the shortcut, or on macOS", () => {
+      renderHook(() => useInAppRecordingHotkey());
+      release(editable);
+      expect(releases()).toHaveLength(0);
+
+      platform.isMacOS = true;
+      renderHook(() => useInAppRecordingHotkey());
+      fireHotkey(editable);
+      release(editable);
+      expect(releases()).toHaveLength(0);
+    });
+  });
+
   it("on Windows matches the stored default primary Control+Space", () => {
     mockSettings.hotkey = "Control+Space";
     renderHook(() => useInAppRecordingHotkey());
