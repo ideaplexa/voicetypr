@@ -27,9 +27,13 @@ export function ActivateLicenseCard({
     >
       <div className="mt-4 space-y-4">
         <div className="flex gap-2">
-          <Button onClick={onPurchase} className="flex-1" size="sm">
+          <Button
+            onClick={onPurchase}
+            className="flex-1"
+            size="sm"
+          >
             <Crown className="mr-1.5 h-3.5 w-3.5" />
-            Buy License
+            Upgrade now
           </Button>
           <Button
             onClick={() => openExternalLink("https://polar.sh/ideaplexa/portal")}

@@ -82,6 +82,11 @@ pub trait ServerContext: Send + Sync {
     fn get_password(&self) -> Option<String>;
     /// The license cache the hotkey reads; transcription is refused unless it is ready.
     fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>>;
+    /// Records the time before a license decision, so a clock moved back is
+    /// noticed. It touches secure storage, so the caller runs it off the executor.
+    fn trial_clock_observer(&self) -> Option<Box<dyn FnOnce() + Send + 'static>> {
+        None
+    }
     fn allow_model_control(&self) -> bool {
         crate::remote::model_control::is_model_control_enabled()
     }
@@ -282,7 +287,13 @@ fn transcribe_endpoint<T: ServerContext + 'static>(
 async fn handle_transcribe_license_preflight<T: ServerContext + 'static>(
     ctx: Arc<RwLock<T>>,
 ) -> Result<Box<dyn Reply>, Rejection> {
-    let license_cache = { ctx.read().await.license_cache() };
+    let (license_cache, observe) = {
+        let ctx = ctx.read().await;
+        (ctx.license_cache(), ctx.trial_clock_observer())
+    };
+    if let Some(observe) = observe {
+        let _ = tokio::task::spawn_blocking(observe).await;
+    }
     match host_license_refusal(wait_for_recording_license(&license_cache).await) {
         Some(code) => Ok(Box::new(host_license_refused(code))),
         None => Err(warp::reject::not_found()),

@@ -18,6 +18,7 @@ import { findActivePrimaryBinding } from "@/lib/shortcut-display";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { ScreenId } from "@/components/navigation";
 import type {
   ModifierKind,
   ModifierSide,
@@ -26,11 +27,13 @@ import type {
 } from "@/types/shortcuts";
 import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 import { useOfflinePreparation } from "@/components/onboarding/useOfflinePreparation";
+import type { StartingPolishStyle } from "@/components/onboarding/PolishStep";
 
 // Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
-const DEFAULT_HOTKEY = isMacOS ? "Alt+Space" : "Control+Space";
+const defaultHotkey = () => (isMacOS ? "Alt+Space" : "Control+Space");
 
 const log = createLogger("onboarding");
+const REACHED_BUY = "onboarding_reached_buy";
 const NO_DOWNLOAD_ERRORS: Readonly<Record<string, string>> = Object.freeze({});
 
 export function useOnboardingDesktop({
@@ -38,8 +41,10 @@ export function useOnboardingDesktop({
   onCompletionError,
   onComplete,
   modelManagement,
-  previewPhase,
+  previewStep,
+  licenseStatus,
 }: OnboardingDesktopProps) {
+  const needsTrial = licenseStatus?.status !== "licensed" && licenseStatus?.status !== "trial";
   const { settings, updateSettings } = useSettings();
   const preparation = useOfflinePreparation(modelManagement);
   const {
@@ -68,22 +73,52 @@ export function useOnboardingDesktop({
     verifyingModels,
     downloadErrors = NO_DOWNLOAD_ERRORS,
     cancelDownload,
-    deleteModel,
-    repairModel,
     isLoading,
   } = modelManagement;
 
-  const [currentStep, setCurrentStep] = useState<Step>(
-    previewPhase === 2
-      ? isMacOS
-        ? "permissions"
-        : "hotkey"
-      : previewPhase === 3
-        ? "success"
-        : "welcome",
+  // Closed at Buy or the trial page: the next launch reopens at Buy.
+  const [currentStep, setCurrentStep] = useState<Step>(() =>
+    previewStep ?? (localStorage.getItem(REACHED_BUY) ? "buy" : "promise"),
   );
-  // Both independent privacy choices are opt-out and default to checked.
-  const [telemetryOptIn, setTelemetryOptIn] = useState(true);
+  useEffect(() => {
+    if (currentStep === "buy" || currentStep === "trial") localStorage.setItem(REACHED_BUY, "true");
+  }, [currentStep]);
+  // The steps in order: the essentials, Polish, the first try and its result,
+  // a fork (go deeper or done for now), then Buy, and the trial's name and
+  // email only after "Start 7-day trial". A step that no longer applies is skipped.
+  const [wantsTrial, setWantsTrial] = useState(false);
+  const [wantsTour, setWantsTour] = useState(false);
+  const steps: Step[] = [
+    "promise",
+    "source",
+    "language",
+    "engine",
+    "permissions",
+    "shortcut",
+    "polish",
+    "try",
+    "result",
+    "fork",
+    "tour",
+    "buy",
+    "trial",
+    "done",
+  ];
+  const paid = (step: Step) => step === "buy" || step === "trial";
+  const skipped = (step: Step) =>
+    (paid(step) && !needsTrial) || (step === "trial" && !wantsTrial) || (step === "tour" && !wantsTour);
+  const walk = (from: Step, by: 1 | -1): Step => {
+    for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
+      if (!skipped(steps[i])) return steps[i];
+    }
+    return from;
+  };
+  const after = (step: Step) => walk(step, 1);
+  const before = (step: Step) => walk(step, -1);
+  // Sharing is opt-in: the box starts unticked unless the user already chose.
+  const [telemetryOptIn, setTelemetryOptIn] = useState(false);
+  // Asked once: only when no sharing choice is stored; unknown after a failed read.
+  const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
   const [sourceType, setSourceType] = useState<SourceType>(() =>
     isCloudEngine(settings?.current_model_engine ?? "") ? "cloud" : "local",
   );
@@ -92,7 +127,6 @@ export function useOnboardingDesktop({
   const [capturedBareModifier, setCapturedBareModifier] = useState<BareModifierSpec | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState<string | null>(null);
   const [accessibilityRequested, setAccessibilityRequested] = useState(false);
-  const [checkingPermissions, setCheckingPermissions] = useState<Set<string>>(new Set());
   const [remoteServers, setRemoteServers] = useState<SavedConnection[]>([]);
   const [activeRemoteServerId, setActiveRemoteServerId] = useState<string | null>(null);
   const [isLoadingRemoteServers, setIsLoadingRemoteServers] = useState(false);
@@ -110,14 +144,15 @@ export function useOnboardingDesktop({
   const [previousSettings, setPreviousSettings] = useState(settings);
   const sourceChosenByUser = useRef(false);
 
-  // Hydrate persisted consent so a relaunched onboarding cannot silently
-  // overwrite a previously stored opt-out with the default-on state.
+  // A relaunched onboarding keeps a choice the user already made.
   useEffect(() => {
     let cancelled = false;
-    invoke<{ enabled: boolean }>("get_telemetry_status")
+    invoke<{ enabled: boolean; consent_required?: boolean } | null>("get_telemetry_status")
       .then((telemetry) => {
         if (cancelled) return;
-        setTelemetryOptIn(telemetry.enabled);
+        const answered = telemetry?.consent_required === false;
+        setConsentRequired(!answered);
+        if (answered) setTelemetryOptIn(telemetry.enabled);
       })
       .catch((error) => {
         log.error("Failed to read stored privacy choices:", error);
@@ -149,15 +184,6 @@ export function useOnboardingDesktop({
     } as PermissionState,
   };
 
-  const steps = useMemo(
-    () =>
-      isMacOS
-        ? (["welcome", "source", "readiness", "permissions", "hotkey", "success"] satisfies Step[])
-        : (["welcome", "source", "readiness", "hotkey", "success"] satisfies Step[]),
-    [],
-  );
-
-  const currentIndex = steps.indexOf(currentStep);
   const selectedModelName = settings?.current_model || null;
   const selectedModel = selectedModelName ? models[selectedModelName] : null;
   const localModelNames = useMemo(
@@ -178,15 +204,6 @@ export function useOnboardingDesktop({
   const isModelReady = useCallback(
     (name: string) => models[name]?.downloaded === true && !models[name]?.requires_setup && !verifyingModels.has(name),
     [models, verifyingModels],
-  );
-  const handleDeleteModel = useCallback(
-    async (modelName: string) => {
-      const deleted = await deleteModel(modelName);
-      if (deleted && settings?.current_model === modelName) {
-        await updateSettings({ current_model: "", current_model_engine: "whisper" });
-      }
-    },
-    [deleteModel, settings, updateSettings],
   );
   const localReady = Boolean(
     sourceType === "local" &&
@@ -254,12 +271,12 @@ export function useOnboardingDesktop({
   }, []);
 
   useEffect(() => {
-    if (currentStep !== "permissions") return;
+    if (currentStep !== "try" && currentStep !== "permissions" && currentStep !== "shortcut" && currentStep !== "done") return;
     void checkPermissions();
   }, [currentStep, checkPermissions]);
 
   useEffect(() => {
-    if (currentStep !== "permissions") return;
+    if (currentStep !== "try" && currentStep !== "permissions") return;
     const handleFocus = () => {
       void checkPermissionsRef.current();
     };
@@ -269,16 +286,20 @@ export function useOnboardingDesktop({
   }, [currentStep]);
 
   useEffect(() => {
-    if (currentStep !== "readiness" || sourceType !== "remote") return;
+    if (sourceType !== "remote") return;
     void (async () => {
       await Promise.resolve();
       await loadRemoteServers();
     })();
-  }, [currentStep, sourceType, loadRemoteServers]);
+  }, [sourceType, loadRemoteServers]);
 
+  const [sourceRestored, setSourceRestored] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void invoke<string | null>("get_active_remote_server")
+      .finally(() => {
+        if (!cancelled) setSourceRestored(true);
+      })
       .then((serverId) => {
         if (!cancelled && serverId) {
           setActiveRemoteServerId(serverId);
@@ -307,14 +328,14 @@ export function useOnboardingDesktop({
           setHotkey("");
           setHoldToTalk(primary.action === "hold_to_record");
         } else {
-          setHotkey(DEFAULT_HOTKEY);
+          setHotkey(defaultHotkey());
         }
         setHotkeyHydrated(true);
       })
       .catch((error) => {
         if (cancelled) return;
         log.error("[OnboardingDesktop] Failed to restore configured hotkey:", error);
-        setHotkey(DEFAULT_HOTKEY);
+        setHotkey(defaultHotkey());
         setHotkeyHydrated(true);
       });
     return () => {
@@ -324,27 +345,8 @@ export function useOnboardingDesktop({
 
   const confirmSource = (nextSourceType: SourceType) => {
     sourceChosenByUser.current = true;
+    if (nextSourceType !== "local") preparation.leaveLocal();
     setSourceType(nextSourceType);
-  };
-
-  const checkSinglePermission = async (type: "microphone" | "accessibility") => {
-    setCheckingPermissions((prev) => new Set(prev).add(type));
-
-    try {
-      if (type === "microphone") {
-        await checkMicPermission();
-      } else {
-        await checkAccessPermission();
-      }
-    } catch (error) {
-      log.error(`Failed to check ${type} permission:`, error);
-    } finally {
-      setCheckingPermissions((prev) => {
-        const next = new Set(prev);
-        next.delete(type);
-        return next;
-      });
-    }
   };
 
   const requestPermission = async (type: "microphone" | "accessibility") => {
@@ -366,19 +368,25 @@ export function useOnboardingDesktop({
     }
   };
 
+  // Asks on first use; afterwards only System Settings can change the answer.
+  const ensureMicrophone = async () => {
+    if (microphonePermissionStatus === "not_determined") return requestMicPermission();
+    await requestPermission("microphone");
+    return false;
+  };
+
   const selectModel = async (modelName: string, source: "local" | "cloud") => {
     const info: ModelInfo | undefined = models[modelName];
-    if (!info) {
-      toast.error("That model is not available");
-      return;
-    }
+    // A cloud provider is known from the app's own list even before the model list reloads.
+    const engine = info?.engine ?? (source === "cloud" ? getCloudProviderByModel(modelName)?.engine : undefined);
+    if (!engine) throw new Error("That model is not available");
     sourceChosenByUser.current = true;
     await invoke("set_active_remote_server", { serverId: null });
     setActiveRemoteServerId(null);
     setSourceType(source);
     await updateSettings({
       current_model: modelName,
-      current_model_engine: info.engine ?? "whisper",
+      current_model_engine: engine,
     });
   };
 
@@ -402,9 +410,9 @@ export function useOnboardingDesktop({
     }
   };
 
-  const switchToLocalReadiness = () => {
-    confirmSource("local");
-  };
+  // A selection still on its way to the backend would land after a change of
+  // source, so Back and Continue wait for it.
+  const [selectingRemote, setSelectingRemote] = useState(false);
 
   const selectRemoteServer = async (serverId: string) => {
     const server = remoteServers.find((candidate) => candidate.id === serverId);
@@ -413,7 +421,12 @@ export function useOnboardingDesktop({
       return;
     }
 
-    await invoke("set_active_remote_server", { serverId });
+    setSelectingRemote(true);
+    try {
+      await invoke("set_active_remote_server", { serverId });
+    } finally {
+      setSelectingRemote(false);
+    }
     setActiveRemoteServerId(serverId);
     confirmSource("remote");
     toast.success("Remote Voicetypr selected");
@@ -435,10 +448,13 @@ export function useOnboardingDesktop({
       ),
     );
     setActiveRemoteServerId(server.id);
-    void invoke("set_active_remote_server", { serverId: server.id }).catch((error) => {
-      log.error("[OnboardingDesktop] Failed to activate remote server:", error);
-      toast.error("Remote Voicetypr was added, but could not be selected");
-    });
+    setSelectingRemote(true);
+    void invoke("set_active_remote_server", { serverId: server.id })
+      .catch((error) => {
+        log.error("[OnboardingDesktop] Failed to activate remote server:", error);
+        toast.error("Remote Voicetypr was added, but could not be selected");
+      })
+      .finally(() => setSelectingRemote(false));
     confirmSource("remote");
     void loadRemoteServers();
   };
@@ -521,8 +537,6 @@ export function useOnboardingDesktop({
       await updateSettings({
         hotkey: "",
         recording_mode: holdToTalk ? "push_to_talk" : "toggle",
-        current_model: selectedModelName || "",
-        current_model_engine: selectedModel?.engine ?? "whisper",
         onboarding_completed: false,
       });
     } else {
@@ -545,8 +559,6 @@ export function useOnboardingDesktop({
       await updateSettings({
         hotkey,
         recording_mode: holdToTalk ? "push_to_talk" : "toggle",
-        current_model: selectedModelName || "",
-        current_model_engine: selectedModel?.engine ?? "whisper",
         onboarding_completed: false,
       });
     }
@@ -556,18 +568,20 @@ export function useOnboardingDesktop({
     await updateSettings({ transcription_acceleration: checked ? "auto" : "cpu" });
   };
 
-  const completeOnboarding = async () => {
+  const completeOnboarding = async (open?: ScreenId) => {
     setIsSavingCompletion(true);
-    onCompletionStart?.();
+    onCompletionStart?.(open);
     try {
       // Persist privacy choices before publishing onboarding completion. The
       // settings context updates optimistically, so setting onboarding_completed
       // first would mount the main app's consent dialog while these writes were
       // still pending. That dialog would then retain the old default-on state.
-      await invoke("set_telemetry_consent", { enabled: telemetryOptIn });
+      if (consentRequired) await invoke("set_telemetry_consent", { enabled: telemetryOptIn });
 
 
       await updateSettings({ onboarding_completed: true }, { publishAfterSave: true });
+      localStorage.removeItem(REACHED_BUY);
+      onComplete(open);
 
       try {
         await invoke("record_onboarding_completed");
@@ -576,7 +590,6 @@ export function useOnboardingDesktop({
         // choices themselves have already been persisted successfully.
         log.error("Failed to record onboarding completion:", analyticsError);
       }
-      onComplete();
     } catch (error) {
       onCompletionError?.();
       log.error("Failed to complete onboarding:", error);
@@ -586,105 +599,143 @@ export function useOnboardingDesktop({
     }
   };
 
+  // An explicit pick wins over an automatic start still waiting on the network.
+  const picks = useRef(0);
+  const prepareLocal = async () => {
+    if (!preparation.recommended) return false;
+    const recommended = preparation.recommended;
+    const pick = picks.current;
+    await invoke("set_active_remote_server", { serverId: null });
+    setActiveRemoteServerId(null);
+    if (pick !== picks.current) return true;
+    await preparation.prepare(recommended);
+    return true;
+  };
+
+  // One automatic start per model, so a cancelled download stays cancelled
+  // while a model chosen for another language still starts.
+  const preparingStarted = useRef<string | null>(null);
+  const startPreparing = () => {
+    const target = preparation.recommended;
+    if (!target || preparingStarted.current === target || sourceReady || models[target]?.downloaded) return;
+    preparingStarted.current = target;
+    void prepareLocal().catch(() => {
+      preparingStarted.current = null;
+    });
+  };
+
+  const startPreparingRef = useRef(startPreparing);
+  useEffect(() => {
+    startPreparingRef.current = startPreparing;
+  });
+  // The on-device engine starts downloading on the model step, where its progress shows.
+  useEffect(() => {
+    if (currentStep === "engine" && sourceType === "local" && sourceRestored) startPreparingRef.current();
+  }, [currentStep, sourceType, sourceRestored, preparation.recommended]);
+
+  const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
+    if (style && polishOn) await invoke("update_enhancement_options", { options: { preset: style } });
+    else await updateSettings({ starting_polish_style: style });
+    setCurrentStep(after("polish"));
+  };
+
   const handleNext = async () => {
     try {
-      if (currentStep === "welcome") {
-        setCurrentStep("source");
-        return;
-      }
 
-      if (currentStep === "source") {
+      if (currentStep === "engine") {
         if (preparation.savingLanguage) return;
-        sourceChosenByUser.current = true;
-        if (sourceType === "local") {
-          if (!preparation.recommended) return;
-          await invoke("set_active_remote_server", { serverId: null });
-          setActiveRemoteServerId(null);
-          await preparation.prepare(preparation.recommended);
-          setCurrentStep(isMacOS ? "permissions" : "hotkey");
-        } else setCurrentStep("readiness");
-        return;
-      }
-
-      if (currentStep === "permissions") {
-        setCurrentStep("hotkey");
-        return;
-      }
-
-      if (currentStep === "readiness") {
-        if (sourceType !== "remote") {
-          await invoke("set_active_remote_server", { serverId: null });
-          setActiveRemoteServerId(null);
+        if (sourceType === "local" && !sourceReady) {
+          if (models[preparation.recommended ?? ""]?.downloaded) await prepareLocal();
+          else startPreparing();
         }
-        setCurrentStep(isMacOS ? "permissions" : "hotkey");
+        await leaveSource();
+        setCurrentStep(after("engine"));
         return;
       }
 
-      if (currentStep === "hotkey") {
-        if (!sourceReady) return;
-        await saveHotkeySettings();
-        setCurrentStep("success");
-        return;
-      }
+      if (currentStep === "language" && preparation.savingLanguage) return;
+      if (currentStep === "shortcut") await saveHotkeySettings();
+      setCurrentStep(after(currentStep));
     } catch (error) {
       log.error("Failed to advance onboarding:", error);
       toast.error(error instanceof Error ? error.message : "Failed to continue onboarding");
     }
   };
 
-  const handleBack = () => {
-    if (sourceType === "local" &&
-      (currentStep === "permissions" || (currentStep === "hotkey" && !isMacOS))) {
-      setCurrentStep("source");
+  // Leaving the source steps either way: a remote server stays active only when
+  // it is the chosen source, so "this Mac" never sends audio to the network.
+  // The backend's route is cleared whatever the screen last loaded, so a late
+  // refresh can never leave a network computer active behind "this Mac".
+  const leaveSource = async () => {
+    if (sourceType === "remote") return;
+    await invoke("set_active_remote_server", { serverId: null });
+    setActiveRemoteServerId(null);
+  };
+
+  const handleBack = async () => {
+    if (currentStep === "source") {
+      try {
+        await leaveSource();
+      } catch (error) {
+        log.error("Failed to leave the source step:", error);
+        toast.error("Couldn’t switch where dictation runs. Try again.");
+        return;
+      }
+      setCurrentStep(before("source"));
       return;
     }
-    const previousIndex = currentIndex - 1;
-    if (previousIndex >= 0) {
-      setCurrentStep(steps[previousIndex]);
-    }
+    setCurrentStep(before(currentStep));
   };
 
   const canProceed = () => {
     switch (currentStep) {
-      case "source":
-        return !preparation.savingLanguage && (sourceType !== "local" || Boolean(preparation.recommended));
+      case "language":
+      case "engine":
+        return !preparation.savingLanguage;
       case "permissions":
-        if (!isMacOS) return true;
-        return (
-          permissions.microphone.status === "granted" &&
-          permissions.accessibility.status === "granted"
-        );
-      case "readiness":
-        return sourceType === "local" ? Boolean(preparation.name) : sourceReady;
-      case "hotkey":
-        return !isEditingHotkey && sourceReady;
+        return !isMacOS || permissions.microphone.status === "granted";
+      case "shortcut":
+        return !isEditingHotkey;
       default:
         return true;
     }
   };
 
-  const nextDisabled = !canProceed();
+  const nextDisabled = selectingRemote || !canProceed();
 
   return {
     currentStep,
-    currentIndex,
-    steps,
+    chooseStartingStyle,
+    isEditingHotkey,
+    goTo: setCurrentStep,
     sourceType,
     preparation,
     sourceReady,
-    openModelChoices: () => { confirmSource("local"); setCurrentStep("readiness"); },
     confirmSource,
+    after,
+    /** The fork after the result: the tour, or straight on. */
+    leaveFork: (deeper: boolean) => {
+      setWantsTour(deeper);
+      setCurrentStep(deeper ? "tour" : walk("tour", 1));
+    },
+    /** From Buy: the name and email page that starts the trial. */
+    chooseTrial: () => {
+      setWantsTrial(true);
+      setCurrentStep("trial");
+    },
     handleBack,
     handleNext,
     nextDisabled,
+    selectingRemote,
     permissions,
-    checkingPermissions,
     isRequestingPermission,
-    checkSinglePermission,
     requestPermission,
+    ensureMicrophone,
     local: {
       localModelNames,
       recommendedModel: preparation.bestMatch,
+      preparing: preparation.name,
+      language: preparation.language,
       models,
       downloadProgress,
       verifyingModels,
@@ -696,15 +747,13 @@ export function useOnboardingDesktop({
       transcriptionAcceleration: settings?.transcription_acceleration,
       onDownload: preparation.download,
       onSelectLocal: (name: string) => {
+        picks.current += 1;
         confirmSource("local");
-        void preparation.prepare(name);
+        void preparation.prepare(name).catch(() => toast.error("Could not prepare this model. Try again."));
       },
       onCancelDownload: (name: string) => {
+        preparation.forget(name);
         void cancelDownload(name);
-      },
-      onDelete: handleDeleteModel,
-      onRepair: (name: string) => {
-        void repairModel(name);
       },
       isModelReady,
       onGpuToggle: (checked: boolean) => {
@@ -720,7 +769,7 @@ export function useOnboardingDesktop({
       isSavingCloudKey,
       isModelReady,
       onSelectCloud: (name: string) => {
-        void selectCloudModel(name);
+        void selectCloudModel(name).catch(() => toast.error("Couldn’t switch to that provider. Try again."));
       },
       onSetCloudModelSetup: setCloudModelSetup,
       onCloudKeySubmit: (apiKey: string) => {
@@ -734,9 +783,7 @@ export function useOnboardingDesktop({
       isLoadingRemoteServers,
       showAddRemoteModal,
       selectedDiscoveredServer,
-      onLoadRemoteServers: () => {
-        void loadRemoteServers();
-      },
+      onLoadRemoteServers: loadRemoteServers,
       onOpenAddServer: () => {
         setSelectedDiscoveredServer(null);
         setShowAddRemoteModal(true);
@@ -747,7 +794,6 @@ export function useOnboardingDesktop({
       onSelectRemote: (serverId: string) => {
         void selectRemoteServer(serverId);
       },
-      onSwitchToLocal: switchToLocalReadiness,
       onServerAdded: handleRemoteServerAdded,
       onAddModalOpenChange: (open: boolean) => {
         setShowAddRemoteModal(open);
@@ -771,7 +817,9 @@ export function useOnboardingDesktop({
       setHotkey("");
     },
     onHoldToTalkChange: setHoldToTalk,
+    saveHotkeySettings,
     telemetryOptIn,
+    consentRequired,
     isSavingCompletion,
     onTelemetryChange: setTelemetryOptIn,
     completeOnboarding,

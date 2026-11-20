@@ -80,6 +80,11 @@ async fn normalize_owned(
 
 pub fn cli_directory(data: &Path) -> std::io::Result<PathBuf> {
     let dir = data.join("cli-recordings");
+    private_directory(&dir)?;
+    Ok(dir)
+}
+
+pub(crate) fn private_directory(dir: &Path) -> std::io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -87,8 +92,7 @@ pub fn cli_directory(data: &Path) -> std::io::Result<PathBuf> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    builder.create(&dir)?;
-    Ok(dir)
+    builder.create(dir)
 }
 
 fn cli_name(path: &Path, prefix: &str) -> bool {

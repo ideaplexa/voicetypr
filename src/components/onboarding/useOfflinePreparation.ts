@@ -42,9 +42,13 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
   const { settings, updateSettings } = useSettings();
   const initialized = useRef(false);
   const [savingLanguage, setSavingLanguage] = useState(false);
+  const savingLanguageRef = useRef(false);
   const [target, setTarget] = useState<string | null>(null);
-  const [warningModel, setWarningModel] = useState<string | null>(null);
+  const [warning, setWarning] = useState<{ model: string; language: string } | null>(null);
   const language = settings?.speech_language ?? "en";
+  // A warning belongs to the language it was raised for.
+  const warningModel = warning?.language === language ? warning.model : null;
+  const setWarningModel = (model: string | null) => setWarning(model ? { model, language } : null);
   useEffect(() => {
     if (!settings || initialized.current || management.isLoading) return;
     initialized.current = true;
@@ -81,23 +85,43 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
       return;
     }
     setTarget(modelName);
-    // Selection is explicit; practice remains gated by verified availability.
-    await updateSettings({ current_model: modelName, current_model_engine: info.engine });
+    // A model that still has to download leaves a working one in use until it is ready.
+    const current = selected ? management.models[selected] : undefined;
+    const keepCurrent = !info.downloaded && selected !== modelName && Boolean(current && isLocalModel(current) && current.downloaded && !current.requires_setup);
+    if (!keepCurrent) await updateSettings({ current_model: modelName, current_model_engine: info.engine });
     if (!info.downloaded && management.downloadProgress[modelName] === undefined &&
       !management.verifyingModels.has(modelName)) await management.downloadModel(modelName);
   };
 
+  // The chosen model takes over once its download has been checked.
+  const targetInfo = target ? management.models[target] : undefined;
+  const targetArrived = Boolean(target && targetInfo?.downloaded && !targetInfo.requires_setup &&
+    !management.verifyingModels.has(target) && selected !== target);
+  useEffect(() => {
+    if (!targetArrived || !target || !targetInfo) return;
+    void updateSettings({ current_model: target, current_model_engine: targetInfo.engine }).catch(() => {
+      toast.error("Could not switch to the downloaded model. Pick it again.");
+    });
+  }, [targetArrived, target, targetInfo, updateSettings]);
+
   return {
     language, savingLanguage, recommended, bestMatch, name, model, ready, warningModel,
     changeLanguage: async (value: string) => {
+      // One save at a time, so a later pick can never be overtaken by an earlier one.
+      if (savingLanguageRef.current) return;
+      savingLanguageRef.current = true;
       setSavingLanguage(true);
       try {
         await updateSettings({ speech_language: value, ...languageModelPatch(management, settings?.current_model, value) });
         localStorage.setItem(LANGUAGE_CHOSEN, "true");
         setTarget(null);
+        setWarningModel(null);
       } catch {
         toast.error("Could not save your language. Try again.");
-      } finally { setSavingLanguage(false); }
+      } finally {
+        savingLanguageRef.current = false;
+        setSavingLanguage(false);
+      }
     },
     prepare,
     download: (modelName: string) => {
@@ -105,6 +129,10 @@ export function useOfflinePreparation(management: OnboardingDesktopProps["modelM
       if (info && !supportsSpokenLanguage(info, language)) setWarningModel(modelName);
       else void prepare(modelName).catch(() => toast.error("Could not prepare offline dictation. Try again."));
     },
+    /** A cancelled download stops being the model later steps wait for. */
+    forget: (modelName: string) => setTarget((current) => (current === modelName ? null : current)),
+    /** Leaving this computer as the source: a download finishing later must not take over. */
+    leaveLocal: () => setTarget(null),
     dismissWarning: () => setWarningModel(null),
     confirmDownload: () => {
       if (warningModel) void management.downloadModel(warningModel);

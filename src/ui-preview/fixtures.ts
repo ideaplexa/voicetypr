@@ -1,3 +1,4 @@
+import type { Step } from "@/components/onboarding/onboardingTypes";
 import { createUsageFixture } from "@/ui-preview/usageFixture";
 import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type LicenseStatus, type ModelInfo, type TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
@@ -15,7 +16,9 @@ export type PreviewOptions = {
   platform: "macos" | "windows";
   empty: boolean;
   sidebar?: "expanded" | "rail";
-  onboarding?: 1 | 2 | 3;
+  onboarding?: Step;
+  /** `?case=`: an onboarding edge case, such as a denied microphone. */
+  onboardingCase?: OnboardingPreviewCase;
   /** `?license=none`: a device whose free trial has not been started. */
   trialNotStarted?: boolean;
   /** A new person: press-to-toggle, no Polish provider, empty Dictionary, sharing off. */
@@ -71,7 +74,7 @@ export const demoHistory: HistoryWireItem[] = demoText.map((text, index) => ({
           : 48 * 60 * 60 * 1000 + (index - 10) * 60 * 60 * 1000),
   ).toISOString(),
   text,
-  model: index === 7 || index === 12 ? "whisper-small" : "parakeet-v3",
+  model: index === 7 || index === 12 ? "small.en" : "parakeet-tdt-0.6b-v3",
   status: "completed",
   writing: {
     source: index === 7 || index === 12 ? "audio_file" : "desktop_recording",
@@ -92,7 +95,7 @@ export const demoHistory: HistoryWireItem[] = demoText.map((text, index) => ({
 }));
 
 export const demoDownloadProgress = {
-  model: "whisper-medium",
+  model: "large-v3-turbo",
   engine: "whisper",
   downloaded: 241_000_000,
   total: 574_000_000,
@@ -101,48 +104,29 @@ export const demoDownloadProgress = {
 };
 
 export const demoModels: ModelInfo[] = [
-  {
-    name: "parakeet-v3",
-    display_name: "Parakeet v3",
-    engine: "parakeet",
+  ...([
+    ["parakeet-tdt-0.6b-v3", "Parakeet V3", "parakeet", true, true, 500_000_000, 9, 9],
+    ["parakeet-tdt-0.6b-v2", "Parakeet V2 (English)", "parakeet", false, false, 480_000_000, 9, 8],
+    ["parakeet-unified-640ms", "Parakeet Unified (English)", "parakeet", false, false, 620_000_000, 9, 10],
+    ["nemotron-multilingual-1120ms", "Nemotron 3.5", "parakeet", false, false, 665_000_000, 8, 9],
+    ["base.en", "Base (English)", "whisper", false, true, 147_964_211, 8, 5],
+    ["small.en", "Small (English)", "whisper", false, false, 487_614_201, 7, 6],
+    ["large-v3-turbo", "Large v3 Turbo", "whisper", false, false, 1_624_555_275, 7, 9],
+    ["large-v3", "Large v3", "whisper", false, false, 3_095_033_483, 2, 9],
+  ] as const).map(([name, display_name, engine, recommended, downloaded, size, speed_score, accuracy_score]): ModelInfo => ({
+    name,
+    display_name,
+    engine,
     kind: "local",
-    recommended: true,
-    downloaded: true,
+    recommended,
+    downloaded,
     requires_setup: false,
-    size: 2_300_000_000,
+    size,
     url: "",
     sha256: "",
-    speed_score: 10,
-    accuracy_score: 9,
-  },
-  {
-    name: "whisper-small",
-    display_name: "Whisper Small English",
-    engine: "whisper",
-    kind: "local",
-    recommended: false,
-    downloaded: true,
-    requires_setup: false,
-    size: 252_000_000,
-    url: "",
-    sha256: "",
-    speed_score: 8,
-    accuracy_score: 7,
-  },
-  {
-    name: "whisper-medium",
-    display_name: "Whisper Turbo",
-    engine: "whisper",
-    kind: "local",
-    recommended: false,
-    downloaded: false,
-    requires_setup: false,
-    size: 574_000_000,
-    url: "",
-    sha256: "",
-    speed_score: 6,
-    accuracy_score: 8,
-  },
+    speed_score,
+    accuracy_score,
+  })),
   ...(["soniox", "deepgram", "openai", "groq", "cohere"] as const).map((engine): ModelInfo => ({
     name: engine,
     display_name: engine[0].toUpperCase() + engine.slice(1),
@@ -246,17 +230,19 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
 ];
 
+export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "download-failed" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed" | "no-access" | "cloud" | "remote" | "mic-new" | "check-failed";
+
 export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
   const settings: AppSettings = {
     hotkey,
-    current_model: "parakeet-v3",
-    current_model_engine: "parakeet",
+    current_model: options.onboardingCase === "cloud" ? "soniox" : "parakeet-tdt-0.6b-v3",
+    current_model_engine: options.onboardingCase === "cloud" ? "soniox" : "parakeet",
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
     check_updates_automatically: false,
-    recording_mode: options.fresh ? "toggle" : "push_to_talk",
+    recording_mode: options.onboarding || options.fresh ? "toggle" : "push_to_talk",
     selected_microphone:
       options.platform === "macos" ? "MacBook Pro Microphone" : "Built-in Microphone",
     auto_paste_transcription: true,
@@ -271,27 +257,32 @@ export function createFixtures(options: PreviewOptions) {
     save_recordings: true,
     first_week: { day: options.day ?? 8, last_seen: localDate(new Date()), dismissed: [] },
   };
+  const downloadCase = options.onboardingCase === "downloading" || options.onboardingCase === "download-failed";
   const onboardingModels = options.onboarding
     ? demoModels.map((model) => {
-        if (model.name !== "parakeet-v3") return model;
+        if (model.name !== "parakeet-tdt-0.6b-v3") return model;
         return options.platform === "macos"
           ? {
               ...model,
               display_name: "Parakeet V3",
               size: 500_000_000,
-              downloaded: options.onboarding !== 1,
+              downloaded: options.onboarding !== "promise" && !downloadCase,
             }
           : {
               ...model,
-              display_name: "Large v3 Turbo",
-              engine: "whisper" as const,
-              size: 1_624_555_275,
-              downloaded: options.onboarding !== 1,
+              display_name: "Parakeet V3",
+              size: 670_479_942,
+              downloaded: options.onboarding !== "promise" && !downloadCase,
             };
       })
     : demoModels;
-  const license: LicenseStatus = options.trialNotStarted
+  const beforeTrial = options.onboarding !== "done" || options.onboardingCase === "no-access";
+  const license: LicenseStatus = options.onboardingCase === "expired"
+    ? { status: "expired" }
+    : options.trialNotStarted || (options.onboarding && beforeTrial)
     ? { status: "none" }
+    : options.onboarding && options.onboardingCase !== "licensed"
+    ? { status: "trial", trial_days_left: 7, expires_at: "2026-11-24T12:00:00Z" }
     : {
         status: "licensed",
         license_type: "pro",
@@ -321,7 +312,7 @@ export function createFixtures(options: PreviewOptions) {
     { id: "gemini", name: "Gemini", status: "production", requires_api_key: true },
   ];
   const aiSettings: AISettings = {
-    enabled: !options.fresh,
+    enabled: !options.fresh && (!options.onboarding || options.onboardingCase === "polished"),
     provider: "openai",
     model: "gpt-6-luna",
     hasApiKey: true,
@@ -371,13 +362,15 @@ export function createFixtures(options: PreviewOptions) {
     "plugin:log|log": null,
     get_settings: settings,
     list_kept_dictations: [],
-    get_microphone_permission_status: options.onboarding === 2 ? "not_determined" : "granted",
+    get_microphone_permission_status: options.onboardingCase === "mic-denied" ? "denied"
+      : options.onboardingCase === "mic-new" ? "not_determined"
+      : options.onboarding === "promise" || options.onboarding === "try" ? "not_determined" : "granted",
     start_microphone_test: "preview",
     stop_microphone_test: null,
     save_settings: null,
     check_license_status: license,
     revalidate_license: license,
-    start_trial: { status: "trial", trial_days_left: 7 } satisfies LicenseStatus,
+    start_trial: { status: "trial", trial_days_left: 7, expires_at: "2026-11-24T12:00:00Z" } satisfies LicenseStatus,
     get_model_status: { models: onboardingModels },
     get_recognition_availability_snapshot: {
       whisper_available: false,
@@ -403,6 +396,7 @@ export function createFixtures(options: PreviewOptions) {
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
     get_ai_settings: aiSettings,
+    polish_can_run: !options.onboarding || options.onboardingCase === "polished",
     get_ai_settings_for_provider: aiSettings,
     list_ai_providers: providers,
     get_enhancement_options: enhancement,
@@ -414,7 +408,7 @@ export function createFixtures(options: PreviewOptions) {
     ],
     validate_microphone_selection: false,
     check_microphone_permission: true,
-    check_accessibility_permission: options.onboarding === 2 ? false : true,
+    check_accessibility_permission: !(options.onboarding === "permissions" || options.onboardingCase === "ax-skipped"),
     get_tray_status: { available: true, attempts: 0, lastError: null },
     get_distribution_info: distribution,
     check_for_app_update: null,
@@ -422,6 +416,10 @@ export function createFixtures(options: PreviewOptions) {
     get_product_analytics_status: { enabled: true, available: true, consent_required: false },
     get_autostart_status: false,
     get_current_recording_state: { state: "idle" },
+    get_onboarding_try: { kind: "tries", left: 10 },
+    start_onboarding_try: { id: "preview", left: 9 },
+    stop_onboarding_try: { heard: "um so let's move the the sync to thursday no wait friday at three and uh i'll send the notes before" },
+    arm_onboarding_try: null,
     cli_tool_status: {
       installed: true,
       manageable: true,
@@ -434,9 +432,12 @@ export function createFixtures(options: PreviewOptions) {
       compatible: true,
       detail: null,
     },
-    list_remote_servers: [],
+    list_remote_servers: options.onboardingCase === "remote"
+      ? [{ id: "studio", name: "Studio Mac mini", host: "192.168.1.20", port: 47842, status: "Online", model: "parakeet-tdt-0.6b-v3", created_at: 0 }]
+      : [],
     discover_remote_servers: [],
-    get_active_remote_server: null,
+    get_active_remote_server: options.onboardingCase === "remote" ? "studio" : null,
+    check_remote_server_status: { id: "studio", name: "Studio Mac mini", host: "192.168.1.20", port: 47842, status: "Online", model: "parakeet-tdt-0.6b-v3", created_at: 0 },
     get_sharing_status: sharing,
     get_local_ips: ["192.168.1.20"],
     get_firewall_status: firewall,

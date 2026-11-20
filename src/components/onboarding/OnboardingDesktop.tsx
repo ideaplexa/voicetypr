@@ -1,248 +1,384 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { CircleCheck, Download } from "lucide-react";
+import type { ScreenId } from "@/components/navigation";
+import { BuyStep } from "@/components/onboarding/BuyStep";
+import { DoneConsent, DoneStep } from "@/components/onboarding/DoneStep";
+import { EngineStep } from "@/components/onboarding/EngineStep";
+import { ForkStep } from "@/components/onboarding/ForkStep";
+import { Frame, FrameChip, QuietNext } from "@/components/onboarding/Frame";
 import { HotkeyStep } from "@/components/onboarding/HotkeyStep";
-import { StepDots } from "@/components/onboarding/OnboardingChrome";
-import { PermissionsStep } from "@/components/onboarding/PermissionsStep";
-
-import { SourceStep } from "@/components/onboarding/SourceStep";
-import { SuccessStep } from "@/components/onboarding/SuccessStep";
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/settings/SettingsButton";
-import { MicrophoneCheck } from "@/components/onboarding/MicrophoneCheck";
-import { isMacOS } from "@/lib/platform";
-import { ReadinessLocalPanel } from "@/components/onboarding/ReadinessLocalPanel";
-import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel";
-import { ReadinessRemotePanel } from "@/components/onboarding/ReadinessRemotePanel";
-import { type OnboardingDesktopProps } from "@/components/onboarding/onboardingTypes";
+import { KeyStep } from "@/components/onboarding/KeyStep";
+import { LanguageStep } from "@/components/onboarding/LanguageStep";
+import { CheckFailedStep, TrialEndedStep } from "@/components/onboarding/LicenceStates";
+import { PolishStep } from "@/components/onboarding/PolishStep";
+import { PromiseStep } from "@/components/onboarding/PromiseStep";
+import { ResultStep } from "@/components/onboarding/ResultStep";
+import { SetupStep } from "@/components/onboarding/SetupStep";
+import { TOUR, TourStep } from "@/components/onboarding/TourStep";
+import { TrialFooter, TrialStep } from "@/components/onboarding/TrialStep";
+import { TryStep } from "@/components/onboarding/TryStep";
+import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
+import { VoiceSourceStep } from "@/components/onboarding/VoiceSourceStep";
+import { formatBareModifierLabel, type OnboardingDesktopProps, type Step } from "@/components/onboarding/onboardingTypes";
 import { useOnboardingDesktop } from "@/components/onboarding/useOnboardingDesktop";
-import { OfflinePreparationStatus } from "@/components/onboarding/OfflinePreparationStatus";
+import { Button } from "@/components/settings/SettingsButton";
+import { isMacOS } from "@/lib/platform";
+import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
+import type { LicenseStatus } from "@/types";
+
+const noop = async () => {};
+const TOTAL = 13;
+/** "N of 13" on each screen's progress bar, as the frames count them. */
+const PROGRESS: Partial<Record<Step, number>> = {
+  source: 1, language: 2, engine: 3, permissions: 4, shortcut: 5, polish: 6, try: 7, result: 8, fork: 9, tour: 9, buy: 10, trial: 11, done: 12,
+};
+const CHIP_STEPS: Step[] = ["permissions", "shortcut", "polish", "try", "result", "fork"];
+
+function trialLine(status: LicenseStatus | null | undefined) {
+  const expires = status?.expires_at ? new Date(status.expires_at) : null;
+  if (expires && !Number.isNaN(expires.getTime())) {
+    return `Your trial runs until ${expires.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}.`;
+  }
+  const days = status?.trial_days_left;
+  return days !== undefined ? `Your trial has ${days} ${days === 1 ? "day" : "days"} left.` : "Your trial is running.";
+}
 
 export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDesktopProps) {
-  const {
-    currentStep,
+  const { licenseStatus, licenseCheckFailed, onStartTrial, onActivateLicense, onRecheckLicense, onOpenPricing } = props;
+  const [outcome, setOutcome] = useState<{ kind: "trial"; firstName: string } | { kind: "key" } | null>(null);
+  const flow = useOnboardingDesktop(props);
+  const { currentStep, goTo, sourceType, preparation, sourceReady, local, permissions, hotkey, holdToTalk, capturedBareModifier } = flow;
 
-    sourceType,
-    preparation,
-    sourceReady,
-    openModelChoices,
-    confirmSource,
-    handleBack,
-    handleNext,
-    nextDisabled,
-    permissions,
-    checkingPermissions,
-    isRequestingPermission,
-    checkSinglePermission,
-    requestPermission,
-    local,
-    cloud,
-    remote,
-    hotkey,
-    holdToTalk,
-    capturedBareModifier,
-    onHotkeyChange,
-    onEditingChange,
-    onBareModifier,
-    onHoldToTalkChange,
-    telemetryOptIn,
-    isSavingCompletion,
-    onTelemetryChange,
-    completeOnboarding,
-  } = useOnboardingDesktop(props);
-
-  const [savingShortcut, setSavingShortcut] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState(false);
-  const [windowsMicDone, setWindowsMicDone] = useState(props.previewPhase === 3);
-  // Welcome remains a machine step, but shares phase one's chrome.
+  const [polishCanRun, setPolishCanRun] = useState(false);
+  const [firstTry, setFirstTry] = useState<FirstDictation | null>(null);
+  const [tourIndex, setTourIndex] = useState(0);
+  const [remembered, setRemembered] = useState<ScreenId | null>(null);
+  const [enteringKey, setEnteringKey] = useState(false);
+  const [trialPending, setTrialPending] = useState(false);
+  const [trialUnreachable, setTrialUnreachable] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+  const [startedWithAccess] = useState(() => licenseStatus?.status === "licensed" || licenseStatus?.status === "trial");
+
   useEffect(() => {
-    if (currentStep === "welcome") void handleNext();
-  }, [currentStep, handleNext]);
-  const phase =
-    currentStep === "permissions" || (currentStep === "hotkey" && !isMacOS && !windowsMicDone)
-      ? 2
-      : currentStep === "hotkey" || currentStep === "success"
-        ? 3
-        : 1;
-  const preparingShortcut = useRef(false);
+    let cancelled = false;
+    void invoke<{ enabled?: boolean } | null>("get_ai_settings")
+      .then((ai) => { if (!cancelled) setAiEnabled(Boolean(ai?.enabled)); })
+      .catch(() => undefined);
+    void invoke<boolean>("polish_can_run")
+      .then((canRun) => { if (!cancelled) setPolishCanRun(Boolean(canRun)); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  // A key activated or a recheck that finds a license or trial goes straight to Done.
+  const licensed = licenseStatus?.status === "licensed" || licenseStatus?.status === "trial";
   useEffect(() => {
-    if (currentStep !== "hotkey") {
-      preparingShortcut.current = false;
-      return;
-    }
-    if (phase !== 3 || editingShortcut || preparingShortcut.current || !sourceReady) return;
-    preparingShortcut.current = true;
-    setSavingShortcut(true);
-    void handleNext().finally(() => {
-      setEditingShortcut(true);
-      setSavingShortcut(false);
-    });
-  }, [currentStep, phase, editingShortcut, handleNext, sourceReady]);
-  const modelName = preparation.recommended;
-  const model = modelName ? local.models[modelName] : undefined;
-  const modelSize = model?.size ? `${Math.round(model.size / (1024 * 1024))} MB` : null;
-  const needsDownload = model && !model.downloaded;
-  const continueLabel =
-    sourceType === "local" && needsDownload && modelSize
-      ? `Continue — download ${model.display_name} (${modelSize})`
-      : sourceType === "cloud"
-        ? "Continue — connect your provider"
-        : sourceType === "remote"
-          ? "Continue — connect another computer"
-          : "Continue";
-  const phaseOneNext = async () => {
-    await handleNext();
+    if ((currentStep === "buy" || currentStep === "trial") && licensed) goTo("done");
+  }, [currentStep, licensed, goTo]);
+
+  const polishOn = aiEnabled && polishCanRun;
+  const caps = capturedBareModifier
+    ? [formatBareModifierLabel(capturedBareModifier)]
+    : shortcutKeyCaps(hotkey, isMacOS ? "darwin" : "windows");
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    try { await action(); } finally { setBusy(false); }
   };
-  const enterTry = async () => {
-    preparingShortcut.current = true;
-    setSavingShortcut(true);
-    await handleNext();
-    setSavingShortcut(false);
-    setEditingShortcut(true);
-    setWindowsMicDone(true); // Save the real shortcut before the user tries dictation.
+  const next = () => void run(flow.handleNext);
+  const buy = () => {
+    void (onOpenPricing ?? noop)();
+    setEnteringKey(true);
   };
-  const actionClass =
-    "h-auto rounded-[10px] px-4 py-[9px] text-[13px] leading-[normal] font-medium text-muted-foreground hover:text-muted-foreground";
-  return (
-    <div className="flex min-h-screen flex-col items-center bg-background pt-[44px] text-foreground">
-      <StepDots currentIndex={phase - 1} total={3} />
-      <main className="flex w-full flex-1 items-center justify-center px-6 py-6">
-        <div
-          className={`flex w-full max-w-[620px] flex-col items-center ${phase === 2 ? "gap-5" : "gap-[22px]"}`}
-        >
-          {phase === 1 && (
-            <>
-              <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-                Where should your voice become text?
-              </h2>
-              <p className="text-center text-sm leading-[normal] text-muted-foreground">
-                You can change this any time. Most people start on this {isMacOS ? "Mac" : "PC"}.
-              </p>
-              {currentStep === "source" || currentStep === "welcome" ? (
-                <SourceStep
-                  sourceType={sourceType}
-                  onConfirmSource={confirmSource}
-                  modelSize={modelSize}
-                  language={preparation.language}
-                  onLanguageChange={(value) => void preparation.changeLanguage(value)}
-                />
-              ) : (
-                <div className="w-full">
-                  {sourceType === "local" && <ReadinessLocalPanel {...local} />}
-                  {sourceType === "cloud" && <ReadinessCloudPanel {...cloud} />}
-                  {sourceType === "remote" && <ReadinessRemotePanel {...remote} />}
-                </div>
-              )}
-              <div className="flex gap-[10px]">
-                {currentStep === "readiness" && (
-                  <Button variant="outline" className={actionClass} onClick={handleBack}>
-                    Back
-                  </Button>
-                )}
-                <Button
-                  className="h-auto rounded-[10px] px-4 py-[9px] border-0 text-sm leading-4"
-                  disabled={nextDisabled || currentStep === "welcome"}
-                  onClick={() => void phaseOneNext()}
-                >
-                  {currentStep === "readiness" ? "Continue" : continueLabel}
-                </Button>
-              </div>
-              {(currentStep === "source" || currentStep === "welcome") && sourceType === "local" && (
-                <Button variant="ghost" onClick={openModelChoices}>Choose a different model</Button>
-              )}
-            </>
-          )}
-          {phase === 2 && (
-            <>
-              <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-                {isMacOS ? "Let Voicetypr hear you and type for you" : "Check your microphone"}
-              </h2>
-              <p className="text-center text-sm leading-[normal] text-muted-foreground">
-                {isMacOS
-                  ? "Two permissions, then you're ready to try it."
-                  : "Speak to check your microphone."}
-              </p>
-              {isMacOS && (
-                <PermissionsStep
-                  permissions={permissions}
-                  checkingPermissions={checkingPermissions}
-                  isRequestingPermission={isRequestingPermission}
-                  onCheck={checkSinglePermission}
-                  onRequest={requestPermission}
-                />
-              )}
-              {(!isMacOS || permissions.microphone.status === "granted") && <MicrophoneCheck />}
-              <div className="flex gap-[10px]">
-                <Button variant="outline" className={actionClass} onClick={handleBack}>
-                  Back
-                </Button>
-                <Button
-                  className="h-auto rounded-[10px] px-4 py-[9px] border-0 text-sm leading-4"
-                  disabled={(isMacOS ? nextDisabled : !sourceReady) || savingShortcut}
-                  onClick={() => void (isMacOS ? handleNext() : enterTry())}
-                >
-                  Continue
-                </Button>
-              </div>
-            </>
-          )}
-          {sourceType === "local" && currentStep !== "welcome" && currentStep !== "source" && (
-            <OfflinePreparationStatus
-              ready={local.localReady}
-              hideWhenReady={phase === 3}
-              verifying={Boolean(preparation.name && local.verifyingModels.has(preparation.name))}
-              progress={preparation.name ? local.downloadProgress[preparation.name] : undefined}
-              failed={Boolean(preparation.name && local.downloadErrors[preparation.name])}
-              onCancel={() => { if (preparation.name) local.onCancelDownload(preparation.name); }}
-              onRetry={() => { if (preparation.name) local.onDownload(preparation.name); }}
-              onChoose={openModelChoices}
-            />
-          )}
-          {preparation.warningModel && (
-            <div role="alert" className="flex flex-col items-center gap-3 text-sm">
-              <p>This model does not support your chosen language. Download it without selecting it?</p>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
-                <Button onClick={preparation.confirmDownload}>Download anyway</Button>
-              </div>
-            </div>
-          )}
-          {phase === 3 && currentStep === "hotkey" && !editingShortcut && (
-            <p role="status" className="text-sm text-muted-foreground">
-              {sourceReady ? "Preparing your shortcut…" : "Offline dictation must be ready before you can try it."}
-            </p>
-          )}
-          {phase === 3 && (currentStep === "success" || editingShortcut) && (
-            <SuccessStep
-              capturedBareModifier={capturedBareModifier}
-              holdToTalk={holdToTalk}
-              hotkey={hotkey}
-              telemetryOptIn={telemetryOptIn}
-              isSavingCompletion={isSavingCompletion || savingShortcut || currentStep !== "success"}
-              onTelemetryChange={onTelemetryChange}
-              onComplete={completeOnboarding}
-              onStartTrial={props.onStartTrial}
-              onChangeShortcut={() => {
-                setEditingShortcut(true);
-                handleBack();
-              }}
-              editor={
-                currentStep === "hotkey" && editingShortcut ? (
-                  <HotkeyStep
-                    hotkey={hotkey}
-                    holdToTalk={holdToTalk}
-                    capturedBareModifier={capturedBareModifier}
-                    onHotkeyChange={onHotkeyChange}
-                    onEditingChange={onEditingChange}
-                    onBareModifier={onBareModifier}
-                    onHoldToTalkChange={onHoldToTalkChange}
-                    onBack={handleBack}
-                    onNext={handleNext}
-                    nextDisabled={nextDisabled}
-                  />
-                ) : undefined
-              }
-            />
-          )}
-        </div>
-      </main>
+
+  const downloading = preparation.name ? local.models[preparation.name] : undefined;
+  const progress = preparation.name ? local.downloadProgress[preparation.name] : undefined;
+  const downloadError = preparation.name ? local.downloadErrors[preparation.name] : undefined;
+  const chip = sourceType === "local" && downloading && CHIP_STEPS.includes(currentStep) ? (
+    local.localReady ? (
+      <FrameChip icon={<CircleCheck aria-hidden="true" className="size-[13px] text-sage" />}>{downloading.display_name} is ready</FrameChip>
+    ) : (
+      <FrameChip icon={<Download aria-hidden="true" className="size-[13px] text-sage" />}>
+        {downloading.display_name} · {downloadError ? "download stopped" : `${Math.round(progress ?? 0)}%`}
+      </FrameChip>
+    )
+  ) : null;
+
+  const warned = preparation.warningModel ? local.models[preparation.warningModel] : undefined;
+  const languageWarning = warned && sourceType === "local" ? (
+    <div role="alert" className="flex flex-col items-center gap-3 text-sm">
+      <p>{warned.display_name} doesn't support your chosen language. Download it without selecting it?</p>
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={preparation.dismissWarning}>Cancel</Button>
+        <Button onClick={preparation.confirmDownload}>Download anyway</Button>
+      </div>
     </div>
+  ) : null;
+
+  const done = outcome?.kind === "trial"
+    ? { title: outcome.firstName ? `You’re set, ${outcome.firstName}` : "You’re set", line: trialLine(licenseStatus) }
+    : outcome?.kind === "key" ? { title: "Voicetypr is yours", line: "Your licence is active." }
+    : startedWithAccess ? { title: "Welcome back", line: licenseStatus?.status === "trial" ? trialLine(licenseStatus) : "Your licence is active." }
+    : { title: "You’re set", line: licenseStatus?.status === "trial" ? trialLine(licenseStatus) : "Your licence is active." };
+
+  const paid = currentStep === "buy" || currentStep === "trial";
+  const checkFailed = paid && Boolean(licenseCheckFailed) && !licensed;
+  const trialEnded = paid && !checkFailed && licenseStatus?.status === "expired";
+
+  let frame: { back?: () => void; right?: ReactNode; footer?: ReactNode; progress: boolean; body: ReactNode };
+  if (enteringKey) {
+    frame = {
+      progress: false,
+      back: () => setEnteringKey(false),
+      body: (
+        <KeyStep
+          onBuy={() => void (onOpenPricing ?? noop)()}
+          onActivate={async (key) => {
+            const error = await (onActivateLicense ?? (async () => "Couldn’t activate the key. Try again."))(key);
+            if (!error) {
+              setOutcome({ kind: "key" });
+              setEnteringKey(false);
+              goTo("done");
+            }
+            return error;
+          }}
+        />
+      ),
+    };
+  } else if (checkFailed) {
+    frame = {
+      progress: false,
+      body: (
+        <CheckFailedStep
+          checking={rechecking}
+          onRecheck={() => {
+            setRechecking(true);
+            void (onRecheckLicense ?? noop)().finally(() => setRechecking(false));
+          }}
+        />
+      ),
+    };
+  } else if (trialEnded) {
+    frame = { progress: false, body: <TrialEndedStep onBuy={buy} onHaveKey={() => setEnteringKey(true)} /> };
+  } else {
+    frame = { progress: currentStep !== "promise", back: () => void flow.handleBack(), body: null };
+    switch (currentStep) {
+      case "promise":
+        frame.back = undefined;
+        frame.body = <PromiseStep busy={busy || preparation.savingLanguage} onBegin={next} />;
+        break;
+      case "source":
+        frame.body = (
+          <VoiceSourceStep sourceType={sourceType} busy={busy || flow.nextDisabled} onConfirmSource={flow.confirmSource} onNext={next} />
+        );
+        break;
+      case "language":
+        frame.body = (
+          <LanguageStep
+            language={preparation.language}
+            busy={busy || flow.nextDisabled}
+            onLanguageChange={(value) => void preparation.changeLanguage(value)}
+            onNext={next}
+          />
+        );
+        break;
+      case "engine":
+        frame.body = (
+          <EngineStep
+            sourceType={sourceType}
+            local={local}
+            cloud={flow.cloud}
+            remote={flow.remote}
+            warning={languageWarning}
+            ready={sourceType === "local" || sourceReady}
+            busy={busy || flow.nextDisabled}
+            onNext={next}
+          />
+        );
+        break;
+      case "permissions":
+      case "shortcut":
+        if (currentStep === "shortcut" && editingShortcut) frame.back = undefined;
+        frame.body = (
+          <SetupStep
+            part={currentStep}
+            caps={caps}
+            holdToTalk={holdToTalk}
+            onHoldToTalkChange={flow.onHoldToTalkChange}
+            permissions={permissions}
+            isRequestingPermission={flow.isRequestingPermission}
+            onRequest={flow.requestPermission}
+            editor={editingShortcut ? (
+              <HotkeyStep
+                hotkey={hotkey}
+                holdToTalk={holdToTalk}
+                capturedBareModifier={capturedBareModifier}
+                onHotkeyChange={flow.onHotkeyChange}
+                onEditingChange={flow.onEditingChange}
+                onBareModifier={flow.onBareModifier}
+                onHoldToTalkChange={flow.onHoldToTalkChange}
+                onBack={() => {
+                  flow.onEditingChange(false);
+                  setEditingShortcut(false);
+                }}
+                onNext={() => void run(async () => {
+                  await flow.saveHotkeySettings();
+                  setEditingShortcut(false);
+                })}
+                nextDisabled={flow.isEditingHotkey || busy}
+              />
+            ) : null}
+            onChangeShortcut={() => setEditingShortcut(true)}
+            onSkipAccessibility={next}
+            onNext={next}
+            nextDisabled={flow.nextDisabled}
+            saving={busy}
+          />
+        );
+        break;
+      case "polish":
+        frame.back = undefined;
+        frame.body = (
+          <PolishStep
+            canRun={polishCanRun}
+            enabled={aiEnabled}
+            firstTry={null}
+            saving={busy}
+            onBack={() => void flow.handleBack()}
+            onChoose={(style) => void run(() => flow.chooseStartingStyle(style, polishOn))}
+          />
+        );
+        break;
+      case "try": {
+        // A try the user already made stays theirs: Buy shows their own words.
+        const skip = () => goTo("fork");
+        frame.right = <QuietNext onClick={skip}>Skip for now</QuietNext>;
+        frame.body = (
+          <TryStep
+            caps={caps}
+            holdToTalk={holdToTalk}
+            engineReady={sourceReady}
+            download={sourceType === "local" && downloading && !local.localReady ? {
+              model: downloading.display_name,
+              progress,
+              size: downloading.size,
+              error: downloadError,
+              onRetry: () => { if (preparation.name) local.onDownload(preparation.name); },
+            } : null}
+            microphone={permissions.microphone.status}
+            clickToTalk={isMacOS && permissions.accessibility.status !== "granted"}
+            onAllowMicrophone={flow.ensureMicrophone}
+            onResult={(result) => {
+              setFirstTry(result);
+              goTo("result");
+            }}
+            onSkip={skip}
+          />
+        );
+        break;
+      }
+      case "result":
+        frame.back = () => goTo("try");
+        frame.body = firstTry ? (
+          <ResultStep result={firstTry} polishOn={polishOn} onTryAgain={() => goTo("try")} onNext={() => goTo("fork")} />
+        ) : null;
+        break;
+      case "fork":
+        frame.back = () => goTo(firstTry ? "result" : "try");
+        frame.body = (
+          <ForkStep
+            onDeeper={() => {
+              setTourIndex(0);
+              flow.leaveFork(true);
+            }}
+            onDoneForNow={() => flow.leaveFork(false)}
+          />
+        );
+        break;
+      case "tour":
+        frame.back = () => (tourIndex > 0 ? setTourIndex(tourIndex - 1) : goTo("fork"));
+        frame.right = <QuietNext onClick={() => void run(flow.handleNext)}>Skip the tour</QuietNext>;
+        frame.body = (
+          <TourStep
+            index={tourIndex}
+            remembered={remembered}
+            onOpen={setRemembered}
+            onNext={() => (tourIndex < TOUR.length - 1 ? setTourIndex(tourIndex + 1) : next())}
+          />
+        );
+        break;
+      case "buy":
+        frame.body = (
+          <BuyStep
+            result={firstTry}
+            source={sourceType}
+            pending={trialPending}
+            onBuy={buy}
+            onStartTrial={flow.chooseTrial}
+            onHaveKey={() => setEnteringKey(true)}
+          />
+        );
+        break;
+      case "trial":
+        if (trialUnreachable) frame.back = () => setTrialUnreachable(false);
+        else frame.footer = <TrialFooter />;
+        frame.body = (
+          <TrialStep
+            pending={trialPending}
+            unreachable={trialUnreachable}
+            onUnreachableChange={setTrialUnreachable}
+            onHaveKey={() => {
+              setTrialUnreachable(false);
+              setEnteringKey(true);
+            }}
+            onStartTrial={async (name, email) => {
+              setTrialPending(true);
+              const error = await (onStartTrial ?? (async () => "trial_failed" as const))(name, email)
+                .finally(() => setTrialPending(false));
+              if (!error) {
+                setOutcome({ kind: "trial", firstName: name.split(/\s+/)[0] ?? "" });
+                goTo("done");
+              }
+              return error;
+            }}
+          />
+        );
+        break;
+      case "done":
+        frame.back = undefined;
+        frame.footer = flow.consentRequired ? (
+          <DoneConsent checked={flow.telemetryOptIn} disabled={flow.isSavingCompletion} onChange={flow.onTelemetryChange} />
+        ) : null;
+        frame.body = (
+          <DoneStep
+            title={done.title}
+            line={done.line}
+            caps={caps}
+            holdToTalk={holdToTalk}
+            saving={flow.isSavingCompletion}
+            onFinish={() => void flow.completeOnboarding(remembered ?? undefined)}
+            onSeeCapabilities={() => void flow.completeOnboarding("capabilities")}
+          />
+        );
+        break;
+    }
+  }
+
+  const step = PROGRESS[currentStep];
+  return (
+    <Frame
+      progress={frame.progress && step ? { done: step, total: TOTAL } : null}
+      chip={enteringKey || checkFailed || trialEnded ? null : chip}
+      onBack={frame.back}
+      backDisabled={busy || trialPending || flow.selectingRemote}
+      right={frame.right}
+      footer={frame.footer}
+    >
+      {frame.body}
+    </Frame>
   );
 };
+

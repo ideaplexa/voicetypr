@@ -1,51 +1,40 @@
 import { recordEvent } from "@/lib/observability";
 import { MicrophoneSelection } from "@/components/MicrophoneSelection";
-import { SettingsPaneCard } from "@/components/settings/settings-ui";
+import { LevelBars } from "@/components/onboarding/LevelBars";
 import { useSettings } from "@/contexts/SettingsContext";
 import { invoke } from "@tauri-apps/api/core";
+import { CircleCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useMicrophoneTest } from "@/components/onboarding/useMicrophoneTest";
 
+/** 05 on Windows: the live level, whether we hear you, and the microphone to use. */
 export function MicrophoneCheck() {
   const { settings, refreshSettings } = useSettings();
   const { level, status, visible } = useMicrophoneTest(settings?.selected_microphone || undefined);
   return (
-    <SettingsPaneCard className="w-full !p-[18px]">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">Microphone</h3>
-        <MicrophoneSelection
-          value={settings?.selected_microphone || undefined}
-          className="h-[34px] w-auto max-w-[360px] rounded-[10px] px-[10px] text-[13px] text-muted-foreground hover:text-muted-foreground aria-expanded:text-muted-foreground"
-          onValueChange={async (deviceName) => {
-            try {
-              await invoke("set_audio_device", { deviceName: deviceName || null });
-                recordEvent({ name: "quick_setting_changed", properties: { setting: "mic", source: "app" } });
-              await refreshSettings();
-            } catch {
-              toast.error("Failed to change microphone");
-            }
-          }}
-        />
-      </div>
-      <div className="mt-3 flex h-[18px] items-center gap-[3px]" role="meter"
-        aria-label="Microphone input level" aria-valuemin={0} aria-valuemax={100}
-        aria-valuenow={Math.round(level * 100)}>
-        {Array.from({ length: 24 }, (_, index) => (
-          <span key={index} className={`h-2 flex-1 rounded-sm ${index < Math.round(level * 24) ? "bg-sage" : "bg-muted"}`} />
-        ))}
-      </div>
-      <p role="status" className="mt-3 text-xs text-muted-foreground">
+    <div className="flex flex-col items-center gap-[22px] self-stretch rounded-2xl border border-border bg-card p-7">
+      <LevelBars level={level} size="lg" />
+      <p role="status" className="flex items-center gap-2 text-base font-semibold text-foreground">
+        {status === "heard" && visible ? <CircleCheck aria-hidden="true" className="size-[18px] text-sage" /> : null}
         {!visible || status === "paused" ? "Microphone test paused." : status === "opening" ? "Opening microphone…"
           : status === "heard" ? "We can hear you"
           : status === "quiet" ? "No input yet — try another microphone"
           : status === "error" ? "Could not open this microphone — try another microphone"
-          : "Speak to check your microphone."}
+          : "Say a few words."}
       </p>
-      <p className="mt-2 text-xs text-muted-foreground">
-        {visible && (status === "listening" || status === "heard" || status === "quiet")
-          ? "Microphone on for this check. Nothing is saved."
-          : "This check saves nothing."}
-      </p>
-    </SettingsPaneCard>
+      <MicrophoneSelection
+        value={settings?.selected_microphone || undefined}
+        className="h-11 w-full rounded-[10px] px-3.5 text-[15px]"
+        onValueChange={async (deviceName) => {
+          try {
+            await invoke("set_audio_device", { deviceName: deviceName || null });
+            recordEvent({ name: "quick_setting_changed", properties: { setting: "mic", source: "app" } });
+            await refreshSettings();
+          } catch {
+            toast.error("Failed to change microphone");
+          }
+        }}
+      />
+    </div>
   );
 }

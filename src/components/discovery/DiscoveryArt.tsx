@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ChartNoAxesColumnIncreasing, ChevronRight, Download, Network, Share2, Upload } from "lucide-react";
+import trayIcon from "../../../src-tauri/icons/tray-light.png";
+import { ArrowLeft, ArrowRight, Bot, ChartNoAxesColumnIncreasing, ChevronRight, Download, FileAudio, Laptop, MessageSquare, Monitor, Network, Share2, SquareTerminal, Upload, Wifi } from "lucide-react";
 import { PillPreview } from "@/components/discovery/PillPreview";
 import { cn } from "@/lib/utils";
 import { isMacOS } from "@/lib/platform";
@@ -24,7 +25,22 @@ function Tile({ icon: Icon }: { icon: LucideIcon }) {
   return <span className="flex size-11 items-center justify-center rounded-[11px] bg-card text-sage shadow-[0_0_0_1px_var(--border)]"><Icon className="size-[22px]" strokeWidth={1.75} /></span>;
 }
 
-export type DiscoveryArtKind = "hold" | "dictionary" | "suggestion" | "polish" | "voice_commands" | "realtime" | "pill" | "retry" | "tray" | "media" | "file" | "share" | "remote" | "history" | "insights" | "model" | "cloud" | "terminal";
+/** The setup tour's full-size pictures (10b, 10d to 10h); the caller sizes the picture. */
+export type TourArtKind = "tour_suggestion" | "tour_file" | "tour_share" | "tour_styles" | "tour_history" | "tour_tray";
+
+export type DiscoveryArtKind = "hold" | "dictionary" | "suggestion" | "polish" | "voice_commands" | "realtime" | "pill" | "retry" | "tray" | "media" | "file" | "share" | "remote" | "history" | "insights" | "model" | "cloud" | "terminal" | TourArtKind;
+
+const tourCard = "rounded-[14px] bg-card shadow-[0_0_0_0.5px_var(--border)]";
+
+function TourComputer({ icon: Icon, name, line }: { icon: LucideIcon; name: string; line: string }) {
+  return (
+    <span className={cn(tourCard, "flex flex-col items-center gap-2 px-5 py-4")}>
+      <Icon className="size-[34px] text-foreground" strokeWidth={1.5} />
+      <span className="text-[14.5px] font-semibold text-foreground">{name}</span>
+      <span className="text-[13px] text-muted-foreground">{line}</span>
+    </span>
+  );
+}
 
 /** Small pictures of each feature as the app really shows it: the real pill (PillPreview) only where the feature is dictating, otherwise a small slice of the feature's own row, menu or control, or its own icon. Decorative only. */
 export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArtKind; shortcut?: string[]; className?: string }) {
@@ -113,6 +129,79 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
         <span className="min-w-0 flex-1"><span className="block font-medium">Soniox</span><span className="block text-muted-foreground">Needs a key</span></span>
         <MiniButton ghost>Add key</MiniButton>
       </Panel>;
+      break;
+    case "tour_suggestion":
+      content = <span className={cn(tourCard, "flex w-[360px] flex-col items-start gap-3.5 p-5")}>
+        <span className="flex items-center gap-2.5 text-[17px]">
+          <span className="text-text-3">Brian</span>
+          <ArrowRight className="size-4 text-text-3" />
+          <span className="font-semibold text-foreground">Bryan</span>
+        </span>
+        <span className="flex gap-2 text-[15px] font-semibold">
+          <span className="flex h-11 items-center rounded-[10px] bg-sage px-[22px] text-sage-foreground">Add to Dictionary</span>
+          <span className="flex h-11 items-center rounded-[10px] bg-card px-[22px] text-foreground shadow-[0_0_0_0.5px_var(--border)]">Dismiss</span>
+        </span>
+      </span>;
+      break;
+    case "tour_file":
+      content = <span className="flex items-center gap-[18px]">
+        <span className={cn(tourCard, "flex items-center gap-2.5 px-[18px] py-3.5")}>
+          <FileAudio className="size-[22px] text-sage" />
+          <span className="font-mono text-[15px] font-medium text-foreground">call.m4a</span>
+        </span>
+        <ArrowRight className="size-[18px] text-text-3" />
+        <span className={cn(tourCard, "flex w-[170px] flex-col gap-2 px-4 py-3.5")}>
+          {[130, 110, 140, 80].map((width) => <i key={width} className="block h-[7px] rounded bg-border" style={{ width }} />)}
+        </span>
+      </span>;
+      break;
+    case "tour_share":
+      content = <span className="flex items-center gap-[22px]">
+        <TourComputer icon={Laptop} name={mac("MacBook Air", "Laptop")} line={mac("Uses the Mac mini", "Uses the desktop PC")} />
+        <span className="flex flex-col items-center gap-1.5">
+          <Wifi className="size-5 text-sage" />
+          <ArrowLeft className="size-4 text-text-3" />
+        </span>
+        <TourComputer icon={Monitor} name={mac("Studio Mac mini", "Desktop PC")} line="Sharing on" />
+      </span>;
+      break;
+    case "tour_styles":
+      content = <span className={cn(tourCard, "flex w-[380px] flex-col overflow-hidden")}>
+        {([[MessageSquare, "Slack", "Message"], [Bot, "ChatGPT", "Clean"], [SquareTerminal, mac("Terminal", "Windows Terminal"), "Code"]] as const).map(([Icon, app, style]) => (
+          <span key={app} className="flex h-[52px] items-center gap-3 border-b border-border px-4 last:border-b-0">
+            <Icon className="size-6 text-foreground" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 text-left text-[15px] font-medium text-foreground">{app}</span>
+            <span className="rounded-full bg-sage-bg px-[9px] py-[3px] text-[12.5px] font-semibold text-sage">{style}</span>
+          </span>
+        ))}
+      </span>;
+      break;
+    case "tour_history":
+      content = <span className={cn(tourCard, "flex w-[400px] flex-col overflow-hidden text-left text-[14.5px] text-foreground")}>
+        {[["14:32", "Let’s move the sync to Friday at 3…"], ["14:05", "Bryan, the deck is ready for review…"], ["13:48", "Remind me to send the invoice tomorrow…"]].map(([time, text]) => (
+          <span key={time} className="flex h-[46px] items-center gap-3 border-b border-border px-4 last:border-b-0">
+            <span className="font-mono text-[13px] text-text-3">{time}</span>
+            {text}
+          </span>
+        ))}
+      </span>;
+      break;
+    case "tour_tray":
+      content = <span className="flex w-[340px] flex-col items-end gap-1.5">
+        <span className="flex items-center gap-3.5 rounded-lg bg-card px-2.5 py-[5px] text-[12.5px] text-text-3">
+          <Wifi className="size-3.5" />
+          <span className="rounded-[5px] bg-sage-bg p-[3px]"><img src={trayIcon} alt="" className="size-4" /></span>
+          14:32
+        </span>
+        <span className="flex w-[250px] flex-col rounded-[10px] bg-card p-[5px] text-left text-[13px] text-foreground shadow-[0_0_0_0.5px_var(--border),0_6px_18px_rgba(0,0,0,.12)]">
+          {[mac("Start Dictation", "Start dictation"), mac("Retry Last Dictation", "Retry last dictation"), "Polish: Clean", "Engine: Parakeet V3", "Open Voicetypr"].map((item, index) => (
+            <span key={item} className={cn("flex items-center justify-between rounded-md px-2.5 py-[5px]", index === 0 && "bg-sage text-sage-foreground")}>
+              {item}
+              {index === 2 || index === 3 ? <ChevronRight className="size-3 text-text-3" /> : null}
+            </span>
+          ))}
+        </span>
+      </span>;
       break;
     case "terminal":
       content = <span className="w-[min(160px,90%)] rounded-[7px] bg-[#121316] px-2 py-1.5 text-left font-mono text-[9.5px] leading-[1.35] text-white/90"><span className="text-[#8FD1A8]">{isMacOS ? "$" : "PS>"}</span> {isMacOS ? "" : "cmd /c "}voicetypr transcribe --file call.m4a --json</span>;

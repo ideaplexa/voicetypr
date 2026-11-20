@@ -56,13 +56,16 @@ impl ServerContext for HostContext {
     }
 }
 
+/// A trial carries its end date: the trial clock refuses one without it.
 fn cache(status: LicenseState) -> RuntimeLicenseCache {
+    let expires_at = (status == LicenseState::Trial)
+        .then(|| (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339());
     RuntimeLicenseCache::Ready(CachedLicense::new(LicenseStatus {
         status,
         trial_days_left: None,
         license_type: None,
         license_key: None,
-        expires_at: None,
+        expires_at,
         verification_state: None,
         verification_expires_at: None,
     }))

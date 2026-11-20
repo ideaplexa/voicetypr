@@ -53,7 +53,7 @@ export function AppContainer() {
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
   const { settings, refreshSettings } = useSettings();
   const { checkAccessibilityPermission, checkMicrophonePermission } = useReadiness();
-  const { status: licenseStatus, startTrial } = useLicense();
+  const { status: licenseStatus, checkFailed, startTrial, activateLicense, checkStatus, openPurchasePage } = useLicense();
   const modelAvailability = useModelAvailabilityContext();
 
   // Use the model management context for onboarding
@@ -78,10 +78,13 @@ export function AppContainer() {
     forceOnboardingNeedsFreshAvailabilityRef,
   });
 
+  // Finishing onboarding while the engine still downloads opens the app; the
+  // download carries on and Home shows what is still needed.
+  const [finishedOnboarding, setFinishedOnboarding] = useState(false);
   const showOnboarding = Boolean(
     settings?.onboarding_completed === false ||
     forceShowOnboarding ||
-    modelAvailability.hasModels === false,
+    (modelAvailability.hasModels === false && !finishedOnboarding),
   );
   // Progress is only needed by onboarding; subscribing elsewhere would re-render
   // this container on every tick.
@@ -98,8 +101,10 @@ export function AppContainer() {
     checkMicrophonePermission,
   });
 
-  const markOnboardingCompletionStarted = () => {
+  // The destination is set before completion is published, so Home never shows first.
+  const markOnboardingCompletionStarted = (open?: ScreenId) => {
     hasCompletedOnboardingRef.current = true;
+    setActiveSection(open ?? "home");
   };
 
   const clearOnboardingCompletionMarker = () => {
@@ -111,15 +116,21 @@ export function AppContainer() {
     return (
       <AppErrorBoundary>
         <OnboardingDesktop
-          previewPhase={getOnboardingPreview()}
+          previewStep={getOnboardingPreview()}
           onCompletionStart={markOnboardingCompletionStarted}
           onCompletionError={clearOnboardingCompletionMarker}
           onComplete={() => {
+            setFinishedOnboarding(true);
             setForceShowOnboarding(false);
             refreshSettings();
             void modelAvailability.checkModels();
           }}
-          onStartTrial={licenseStatus?.status === "none" ? startTrial : undefined}
+          licenseStatus={licenseStatus}
+          licenseCheckFailed={checkFailed}
+          onStartTrial={(name, email) => startTrial(name, email, { quiet: true })}
+          onActivateLicense={(key) => activateLicense(key, { quiet: true })}
+          onRecheckLicense={checkStatus}
+          onOpenPricing={openPurchasePage}
           modelManagement={{ ...modelManagement, downloadProgress }}
         />
       </AppErrorBoundary>

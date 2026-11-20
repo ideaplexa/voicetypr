@@ -175,12 +175,30 @@ export function useInAppRecordingHotkey(): void {
     // The backend routes the toggle like the native hotkey: it cancels a
     // pending start (still Idle here while the license loads) before reading
     // the state, so this must not pick start/stop from React state.
-    const performToggle = (reason: string): void => {
+    const performToggle = (reason: string): boolean => {
       const now = Date.now();
-      if (now - lastToggleRef.current < TOGGLE_DEBOUNCE_MS) return;
+      if (now - lastToggleRef.current < TOGGLE_DEBOUNCE_MS) return false;
       lastToggleRef.current = now;
       log.debug(`In-app ${reason} in editable field — toggling recording`);
-      void latest.current.recording.toggleRecording();
+      lastPress = Promise.resolve(latest.current.recording.toggleRecording()).catch(() => undefined);
+      return true;
+    };
+
+    // A combo press sent on Windows: the key that completed it, and the press
+    // in flight. Its release is reported after the press, for hold to talk.
+    let combo: { code: string; ctrl: boolean; meta: boolean; shift: boolean; alt: boolean } | null = null;
+    let lastPress: Promise<unknown> = Promise.resolve();
+    const releaseCombo = (event: KeyboardEvent): void => {
+      if (combo === null) return;
+      const held =
+        event.code !== combo.code &&
+        (!combo.ctrl || event.ctrlKey) &&
+        (!combo.meta || event.metaKey) &&
+        (!combo.shift || event.shiftKey) &&
+        (!combo.alt || event.altKey);
+      if (held) return;
+      combo = null;
+      void lastPress.then(() => invoke("in_app_hotkey_released")).catch(() => undefined);
     };
 
     const startHold = (): boolean => {
@@ -328,12 +346,15 @@ export function useInAppRecordingHotkey(): void {
         if (hasAltGraph(event)) return;
         if (!eventMatchesShortcut(event, currentHotkey)) return;
         event.preventDefault();
-        performToggle("hotkey");
+        if (performToggle("hotkey") && !isMacOS) {
+          combo = { code: event.code, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey, alt: event.altKey };
+        }
         return;
       }
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
+      releaseCombo(event);
       if (activeHoldCode && event.code === activeHoldCode) {
         clearPendingHoldStart();
         if (event.isComposing) {

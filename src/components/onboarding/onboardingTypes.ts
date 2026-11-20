@@ -3,20 +3,51 @@ import type { SavedConnection } from "@/components/RemoteServerCard";
 import type { useModelManagement } from "@/hooks/useModelManagement";
 import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import { isMacOS } from "@/lib/platform";
-import type { TrialStartError } from "@/types";
+import type { ScreenId } from "@/components/navigation";
+import type { LicenseStatus, TrialStartError } from "@/types";
+
+export type Step =
+  | "promise"
+  | "source"
+  | "language"
+  | "engine"
+  | "permissions"
+  | "shortcut"
+  | "polish"
+  | "try"
+  | "result"
+  | "fork"
+  | "tour"
+  | "buy"
+  | "trial"
+  | "done";
 
 export interface OnboardingDesktopProps {
-  /** Screenshot fixtures only; production onboarding always starts at welcome. */
-  previewPhase?: 1 | 2 | 3;
-  onCompletionStart?: () => void;
+  /** Screenshot fixtures only; production onboarding always starts at the promise. */
+  previewStep?: Step;
+  /** Completion is about to be published; `open` is the screen to show after it. */
+  onCompletionStart?: (open?: ScreenId) => void;
   onCompletionError?: () => void;
-  onComplete: () => void;
-  /** Set only while this device has no trial yet; starts it on the user's click. */
+  /** Opens the app, on the section the tour remembered when there is one. */
+  onComplete: (open?: ScreenId) => void;
+  /** The licence as last checked; null when the check has not answered. */
+  licenseStatus?: LicenseStatus | null;
+  /** The latest licence check failed, so the status may be stale. */
+  licenseCheckFailed?: boolean;
   onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
+  /** Resolves to a message the user can act on, or null once the key is active. */
+  onActivateLicense?: (key: string) => Promise<string | null>;
+  onRecheckLicense?: () => Promise<void>;
+  onOpenPricing?: () => Promise<void>;
   modelManagement: ReturnType<typeof useModelManagement>;
 }
 
-export type Step = "welcome" | "source" | "permissions" | "readiness" | "hotkey" | "success";
+/**
+ * Whether new users get Polish without their own key. Undecided by the founder;
+ * nothing backs it yet, so the first sentence shows the engine's own text unless
+ * this user has Polish on.
+ */
+export const NEW_USERS_GET_POLISH = false;
 
 export type SourceType = "local" | "cloud" | "remote";
 export type PermissionStatus = "checking" | "granted" | "not_determined" | "denied" | "restricted" | "error";

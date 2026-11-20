@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { open } from "@tauri-apps/plugin-shell";
@@ -104,8 +104,11 @@ describe("AccountSection license verification", () => {
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: "License key" })).toHaveValue(""),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Buy License" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade now" }));
     expect(openPurchasePage).toHaveBeenCalledTimes(1);
+    const keyWindow = await screen.findByRole("dialog", { name: "Activate your license" });
+    await waitFor(() => expect(within(keyWindow).getByRole("textbox", { name: "License key" })).toHaveFocus());
+    expect(within(keyWindow).getByRole("button", { name: "Recheck" })).toBeInTheDocument();
   });
 
   it("opens the existing license management portal from an unlicensed state", async () => {

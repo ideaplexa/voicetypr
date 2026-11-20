@@ -21,7 +21,7 @@ fn preflight_reset(
 }
 
 // secure.dat is a sibling of these directories and must survive reset.
-fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str); 4] {
+pub(crate) fn app_data_directories_to_clear(app_data_dir: &Path) -> [(PathBuf, &'static str); 4] {
     [
         (app_data_dir.join("stores"), "Stores directory"),
         (app_data_dir.join("models"), "Downloaded models"),

@@ -17,9 +17,19 @@ pub async fn toggle_recording(
             log::info!("Toggle: in-app hotkey ignored; this press was already handled");
             return Ok(ToggleRoute::NoChange);
         }
+        if crate::recording::onboarding_try::claim_hotkey(&app, keytrigger::KeyPhase::Pressed) {
+            return Ok(ToggleRoute::NoChange);
+        }
         log::info!("Toggle: in-app hotkey fallback");
     }
     crate::recording::toggle::toggle_recording(app, source).await
+}
+
+/// The main window's shortcut release on Windows, where the low-level hook is
+/// blind while our window has focus: it ends a First try held to talk.
+#[tauri::command]
+pub fn in_app_hotkey_released(app: AppHandle) {
+    crate::recording::onboarding_try::claim_hotkey(&app, keytrigger::KeyPhase::Released);
 }
 
 /// The main window's Esc on Windows, where the low-level hook is blind while

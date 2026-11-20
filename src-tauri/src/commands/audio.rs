@@ -2344,7 +2344,7 @@ mod tests {
             trial_days_left: None,
             license_type: None,
             license_key: None,
-            expires_at: None,
+            expires_at: Some((chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339()),
             verification_state: None,
             verification_expires_at: None,
         })
@@ -4585,7 +4585,14 @@ pub(crate) fn recording_license_state(
         {
             RecordingLicenseState::Blocked
         }
-        RuntimeLicenseCache::Ready(_) => RecordingLicenseState::Ready,
+        RuntimeLicenseCache::Ready(cached) => {
+            use crate::license::trial_clock::{trial_clock, TrialClock};
+            match trial_clock(&cached.status) {
+                TrialClock::Valid => RecordingLicenseState::Ready,
+                TrialClock::Expired => RecordingLicenseState::Blocked,
+                TrialClock::CheckRequired => RecordingLicenseState::CheckFailed,
+            }
+        }
         RuntimeLicenseCache::Loading => RecordingLicenseState::Loading,
         RuntimeLicenseCache::Failed => RecordingLicenseState::CheckFailed,
     }
@@ -7818,29 +7825,22 @@ async fn process_diarized_upload(
     Ok(result)
 }
 
+/// Turns an audio file into the engine's text with the selected engine: no
+/// writing pipeline, Polish, history or delivery.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn transcribe_audio_file_impl(
-    app: AppHandle,
-    file_path: String,
+pub(crate) async fn transcribe_upload_audio(
+    app: &AppHandle,
+    file_path: &str,
     model_name: String,
     model_engine: Option<String>,
-    validate_requirements: bool,
     language_override: Option<String>,
     audio_ctx: Option<i32>,
     speed_mode_override: Option<bool>,
     retry_generation: Option<u64>,
-) -> Result<UploadTranscription, String> {
-    // History retries may use the original saved WAV without an executor copy.
-    // Register before the first await; RAII releases on completion/error/cancel.
-    let _source_lease = crate::recording::kept::protect_path(Path::new(&file_path));
-    let upload_generation = retry_generation.unwrap_or_else(current_recording_generation);
-    log::info!("[UPLOAD] transcribe_audio_file started");
-    if validate_requirements {
-        validate_recording_requirements(&app).await?;
-    }
-
+    diarize: bool,
+) -> Result<(TranscriptionResult, bool), String> {
     // Use the provided file path directly
-    let audio_path = std::path::Path::new(&file_path);
+    let audio_path = std::path::Path::new(file_path);
 
     // Validate file exists
     if !audio_path.exists() {
@@ -7863,7 +7863,7 @@ pub(crate) async fn transcribe_audio_file_impl(
 
     // Resolve engine (whisper/parakeet/cloud) for the requested model
     let engine_selection =
-        resolve_engine_for_model(&app, &model_name, model_engine.as_deref()).await?;
+        resolve_engine_for_model(app, &model_name, model_engine.as_deref()).await?;
     log::info!(
         "[UPLOAD] Engine resolved to: {}",
         engine_selection.engine_name()
@@ -7889,7 +7889,7 @@ pub(crate) async fn transcribe_audio_file_impl(
         .get("transcription_task")
         .and_then(|v| v.as_str().map(|s| s.to_string()));
     let transcription_task = resolve_transcription_task_for_audio(
-        &app,
+        app,
         legacy_translate_to_english,
         stored_transcription_task.as_deref(),
     )?;
@@ -7945,7 +7945,7 @@ pub(crate) async fn transcribe_audio_file_impl(
         let server_conn = RemoteServerConnection::new(host.clone(), *port, password.clone());
 
         let request_context = crate::commands::remote::resolve_remote_request_context(
-            &app,
+            app,
             server_id,
             transcription_job.spoken_language.as_deref(),
         )
@@ -7983,9 +7983,9 @@ pub(crate) async fn transcribe_audio_file_impl(
                 )
                 .map_err(upload_error_to_string)?;
                 let normalized_file = normalize_upload_audio(&recordings_dir, &wav_path).await?;
-                if retry_generation.is_none() {
+                if diarize {
                     cloud_result = maybe_return_diarized_cloud_upload(
-                        &app,
+                        app,
                         *provider,
                         normalized_file.path(),
                         &language,
@@ -8012,7 +8012,7 @@ pub(crate) async fn transcribe_audio_file_impl(
                 })?;
             let initial_prompt =
                 if matches!(engine_selection, ActiveEngineSelection::Whisper { .. }) {
-                    compile_whisper_initial_prompt(&app, Some(&language))
+                    compile_whisper_initial_prompt(app, Some(&language))
                 } else {
                     None
                 };
@@ -8042,7 +8042,7 @@ pub(crate) async fn transcribe_audio_file_impl(
                 audio_ctx,
                 speed_mode_override,
             };
-            transcribe_with_app(&app, request)
+            transcribe_with_app(app, request)
                 .await
                 .map_err(upload_error_to_string)?
         }
@@ -8052,6 +8052,42 @@ pub(crate) async fn transcribe_audio_file_impl(
         "[UPLOAD] Completed transcription, {} characters",
         transcription_result.raw_text.len()
     );
+    Ok((transcription_result, diarized_upload))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn transcribe_audio_file_impl(
+    app: AppHandle,
+    file_path: String,
+    model_name: String,
+    model_engine: Option<String>,
+    validate_requirements: bool,
+    language_override: Option<String>,
+    audio_ctx: Option<i32>,
+    speed_mode_override: Option<bool>,
+    retry_generation: Option<u64>,
+) -> Result<UploadTranscription, String> {
+    // History retries may use the original saved WAV without an executor copy.
+    // Register before the first await; RAII releases on completion/error/cancel.
+    let _source_lease = crate::recording::kept::protect_path(Path::new(&file_path));
+    let upload_generation = retry_generation.unwrap_or_else(current_recording_generation);
+    log::info!("[UPLOAD] transcribe_audio_file started");
+    if validate_requirements {
+        validate_recording_requirements(&app).await?;
+    }
+
+    let (transcription_result, diarized_upload) = transcribe_upload_audio(
+        &app,
+        &file_path,
+        model_name,
+        model_engine,
+        language_override,
+        audio_ctx,
+        speed_mode_override,
+        retry_generation,
+        retry_generation.is_none(),
+    )
+    .await?;
     if let Some(generation) = retry_generation {
         if delivery_aborted(
             app.state::<AppState>().is_cancellation_requested(),

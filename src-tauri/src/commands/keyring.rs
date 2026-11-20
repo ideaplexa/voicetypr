@@ -3,6 +3,15 @@ use tauri::AppHandle;
 
 /// Validate key names to prevent edge cases and security issues
 fn validate_key(key: &str) -> Result<(), String> {
+    // Values only the app itself may change: the try count and the trial clock.
+    if [
+        crate::license::access::TRY_KEY,
+        crate::license::trial_clock::KEY,
+    ]
+    .contains(&key)
+    {
+        return Err("This key is managed by Voicetypr".to_string());
+    }
     // Check if key is empty
     if key.is_empty() {
         return Err("Key cannot be empty".to_string());
@@ -80,4 +89,16 @@ pub fn keyring_has(app: AppHandle, key: String) -> Result<bool, String> {
 
     // Check secure store
     secure_store::secure_has(&app, &key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_key;
+
+    #[test]
+    fn the_app_window_cannot_reset_the_try_count_or_the_trial_clock() {
+        assert!(validate_key(crate::license::access::TRY_KEY).is_err());
+        assert!(validate_key(crate::license::trial_clock::KEY).is_err());
+        assert!(validate_key("stt_api_key_deepgram").is_ok());
+    }
 }

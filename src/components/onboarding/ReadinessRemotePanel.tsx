@@ -1,23 +1,11 @@
-import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import type { DiscoveredRemoteServer } from "@/components/onboarding/onboardingTypes";
 import { isRemoteServerOnline } from "@/components/onboarding/onboardingTypes";
 import type { SavedConnection } from "@/components/RemoteServerCard";
 import { AddServerModal } from "@/components/sections/AddServerModal";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/settings/SettingsButton";
-import {
-  Card,
-  CardAction,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Spinner } from "@/components/ui/spinner";
 import { getModelDisplayName } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
-import { Wifi, WifiOff } from "lucide-react";
+import { Lock, Plus, Server } from "lucide-react";
+import { useEffect, type ReactNode } from "react";
 
 export interface ReadinessRemotePanelProps {
   remoteServers: SavedConnection[];
@@ -26,15 +14,32 @@ export interface ReadinessRemotePanelProps {
   isLoadingRemoteServers: boolean;
   showAddRemoteModal: boolean;
   selectedDiscoveredServer: DiscoveredRemoteServer | null;
-  onLoadRemoteServers: () => void;
+  onLoadRemoteServers: () => Promise<void>;
   onOpenAddServer: () => void;
   onAddDiscovered: (server: DiscoveredRemoteServer) => void;
   onSelectRemote: (serverId: string) => void;
-  onSwitchToLocal: () => void;
   onServerAdded: (server: SavedConnection) => void;
   onAddModalOpenChange: (open: boolean) => void;
 }
 
+const rowButton = "flex items-center gap-1.5 rounded-lg border border-border px-3 py-[7px] text-[13.5px] font-medium text-foreground hover:bg-accent disabled:opacity-50";
+
+function Row({ name, about, on, children }: { name: string; about: string; on?: boolean; children: ReactNode }) {
+  return (
+    <div className={cn("flex h-16 items-center gap-3.5 border-b border-border px-[18px]", on && "bg-sage-bg")}>
+      <span className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-secondary text-foreground">
+        <Server aria-hidden="true" className="size-[17px]" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[15.5px] leading-[1.2] font-semibold text-foreground">{name}</span>
+        <span className="truncate text-sm leading-[1.2] text-muted-foreground">{about}</span>
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** 04c Use another computer: computers found on the network, saved ones, and one by address. */
 export function ReadinessRemotePanel({
   remoteServers,
   discoveredRemoteServers,
@@ -46,134 +51,58 @@ export function ReadinessRemotePanel({
   onOpenAddServer,
   onAddDiscovered,
   onSelectRemote,
-  onSwitchToLocal,
   onServerAdded,
   onAddModalOpenChange,
 }: ReadinessRemotePanelProps) {
+  // Computers that turn sharing on while this screen is open show up too.
+  useEffect(() => {
+    const timer = window.setInterval(() => void onLoadRemoteServers(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [onLoadRemoteServers]);
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium">Saved remote servers</p>
-          <p className="text-sm text-muted-foreground">
-            Online servers can be selected for transcription.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => void onLoadRemoteServers()}
-            disabled={isLoadingRemoteServers}
+    <div className="flex flex-col gap-[30px] self-stretch">
+      <div className="flex flex-col overflow-hidden rounded-[14px] border border-border bg-card">
+        {discoveredRemoteServers.map((server) => (
+          <Row
+            key={`${server.machine_id}:${server.host}:${server.port}`}
+            name={server.name || `${server.host}:${server.port}`}
+            about={`Found on your network · ${server.auth_required ? "Password required" : getModelDisplayName(server.model)}`}
           >
-            {isLoadingRemoteServers ? <Spinner /> : null}
-            Refresh
-          </Button>
-          <Button onClick={onOpenAddServer}>Add server</Button>
-        </div>
+            <button type="button" className={rowButton} onClick={() => void onAddDiscovered(server)}>
+              {server.auth_required ? <Lock aria-hidden="true" className="size-3.5" /> : null}
+              {server.auth_required ? "Add with password" : "Use this computer"}
+            </button>
+          </Row>
+        ))}
+        {remoteServers.map((server) => {
+          const selected = server.id === activeRemoteServerId;
+          const online = isRemoteServerOnline(server);
+          return (
+            <Row
+              key={server.id}
+              on={selected}
+              name={server.name || `${server.host}:${server.port}`}
+              about={[online ? "Online" : server.status || "Unknown", server.model ? getModelDisplayName(server.model) : null].filter(Boolean).join(" · ")}
+            >
+              {selected ? (
+                <span className="text-[13.5px] font-medium text-sage">In use</span>
+              ) : (
+                <button type="button" className={rowButton} disabled={!online} onClick={() => void onSelectRemote(server.id)}>
+                  Use
+                </button>
+              )}
+            </Row>
+          );
+        })}
+        {isLoadingRemoteServers && remoteServers.length === 0 && discoveredRemoteServers.length === 0 ? (
+          <p className="border-b border-border px-[18px] py-4 text-sm text-muted-foreground">Looking for computers on your network…</p>
+        ) : null}
+        <button type="button" onClick={onOpenAddServer} className="flex h-14 items-center gap-3.5 px-[18px] text-[15px] font-medium text-sage hover:bg-accent">
+          <Plus aria-hidden="true" className="size-4" />
+          Add a server by address
+        </button>
       </div>
-
-      <Card className="rounded-[14px] border border-border bg-card py-0">
-        <ScrollArea className="h-[320px]">
-          <div className="flex flex-col gap-3 p-4">
-            {isLoadingRemoteServers && remoteServers.length === 0 ? (
-              <LoadingState label="Checking remote servers" />
-            ) : null}
-            {!isLoadingRemoteServers && remoteServers.length === 0 ? (
-              <div className="flex flex-col items-center gap-3">
-                <EmptyState
-                  title="No remote servers saved"
-                  description="Add a Voicetypr server, or set up this device with a local model instead."
-                />
-                <Button variant="outline" onClick={onSwitchToLocal}>
-                  Choose local instead
-                </Button>
-              </div>
-            ) : null}
-            {discoveredRemoteServers.map((server) => (
-              <Card
-                key={`${server.machine_id}:${server.host}:${server.port}`}
-                size="sm"
-                className="rounded-none border-0 border-b border-border bg-transparent ring-0 last:border-b-0"
-              >
-                <CardHeader>
-                  <CardAction>
-                    <Badge
-                      variant={server.auth_required ? "outline" : "secondary"}
-                      className="text-xs text-muted-foreground"
-                    >
-                      {server.auth_required ? "Password required" : "Found on LAN"}
-                    </Badge>
-                  </CardAction>
-                  <div className="flex items-start gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-xl bg-sage-bg text-sage">
-                      <Wifi className="size-5" />
-                    </div>
-                    <div>
-                      <CardTitle>{server.name || `${server.host}:${server.port}`}</CardTitle>
-                      <CardDescription>
-                        {server.host}:{server.port} · {getModelDisplayName(server.model)}
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardFooter className="justify-end">
-                  <Button size="sm" onClick={() => void onAddDiscovered(server)}>
-                    {server.auth_required ? "Add with password" : "Use this server"}
-                  </Button>
-                </CardFooter>
-              </Card>
-            ))}
-            {remoteServers.map((server) => {
-              const selected = server.id === activeRemoteServerId;
-              const online = isRemoteServerOnline(server);
-              return (
-                <Card
-                  key={server.id}
-                  size="sm"
-                  className={cn(
-                    "rounded-none border-0 border-b border-border bg-transparent ring-0 last:border-b-0",
-                    selected && "border-sage/50 bg-sage-bg/40 ring-1 ring-sage/30",
-                  )}
-                >
-                  <CardHeader>
-                    <CardAction>
-                      <Badge
-                        variant={online ? "secondary" : "outline"}
-                        className={cn("text-xs text-muted-foreground", online && "bg-sage-bg")}
-                      >
-                        {online ? "Online" : server.status || "Unknown"}
-                      </Badge>
-                    </CardAction>
-                    <div className="flex items-start gap-3">
-                      <div className="flex size-10 items-center justify-center rounded-xl bg-sage-bg text-sage">
-                        {online ? <Wifi className="size-5" /> : <WifiOff className="size-5" />}
-                      </div>
-                      <div>
-                        <CardTitle>{server.name || `${server.host}:${server.port}`}</CardTitle>
-                        <CardDescription>
-                          {server.host}:{server.port}
-                          {server.model ? ` · ${getModelDisplayName(server.model)}` : ""}
-                        </CardDescription>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardFooter className="justify-end">
-                    <Button
-                      size="sm"
-                      variant={selected ? "default" : "outline"}
-                      disabled={!online}
-                      onClick={() => void onSelectRemote(server.id)}
-                    >
-                      {selected ? "Selected" : "Use this server"}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              );
-            })}
-          </div>
-        </ScrollArea>
-      </Card>
-
+      <p className="text-center text-[14.5px] text-muted-foreground">The other computer needs Voicetypr running with Network sharing on.</p>
       <AddServerModal
         open={showAddRemoteModal}
         onOpenChange={onAddModalOpenChange}

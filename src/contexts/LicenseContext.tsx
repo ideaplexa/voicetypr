@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/utils/error";
 import { createLogger } from "@/lib/logger";
 import { TRIAL_NOTICE_VERSION } from "@/lib/trial-notice";
+import { isMacOS } from "@/lib/platform";
 
 const log = createLogger("license");
 const LICENSE_COMMAND_TIMEOUT_MS = 60_000;
@@ -29,11 +30,14 @@ const TRIAL_START_ERRORS: readonly TrialStartError[] = [
 interface LicenseContextValue {
   status: LicenseStatus | null;
   isLoading: boolean;
+  /** The last status check failed; the status shown may be stale. */
+  checkFailed: boolean;
   checkStatus: () => Promise<void>;
   revalidateLicense: () => Promise<void>;
-  startTrial: (name: string, email: string) => Promise<TrialStartError | null>;
+  startTrial: (name: string, email: string, options?: { quiet?: boolean }) => Promise<TrialStartError | null>;
   restoreLicense: () => Promise<void>;
-  activateLicense: (key: string) => Promise<void>;
+  /** Resolves to the error in plain words, or null once the key is active. */
+  activateLicense: (key: string, options?: { quiet?: boolean }) => Promise<string | null>;
   deactivateLicense: () => Promise<void>;
   openPurchasePage: () => Promise<void>;
 }
@@ -59,21 +63,22 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<
 const getFriendlyLicenseError = (action: "activate" | "restore", rawMessage?: string) => {
   const lower = rawMessage?.toLowerCase() ?? "";
   const actionLabel = action === "activate" ? "activate license" : "restore license";
+  const machine = isMacOS ? "Mac" : "PC";
 
   if (lower.includes("network error") || lower.includes("error sending request")) {
-    return `Failed to ${actionLabel}. Please check your connection and try again.`;
+    return `Couldn’t reach Voicetypr to ${action === "activate" ? "activate your key" : "restore your license"}. Check your connection and try again.`;
   }
 
   if (lower.includes("already activated on another device")) {
-    return "This license is already activated on another device";
+    return `This key is already in use on another ${machine}. Deactivate it there first, or write to support@voicetypr.com.`;
   }
 
   if (lower.includes("maximum number of devices")) {
-    return "This license has reached its device activation limit";
+    return "This key is on as many devices as it covers. Free one up in Manage license, or write to support@voicetypr.com.";
   }
 
   if (lower.includes("invalid license key")) {
-    return "Invalid license key";
+    return "That key didn’t work. Check it against your receipt email.";
   }
 
   if (action === "restore" && lower.includes("no license found")) {
@@ -96,6 +101,7 @@ const openPurchasePage = async () => {
 export function LicenseProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [checkFailed, setCheckFailed] = useState(false);
   const latestCheckStatusId = useRef(0);
 
   const checkStatus = useCallback(async () => {
@@ -120,8 +126,10 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
         verification_state: licenseStatus.verification_state,
       });
       setStatus(licenseStatus);
+      setCheckFailed(false);
     } catch (error) {
       if (checkId !== latestCheckStatusId.current) return;
+      setCheckFailed(true);
 
       if (error instanceof Error && error.message === "License status check timed out") {
         toast.error("License status check timed out. Please try again.");
@@ -167,14 +175,14 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const startTrial = useCallback(async (name: string, email: string): Promise<TrialStartError | null> => {
+  const startTrial = useCallback(async (name: string, email: string, options?: { quiet?: boolean }): Promise<TrialStartError | null> => {
     const checkId = ++latestCheckStatusId.current;
     try {
       setIsLoading(true);
       const licenseStatus = await invoke<LicenseStatus>("start_trial", { name, email, noticeVersion: TRIAL_NOTICE_VERSION });
       if (checkId === latestCheckStatusId.current) setStatus(licenseStatus);
-      if (licenseStatus.status === "trial") toast.success("Your free trial has started");
-      return null;
+      if (licenseStatus.status === "trial" && !options?.quiet) toast.success("Your free trial has started");
+      return licenseStatus.status === "trial" || licenseStatus.status === "licensed" ? null : "trial_failed";
     } catch (error: unknown) {
       const code = TRIAL_START_ERRORS.find((known) => known === error) ?? "trial_failed";
       log.error("Failed to start trial:", code);
@@ -198,15 +206,17 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const activateLicense = useCallback(async (key: string) => {
+  const activateLicense = useCallback(async (key: string, options?: { quiet?: boolean }) => {
     try {
       const licenseStatus = await invoke<LicenseStatus>("activate_license", { licenseKey: key });
       setStatus(licenseStatus);
-      toast.success("License activated successfully");
+      if (!options?.quiet) toast.success("License activated successfully");
+      return null;
     } catch (error: unknown) {
-      const message = getErrorMessage(error);
-      log.error("Failed to activate license:", error);
-      toast.error(getFriendlyLicenseError("activate", message));
+      const friendly = getFriendlyLicenseError("activate", getErrorMessage(error));
+      log.error("Failed to activate license");
+      if (!options?.quiet) toast.error(friendly);
+      return friendly;
     }
   }, []);
 
@@ -236,6 +246,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       isLoading,
+      checkFailed,
       checkStatus,
       revalidateLicense,
       startTrial,
@@ -247,6 +258,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     [
       status,
       isLoading,
+      checkFailed,
       checkStatus,
       revalidateLicense,
       startTrial,

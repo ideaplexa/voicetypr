@@ -1,20 +1,8 @@
-import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import { ApiKeyModal } from "@/components/ApiKeyModal";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/settings/SettingsButton";
-import {
-  Card,
-  CardAction,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { getCloudProviderByModel } from "@/lib/cloudProviders";
-import { cn } from "@/lib/utils";
+import { CLOUD_PROVIDERS, getCloudProviderByModel } from "@/lib/cloudProviders";
 import type { ModelInfo } from "@/types";
-import { Cloud } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Cloud, KeyRound } from "lucide-react";
 
 export interface ReadinessCloudPanelProps {
   cloudModelNames: string[];
@@ -29,11 +17,19 @@ export interface ReadinessCloudPanelProps {
   onCloudKeySubmit: (apiKey: string) => void;
 }
 
+/** The frames' line for each provider: whether words appear while you speak. */
+const ABOUT: Record<string, string> = {
+  Soniox: "Supports real-time words",
+  Deepgram: "Supports real-time words",
+};
+
+const ORDER = ["Soniox", "Deepgram", "OpenAI", "Groq", "Cohere"];
+
+const rowButton = "flex items-center gap-1.5 rounded-lg border border-border px-3 py-[7px] text-[13.5px] font-medium text-foreground hover:bg-accent";
+
+/** 04b Choose a cloud provider: every provider the app supports, its key as the control. */
 export function ReadinessCloudPanel({
-  cloudModelNames,
-  models,
   currentModel,
-  isLoading,
   cloudModelSetup,
   isSavingCloudKey,
   isModelReady,
@@ -41,79 +37,44 @@ export function ReadinessCloudPanel({
   onSetCloudModelSetup,
   onCloudKeySubmit,
 }: ReadinessCloudPanelProps) {
-  const activeCloudProvider = cloudModelSetup
-    ? getCloudProviderByModel(cloudModelSetup)
-    : undefined;
-
+  const activeCloudProvider = cloudModelSetup ? getCloudProviderByModel(cloudModelSetup) : undefined;
+  const all = Object.values(CLOUD_PROVIDERS);
+  const providers = [
+    ...ORDER.flatMap((name) => all.filter((provider) => provider.displayName === name)),
+    ...all.filter((provider) => !ORDER.includes(provider.displayName)),
+  ];
   return (
-    <div className="flex flex-col gap-4">
-      <Card className="rounded-[14px] border border-border bg-card py-0">
-        <ScrollArea className="h-[320px]">
-          <div className="flex flex-col gap-3 p-4">
-            {cloudModelNames.map((name) => {
-              const model = models[name];
-              const provider = getCloudProviderByModel(name);
-              if (!model || !provider) return null;
-              const ready = isModelReady(name);
-              const selected = currentModel === name;
-              return (
-                <Card
-                  key={name}
-                  size="sm"
-                  className={cn(
-                    "rounded-none border-0 border-b border-border bg-transparent shadow-none last:border-b-0",
-                    selected && "border-sage/50 bg-sage-bg/40 ring-1 ring-sage/30",
-                  )}
-                >
-                  <CardHeader>
-                    <CardAction>
-                      <Badge
-                        variant={ready ? "secondary" : "outline"}
-                        className="text-xs text-muted-foreground"
-                      >
-                        {ready ? "Connected" : "API key required"}
-                      </Badge>
-                    </CardAction>
-                    <div className="flex items-start gap-3">
-                      <div className="flex size-10 items-center justify-center rounded-xl bg-sage-bg text-sage">
-                        <Cloud className="size-5" />
-                      </div>
-                      <div>
-                        <CardTitle>{provider.displayName}</CardTitle>
-                        <CardDescription>{provider.description}</CardDescription>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardFooter className="justify-end">
-                    <Button
-                      size="sm"
-                      variant={selected ? "default" : "outline"}
-                      onClick={() => {
-                        if (ready) {
-                          void onSelectCloud(name);
-                        } else {
-                          onSetCloudModelSetup(name);
-                        }
-                      }}
-                    >
-                      {selected ? "Selected" : ready ? "Use provider" : "Add API key"}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              );
-            })}
-            {isLoading && cloudModelNames.length === 0 ? (
-              <LoadingState label="Loading cloud providers" />
-            ) : null}
-            {!isLoading && cloudModelNames.length === 0 ? (
-              <EmptyState
-                title="No cloud providers available"
-                description="Choose Local or Remote Voicetypr to continue."
-              />
-            ) : null}
-          </div>
-        </ScrollArea>
-      </Card>
+    <div className="flex flex-col gap-4 self-stretch">
+      <div className="flex flex-col overflow-hidden rounded-[14px] border border-border bg-card">
+        {providers.map((provider) => {
+          const name = provider.modelName;
+          const keyAdded = isModelReady(name);
+          const inUse = keyAdded && currentModel === name;
+          return (
+            <div key={name} className={cn("flex h-[60px] items-center gap-3.5 border-b border-border px-[18px] last:border-b-0", inUse && "bg-sage-bg")}>
+              <span className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-secondary text-foreground">
+                <Cloud aria-hidden="true" className="size-[17px]" />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-[15.5px] leading-[1.2] font-semibold text-foreground">{provider.displayName}</span>
+                <span className="text-sm leading-[1.2] text-muted-foreground">{ABOUT[provider.displayName] ?? "Text after you stop"}</span>
+              </span>
+              {inUse ? (
+                <span className="text-[13.5px] font-medium text-sage">In use</span>
+              ) : keyAdded ? (
+                <button type="button" className={rowButton} aria-label={`Use ${provider.displayName}`} onClick={() => void onSelectCloud(name)}>
+                  Use
+                </button>
+              ) : (
+                <button type="button" className={rowButton} aria-label={`Add API key for ${provider.displayName}`} onClick={() => onSetCloudModelSetup(name)}>
+                  <KeyRound aria-hidden="true" className="size-3.5" />
+                  Add API key
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
       {activeCloudProvider ? (
         <ApiKeyModal
           inline

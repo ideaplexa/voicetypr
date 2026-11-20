@@ -17,8 +17,12 @@ const DIM = "rgba(255,255,255,.55)";
  * The recording pill, small and still, for illustrations. The glyph (bars, spinner, check) is drawn by the
  * pill's own Glyph and WaveBuffer on a canvas of their own; the live pill is never touched. Decorative only.
  */
-export function PillPreview({ state = "listening", silent = false, app = "Notes", words = ["Let’s move the", "meeting"], scale = 0.5, className }: {
+export function PillPreview({ state = "listening", silent = false, app = "Notes", appIcon, wordCount = 12, words = ["Let’s move the", "meeting"], scale = 0.5, className }: {
   state?: PillPreviewState;
+  /** The app's own icon in place of its letter tile. */
+  appIcon?: string;
+  /** The count after "Pasted". */
+  wordCount?: number;
   silent?: boolean;
   app?: string;
   words?: [string, string];
@@ -63,9 +67,13 @@ export function PillPreview({ state = "listening", silent = false, app = "Notes"
             {words[0]} <i className="pr-0.5" style={{ color: "rgba(255,255,255,.52)" }}>{words[1]}</i>
           </span>
         ) : null}
-        <span className="absolute flex size-[18px] items-center justify-center text-[11px] font-semibold text-white" style={{ left: 12, top: row - 9, borderRadius: isMacOS ? 5 : 4, background: appColour(app) }}>
-          {Array.from(app.trim())[0]?.toUpperCase() ?? "V"}
-        </span>
+        {appIcon ? (
+          <img src={appIcon} alt="" className="absolute size-[18px]" style={{ left: 12, top: row - 9 }} />
+        ) : (
+          <span className="absolute flex size-[18px] items-center justify-center text-[11px] font-semibold text-white" style={{ left: 12, top: row - 9, borderRadius: isMacOS ? 5 : 4, background: appColour(app) }}>
+            {Array.from(app.trim())[0]?.toUpperCase() ?? "V"}
+          </span>
+        )}
         <canvas ref={canvas} className="absolute" style={{ left: glyphLeft, top: row - 12, width: 260, height: 24 }} />
         {recording ? (
           <>
@@ -83,7 +91,7 @@ export function PillPreview({ state = "listening", silent = false, app = "Notes"
         ) : null}
         {state === "pasted" ? (
           <>
-            <span className="absolute" style={{ left: 81, top: row - 8 }}>Pasted <span style={{ color: DIM }}>· 12 words</span></span>
+            <span className="absolute" style={{ left: 81, top: row - 8 }}>Pasted <span style={{ color: DIM }}>· {wordCount} {wordCount === 1 ? "word" : "words"}</span></span>
             <svg className="absolute -top-px -left-px overflow-visible" width={width} height={height}>
               <path d={`M ${width / 2} 1 H ${width - 1 - r} A ${r} ${r} 0 0 1 ${width - 1 - r} ${height - 1} H ${1 + r} A ${r} ${r} 0 0 1 ${1 + r} 1 Z`} pathLength={1} fill="none" stroke={SAGE} strokeWidth={2} strokeDasharray="1 1" strokeDashoffset={0.45} />
             </svg>

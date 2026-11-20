@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LicenseStatus } from "@/types";
 
@@ -212,5 +213,31 @@ describe("LicenseContext", () => {
 
     latestCheckRequest.resolve({ ...licensedStatus, verification_state: "verified" });
     await waitFor(() => expect(screen.getByTestId("license-loading").textContent).toBe("false"));
+  });
+  it.each([
+    ["Invalid license key", "That key didn’t work. Check it against your receipt email."],
+    ["License is already activated on another device", "This key is already in use on another Mac. Deactivate it there first, or write to support@voicetypr.com."],
+    ["Maximum number of devices reached", "This key is on as many devices as it covers. Free one up in Manage license, or write to support@voicetypr.com."],
+  ])("explains a failed activation (%s) in plain words to the key window, without a toast", async (raw, friendly) => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "check_license_status") return { status: "none" };
+      if (command === "activate_license") throw new Error(raw);
+      return null;
+    });
+    function ActivateProbe() {
+      const { activateLicense } = useLicense();
+      const [message, setMessage] = useState<string | null>(null);
+      return (
+        <>
+          <button onClick={() => void activateLicense("VT-KEY", { quiet: true }).then(setMessage)}>Activate</button>
+          <p data-testid="activation-error">{message}</p>
+        </>
+      );
+    }
+    render(<LicenseProvider><ActivateProbe /></LicenseProvider>);
+    fireEvent.click(screen.getByText("Activate"));
+    await waitFor(() => expect(screen.getByTestId("activation-error").textContent).toBe(friendly));
+    const { toast } = await import("sonner");
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

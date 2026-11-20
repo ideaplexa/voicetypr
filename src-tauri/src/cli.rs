@@ -344,6 +344,7 @@ pub fn maybe_run_from_env_with_context(
         let license_check = if measurement {
             None
         } else {
+            crate::license::trial_clock::observe(&app_handle);
             Some(check_license_status(app_handle.clone()).await)
         };
 
@@ -1172,7 +1173,7 @@ mod tests {
             trial_days_left: None,
             license_type: None,
             license_key: None,
-            expires_at: None,
+            expires_at: Some((chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339()),
             verification_state: None,
             verification_expires_at: None,
         }
