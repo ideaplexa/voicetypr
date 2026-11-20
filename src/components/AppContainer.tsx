@@ -101,8 +101,10 @@ export function AppContainer() {
     checkMicrophonePermission,
   });
 
-  const markOnboardingCompletionStarted = () => {
+  // The destination is set before completion is published, so Home never shows first.
+  const markOnboardingCompletionStarted = (open?: ScreenId) => {
     hasCompletedOnboardingRef.current = true;
+    if (open) setActiveSection(open);
   };
 
   const clearOnboardingCompletionMarker = () => {
@@ -117,8 +119,7 @@ export function AppContainer() {
           previewStep={getOnboardingPreview()}
           onCompletionStart={markOnboardingCompletionStarted}
           onCompletionError={clearOnboardingCompletionMarker}
-          onComplete={(open) => {
-            if (open) setActiveSection(open);
+          onComplete={() => {
             setFinishedOnboarding(true);
             setForceShowOnboarding(false);
             refreshSettings();

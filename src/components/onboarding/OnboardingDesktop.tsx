@@ -373,6 +373,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
             holdToTalk={holdToTalk}
             saving={flow.isSavingCompletion}
             onFinish={() => void flow.completeOnboarding(remembered ?? undefined)}
+            onSeeCapabilities={() => void flow.completeOnboarding("capabilities")}
           />
         );
         break;

@@ -1,8 +1,8 @@
 import trayIcon from "../../../src-tauri/icons/tray-light.png";
-import { FrameHeading, FrameKeys, PrimaryButton } from "@/components/onboarding/Frame";
+import { FrameHeading, FrameKeys, PrimaryButton, QuietButton } from "@/components/onboarding/Frame";
 import { WhatsShared } from "@/components/WhatsShared";
 import { isMacOS } from "@/lib/platform";
-import { BatteryFull, Search, Wifi } from "lucide-react";
+import { BatteryFull, Compass, Search, Wifi } from "lucide-react";
 
 /** 13 Done (13b after buying or for a device that already has access): where Voicetypr lives and the shortcut. */
 export function DoneStep({
@@ -12,6 +12,7 @@ export function DoneStep({
   holdToTalk,
   saving,
   onFinish,
+  onSeeCapabilities,
 }: {
   title: string;
   /** What access they have, before where Voicetypr lives. */
@@ -20,6 +21,8 @@ export function DoneStep({
   holdToTalk: boolean;
   saving: boolean;
   onFinish: () => void;
+  /** Finishes setup and opens the capabilities page. */
+  onSeeCapabilities: () => void;
 }) {
   const now = new Date();
   const clock = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -45,7 +48,13 @@ export function DoneStep({
         <FrameKeys caps={caps} />
         in any app to dictate.
       </p>
-      <PrimaryButton disabled={saving} onClick={onFinish}>Start using Voicetypr</PrimaryButton>
+      <div className="flex flex-col items-center gap-3">
+        <PrimaryButton disabled={saving} onClick={onFinish}>Start using Voicetypr</PrimaryButton>
+        <QuietButton className="text-sage hover:text-sage" disabled={saving} onClick={onSeeCapabilities}>
+          <Compass aria-hidden="true" className="size-[15px]" />
+          See what Voicetypr can do
+        </QuietButton>
+      </div>
     </section>
   );
 }

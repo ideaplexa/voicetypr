@@ -1,3 +1,5 @@
+import appIcon from "../../../src-tauri/icons/128x128@2x.png";
+import { PillPreview } from "@/components/discovery/PillPreview";
 import { FrameHeading, PrimaryButton, QuietButton } from "@/components/onboarding/Frame";
 import { ProofPair } from "@/components/onboarding/Proof";
 import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
@@ -28,8 +30,7 @@ export function ResultStep({
             : "Polish is off, so there was no AI clean-up. Here is what landed in your note."}
         />
       )}
-      {/* The pill's done state (PillPreview from #174) goes in this slot. */}
-      <div aria-hidden="true" className="h-[41px] w-[283px]" />
+      <PillPreview appIcon={appIcon} wordCount={result.words} state="pasted" scale={1.2} />
       {result.polished ? (
         <ProofPair raw={result.heard} clean={result.typed} />
       ) : (

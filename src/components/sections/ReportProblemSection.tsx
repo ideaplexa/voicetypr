@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CircleCheck, Check, Copy, Keyboard, Sparkles, Wrench } from "lucide-react";
+import { AlertCircle, CircleCheck, Check, Compass, Copy, Keyboard, Sparkles, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/settings/SettingsButton";
@@ -28,8 +28,10 @@ import { createLogger } from "@/lib/logger";
 const log = createLogger("report-problem");
 export function ReportProblemSection({
   onNavigateSettingsPane,
+  onOpenCapabilities,
 }: {
   onNavigateSettingsPane?: (pane: SettingsPane) => void;
+  onOpenCapabilities?: () => void;
 }) {
   const [version, setVersion] = useState<string | null>(null);
   const [announcementOpen, setAnnouncementOpen] = useState(false);
@@ -179,7 +181,14 @@ export function ReportProblemSection({
         description="Get unstuck fast, or tell us what broke."
         className="[&_h1]:leading-[normal] [&_h1]:tracking-[-0.4px] [&_p]:text-[13.5px] [&_p]:leading-[normal]"
       />
-      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
+        <ChoiceLink
+          label="What Voicetypr can do"
+          description="Every feature, what it needs and where it lives."
+          icon={Compass}
+          action="Open"
+          onClick={() => onOpenCapabilities?.()}
+        />
         <ChoiceLink
           label="Troubleshooting"
           description="Permissions, quick fixes and reset."

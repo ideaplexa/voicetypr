@@ -23,6 +23,9 @@ const options: PreviewOptions = {
   onboardingCase,
   trialNotStarted: query.get("license") === "none",
   polish: (query.get("polish") || undefined) as PreviewOptions["polish"],
+  fresh: query.get("fresh") === "1",
+  day: query.has("day") ? Number(query.get("day")) : undefined,
+  sharingOff: query.get("sharing") === "off",
 };
 document.cookie = `sidebar_state=${options.sidebar !== "rail"}; path=/`;
 installPreviewPlatform(options.platform);

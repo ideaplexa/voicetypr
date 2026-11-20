@@ -1,4 +1,5 @@
 use crate::audio::device_watcher::try_start_device_watcher_if_ready;
+use crate::commands::first_week::{load_first_week, FirstWeekProgress};
 use crate::commands::key_normalizer::{
     normalize_shortcut_keys, validate_key_combination_allowing_safe_single_key,
 };
@@ -171,6 +172,8 @@ pub struct Settings {
     // Direct-install updater channel: "stable" | "beta"
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
+    #[serde(default)]
+    pub first_week: FirstWeekProgress,
 }
 
 impl Default for Settings {
@@ -221,6 +224,7 @@ impl Default for Settings {
             transcript_paragraphs: true,
             transcript_remove_fillers: false,
             update_channel: default_update_channel(),
+            first_week: FirstWeekProgress::default(),
         }
     }
 }
@@ -736,6 +740,7 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         )
         .as_str()
         .to_string(),
+        first_week: load_first_week(&store),
     };
     let normalized_speech_language = super::speech_language::normalize_for_active_source(
         &app,

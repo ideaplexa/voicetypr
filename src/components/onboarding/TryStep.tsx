@@ -1,3 +1,5 @@
+import appIcon from "../../../src-tauri/icons/128x128@2x.png";
+import { PillPreview } from "@/components/discovery/PillPreview";
 import { FrameHeading, FrameKeys, PrimaryButton, QuietButton, SecondaryButton } from "@/components/onboarding/Frame";
 import type { PermissionStatus } from "@/components/onboarding/onboardingTypes";
 import { useFirstDictation, type FirstDictation } from "@/components/onboarding/useFirstDictation";
@@ -142,8 +144,7 @@ export function TryStep({
           <QuietButton onClick={() => void (listening ? stop() : start())}>Or click here to talk</QuietButton>
         )
       ) : null}
-      {/* The live pill (PillPreview from #174) goes in this slot. */}
-      <div aria-hidden="true" className="h-[44px] w-[307px]" />
+      <PillPreview appIcon={appIcon} state={working ? "transcribing" : "listening"} scale={1.3} />
     </section>
   );
 }

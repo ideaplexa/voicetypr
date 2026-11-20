@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { PageHeader, SettingsPage } from "@/components/settings/settings-ui";
+import { SectionIntro } from "@/components/discovery/SectionIntro";
 import { DictionaryTabs } from "@/components/settings/DictionaryTabs";
 import { DictionarySuggestions } from "@/components/settings/DictionarySuggestions";
 import { useDictionarySuggestions } from "@/state/dictionarySuggestions";
@@ -178,6 +179,7 @@ export function DictionarySection() {
           </Button>
         }
       />
+      <SectionIntro art="suggestion" line="Fix a word in History and it shows up here as a suggestion." />
       <DictionarySuggestions />
       <DictionaryTabs
         value={tab}

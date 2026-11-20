@@ -572,7 +572,7 @@ export function useOnboardingDesktop({
 
   const completeOnboarding = async (open?: ScreenId) => {
     setIsSavingCompletion(true);
-    onCompletionStart?.();
+    onCompletionStart?.(open);
     try {
       // Persist privacy choices before publishing onboarding completion. The
       // settings context updates optimistically, so setting onboarding_completed
@@ -582,6 +582,8 @@ export function useOnboardingDesktop({
 
 
       await updateSettings({ onboarding_completed: true }, { publishAfterSave: true });
+      localStorage.removeItem(REACHED_BUY);
+      onComplete(open);
 
       try {
         await invoke("record_onboarding_completed");
@@ -590,8 +592,6 @@ export function useOnboardingDesktop({
         // choices themselves have already been persisted successfully.
         log.error("Failed to record onboarding completion:", analyticsError);
       }
-      localStorage.removeItem(REACHED_BUY);
-      onComplete(open);
     } catch (error) {
       onCompletionError?.();
       log.error("Failed to complete onboarding:", error);
