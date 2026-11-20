@@ -18,6 +18,7 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { isMacOS } from "@/lib/platform";
 import { useWritingSettings } from "@/state/writingSettings";
 import type { AppSettings, FirstWeekProgress, SpeechModelEngine } from "@/types";
+import type { PolishReadiness } from "@/lib/polish-ready";
 
 const log = createLogger("first-week");
 const computer = isMacOS ? "Mac" : "PC";
@@ -29,14 +30,14 @@ interface CardCopy {
   action: string;
 }
 
-function firstWeekCopy(id: FirstWeekCardId, accessibilityMissing: boolean, polishReady: boolean | null): CardCopy {
+function firstWeekCopy(id: FirstWeekCardId, accessibilityMissing: boolean, polishReady: PolishReadiness | null): CardCopy {
   switch (id) {
     case "hold":
       return { title: "Hold to talk", line: "Hold your shortcut while you talk, then let go to paste.", action: "Turn on" };
     case "dictionary":
       return { title: "Teach it your words", line: "Add names and terms so Voicetypr gets them right.", action: "Open Dictionary" };
     case "polish":
-      return { title: "Polish", line: "Clean up fillers, false starts and punctuation, with a style per app.", needs: polishReady === false ? "Needs a provider" : undefined, action: "Set up Polish" };
+      return { title: "Polish", line: "Clean up fillers, false starts and punctuation, with a style per app.", needs: polishReady === "needs_provider" ? "Needs a provider" : polishReady === "waiting" ? "Not available yet" : undefined, action: "Set up Polish" };
     case "voice_commands":
       return {
         title: "Say “new line”",
@@ -56,7 +57,7 @@ function firstWeekCopy(id: FirstWeekCardId, accessibilityMissing: boolean, polis
 export function FirstWeekCard({ sourceReady, polishOn, polishReady, dictionaryEmpty, holdToTalk, shortcut, onNavigate, onNavigateSettingsPane }: {
   sourceReady: boolean;
   polishOn: boolean | null;
-  polishReady: boolean | null;
+  polishReady: PolishReadiness | null;
   dictionaryEmpty: boolean | null;
   holdToTalk: boolean | null;
   shortcut: string[];

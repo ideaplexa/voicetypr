@@ -1,8 +1,9 @@
 import type { DiscoveryArtKind } from "@/components/discovery/DiscoveryArt";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
 import { isMacOS } from "@/lib/platform";
+import type { PolishReadiness } from "@/lib/polish-ready";
 
-export type CapabilityBadge = "Works now" | "Needs a provider" | "Needs a key" | "Needs a second computer" | "Download" | "Needs a source that streams" | "Turn on first" | "Install first";
+export type CapabilityBadge = "Works now" | "Not available yet" | "Needs a provider" | "Needs a key" | "Needs a second computer" | "Download" | "Needs a source that streams" | "Turn on first" | "Install first";
 export type CapabilityTarget = { screen: ScreenId; label: string } | { pane: SettingsPane; label: string };
 
 export interface Capability {
@@ -17,12 +18,12 @@ export interface Capability {
 const computer = isMacOS ? "Mac" : "PC";
 
 /** Everything Voicetypr can do, grouped as in the MOI-154 design. Copy follows the design's truthfulness review. */
-export function capabilityGroups(streams: boolean, polishReady: boolean): { title: string; items: Capability[] }[] {
+export function capabilityGroups(streams: boolean, polish: PolishReadiness | null): { title: string; items: Capability[] }[] {
   return [
     {
       title: "Write better",
       items: [
-        { id: "polish", art: "polish", title: "Polish", line: "Cleans up fillers, false starts and punctuation, with a style per app.", badge: polishReady ? "Works now" : "Needs a provider", target: { screen: "polish", label: "Open Polish" } },
+        { id: "polish", art: "polish", title: "Polish", line: "Cleans up fillers, false starts and punctuation, with a style per app.", badge: polish === "works" ? "Works now" : polish === "needs_provider" ? "Needs a provider" : "Not available yet", target: { screen: "polish", label: "Open Polish" } },
         { id: "dictionary", art: "dictionary", title: "Dictionary", line: "Add names and terms so Voicetypr gets them right.", badge: "Works now", target: { screen: "dictionary", label: "Open Dictionary" } },
         { id: "suggestions", art: "suggestion", title: "Dictionary suggestions", line: "Fix a word in History and the Dictionary offers to learn it.", badge: "Works now", target: { screen: "history", label: "Open History" } },
         { id: "voice_commands", art: "voice_commands", title: "Voice commands and spoken punctuation", line: `Say only the command, like “new line” or “semicolon”, then stop${isMacOS ? "; needs Accessibility" : ""}.`, badge: "Turn on first", target: { screen: "polish", label: "Open Polish" } },

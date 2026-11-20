@@ -25,7 +25,7 @@ export function CapabilitiesTab({ onNavigate, onNavigateSettingsPane }: { onNavi
         <Button variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground" onClick={() => onNavigate?.("help")}><ArrowLeft className="size-3.5" />Help & feedback</Button>
         <PageHeader title="What Voicetypr can do" description="Each card says what it needs and opens the place where it lives." />
       </div>
-      {capabilityGroups(streams, polishReady === true).map((group) => (
+      {capabilityGroups(streams, polishReady).map((group) => (
         <section key={group.title} aria-labelledby={`capability-${group.title.toLowerCase().replace(/\W+/g, "-")}`} className="flex flex-col gap-3">
           <h2 id={`capability-${group.title.toLowerCase().replace(/\W+/g, "-")}`} className="text-[14px] leading-[normal] font-semibold text-foreground">{group.title}</h2>
           <ul className="grid gap-3 @lg:grid-cols-2 @2xl:grid-cols-3">

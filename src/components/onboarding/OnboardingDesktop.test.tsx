@@ -1327,6 +1327,8 @@ describe("OnboardingDesktop", () => {
     expect(await screen.findByRole("heading", { name: "That’s you, cleaned up" })).toBeInTheDocument();
     expect(screen.getByText("Voicetypr cleaned it")).toBeInTheDocument();
     expect(screen.getByText("Friday at three.")).toBeInTheDocument();
+    // The pill counts the words that were typed: the cleaned text, not what was heard.
+    expect(screen.getByText("· 3 words")).toBeInTheDocument();
     neverRecords();
     await user.click(screen.getByRole("button", { name: /^continue$/i }));
     await user.click(await screen.findByRole("button", { name: /^done for now/i }));
