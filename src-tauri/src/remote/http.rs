@@ -13,9 +13,12 @@ use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
 use warp::{http::StatusCode, Filter, Rejection, Reply};
 
 use super::server::{
-    ErrorResponse, RemoteCapabilities, RemoteModelControlSnapshot, RemoteModelControlUpdate,
-    StatusResponse, TranscribeResponse, REMOTE_PROTOCOL_VERSION,
+    host_license_refusal, ErrorResponse, RemoteCapabilities, RemoteModelControlSnapshot,
+    RemoteModelControlUpdate, StatusResponse, TranscribeResponse, REMOTE_PROTOCOL_VERSION,
 };
+use crate::commands::audio::recording_license_state;
+use crate::commands::license::RuntimeLicenseCache;
+use crate::license::recording_readiness::wait_for_recording_license;
 use crate::transcription::TranscriptionResult;
 
 /// Auth header name
@@ -77,6 +80,13 @@ pub trait ServerContext: Send + Sync {
     fn get_model_name(&self) -> String;
     fn get_server_name(&self) -> String;
     fn get_password(&self) -> Option<String>;
+    /// The license cache the hotkey reads; transcription is refused unless it is ready.
+    fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>>;
+    /// Records the time before a license decision, so a clock moved back is
+    /// noticed. It touches secure storage, so the caller runs it off the executor.
+    fn trial_clock_observer(&self) -> Option<Box<dyn FnOnce() + Send + 'static>> {
+        None
+    }
     fn allow_model_control(&self) -> bool {
         crate::remote::model_control::is_model_control_enabled()
     }
@@ -115,6 +125,21 @@ pub trait ServerContext: Send + Sync {
     ) -> Result<RemoteModelControlSnapshot, String> {
         Err("Remote model control is unavailable for this host".to_string())
     }
+}
+
+#[cfg(test)]
+pub(crate) fn licensed_host_cache() -> Arc<RwLock<RuntimeLicenseCache>> {
+    Arc::new(RwLock::new(RuntimeLicenseCache::Ready(
+        crate::commands::license::CachedLicense::new(crate::license::LicenseStatus {
+            status: crate::license::LicenseState::Licensed,
+            trial_days_left: None,
+            license_type: None,
+            license_key: None,
+            expires_at: None,
+            verification_state: None,
+            verification_expires_at: None,
+        }),
+    )))
 }
 
 /// Create all warp routes for the remote transcription API.
@@ -196,6 +221,13 @@ fn transcribe_endpoint<T: ServerContext + 'static>(
         .and(warp::header::<String>("content-type"))
         .and_then(handle_transcribe_content_type_preflight);
 
+    // License preflight: a host without an active license or trial refuses before
+    // the upload is buffered or the transcription permit is taken.
+    let license_error_route = warp::path!("api" / "v1" / "transcribe")
+        .and(warp::post())
+        .and(with_context(ctx.clone()))
+        .and_then(handle_transcribe_license_preflight);
+
     let main_route = warp::path!("api" / "v1" / "transcribe")
         .and(warp::post())
         .and(warp::header::optional::<String>(AUTH_HEADER))
@@ -245,7 +277,37 @@ fn transcribe_endpoint<T: ServerContext + 'static>(
         .and(with_client_activity(client_activity))
         .and_then(handle_transcribe);
 
-    auth_error_route.or(content_type_error_route).or(main_route)
+    auth_error_route
+        .or(content_type_error_route)
+        .or(license_error_route)
+        .or(main_route)
+}
+
+/// Waits for a pending check like the hotkey does; anything but ready refuses.
+async fn handle_transcribe_license_preflight<T: ServerContext + 'static>(
+    ctx: Arc<RwLock<T>>,
+) -> Result<Box<dyn Reply>, Rejection> {
+    let (license_cache, observe) = {
+        let ctx = ctx.read().await;
+        (ctx.license_cache(), ctx.trial_clock_observer())
+    };
+    if let Some(observe) = observe {
+        let _ = tokio::task::spawn_blocking(observe).await;
+    }
+    match host_license_refusal(wait_for_recording_license(&license_cache).await) {
+        Some(code) => Ok(Box::new(host_license_refused(code))),
+        None => Err(warp::reject::not_found()),
+    }
+}
+
+fn host_license_refused(code: &'static str) -> warp::reply::WithStatus<warp::reply::Json> {
+    warn!("[Remote Server] Transcription request REJECTED - {}", code);
+    warp::reply::with_status(
+        warp::reply::json(&ErrorResponse {
+            error: code.to_string(),
+        }),
+        StatusCode::FORBIDDEN,
+    )
 }
 
 /// Auth preflight for POST /api/v1/transcribe. Runs BEFORE the permit/body filters so an
@@ -675,12 +737,13 @@ async fn handle_transcribe<T: ServerContext + 'static>(
     } = parts;
 
     let audio_size_kb = body.len() as f64 / 1024.0;
-    let (server_name, model_name, required_password) = {
+    let (server_name, model_name, required_password, license_cache) = {
         let ctx = ctx.read().await;
         (
             ctx.get_server_name(),
             ctx.get_model_name(),
             ctx.get_password(),
+            ctx.license_cache(),
         )
     };
 
@@ -723,6 +786,12 @@ async fn handle_transcribe<T: ServerContext + 'static>(
                 ));
             }
         }
+    }
+
+    // The preflight waited; recheck without waiting in case it changed during upload.
+    let license = recording_license_state(&*license_cache.read().await);
+    if let Some(code) = host_license_refusal(license) {
+        return Ok(host_license_refused(code));
     }
 
     // Validate content type
@@ -873,6 +942,10 @@ mod tests {
     struct MockContext;
 
     impl ServerContext for MockContext {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "mock-model".to_string()
         }
@@ -940,6 +1013,10 @@ mod tests {
     }
 
     impl ServerContext for DelayedMockContext {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "delayed-mock-model".to_string()
         }
@@ -1040,6 +1117,10 @@ mod tests {
     }
 
     impl ServerContext for GatedMockContext {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "gated-mock-model".to_string()
         }
@@ -1111,6 +1192,10 @@ mod tests {
     }
 
     impl ServerContext for FailingMockContext {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "failing-mock-model".to_string()
         }
@@ -1174,6 +1259,10 @@ mod tests {
     }
 
     impl ServerContext for ContextCaptureMock {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "mock-model".to_string()
         }
@@ -1221,6 +1310,10 @@ mod tests {
     struct ConsistentStatusMock;
 
     impl ServerContext for ConsistentStatusMock {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "stale-model".to_string()
         }
@@ -1280,6 +1373,10 @@ mod tests {
     }
 
     impl ServerContext for SlowTranscribeMock {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "slow-model".to_string()
         }
@@ -1620,6 +1717,10 @@ mod tests {
     struct Utf8PreviewContext;
 
     impl ServerContext for Utf8PreviewContext {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             "utf8-preview-model".to_string()
         }
@@ -2482,6 +2583,10 @@ mod tests {
     }
 
     impl ServerContext for PasswordedControlContext {
+        fn license_cache(&self) -> Arc<RwLock<RuntimeLicenseCache>> {
+            licensed_host_cache()
+        }
+
         fn get_model_name(&self) -> String {
             self.model_name.clone()
         }

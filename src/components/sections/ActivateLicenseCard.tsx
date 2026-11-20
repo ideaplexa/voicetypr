@@ -23,7 +23,7 @@ export function ActivateLicenseCard({
     <SettingsCard
       icon={Crown}
       title="Activate license"
-      description="Upgrade to Pro or enter an existing license key."
+      description="Buy Voicetypr or enter your license key."
     >
       <div className="mt-4 space-y-4">
         <div className="flex gap-2">
