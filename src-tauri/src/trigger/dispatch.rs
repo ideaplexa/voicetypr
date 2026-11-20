@@ -26,6 +26,7 @@ pub fn on_engine_event(app: &AppHandle, ev: TriggerEvent) {
     // Transient window: the matcher may emit a synthetic Released for a binding
     // the app map no longer holds (it was just removed). The removal path
     // already released it, so this is safe to ignore.
+    log::debug!("keytrigger: trigger {} {:?}", ev.id, ev.phase);
     let Some(binding) = binding else {
         log::debug!("keytrigger: no engine binding for id {}", ev.id);
         return;
@@ -39,6 +40,7 @@ pub fn on_engine_event(app: &AppHandle, ev: TriggerEvent) {
                 &app_state,
                 &app_handle,
                 ev.phase,
+                crate::recording::escape_handler::EscapeSource::Hook,
             )
             .await;
         });

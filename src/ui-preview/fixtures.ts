@@ -167,6 +167,7 @@ export const demoWriting: WritingSettings = {
     { app_name: "Cursor", preset: "Code", enabled: true },
   ],
   spoken_punctuation: false,
+  editing_commands: false,
 };
 
 const shortcutActions: ShortcutActionDefinition[] = [
@@ -228,14 +229,14 @@ const shortcutActions: ShortcutActionDefinition[] = [
   },
 ];
 
-export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "download-failed" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed" | "no-access";
+export type OnboardingPreviewCase = "heard" | "polished" | "downloading" | "download-failed" | "mic-denied" | "ax-skipped" | "offline" | "key-error" | "expired" | "licensed" | "no-access" | "cloud" | "remote" | "mic-new" | "check-failed";
 
 export function createFixtures(options: PreviewOptions) {
   const hotkey = options.platform === "macos" ? "Alt+Space" : "Control+Space";
   const settings: AppSettings = {
     hotkey,
-    current_model: "parakeet-tdt-0.6b-v3",
-    current_model_engine: "parakeet",
+    current_model: options.onboardingCase === "cloud" ? "soniox" : "parakeet-tdt-0.6b-v3",
+    current_model_engine: options.onboardingCase === "cloud" ? "soniox" : "parakeet",
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
@@ -360,6 +361,7 @@ export function createFixtures(options: PreviewOptions) {
     get_settings: settings,
     list_kept_dictations: [],
     get_microphone_permission_status: options.onboardingCase === "mic-denied" ? "denied"
+      : options.onboardingCase === "mic-new" ? "not_determined"
       : options.onboarding === "promise" || options.onboarding === "try" ? "not_determined" : "granted",
     start_microphone_test: "preview",
     stop_microphone_test: null,
@@ -381,6 +383,13 @@ export function createFixtures(options: PreviewOptions) {
     get_transcription_count: history.length,
     get_writing_settings: writing,
     update_writing_settings: null,
+    list_dictionary_suggestions: options.empty
+      ? []
+      : [{ id: "preview-1", heard: "cloud code", word: "Claude Code", status: "pending" }],
+    set_dictionary_suggestion_status: null,
+    update_transcription_text: [
+      { id: "preview-2", heard: "voice typer", word: "Voicetypr", status: "pending" },
+    ],
     get_shortcut_settings: shortcuts,
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
@@ -413,6 +422,8 @@ export function createFixtures(options: PreviewOptions) {
     get_autostart_status: false,
     get_current_recording_state: { state: "idle" },
     get_onboarding_try: { kind: "tries", left: 10 },
+    start_onboarding_try: { id: "preview", left: 9 },
+    stop_onboarding_try: { heard: "um so let's move the the sync to thursday no wait friday at three and uh i'll send the notes before" },
     arm_onboarding_try: null,
     cli_tool_status: {
       installed: true,
@@ -426,9 +437,12 @@ export function createFixtures(options: PreviewOptions) {
       compatible: true,
       detail: null,
     },
-    list_remote_servers: [],
+    list_remote_servers: options.onboardingCase === "remote"
+      ? [{ id: "studio", name: "Studio Mac mini", host: "192.168.1.20", port: 47842, status: "Online", model: "parakeet-tdt-0.6b-v3", created_at: 0 }]
+      : [],
     discover_remote_servers: [],
-    get_active_remote_server: null,
+    get_active_remote_server: options.onboardingCase === "remote" ? "studio" : null,
+    check_remote_server_status: { id: "studio", name: "Studio Mac mini", host: "192.168.1.20", port: 47842, status: "Online", model: "parakeet-tdt-0.6b-v3", created_at: 0 },
     get_sharing_status: sharing,
     get_local_ips: ["192.168.1.20"],
     get_firewall_status: firewall,

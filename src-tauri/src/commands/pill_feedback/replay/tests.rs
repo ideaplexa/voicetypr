@@ -267,3 +267,26 @@ fn clear_only_replay_releases_native_feedback_ownership() {
     assert!(!produces_ui("kept-dictation-expired"));
     assert!(produces_ui("dictation-note"));
 }
+
+#[test]
+fn a_paste_behind_a_newer_take_only_retires_the_copied_card() {
+    let outcome = |generation: u64, outcome: &str| {
+        (
+            "paste-outcome",
+            json!({"generation":generation,"outcome":outcome,"words":3,"polished":false}),
+        )
+    };
+    let queued = vec![
+        outcome(5, "copied"),
+        outcome(6, "pasted"),
+        outcome(7, "pasted"),
+    ];
+    assert_eq!(
+        revalidate(queued, 7, RecordingState::Idle, None, &[]),
+        vec![
+            ("paste-retire", json!({"generation":6})),
+            outcome(7, "pasted"),
+        ]
+    );
+    assert!(!produces_ui("paste-retire"));
+}

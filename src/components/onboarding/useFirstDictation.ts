@@ -29,6 +29,11 @@ export function readFirstDictation(heard: string, cleaned?: string | null): Firs
 export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult: (result: FirstDictation) => void) {
   const [phase, setPhase] = useState<DictationPhase>("idle");
   const [allowance, setAllowance] = useState<TryAllowance | null>(null);
+  const usedUp = useRef(false);
+  const keepAllowance = useCallback((allowed: TryAllowance | null) => {
+    usedUp.current = allowed?.kind === "usedUp";
+    setAllowance(allowed);
+  }, []);
   // `epoch` changes on blur and unmount, so a late reply from an ended try is ignored.
   const session = useRef({ id: null as string | null, stopQueued: false, phase: "idle" as DictationPhase, epoch: 0 });
   const onResultRef = useRef(onResult);
@@ -69,7 +74,7 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
   }, [move]);
 
   const start = useCallback(async () => {
-    if (session.current.phase !== "idle") return;
+    if (session.current.phase !== "idle" || usedUp.current) return;
     const { epoch } = session.current;
     session.current.stopQueued = false;
     move("starting");
@@ -77,30 +82,33 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
       const started = await invoke<{ id: string; left: number | null }>("start_onboarding_try");
       if (epoch !== session.current.epoch) return;
       session.current.id = started.id;
-      setAllowance(started.left === null ? { kind: "access" } : { kind: "tries", left: started.left });
+      keepAllowance(started.left === null ? { kind: "access" } : { kind: "tries", left: started.left });
       move("listening");
       if (session.current.stopQueued) await stop();
     } catch (error) {
       if (epoch !== session.current.epoch) return;
       move("idle");
       const allowed = await invoke<TryAllowance>("get_onboarding_try").catch(() => null);
-      setAllowance(allowed);
+      if (epoch !== session.current.epoch) return;
+      keepAllowance(allowed);
       if (allowed?.kind !== "usedUp") toast.error(typeof error === "string" ? error : "Could not start dictation. Try again.");
     }
-  }, [move, stop]);
+  }, [move, stop, keepAllowance]);
 
   useEffect(() => {
     if (!active) return;
     let disposed = false;
     void invoke<TryAllowance>("get_onboarding_try")
-      .then((allowed) => { if (!disposed) setAllowance(allowed); })
+      .then((allowed) => { if (!disposed) keepAllowance(allowed); })
       .catch(() => undefined);
     const subscriptions = [
       listen<boolean>("onboarding-try-key", ({ payload: pressed }) => {
         if (disposed) return;
         const current = session.current.phase;
         if (pressed && current === "idle") void start();
-        else if (pressed && !holdToTalk) void stop();
+        // The in-app fallback (Windows, focused window) sends presses only, so a
+        // second press also ends a hold.
+        else if (pressed) void stop();
         else if (!pressed && holdToTalk) void stop();
       }),
       listen<string>("onboarding-try-capped", ({ payload }) => {
@@ -121,13 +129,12 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
       window.removeEventListener("blur", blur);
       end();
       void invoke("arm_onboarding_try", { armed: false }).catch(() => undefined);
-      for (const subscription of subscriptions) void subscription.then((unlisten) => unlisten());
+      for (const subscription of subscriptions) void subscription.then((unlisten) => unlisten()).catch(() => undefined);
     };
   }, [active, holdToTalk, start, stop, end]);
 
   const listening = phase === "listening" || phase === "starting";
   const working = phase === "transcribing";
-  const talk = useCallback(() => (listening ? stop() : start()), [listening, start, stop]);
 
-  return { phase, listening, working, allowance, busy: phase === "starting", talk };
+  return { phase, listening, working, allowance };
 }

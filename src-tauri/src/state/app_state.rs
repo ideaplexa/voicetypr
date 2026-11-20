@@ -65,6 +65,7 @@ pub struct AppState {
     pub license_validation_lock: Arc<tokio::sync::Mutex<()>>,
     pub pill_event_queue: Arc<Mutex<Vec<QueuedPillEvent>>>,
     pub last_toggle_press: Arc<Mutex<Option<Instant>>>,
+    pub last_escape_press: Arc<Mutex<Option<crate::recording::escape_handler::EscapePress>>>,
     pub recording_app_context: Arc<Mutex<Option<ContextHint>>>,
     pub recording_live_preview: AtomicBool,
 }
@@ -104,6 +105,7 @@ impl AppState {
             license_validation_lock: Arc::new(tokio::sync::Mutex::new(())),
             pill_event_queue: Arc::new(Mutex::new(Vec::new())),
             last_toggle_press: Arc::new(Mutex::new(None)),
+            last_escape_press: Arc::new(Mutex::new(None)),
             recording_app_context: Arc::new(Mutex::new(None)),
             recording_live_preview: AtomicBool::new(false),
         }

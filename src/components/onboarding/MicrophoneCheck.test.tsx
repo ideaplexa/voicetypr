@@ -27,7 +27,8 @@ beforeEach(() => {
 it("shows real proof of input and starts a fresh check for a changed microphone", async () => {
   const view = render(<MicrophoneCheck />);
   await act(async () => {});
-  expect(screen.getByText("Microphone on for this check. Nothing is saved.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Choose microphone" })).toBeInTheDocument();
+  expect(screen.getByRole("status")).not.toHaveTextContent("We can hear you");
   act(() => mocks.handlers.get("microphone-test-level")?.({ payload: { session_id: "1", level: 0.05 } }));
   expect(screen.getByText("We can hear you")).toBeInTheDocument();
   expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "40");

@@ -1,19 +1,18 @@
-import { Button } from "@/components/settings/SettingsButton";
-import { Switch } from "@/components/settings/SettingsSwitch";
+import { FrameHeading, PrimaryButton, QuietButton } from "@/components/onboarding/Frame";
 import { builtinPolishView } from "@/components/polish/BuiltInPolishSetting";
-import { Card } from "@/components/ui/card";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { isMacOS } from "@/lib/platform";
-import { cn } from "@/lib/utils";
 import type { PolishStatus } from "@/types";
-import { Sparkles } from "lucide-react";
+import { Check, Settings2, ShieldCheck, Sparkles, Type } from "lucide-react";
 
-/** Whether Polish cleans what the user says: one switch, shared with Settings → Polish. */
+/** 07 Let AI tidy your words (07b off): one switch, shared with Settings → Polish. */
 export function PolishStep({
   status,
   builtinChosen,
   onBuiltinChange,
   saving,
-  onBack,
+  ownProviderLater,
+  onOwnProvider,
   onNext,
 }: {
   /** `polish_status`, the gate dictation uses; null while it is being asked. */
@@ -22,56 +21,60 @@ export function PolishStep({
   builtinChosen: boolean;
   onBuiltinChange: (on: boolean) => void;
   saving: boolean;
-  onBack: () => void;
+  /** Settings → Polish opens once setup is done. */
+  ownProviderLater: boolean;
+  onOwnProvider: () => void;
   onNext: () => void;
 }) {
   const ownReady = status?.own_provider_ready === true;
-  const builtin = builtinPolishView(ownReady ? "own_provider" : status?.builtin === "first_try" ? "ready" : status?.builtin ?? null, builtinChosen);
+  const builtin = builtinPolishView(status?.builtin === "first_try" ? "ready" : status?.builtin ?? null, builtinChosen);
   const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
+  const note = ownReady
+    ? on
+      ? "Polish is on and set up with your own AI provider."
+      : `Polish is set up with your own AI provider but off. Turn it on in Settings → Polish, or from Voicetypr’s ${isMacOS ? "menu bar" : "tray"} menu.`
+    : builtin.disabled
+      ? builtin.status
+      : on
+        ? "Your words go to Voicetypr’s server to be cleaned, then straight back. Nothing is kept."
+        : "No AI cleanup. Your Dictionary and voice commands still apply. Turn it on any time in Settings → Polish.";
+  const NoteIcon = on ? ShieldCheck : Type;
 
   return (
-    <section className="flex w-full flex-col items-center gap-[16px]">
-      <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        Polish tidies what you say
-      </h2>
-      <p className="max-w-[540px] text-center text-base text-muted-foreground">
-        It drops filler and false starts and fixes punctuation, on Voicetypr’s server, so you need no AI key of your own.
-      </p>
-      <Card className="w-full gap-3 px-[18px] py-4 text-left">
-        {ownReady ? (
-          <div className="flex items-start gap-3">
-            <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
-            <p className="text-sm">
-              {on ? (
-                <><span className="font-semibold">Polish is on</span> and set up with your AI provider.</>
-              ) : (
-                <><span className="font-semibold">Polish is set up but off.</span> Turn it on in Settings → Polish, or from Voicetypr’s {isMacOS ? "menu bar" : "tray"} menu.</>
-              )}
-            </p>
-          </div>
-        ) : (
-          <div className="flex items-start gap-3">
-            <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
-            <div className="flex-1 text-sm">
-              <label htmlFor="onboarding-builtin-polish" className="font-semibold">Clean up what I say</label>
-              <p className="text-muted-foreground">
-                Your words go to Voicetypr’s server to be cleaned. Voicetypr’s server keeps nothing. Off sends nothing; you get
-                exactly what you said.
-              </p>
-              {builtin.checked ? null : <p className="mt-1">{builtin.status}</p>}
-            </div>
-            <Switch id="onboarding-builtin-polish" checked={builtin.checked} disabled={builtin.disabled || saving}
-              onCheckedChange={onBuiltinChange} />
-          </div>
-        )}
-        {ownReady ? null : (
-          <p className="pl-7 text-sm text-muted-foreground">Rather use your own AI provider? Add its key in Settings → Polish.</p>
-        )}
-      </Card>
-      <div className="flex flex-wrap justify-center gap-[10px]">
-        <Button variant="outline" disabled={saving} onClick={onBack}>Back</Button>
-        <Button disabled={saving} onClick={onNext}>Continue</Button>
+    <section className="flex w-[560px] flex-col items-center gap-[34px]">
+      <FrameHeading
+        title="Let AI tidy your words"
+        line="Polish is AI clean-up. It runs on Voicetypr’s server, so you need no AI key or account of your own."
+      />
+      <div className="flex flex-col self-stretch overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex items-center gap-3.5 px-[22px] py-5">
+          <span className="flex size-[38px] shrink-0 items-center justify-center rounded-[9px] bg-sage-bg text-sage">
+            <Sparkles aria-hidden="true" className="size-[19px]" />
+          </span>
+          <label htmlFor="onboarding-builtin-polish" className="flex-1 text-[17px] leading-[1.2] font-semibold text-foreground">
+            Clean up what I say
+          </label>
+          {ownReady ? null : (
+            <Switch
+              id="onboarding-builtin-polish"
+              checked={builtin.checked}
+              disabled={builtin.disabled || saving}
+              onCheckedChange={onBuiltinChange}
+            />
+          )}
+        </div>
+        <div className="flex items-start gap-3 bg-secondary px-[22px] py-4">
+          <NoteIcon aria-hidden="true" className="mt-0.5 size-[15px] shrink-0 text-muted-foreground" />
+          <p role="status" className="text-[15px] leading-[1.4] text-muted-foreground">{note}</p>
+        </div>
       </div>
+      {ownReady ? null : (
+        <QuietButton className="text-[15px] text-sage hover:text-sage" aria-pressed={ownProviderLater} onClick={onOwnProvider}>
+          {ownProviderLater ? <Check aria-hidden="true" className="size-[15px]" /> : <Settings2 aria-hidden="true" className="size-[15px]" />}
+          {ownProviderLater ? "Settings → Polish opens after setup" : "Use my own AI provider"}
+        </QuietButton>
+      )}
+      <PrimaryButton disabled={saving} onClick={onNext}>Continue</PrimaryButton>
     </section>
   );
 }

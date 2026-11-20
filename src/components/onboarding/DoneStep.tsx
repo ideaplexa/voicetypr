@@ -1,75 +1,70 @@
-import { KeyCaps } from "@/components/KeyCaps";
-import { AppMark } from "@/components/onboarding/PromiseStep";
-import { Band } from "@/components/onboarding/OnboardingChrome";
-import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import { PanelTop } from "lucide-react";
-import { Button } from "@/components/settings/SettingsButton";
-import { Spinner } from "@/components/ui/spinner";
+import trayIcon from "../../../src-tauri/icons/tray-light.png";
+import { FrameHeading, FrameKeys, PrimaryButton } from "@/components/onboarding/Frame";
+import { WhatsShared } from "@/components/WhatsShared";
 import { isMacOS } from "@/lib/platform";
-import type { ReactNode } from "react";
+import { BatteryFull, Search, Wifi } from "lucide-react";
 
-const DOTS: [number, number, boolean][] = [
-  [-230, -30, true], [-170, 30, false], [-120, -42, false], [-60, 46, true], [80, -46, false], [140, 34, true], [200, -20, false], [250, 40, false],
-];
-
+/** 13 Done (13b after buying or for a device that already has access): where Voicetypr lives and the shortcut. */
 export function DoneStep({
   title,
-  detail,
+  line,
   caps,
   holdToTalk,
-  copyOnly,
-  consent,
   saving,
-  onBack,
   onFinish,
 }: {
   title: string;
-  detail: string | null;
+  /** What access they have, before where Voicetypr lives. */
+  line: string;
   caps: string[];
   holdToTalk: boolean;
-  /** Accessibility is off, so Voicetypr copies instead of pasting. */
-  copyOnly: boolean;
-  consent: ReactNode;
   saving: boolean;
-  onBack: () => void;
   onFinish: () => void;
 }) {
+  const now = new Date();
+  const clock = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
   return (
-    <section className="flex w-full flex-col items-center gap-[20px] text-center">
-      <Band>
-        {DOTS.map(([x, y, gold]) => (
-          <span key={`${x},${y}`} className={cn("absolute size-2.5 rounded-full", gold ? "bg-[#B08D57]/70" : "bg-sage/50")} style={{ left: x, top: y }} />
-        ))}
-        <AppMark />
-      </Band>
-      <h2 className="text-[28px] leading-[normal] font-semibold tracking-[-0.5px]">{title}</h2>
-      <p className="max-w-[520px] text-base leading-9 text-muted-foreground">
-        {detail ? <>{detail} </> : null}
-        {holdToTalk ? "Hold" : "Press"} <KeyCaps caps={caps} size="onboarding" /> in any app and talk.
-      </p>
-      <Card className="w-full flex-row items-start gap-3 px-4 py-3.5 text-left">
-        <span className="flex size-[34px] shrink-0 items-center justify-center rounded-[9px] bg-sage-bg">
-          <PanelTop className="size-[18px] text-sage" />
+    <section className="flex w-[620px] flex-col items-center gap-[34px]">
+      <FrameHeading
+        title={title}
+        line={`${line} Voicetypr stays in your ${isMacOS ? "menu bar" : "system tray"} when this window closes.`}
+      />
+      <div aria-hidden="true" className="flex h-14 items-center justify-end gap-5 self-stretch rounded-[14px] border border-border bg-card px-5 text-text-3">
+        <Wifi className="size-[18px]" />
+        <BatteryFull className="size-[18px]" />
+        <Search className="size-[18px]" />
+        <span className="rounded-lg bg-sage-bg p-1.5">
+          <img src={trayIcon} alt="" className="size-[22px]" />
         </span>
-        <p className="text-sm leading-6">
-          <span className="font-semibold">Voicetypr stays in your {isMacOS ? "menu bar" : "system tray"}</span> when this
-          window closes. Its menu starts dictation, switches Polish, the engine and the microphone, and opens Settings.
-        </p>
-      </Card>
-      {copyOnly ? (
-        <p className="max-w-[480px] text-sm text-muted-foreground">
-          Your words are copied: press {isMacOS ? "⌘V" : "Ctrl+V"} to paste them. Turn on Accessibility in
-          System Settings and it pastes for you.
-        </p>
-      ) : null}
-      {consent}
-      <div className="flex flex-wrap items-center justify-center gap-[10px]">
-        <Button size="lg" variant="outline" disabled={saving} onClick={onBack}>Back</Button>
-        <Button size="lg" disabled={saving} onClick={onFinish}>
-          {saving ? <Spinner /> : null}Start using Voicetypr
-        </Button>
+        <span className="text-[14.5px]">
+          {isMacOS ? `${now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} ${clock}` : clock}
+        </span>
       </div>
+      <p className="flex items-center gap-3 text-[17px] text-muted-foreground">
+        {holdToTalk ? "Hold" : "Press"}
+        <FrameKeys caps={caps} />
+        in any app to dictate.
+      </p>
+      <PrimaryButton disabled={saving} onClick={onFinish}>Start using Voicetypr</PrimaryButton>
     </section>
+  );
+}
+
+/** The crash-report choice at the foot of Done: asked once, off by default. */
+export function DoneConsent({ checked, disabled, onChange }: { checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="flex items-center gap-2 text-[13.5px] text-muted-foreground">
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+          className="size-[15px] accent-[var(--sage)]"
+        />
+        Share anonymous crash reports and usage numbers
+      </label>
+      <WhatsShared />
+    </div>
   );
 }

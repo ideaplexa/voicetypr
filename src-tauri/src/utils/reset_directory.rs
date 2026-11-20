@@ -185,10 +185,82 @@ pub(crate) fn remove(path: &Path, identifier: &str, base: &Path) -> Result<bool,
     }
 }
 
+/// Clear an app-owned directory but keep one live child, such as the WebView2
+/// profile of the running window, which Windows will not let us delete.
+pub(crate) fn remove_contents_except(
+    path: &Path,
+    identifier: &str,
+    base: &Path,
+    keep: &str,
+) -> Result<bool, String> {
+    let Some(path) = validate(path, identifier, base)? else {
+        return Ok(false);
+    };
+    let entries = fs::read_dir(&path).map_err(|_| "Could not clear app-owned storage")?;
+    let mut removed = false;
+    let mut failed = false;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            failed = true;
+            continue;
+        };
+        if entry
+            .file_name()
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(keep.as_bytes())
+        {
+            continue;
+        }
+        let child = entry.path();
+        let result = match fs::symlink_metadata(&child) {
+            Ok(meta) if meta.is_dir() => fs::remove_dir_all(&child),
+            Ok(_) => fs::remove_file(&child),
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(()) => removed = true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => failed = true,
+        }
+    }
+    if failed {
+        return Err("Could not clear app-owned storage".into());
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     const ID: &str = "com.ideaplexa.voicetypr.dev";
+
+    #[test]
+    fn clearing_contents_keeps_only_the_named_live_child() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("AppData/Local");
+        let root = base.join(ID);
+        fs::create_dir_all(root.join("EBWebView/Default")).unwrap();
+        fs::create_dir_all(root.join("logs")).unwrap();
+        fs::write(root.join("logs/voicetypr.log"), b"x").unwrap();
+        fs::write(root.join("ebwebview-not-it"), b"x").unwrap();
+        let sibling = base.join(format!("{ID}.canary"));
+        fs::create_dir_all(&sibling).unwrap();
+
+        assert_eq!(
+            remove_contents_except(&root, ID, &base, "EBWebView"),
+            Ok(true)
+        );
+
+        assert!(root.join("EBWebView/Default").is_dir());
+        assert!(!root.join("logs").exists());
+        assert!(!root.join("ebwebview-not-it").exists());
+        assert!(sibling.is_dir());
+        assert_eq!(
+            remove_contents_except(&root, ID, &base, "EBWebView"),
+            Ok(false)
+        );
+        assert!(remove_contents_except(&sibling, ID, &base, "EBWebView").is_err());
+    }
 
     #[test]
     fn rejects_user_wide_roots_siblings_and_other_builds() {

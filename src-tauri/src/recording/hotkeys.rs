@@ -22,38 +22,16 @@ fn handle_toggle_mode(app: &tauri::AppHandle, app_state: &AppState, event_state:
     }
 
     if !claim_toggle_press(&app_state.toggle_key_held) {
-        log::debug!("Toggle: Ignoring duplicate key press while hotkey is held");
+        log::info!("Toggle: Ignoring duplicate key press while hotkey is held");
         return;
     }
     if super::onboarding_try::claim_hotkey(app, KeyPhase::Pressed) {
+        claim_toggle_window(app_state);
         return;
     }
 
-    let should_throttle = {
-        let now = std::time::Instant::now();
-        match app_state.last_toggle_press.lock() {
-            Ok(mut last_press) => {
-                if let Some(last) = *last_press {
-                    if now.duration_since(last).as_millis() < 300 {
-                        log::debug!("Toggle: Throttling hotkey press (too fast)");
-                        true
-                    } else {
-                        *last_press = Some(now);
-                        false
-                    }
-                } else {
-                    *last_press = Some(now);
-                    false
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to lock last_toggle_press: {}", e);
-                false
-            }
-        }
-    };
-
-    if should_throttle {
+    if !claim_toggle_window(app_state) {
+        log::info!("Toggle: Throttling hotkey press (too fast)");
         crate::commands::island_notice::notice(
             app,
             crate::commands::island_notice::NoticeKind::ShortcutThrottled,
@@ -62,6 +40,7 @@ fn handle_toggle_mode(app: &tauri::AppHandle, app_state: &AppState, event_state:
     }
 
     if app_state.pending_start.cancel() {
+        log::info!("Toggle: Cancelled a start that was still validating");
         return;
     }
     // Commit and cancellation are serialized; a just-committed request is now
@@ -118,6 +97,28 @@ fn handle_toggle_mode(app: &tauri::AppHandle, app_state: &AppState, event_state:
         }
         _ => log::debug!("Toggle: Ignoring hotkey in state {:?}", current_state),
     }
+}
+
+const TOGGLE_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// One press, one toggle: the native hotkey and the main window's in-app
+/// fallback claim the same window, so a press both of them see toggles once.
+pub(crate) fn claim_toggle_window(app_state: &AppState) -> bool {
+    match app_state.last_toggle_press.lock() {
+        Ok(mut last_press) => claim_toggle_at(&mut last_press, std::time::Instant::now()),
+        Err(e) => {
+            log::error!("Failed to lock last_toggle_press: {}", e);
+            true
+        }
+    }
+}
+
+fn claim_toggle_at(last_press: &mut Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    if last_press.is_some_and(|last| now.duration_since(last) < TOGGLE_WINDOW) {
+        return false;
+    }
+    *last_press = Some(now);
+    true
 }
 
 fn claim_toggle_press(toggle_key_held: &AtomicBool) -> bool {
@@ -177,6 +178,9 @@ fn handle_ptt_mode(
     event_state: KeyPhase,
 ) {
     if super::onboarding_try::claim_hotkey(app, event_state) {
+        if matches!(event_state, KeyPhase::Pressed) {
+            claim_toggle_window(app_state);
+        }
         return;
     }
     if app_state.pointer_recording.load(Ordering::SeqCst)
@@ -302,6 +306,7 @@ pub(crate) fn dispatch_action(
         };
 
         if !should_dispatch {
+            log::debug!("Shortcut {id}: press ignored, still marked as pressed");
             return;
         }
     } else if action != ShortcutAction::HoldToRecord {
@@ -399,6 +404,21 @@ pub(crate) fn dispatch_action(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_press_seen_by_both_routes_toggles_once() {
+        let start = std::time::Instant::now();
+        let mut last = None;
+        assert!(super::claim_toggle_at(&mut last, start));
+        assert!(!super::claim_toggle_at(
+            &mut last,
+            start + std::time::Duration::from_millis(40)
+        ));
+        assert!(super::claim_toggle_at(
+            &mut last,
+            start + std::time::Duration::from_millis(340)
+        ));
+    }
+
     use super::{
         claim_toggle_press, hotkey_stop_needs_dispatch, should_dispatch_custom_pressed_binding,
     };

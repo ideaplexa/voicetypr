@@ -1,0 +1,187 @@
+/*FONTS*/
+:root{
+  color-scheme:light;
+  --background:#F7F7F5;--foreground:#18181A;--card:#ffffff;--primary:#18181A;--primary-foreground:#ffffff;
+  --secondary:#F1F1EE;--muted:#F1F1EE;--muted-foreground:#6A6A66;--accent:#f0efec;--destructive:#C2412D;
+  --border:#E4E4E0;--sage:#3F7D5C;--sage-foreground:#ffffff;--sage-bg:#E3EFE7;--text-3:#71716C;--warn:#8F5400;--warn-bg:#FFF0D9;
+  --shadow-sm:0 1px 2px rgba(15,23,42,.07);--shadow-lg:0 10px 30px -12px rgba(15,23,42,.16);--shadow-xl:0 24px 60px -24px rgba(15,23,42,.2);--shadow-2xl:0 30px 90px -30px rgba(15,23,42,.24);
+  --os-panel:rgba(246,246,246,.96);--os-text:#1d1d1f;--os-sub:#4b4b4f;--os-btn:#e3e3e5;--os-line:rgba(0,0,0,.1);--scrim:rgba(20,20,21,.22);
+  --font:"Geist","Geist Variable",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono","Geist Mono Variable",ui-monospace,"SF Mono",Menlo,monospace;
+  --ease-out:cubic-bezier(.16,1,.3,1);--ease-in-out:cubic-bezier(.65,0,.35,1);
+  --spring:linear(0,.006,.025 2.8%,.101 6.1%,.539 18.9%,.721 25.3%,.849 31.5%,.937 38.1%,.968 41.8%,.991 45.7%,1.006 50.1%,1.015 55%,1.017 63.9%,1.001 85.9%,1);
+}
+/*DARK*/
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--background);color:var(--foreground);font-family:var(--font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden;transition:background-color .3s ease,color .3s ease}
+button{font:inherit;color:inherit;cursor:pointer}
+button:disabled{cursor:default}
+:focus-visible{outline:2px solid var(--sage);outline-offset:2px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+/* Buttons, as SettingsButton */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:500;line-height:16px;background:var(--primary);color:var(--primary-foreground);white-space:nowrap;transition:transform .12s var(--ease-out),opacity .15s ease,background-color .15s ease}
+.btn:hover{opacity:.9}.btn:active{transform:scale(.97)}
+.btn.outline{background:var(--card);color:var(--foreground);box-shadow:inset 0 0 0 1px var(--border)}
+.btn.outline:hover{background:var(--secondary);opacity:1}
+.btn.ghost{background:transparent;color:var(--muted-foreground)}
+.btn.ghost:hover{background:var(--secondary);color:var(--foreground);opacity:1}
+.btn.lg{padding:11px 20px;font-size:14px;border-radius:10px}
+.btn.sm{padding:6px 11px;font-size:13px;border-radius:8px}
+.btn[aria-busy="true"]{pointer-events:none;opacity:.8}
+.btn svg{width:16px;height:16px;flex:none}
+.spin{width:14px;height:14px;border-radius:50%;border:1.6px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Keycaps, as KeyCaps size=onboarding. They sink while the real key is down. */
+.caps{display:inline-flex;gap:5px;vertical-align:middle}
+.cap{display:inline-flex;align-items:center;border-radius:7px;border:1px solid var(--border);border-bottom-width:2px;background:var(--card);padding:4px 10px;font-family:var(--font);font-size:15px;font-weight:600;line-height:normal;color:var(--foreground);transition:transform .09s ease,border-color .15s ease,box-shadow .15s ease,background-color .15s ease}
+body.holding .cap.live{transform:translateY(1px);border-color:var(--sage);border-bottom-width:1px;margin-bottom:1px;box-shadow:0 0 0 3px var(--sage-bg);background:var(--sage-bg)}
+.badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:var(--sage-bg);color:var(--sage);font-size:12.5px;font-weight:500;padding:4px 10px}
+.badge i{width:6px;height:6px;border-radius:50%;background:var(--sage)}
+.link{background:none;border:0;padding:0;color:var(--sage);font-weight:500;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--sage) 35%,transparent);text-underline-offset:3px}
+.link:hover{text-decoration-color:var(--sage)}
+
+/* Scenes */
+.scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.scene.leaving{animation:leave .22s ease both;pointer-events:none}
+.scene.active [data-rise]{animation:rise .6s var(--ease-out) both;animation-delay:calc(var(--i,0)*55ms + 60ms)}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes leave{to{opacity:0;transform:translateY(-10px)}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(6px)}to{opacity:1;transform:none}}
+
+/* The pill: always the dark instrument, copied from src/pill.css */
+.pillzone{position:fixed;left:0;right:0;bottom:22px;display:flex;justify-content:center;pointer-events:none;z-index:30}
+.pill{--psage:#8FD1A8;--pamber:#F2B35B;--pt2:rgba(255,255,255,.55);height:12px;width:12px;border-radius:17px;background:#121316;border:1px solid rgba(0,0,0,.45);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 12px 34px rgba(0,0,0,.3);color:rgba(255,255,255,.92);font-size:12.5px;overflow:hidden;white-space:nowrap;transition:width .5s var(--spring),height .5s var(--spring),box-shadow .2s ease;display:flex;align-items:center;justify-content:center}
+.pill.amber{box-shadow:inset 0 0 0 1px rgba(242,179,91,.66),0 12px 34px rgba(0,0,0,.3)}
+.pill-body{display:flex;align-items:center;gap:8px;padding:0 13px;height:32px;flex:none;animation:pill-in .32s ease both}
+.pill[data-state="idle"] .pill-body{padding:0;height:10px;width:10px;justify-content:center}
+@keyframes pill-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.pill .core{width:4px;height:4px;border-radius:50%;background:var(--psage);box-shadow:0 0 6px rgba(143,209,168,.8);animation:breathe 3.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.35}50%{opacity:.85}}
+.pill .dim{color:var(--pt2)}
+.pill .time{font-family:var(--mono);font-size:12px;color:var(--pt2);min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
+.pill canvas{display:block;width:96px;height:24px}
+.pill .kc{font-family:var(--mono);font-size:10.5px;line-height:16px;padding:0 4px;margin:0 1px;border-radius:5px;background:rgba(255,255,255,.1);box-shadow:inset 0 -1px 0 rgba(255,255,255,.1)}
+.pill svg{width:16px;height:16px;flex:none}
+.pill .arc{animation:spin .8s linear infinite}
+.pill .arc.slow{animation-duration:1.5s;color:var(--psage)}
+.pill .tick{color:var(--psage)}
+.pill .tick path{stroke-dasharray:20;stroke-dashoffset:20;animation:draw .4s .1s var(--ease-out) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.pill .warn{color:var(--pamber)}
+
+/* What the operating system shows. Not ours to design: drawn so the flow can be clicked. */
+.os{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--scrim);animation:fade .2s ease both}
+.os.closing{animation:fade .16s ease reverse both}
+.os-note{font-size:11.5px;color:#fff;background:rgba(0,0,0,.55);border-radius:999px;padding:3px 10px}
+.os-alert{width:264px;border-radius:14px;background:var(--os-panel);color:var(--os-text);box-shadow:0 0 0 .5px var(--os-line),0 24px 60px rgba(0,0,0,.32);padding:20px 16px 16px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",var(--font);animation:pop .28s var(--ease-out) both;backdrop-filter:blur(30px)}
+.os-icon{width:56px;height:56px;border-radius:13px;background:#E3EFE7;color:#3F7D5C;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.os-icon svg{width:34px;height:34px}
+.os-alert b{display:block;font-size:13px;line-height:1.3;font-weight:700}
+.os-alert p{font-size:11px;line-height:1.35;margin:8px 0 14px;color:var(--os-sub)}
+.os-btns{display:flex;gap:8px}
+.os-btns button{flex:1;border:0;border-radius:7px;padding:6px 0;font-size:13px;background:var(--os-btn);color:var(--os-text);font-family:inherit}
+.os-btns button.go{background:#0A7AFF;color:#fff}
+.os button:focus-visible{outline:3px solid rgba(10,122,255,.45);outline-offset:1px}
+.os-sheet{width:420px;max-width:calc(100vw - 32px);border-radius:12px;background:var(--os-panel);color:var(--os-text);box-shadow:0 0 0 .5px var(--os-line),0 24px 60px rgba(0,0,0,.32);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",var(--font);animation:pop .28s var(--ease-out) both;overflow:hidden}
+.os-sheet header{padding:12px 16px;font-size:13px;font-weight:600;border-bottom:.5px solid var(--os-line);display:flex;gap:6px;align-items:center}
+.os-sheet header span{color:var(--os-sub);font-weight:400}
+.os-sheet .body{padding:14px 16px 16px}
+.os-sheet .body>p{font-size:11.5px;color:var(--os-sub);margin:0 0 10px}
+.os-row{display:flex;align-items:center;gap:10px;border-radius:8px;background:color-mix(in srgb,var(--os-text) 5%,transparent);padding:8px 10px;font-size:13px}
+.os-row .os-icon{width:24px;height:24px;border-radius:6px;margin:0;box-shadow:none}.os-row .os-icon svg{width:15px;height:15px}
+.os-row span{flex:1}
+.os-switch{width:38px;height:22px;border-radius:11px;border:0;background:color-mix(in srgb,var(--os-text) 18%,transparent);position:relative;transition:background-color .2s ease;padding:0}
+.os-switch::after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .25s var(--spring)}
+.os-switch[aria-checked="true"]{background:#34C759}.os-switch[aria-checked="true"]::after{transform:translateX(16px)}
+.os-sheet footer{display:flex;justify-content:flex-end;padding:0 16px 14px}
+.os-sheet footer button{border:0;border-radius:7px;padding:5px 14px;font-size:13px;background:var(--os-btn);color:var(--os-text);font-family:inherit}
+
+/* Shortcut popover */
+.pop{position:fixed;z-index:50;width:300px;border-radius:14px;background:var(--card);box-shadow:0 0 0 1px var(--border),var(--shadow-xl);padding:14px;animation:pop .22s var(--ease-out) both;transform-origin:50% 0}
+.pop h3{margin:0 0 10px;font-size:13px;font-weight:600}
+.pop .opts{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.pop .opt{display:flex;align-items:center;justify-content:space-between;gap:8px;border:0;background:transparent;border-radius:9px;padding:6px 8px;text-align:left;font-size:13px;color:var(--muted-foreground)}
+.pop .opt:hover{background:var(--secondary)}
+.pop .opt[aria-checked="true"]{background:var(--sage-bg);color:var(--foreground)}
+.pop .opt .cap{font-size:12.5px;padding:2px 7px}
+.seg{display:flex;background:var(--secondary);border-radius:9px;padding:3px;gap:2px}
+.seg button{flex:1;border:0;background:transparent;border-radius:7px;padding:5px 8px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--foreground);font-weight:500;box-shadow:var(--shadow-sm)}
+.pop .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--muted-foreground)}
+
+/* Toast */
+.toast{position:fixed;left:50%;top:22px;transform:translateX(-50%);z-index:70;background:var(--primary);color:var(--primary-foreground);font-size:13px;padding:8px 14px;border-radius:10px;box-shadow:var(--shadow-lg);animation:pop .25s var(--ease-out) both}
+
+/* Review controls. Not part of the design. */
+.proto{position:fixed;left:14px;bottom:14px;z-index:80;font-size:12px;color:var(--muted-foreground);display:flex;align-items:center;gap:4px;opacity:.55;transition:opacity .2s ease}
+.proto:hover,.proto:focus-within,.proto.open{opacity:1}
+.proto button{border:0;background:transparent;border-radius:7px;padding:4px 8px;color:inherit;font-size:12px}
+.proto button:hover{background:var(--secondary);color:var(--foreground)}
+.proto .more{display:none;align-items:center;gap:2px}
+.proto.open .more{display:flex}
+.proto .tag{font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:7px;background:var(--secondary);color:var(--muted-foreground);border:0}
+.engine{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-foreground)}
+.engine .bar{width:54px;height:3px;border-radius:2px;background:var(--border);overflow:hidden}
+.engine .bar i{display:block;height:100%;width:0;background:var(--sage);border-radius:2px;transition:width .6s ease}
+.engine.ready .bar{display:none}
+.engine .dot{display:none;width:6px;height:6px;border-radius:50%;background:var(--sage)}
+.engine.ready .dot{display:block}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}
+}
+
+/* A sentence that cleans itself up: shared by B and C */
+.w{display:inline-block;position:relative;transition:color .5s ease,opacity .2s ease}
+.w.new{animation:word-in .34s var(--ease-out) both}
+@keyframes word-in{from{opacity:0;transform:translateY(.28em)}to{opacity:1;transform:none}}
+.w .t{background:linear-gradient(currentColor,currentColor) no-repeat 0 56%/0 .07em;transition:background-size .34s var(--ease-in-out)}
+.w.cut .t{background-size:100% .07em}
+.w.cut{opacity:.55}
+.w.gone{opacity:0}
+.w.out{display:none}
+.w.changed{animation:changed 1.5s ease both}
+@keyframes changed{0%,35%{color:var(--sage)}100%{color:inherit}}
+s{text-decoration-thickness:1px}
+
+/* Pill controls during a dictation: Stop types it, the cross discards it (labelled, not hover-only) */
+.pill{pointer-events:auto}
+.pill .pbtn{border:0;height:24px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;padding:0 9px;flex:none;transition:background-color .15s ease}
+.pill .pbtn.stop{background:rgba(143,209,168,.18);color:var(--psage);margin-left:2px}
+.pill .pbtn.stop:hover{background:rgba(143,209,168,.3)}
+.pill .pbtn.cancel{width:24px;padding:0;background:transparent;color:var(--pt2)}
+.pill .pbtn.cancel:hover{background:rgba(255,255,255,.12);color:#fff}
+.pill .pbtn svg{width:14px;height:14px}
+.pill-hint{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:31;background:#121316;color:rgba(255,255,255,.92);font-size:12.5px;padding:7px 12px;border-radius:14px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 12px 34px rgba(0,0,0,.3);animation:pop .2s var(--ease-out) both}
+.proto .note{font-size:11px;padding:0 6px}
+.app-dialog .dlg{width:420px;max-width:calc(100vw - 32px);background:var(--card);color:var(--foreground);border-radius:14px;box-shadow:0 0 0 1px var(--border),var(--shadow-2xl);padding:18px 20px;font-size:13.5px;animation:pop .25s var(--ease-out) both}
+.app-dialog h3{margin:0 0 6px;font-size:16px;font-weight:600}
+.app-dialog p{margin:8px 0;color:var(--muted-foreground)}
+.app-dialog ul{margin:8px 0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.dlg-foot{display:flex;justify-content:flex-end;margin-top:12px}
+.legal{margin:0;font-size:12.5px;color:var(--muted-foreground)}
+.legal .link{font-size:inherit}
+h1:focus,h2:focus{outline:none}
+
+/* App icon with the Polish badge, as Island v3.1 in design/voicetypr-2.1.pen */
+.pill .pico{position:relative;width:20px;height:20px;border-radius:6px;background:#2A2D31;color:#fff;display:flex;align-items:center;justify-content:center;flex:none;margin-left:-4px}
+.pill .pico svg{width:13px;height:13px}
+.pill .pico i{position:absolute;right:-3px;bottom:-3px;width:10px;height:10px;border-radius:50%;background:var(--psage);box-shadow:0 0 0 2px #121316;color:#17271d;font-style:normal;font-size:7px;line-height:10px;text-align:center;font-weight:700}
+
+/* Trial details: name and email, both required */
+.fields{display:flex;gap:10px;width:100%}
+.fld{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left}
+.fld label{font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
+.fld input{height:38px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--foreground);font:inherit;font-size:14px;padding:0 12px;transition:border-color .15s ease,box-shadow .15s ease}
+.fld input::placeholder{color:var(--text-3)}
+.fld input:focus{outline:none;border-color:var(--sage);box-shadow:0 0 0 3px var(--sage-bg)}
+.fld input[aria-invalid="true"]{border-color:var(--destructive)}
+.fld .msg{font-size:12px;color:var(--destructive);min-height:0}
+.fld .msg:empty{display:none}
+@media (max-width:560px){.fields{flex-direction:column}}

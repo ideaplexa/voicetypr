@@ -1,5 +1,6 @@
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { SpokenPunctuationField } from "@/components/polish/SpokenPunctuationField";
+import { VoiceCommandsField } from "@/components/polish/VoiceCommandsField";
 import { Button } from "@/components/settings/SettingsButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/settings/SettingsSwitch";
@@ -123,6 +124,11 @@ export function EnhancementSettings({
       enabled={writingSettings.spoken_punctuation}
       disabled={writingSettingsDisabled}
       onChange={(spoken_punctuation) => onWritingSettingsChange({ spoken_punctuation })}
+    />
+    <VoiceCommandsField
+      enabled={writingSettings.editing_commands}
+      disabled={writingSettingsDisabled}
+      onChange={(editing_commands) => onWritingSettingsChange({ editing_commands })}
     />
   </div>;
 }

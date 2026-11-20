@@ -1,47 +1,36 @@
-import { Button } from "@/components/settings/SettingsButton";
+import { FrameHeading, PrimaryButton } from "@/components/onboarding/Frame";
 import { cn } from "@/lib/utils";
 import type { AppSettings } from "@/types";
-import { BookA, Bot, Check, Code, FileText, Layers, Send, type LucideIcon } from "lucide-react";
+import { Bot, CodeXml, Layers, Mail, NotebookPen, Stethoscope, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 export type StartingPolishStyle = NonNullable<AppSettings["starting_polish_style"]>;
 
-const USES: { id: string; label: string; icon: LucideIcon; style: StartingPolishStyle; name: string; detail?: string }[] = [
-  { id: "messages", label: "Messages and email", icon: Send, style: "Message", name: "Message", detail: "tidy sentences in your own wording" },
-  { id: "ai", label: "Prompts for AI", icon: Bot, style: "CleanDictation", name: "Clean" },
-  { id: "code", label: "Code and tech notes", icon: Code, style: "Code", name: "Code" },
-  { id: "docs", label: "Notes and documents", icon: FileText, style: "Writing", name: "Writing", detail: "for longer text" },
-  { id: "clinical", label: "Medical or legal work", icon: BookA, style: "CleanDictation", name: "Clean" },
-  { id: "mix", label: "A bit of everything", icon: Layers, style: "CleanDictation", name: "Clean", detail: "the default" },
+const USES: { id: string; label: string; icon: LucideIcon; style: StartingPolishStyle }[] = [
+  { id: "messages", label: "Messages and email", icon: Mail, style: "Message" },
+  { id: "ai", label: "Prompts for AI", icon: Bot, style: "CleanDictation" },
+  { id: "code", label: "Code and tech notes", icon: CodeXml, style: "Code" },
+  { id: "docs", label: "Notes and documents", icon: NotebookPen, style: "Writing" },
+  { id: "clinical", label: "Medical or legal work", icon: Stethoscope, style: "CleanDictation" },
+  { id: "mix", label: "A bit of everything", icon: Layers, style: "CleanDictation" },
 ];
 
-/** The first screen of the deeper path: the style Polish starts in. */
+/** 10a What will you mostly dictate: the style Polish starts in, first on the deeper path. */
 export function UseStep({
-  polishOn,
   saving,
-  onBack,
   onChoose,
 }: {
-  /** Polish will run on the next dictation, so the pick applies at once. */
-  polishOn: boolean;
   saving: boolean;
-  onBack: () => void;
-  /** null when the user skips; today's default stays. */
+  /** null without a pick: today's default style stays. */
   onChoose: (style: StartingPolishStyle | null) => void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const use = USES.find((item) => item.id === picked);
-  const style = use ? `the ${use.name} style${use.detail ? `, ${use.detail}` : ""}` : "";
 
   return (
-    <section className="flex w-full flex-col items-center gap-[16px]">
-      <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        What will you mostly dictate?
-      </h2>
-      <p className="-mt-1 text-center text-base text-muted-foreground">
-        Polish starts in a style that fits. You can change it any time.
-      </p>
-      <div role="group" aria-label="What you mostly dictate" className="grid w-full gap-2.5 sm:grid-cols-3">
+    <section className="flex w-[640px] flex-col items-center gap-[34px]">
+      <FrameHeading title="What will you mostly dictate?" line="Polish starts in a style that fits. You can change it any time." />
+      <div role="group" aria-label="What you mostly dictate" className="grid grid-cols-3 gap-3 self-stretch">
         {USES.map((item) => {
           const checked = item.id === picked;
           return (
@@ -51,25 +40,24 @@ export function UseStep({
               aria-pressed={checked}
               onClick={() => setPicked(item.id)}
               className={cn(
-                "flex items-center gap-3 rounded-2xl bg-card px-4 py-3.5 text-left text-[15px] font-medium ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                checked && "ring-[1.5px] ring-sage",
+                "flex min-h-[112px] flex-col items-start gap-[18px] rounded-2xl border border-border bg-card p-[18px] text-left hover:border-sage focus-visible:ring-2 focus-visible:ring-sage/40 focus-visible:outline-none",
+                checked && "border-[1.5px] border-sage",
               )}
             >
-              <item.icon className={cn("size-[18px] shrink-0", checked ? "text-sage" : "text-muted-foreground")} />
-              <span className="flex-1">{item.label}</span>
-              <Check className={cn("size-4 shrink-0 text-sage", !checked && "invisible")} />
+              <span
+                className={cn(
+                  "flex size-9 items-center justify-center rounded-[9px]",
+                  checked ? "bg-sage-bg text-sage" : "bg-secondary text-foreground",
+                )}
+              >
+                <item.icon aria-hidden="true" className="size-[17px]" />
+              </span>
+              <span className="text-[15px] leading-[1.2] font-semibold text-foreground">{item.label}</span>
             </button>
           );
         })}
       </div>
-      <p role="status" className="min-h-5 text-center text-sm">
-        {use ? polishOn ? `Polish will use ${style}.` : `When Polish is on, it starts in ${style}.` : null}
-      </p>
-      <div className="flex flex-wrap justify-center gap-[10px]">
-        <Button variant="outline" disabled={saving} onClick={onBack}>Back</Button>
-        <Button variant="ghost" disabled={saving} onClick={() => onChoose(null)}>Skip</Button>
-        <Button disabled={saving} onClick={() => onChoose(use?.style ?? null)}>Continue</Button>
-      </div>
+      <PrimaryButton disabled={saving} onClick={() => onChoose(use?.style ?? null)}>Continue</PrimaryButton>
     </section>
   );
 }

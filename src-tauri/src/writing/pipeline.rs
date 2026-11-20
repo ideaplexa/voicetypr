@@ -298,7 +298,7 @@ fn resolve_output_language(
         .unwrap_or_else(|| FINAL_TEXT_LANGUAGE_SAME_AS_TRANSCRIPT.to_string())
 }
 
-fn effective_transcript_language(transcription: &TranscriptionResult) -> Option<String> {
+pub(crate) fn effective_transcript_language(transcription: &TranscriptionResult) -> Option<String> {
     present_language(transcription.transcript_language.as_deref())
         .map(str::to_string)
         .or_else(|| {

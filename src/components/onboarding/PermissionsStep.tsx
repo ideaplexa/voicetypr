@@ -1,77 +1,82 @@
+import { LevelBars } from "@/components/onboarding/LevelBars";
+import { SecondaryButton, Tag } from "@/components/onboarding/Frame";
 import type { PermissionState } from "@/components/onboarding/onboardingTypes";
-import { SettingsPaneCard } from "@/components/settings/settings-ui";
-import { Button } from "@/components/settings/SettingsButton";
-import { Keyboard, Mic } from "lucide-react";
+import { useMicrophoneTest } from "@/components/onboarding/useMicrophoneTest";
+import { useSettings } from "@/contexts/SettingsContext";
+import { Accessibility, Mic, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
+type Kind = "microphone" | "accessibility";
+
+function Row({ icon: Icon, title, children, action }: { icon: LucideIcon; title: string; children: ReactNode; action: ReactNode }) {
+  return (
+    <div className="flex items-center gap-4 border-b border-border px-5 py-[18px] last:border-b-0">
+      <span className="flex size-[42px] shrink-0 items-center justify-center rounded-[11px] bg-sage-bg text-sage">
+        <Icon aria-hidden="true" className="size-5" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
+        <h3 className="text-[16.5px] leading-[1.2] font-semibold text-foreground">{title}</h3>
+        {children}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/** The live meter once the microphone is allowed: levels only, nothing recorded. */
+function Listening() {
+  const { settings } = useSettings();
+  const device = settings?.selected_microphone || undefined;
+  const { level, status, visible } = useMicrophoneTest(device);
+  const line = !visible || status === "paused" ? "Microphone test paused."
+    : status === "opening" ? "Opening microphone…"
+    : status === "heard" ? ["We can hear you", device].filter(Boolean).join(" · ")
+    : status === "quiet" ? "No input yet — try another microphone in Settings"
+    : status === "error" ? "Could not open this microphone"
+    : "Say something to check your microphone.";
+  return (
+    <span className="flex items-center gap-2.5">
+      <LevelBars level={level} size="sm" />
+      <span role="status" className="text-sm text-muted-foreground">{line}</span>
+    </span>
+  );
+}
+
+/** 05 Let Voicetypr hear you and type for you: the microphone and Accessibility, one row each. */
 export function PermissionsStep({
   permissions,
-  checkingPermissions,
   isRequestingPermission,
-  onCheck,
   onRequest,
-  types = ["microphone", "accessibility"],
 }: {
   permissions: { microphone: PermissionState; accessibility: PermissionState };
-  checkingPermissions: Set<string>;
   isRequestingPermission: string | null;
-  onCheck: (type: "microphone" | "accessibility") => void | Promise<void>;
-  onRequest: (type: "microphone" | "accessibility") => void | Promise<void>;
-  types?: ("microphone" | "accessibility")[];
+  onRequest: (type: Kind) => void | Promise<void>;
 }) {
+  const action = (type: Kind) => {
+    const status = permissions[type].status;
+    if (status === "granted") return <Tag>Allowed</Tag>;
+    return (
+      <SecondaryButton
+        disabled={status === "checking" || isRequestingPermission === type}
+        onClick={() => void onRequest(type)}
+      >
+        {status === "checking" ? "Checking…"
+          : status !== "not_determined" ? "Open System Settings"
+          : type === "microphone" ? "Allow microphone"
+          : "Enable Accessibility"}
+      </SecondaryButton>
+    );
+  };
   return (
-    <SettingsPaneCard className="w-full !px-[18px] !py-1">
-      {types.map((type) => {
-        const allowed = permissions[type].status === "granted";
-        const Icon = type === "microphone" ? Mic : Keyboard;
-        return (
-          <div
-            key={type}
-            className="flex items-center gap-[14px] border-b border-border py-[14px] first:min-h-[92px] last:border-0"
-          >
-            <span
-              className={`flex size-[34px] shrink-0 items-center justify-center rounded-[9px] ${allowed ? "bg-sage-bg" : "bg-muted"}`}
-            >
-              <Icon className="size-[18px] text-sage" />
-            </span>
-            <div className="flex-1 space-y-0.5">
-              <h3 className="text-sm leading-[normal] font-semibold">
-                {type === "microphone" ? "Microphone" : "Accessibility"}
-              </h3>
-              <p className="text-[12.5px] leading-[normal] text-muted-foreground">
-                {type === "microphone"
-                  ? "So Voicetypr can hear you."
-                  : "So your words can be typed into any app."}
-              </p>
-              {type === "accessibility" && !allowed && (
-                <p className="mt-1 text-xs text-muted-foreground">Switch on Voicetypr in the list, then come back.</p>
-              )}
-            </div>
-            {allowed ? (
-              <button
-                type="button"
-                className="flex items-center gap-[5px] rounded-full bg-sage-bg px-[9px] py-[3px] text-[11.5px] font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-                disabled={checkingPermissions.has(type)}
-                onClick={() => void onCheck(type)}
-                aria-label={`Allowed — recheck ${type}`}
-              >
-                <span className="size-1.5 rounded-full bg-sage" />
-                Allowed
-              </button>
-            ) : (
-              <Button
-                className="h-auto rounded-[10px] px-4 py-[9px] text-sm"
-                disabled={permissions[type].status === "checking" || isRequestingPermission === type || checkingPermissions.has(type)}
-                onClick={() => void onRequest(type)}
-              >
-                {permissions[type].status === "checking" ? "Checking…"
-                  : type === "accessibility" ? (permissions[type].status === "not_determined" ? "Enable Accessibility" : "Open System Settings")
-                  : permissions[type].status === "not_determined" ? "Allow microphone"
-                  : "Open System Settings"}
-              </Button>
-            )}
-          </div>
-        );
-      })}
-    </SettingsPaneCard>
+    <div className="flex flex-col self-stretch overflow-hidden rounded-[14px] border border-border bg-card">
+      <Row icon={Mic} title="Microphone" action={action("microphone")}>
+        {permissions.microphone.status === "granted"
+          ? <Listening />
+          : <p className="text-[14.5px] text-muted-foreground">So Voicetypr can hear you.</p>}
+      </Row>
+      <Row icon={Accessibility} title="Accessibility" action={action("accessibility")}>
+        <p className="text-[14.5px] text-muted-foreground">So your words can be typed into any app.</p>
+      </Row>
+    </div>
   );
 }

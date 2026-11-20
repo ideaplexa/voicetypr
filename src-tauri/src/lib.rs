@@ -641,6 +641,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
             recording::onboarding_try::discard_leftovers(app.handle());
+            recording::file_jobs::initialize_temp_dir(&app.config().identifier);
             if let Ok(store) = app.store("settings") {
                 ai::builtin::default_on_for_fresh_install(&store);
             }
@@ -1281,6 +1282,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             start_recording,
             stop_recording,
             commands::recording_toggle::toggle_recording,
+            commands::recording_toggle::in_app_escape,
             cancel_recording,
             get_current_recording_state,
             save_transcription,
@@ -1378,6 +1380,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             save_image_to_file,
             copy_text_to_clipboard,
             commands::original::copy_last_original,
+            commands::dictionary_suggestions::update_transcription_text,
+            commands::dictionary_suggestions::list_dictionary_suggestions,
+            commands::dictionary_suggestions::set_dictionary_suggestion_status,
             get_ai_settings,
             get_ai_settings_for_provider,
             ai::starting_style::polish_can_run,

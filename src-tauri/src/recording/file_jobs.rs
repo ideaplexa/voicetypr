@@ -2,6 +2,7 @@
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::{Duration, SystemTime},
 };
 
@@ -9,6 +10,23 @@ use super::kept::{protect_path, ProtectedPath};
 
 const MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const TEMP_PREFIX: &str = "voicetypr-audio-";
+static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set before any audio work. Dev and installed builds share the OS temp
+/// folder, so each build keeps its temporary audio in a folder named after its
+/// own identifier, and sweeps and Reset never look outside it.
+pub fn initialize_temp_dir(identifier: &str) {
+    let _ = TEMP_DIR.set(std::env::temp_dir().join(identifier));
+}
+
+/// This build's temporary audio folder. Tests and callers before startup
+/// initialization use a folder no installed build writes to.
+pub fn temp_dir() -> PathBuf {
+    TEMP_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| std::env::temp_dir().join("voicetypr-uninitialized"))
+}
 
 pub(crate) struct TempAudio {
     path: tempfile::TempPath,
@@ -17,7 +35,8 @@ pub(crate) struct TempAudio {
 
 impl TempAudio {
     pub fn new() -> std::io::Result<Self> {
-        let dir = std::env::temp_dir();
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir)?;
         let name = format!("{TEMP_PREFIX}{}", uuid::Uuid::new_v4());
         // Register before creation so reset cannot race this new file's lease.
         let lease = protect_path(&dir.join(format!("{name}.wav")));
@@ -189,13 +208,7 @@ pub fn sweep(
 pub async fn startup(data: PathBuf) {
     let _ = tauri::async_runtime::spawn_blocking(move || {
         let _ = super::kept::with_protected_paths(|protected| {
-            sweep(
-                &data,
-                &std::env::temp_dir(),
-                protected,
-                SystemTime::now(),
-                false,
-            )
+            sweep(&data, &temp_dir(), protected, SystemTime::now(), false)
         });
     })
     .await;

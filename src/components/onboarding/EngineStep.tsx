@@ -1,32 +1,29 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Button } from "@/components/settings/SettingsButton";
+import { FrameHeading, PrimaryButton, machine } from "@/components/onboarding/Frame";
 import { ReadinessCloudPanel } from "@/components/onboarding/ReadinessCloudPanel";
 import { ReadinessLocalPanel } from "@/components/onboarding/ReadinessLocalPanel";
 import { ReadinessRemotePanel } from "@/components/onboarding/ReadinessRemotePanel";
 import type { SourceType } from "@/components/onboarding/onboardingTypes";
-import { isMacOS } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 
 const COPY: Record<SourceType, [string, string]> = {
-  local: [
-    "Choose your model",
-    "Runs on this " + (isMacOS ? "Mac" : "PC") + ": downloaded once, private, works offline.",
+  local: [`Choose a model for this ${machine}`, `It runs here, so your audio never leaves this ${machine}.`],
+  cloud: [
+    "Choose a cloud provider",
+    `Your audio goes to the provider you pick. Your key is stored securely on this ${machine} and sent only to them.`,
   ],
-  cloud: ["Choose your cloud provider", "Add your key from that provider. Your audio goes to that provider."],
-  remote: [
-    "Choose the computer",
-    "A Mac or PC running Voicetypr with sharing on. Use only on a trusted network: audio and transcripts travel unencrypted.",
-  ],
+  remote: ["Use another computer on your network", "Use only on a trusted network: audio and transcripts travel unencrypted."],
 };
 
-/** The engine for the place chosen on the step before: models, providers or computers. */
+/** 04, 04b and 04c: the engine for the place chosen on 02. */
 export function EngineStep({
   sourceType,
   local,
   cloud,
   remote,
   warning,
+  ready,
   busy,
-  onBack,
   onNext,
 }: {
   sourceType: SourceType;
@@ -35,25 +32,23 @@ export function EngineStep({
   remote: ComponentProps<typeof ReadinessRemotePanel>;
   /** A model that doesn't support the chosen language asks before downloading. */
   warning: ReactNode;
+  /** Whether an engine is chosen; a local model may still be downloading. */
+  ready: boolean;
   busy: boolean;
-  onBack: () => void;
   onNext: () => void;
 }) {
-  const [title, lede] = COPY[sourceType];
+  const [title, line] = COPY[sourceType];
+  const downloading = sourceType === "local" && !local.localReady && !!local.preparing && local.downloadProgress[local.preparing] !== undefined;
   return (
-    <section className="flex w-full flex-col items-center gap-[18px]">
-      <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">{title}</h2>
-      <p className="text-center text-sm text-muted-foreground">{lede}</p>
-      <div className="w-full">
-        {sourceType === "local" && <ReadinessLocalPanel {...local} />}
-        {sourceType === "cloud" && <ReadinessCloudPanel {...cloud} />}
-        {sourceType === "remote" && <ReadinessRemotePanel {...remote} />}
-      </div>
+    <section className={cn("flex flex-col items-center", sourceType === "local" ? "w-[640px] gap-[26px]" : "w-[600px] gap-[30px]")}>
+      <FrameHeading title={title} line={line} />
+      {sourceType === "local" && <ReadinessLocalPanel {...local} />}
+      {sourceType === "cloud" && <ReadinessCloudPanel {...cloud} />}
+      {sourceType === "remote" && <ReadinessRemotePanel {...remote} />}
       {warning}
-      <div className="flex flex-wrap justify-center gap-[10px]">
-        <Button variant="outline" disabled={busy} onClick={onBack}>Back</Button>
-        <Button disabled={busy} onClick={onNext}>Continue</Button>
-      </div>
+      <PrimaryButton disabled={busy || !ready} onClick={onNext}>
+        {downloading ? "Continue while it downloads" : "Continue"}
+      </PrimaryButton>
     </section>
   );
 }

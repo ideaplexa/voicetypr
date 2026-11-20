@@ -1,28 +1,22 @@
 //! Only an active trial or a license turns speech into text. The desktop
 //! recording gate lives in `recording/island.rs`; these cover the CLI and a
 //! computer sharing its engine on the network.
-use crate::commands::audio::{recording_license_state, RecordingLicenseState};
+#[cfg(test)]
+use crate::commands::audio::recording_license_state;
+use crate::commands::audio::RecordingLicenseState;
+#[cfg(test)]
 use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
+#[cfg(test)]
 use crate::license::LicenseStatus;
 use tauri::{AppHandle, Manager};
 
 pub(crate) const NO_ACCESS: &str =
     "Voicetypr needs an active trial or license to transcribe. Start your free trial or add a license key in the app.";
 
+#[cfg(test)]
 fn status_allows(status: LicenseStatus) -> bool {
     recording_license_state(&RuntimeLicenseCache::Ready(CachedLicense::new(status)))
         == RecordingLicenseState::Ready
-}
-
-/// Checks the license now; a failed check never grants access.
-pub(crate) async fn require_for_cli(app: &AppHandle) -> Result<(), String> {
-    crate::license::trial_clock::observe(app);
-    let status = crate::commands::license::check_license_status(app.clone()).await?;
-    if status_allows(status) {
-        Ok(())
-    } else {
-        Err(NO_ACCESS.to_string())
-    }
 }
 
 /// Whether this computer may transcribe audio another computer sent it.
