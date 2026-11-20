@@ -1,66 +1,50 @@
-import { Button } from "@/components/settings/SettingsButton";
-import { Card } from "@/components/ui/card";
-import { MESSY, PLAIN } from "@/components/onboarding/TryStep";
+import { FrameHeading, PrimaryButton, QuietButton } from "@/components/onboarding/Frame";
+import { ProofPair } from "@/components/onboarding/Proof";
 import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
-import { cn } from "@/lib/utils";
-import { CircleCheck } from "lucide-react";
-import type { ReactNode } from "react";
+import { RotateCcw } from "lucide-react";
 
-/**
- * The First try's result. Polish does not run on the try yet, so the cleaned
- * side is always the labelled example, never presented as their own words.
- */
+/** 09 That’s you, cleaned up; 09b word for word when Polish didn’t run. */
 export function ResultStep({
   result,
-  polishAvailable,
+  polishOn,
   onTryAgain,
-  onBack,
   onNext,
 }: {
-  /** Null when they skipped the try or had no tries left. */
-  result: FirstDictation | null;
-  polishAvailable: boolean;
+  result: FirstDictation;
+  /** Polish is switched on, though it may not have run on this try. */
+  polishOn: boolean;
   onTryAgain: () => void;
-  onBack: () => void;
   onNext: () => void;
 }) {
   return (
-    <section className="flex w-full flex-col items-center gap-[18px] text-center">
-      <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        {result ? "That’s your voice, as text" : "Here’s what a dictation looks like"}
-      </h2>
-      <div className={cn("grid w-full gap-3 text-left", polishAvailable && "sm:grid-cols-2")}>
-        <Pane label={result ? "What Voicetypr heard" : "Example: what you said"} highlight={Boolean(result)}>
-          {result ? result.heard : polishAvailable ? MESSY : PLAIN}
-        </Pane>
-        {polishAvailable ? (
-          <Pane label="Example: what Polish makes of a messy sentence">{PLAIN}</Pane>
-        ) : null}
-      </div>
-      {result ? (
-        <p role="status" className="flex items-center gap-2 text-[12.5px] font-medium text-muted-foreground">
-          <CircleCheck className="size-4 text-sage" />
-          Worked · {result.words} {result.words === 1 ? "word" : "words"} · exactly what the engine heard
-        </p>
-      ) : null}
-      {polishAvailable ? (
-        <p className="max-w-[480px] text-[12.5px] text-muted-foreground">
-          Polish didn’t run on this try. The cleaned text is an example.
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center justify-center gap-[10px]">
-        <Button variant="ghost" onClick={result ? onTryAgain : onBack}>{result ? "Try again" : "Back"}</Button>
-        <Button onClick={onNext}>Continue</Button>
+    <section className="flex w-[720px] flex-col items-center gap-7">
+      {result.polished ? (
+        <FrameHeading title="That’s you, cleaned up" line="Your words as you said them, and what Voicetypr made of them." />
+      ) : (
+        <FrameHeading
+          title="That’s you, word for word"
+          line={polishOn
+            ? "Polish didn’t run on this try, so there was no AI clean-up. Here is what landed in your note."
+            : "Polish is off, so there was no AI clean-up. Here is what landed in your note."}
+        />
+      )}
+      {/* The pill's done state (PillPreview from #174) goes in this slot. */}
+      <div aria-hidden="true" className="h-[41px] w-[283px]" />
+      {result.polished ? (
+        <ProofPair raw={result.heard} clean={result.typed} />
+      ) : (
+        <div className="flex flex-col items-start gap-3 self-stretch rounded-[14px] bg-secondary px-[22px] py-5">
+          <span className="text-[13.5px] leading-[1.2] font-semibold text-muted-foreground">You said</span>
+          <p className="self-stretch text-base leading-[1.5] whitespace-pre-wrap text-foreground">{result.heard}</p>
+        </div>
+      )}
+      <div className="flex items-center gap-3.5">
+        <QuietButton onClick={onTryAgain}>
+          <RotateCcw aria-hidden="true" className="size-[15px]" />
+          Try again
+        </QuietButton>
+        <PrimaryButton onClick={onNext}>Continue</PrimaryButton>
       </div>
     </section>
-  );
-}
-
-function Pane({ label, highlight, children }: { label: string; highlight?: boolean; children: ReactNode }) {
-  return (
-    <Card className={cn("min-h-[120px] gap-2 px-[18px] py-4", highlight && "outline-[1.5px] outline-sage -outline-offset-1")}>
-      <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">{label}</span>
-      <p className="text-[16px] leading-[24px] text-foreground">{children}</p>
-    </Card>
   );
 }

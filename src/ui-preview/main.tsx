@@ -7,7 +7,7 @@ import type { Step } from "@/components/onboarding/onboardingTypes";
 import { installPreviewPlatform } from "./platform";
 
 const query = new URLSearchParams(location.search);
-const STEPS: Step[] = ["promise", "source", "language", "engine", "permissions", "shortcut", "polish", "try", "result", "fork", "buy", "trial", "done"];
+const STEPS: Step[] = ["promise", "source", "language", "engine", "permissions", "shortcut", "polish", "try", "result", "fork", "tour", "buy", "trial", "done"];
 // The numbered phases of the previous onboarding still open its nearest step.
 const LEGACY: Record<string, Step> = { "1": "promise", "2": "permissions", "3": "buy", setup: "permissions" };
 const onboardingParam = query.get("onboarding") ?? "";
@@ -37,6 +37,7 @@ mockIPC(
     if (command.startsWith("plugin:event|")) return null;
     if (command === "start_trial" && onboardingCase === "offline") throw "trial_unreachable";
     if (command === "activate_license" && onboardingCase === "key-error") throw "Invalid license key";
+    if (command === "check_license_status" && onboardingCase === "check-failed") throw "error sending request";
     if (Object.prototype.hasOwnProperty.call(fixtures, command)) return fixtures[command];
     if (!unknown.has(command)) {
       unknown.add(command);
@@ -46,6 +47,9 @@ mockIPC(
   },
   { shouldMockEvents: true },
 );
+
+// Screenshot scripts drive the first try's shortcut through the app's own event.
+(window as unknown as { __previewEmit: typeof emit }).__previewEmit = emit;
 
 // Platform and IPC must exist before modules with module-level Tauri reads load.
 await import("@/main");

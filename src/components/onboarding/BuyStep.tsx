@@ -1,71 +1,75 @@
-import { Button } from "@/components/settings/SettingsButton";
-import { FounderLine } from "@/components/onboarding/FounderLine";
-import { isMacOS } from "@/lib/platform";
-import { Check } from "lucide-react";
+import { PrimaryButton, QuietButton, SecondaryButton, Tag, machine } from "@/components/onboarding/Frame";
+import type { SourceType } from "@/components/onboarding/onboardingTypes";
+import { EXAMPLE, ProofPair } from "@/components/onboarding/Proof";
+import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
+import { AppWindow, ArrowUpRight, BadgeCheck, Cloud, KeyRound, Lock, Network, Sparkles, type LucideIcon } from "lucide-react";
 
-const machine = isMacOS ? "Mac" : "PC";
-
-/** What a license gives, from what the license gate covers in the app. */
-export const BUY_FEATURES = [
-  "Dictation in every app on this " + machine,
-  "Every on-device model, and your own cloud keys",
-  "Network sharing with your other computers",
-  "The command line: transcribe files and record from the terminal",
-  "Direct help from Moinul, who reads every email",
-];
-
-/** The last screen before Done, after the first try: buy, or start the trial. */
+/** 11 Buy Voicetypr (11b cloud engine, 11c another computer): the proof, four outcomes, Buy now, then the trial. */
 export function BuyStep({
-  trialEnded,
+  result,
+  source,
   pending,
   onBuy,
   onStartTrial,
   onHaveKey,
-  onBack,
-  onDecideLater,
 }: {
-  /** This device already used its trial, so only buying or a key can unlock it. */
-  trialEnded: boolean;
+  /** Their first try, or null when it was skipped or used up. */
+  result: FirstDictation | null;
+  source: SourceType;
   pending: boolean;
   onBuy: () => void;
   /** Goes to the name and email page. */
   onStartTrial: () => void;
   onHaveKey: () => void;
-  onBack: () => void;
-  onDecideLater: () => void;
 }) {
+  const ownWords = result !== null && !result.polished;
+  const outcomes: [LucideIcon, string][] = [
+    [AppWindow, "Works in every app you type in"],
+    [Sparkles, ownWords ? "Turn on Polish: messy speech lands clean" : "Messy speech lands clean, no AI key"],
+    source === "cloud" ? [Cloud, "Your chosen cloud engine, your own key"]
+      : source === "remote" ? [Network, "Runs on your other computer’s engine"]
+      : [Lock, `Private: runs on your ${machine}, works offline`],
+    [BadgeCheck, "One payment, yours to keep"],
+  ];
   return (
-    <section className="flex w-full flex-col items-center gap-5 text-center">
-      <h2 className="text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">Keep Voicetypr</h2>
-      {trialEnded ? (
-        <p className="max-w-[480px] text-sm text-muted-foreground">
-          This {machine}’s free week has been used. Buy Voicetypr, or activate a key you already have, to keep dictating.
-        </p>
-      ) : null}
-      <ul className="flex flex-col gap-2.5 text-left">
-        {BUY_FEATURES.map((feature) => (
-          <li key={feature} className="flex items-start gap-2 text-sm">
-            <Check className="mt-0.5 size-4 shrink-0 text-sage" />
-            {feature}
+    <section className="flex w-[780px] flex-col items-center gap-[30px]">
+      <h2 className="text-center text-[36px] leading-[1.2] font-semibold tracking-[-0.9px] text-foreground">
+        Keep talking like that, everywhere
+      </h2>
+      {result?.polished ? (
+        <ProofPair raw={result.heard} clean={result.typed} size="lg" />
+      ) : ownWords ? (
+        <div className="flex flex-col items-start gap-3 self-stretch rounded-2xl border-[1.5px] border-sage bg-card px-[22px] py-5">
+          <span className="text-sm leading-[1.2] font-semibold text-sage">You said it. Voicetypr typed it.</span>
+          <p className="self-stretch text-lg leading-[1.45] font-medium whitespace-pre-wrap text-foreground">{result.heard}</p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 self-stretch">
+          <Tag tone="plain">Example of Polish</Tag>
+          <ProofPair raw={EXAMPLE.raw} dropped={EXAMPLE.dropped} clean={EXAMPLE.clean} rawLabel="You say" cleanLabel="It lands" size="sm" arrow />
+        </div>
+      )}
+      <ul className="grid grid-cols-2 gap-x-6 gap-y-4 self-stretch px-6">
+        {outcomes.map(([Icon, text]) => (
+          <li key={text} className="flex items-center gap-3 text-[17px] font-medium text-foreground">
+            <Icon aria-hidden="true" className="size-[22px] shrink-0 text-sage" />
+            {text}
           </li>
         ))}
       </ul>
-      <div className="flex w-full max-w-[320px] flex-col gap-[10px]">
-        <Button size="lg" disabled={pending} onClick={onBuy}>Buy now</Button>
-        {trialEnded ? null : (
-          <Button size="lg" variant="outline" disabled={pending} onClick={onStartTrial}>Start 7-day trial</Button>
-        )}
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Already bought it?{" "}
-        <button type="button" disabled={pending} className="font-medium text-foreground underline underline-offset-2 disabled:opacity-50" onClick={onHaveKey}>
-          I have a key
-        </button>
-      </p>
-      <FounderLine />
-      <div className="flex gap-[10px]">
-        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={pending} onClick={onBack}>Back</Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={pending} onClick={onDecideLater}>Decide later</Button>
+      <div className="flex flex-col items-center gap-3">
+        <PrimaryButton size="lg" className="w-[340px]" disabled={pending} onClick={onBuy}>
+          Buy now
+          <ArrowUpRight aria-hidden="true" className="size-[17px]" />
+        </PrimaryButton>
+        <SecondaryButton className="w-[340px]" disabled={pending} onClick={onStartTrial}>Start 7-day trial · No card</SecondaryButton>
+        <div className="flex items-center gap-4">
+          <QuietButton disabled={pending} onClick={onHaveKey}>
+            <KeyRound aria-hidden="true" className="size-[15px]" />
+            I have a key
+          </QuietButton>
+          <p className="text-sm text-muted-foreground">Made by Moinul. I read every email.</p>
+        </div>
       </div>
     </section>
   );

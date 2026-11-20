@@ -18,6 +18,7 @@ import { findActivePrimaryBinding } from "@/lib/shortcut-display";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { ScreenId } from "@/components/navigation";
 import type {
   ModifierKind,
   ModifierSide,
@@ -32,6 +33,7 @@ import type { StartingPolishStyle } from "@/components/onboarding/PolishStep";
 const defaultHotkey = () => (isMacOS ? "Alt+Space" : "Control+Space");
 
 const log = createLogger("onboarding");
+const REACHED_BUY = "onboarding_reached_buy";
 const NO_DOWNLOAD_ERRORS: Readonly<Record<string, string>> = Object.freeze({});
 
 export function useOnboardingDesktop({
@@ -74,14 +76,18 @@ export function useOnboardingDesktop({
     isLoading,
   } = modelManagement;
 
-  const [currentStep, setCurrentStep] = useState<Step>(previewStep ?? "promise");
+  // Closed at Buy or the trial page: the next launch reopens at Buy.
+  const [currentStep, setCurrentStep] = useState<Step>(() =>
+    previewStep ?? (localStorage.getItem(REACHED_BUY) ? "buy" : "promise"),
+  );
+  useEffect(() => {
+    if (currentStep === "buy" || currentStep === "trial") localStorage.setItem(REACHED_BUY, "true");
+  }, [currentStep]);
   // The steps in order: the essentials, Polish, the first try and its result,
   // a fork (go deeper or done for now), then Buy, and the trial's name and
-  // email only after "Start 7-day trial". The dots count the shape the licence
-  // started with; a step that no longer applies is skipped.
-  const [shape, setShape] = useState<{ trial: boolean } | null>(null);
-  if (shape === null && licenseStatus != null) setShape({ trial: needsTrial });
+  // email only after "Start 7-day trial". A step that no longer applies is skipped.
   const [wantsTrial, setWantsTrial] = useState(false);
+  const [wantsTour, setWantsTour] = useState(false);
   const steps: Step[] = [
     "promise",
     "source",
@@ -93,13 +99,14 @@ export function useOnboardingDesktop({
     "try",
     "result",
     "fork",
+    "tour",
     "buy",
     "trial",
     "done",
   ];
   const paid = (step: Step) => step === "buy" || step === "trial";
-  const skipped = (step: Step) => (paid(step) && !needsTrial) || (step === "trial" && !wantsTrial);
-  const dots = steps.filter((step) => !paid(step) || (shape?.trial ?? needsTrial));
+  const skipped = (step: Step) =>
+    (paid(step) && !needsTrial) || (step === "trial" && !wantsTrial) || (step === "tour" && !wantsTour);
   const walk = (from: Step, by: 1 | -1): Step => {
     for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
       if (!skipped(steps[i])) return steps[i];
@@ -112,7 +119,6 @@ export function useOnboardingDesktop({
   const [telemetryOptIn, setTelemetryOptIn] = useState(false);
   // Asked once: only when no sharing choice is stored; unknown after a failed read.
   const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
-  const [accessibilitySkipped, setAccessibilitySkipped] = useState(false);
   const [sourceType, setSourceType] = useState<SourceType>(() =>
     isCloudEngine(settings?.current_model_engine ?? "") ? "cloud" : "local",
   );
@@ -121,7 +127,6 @@ export function useOnboardingDesktop({
   const [capturedBareModifier, setCapturedBareModifier] = useState<BareModifierSpec | null>(null);
   const [isRequestingPermission, setIsRequestingPermission] = useState<string | null>(null);
   const [accessibilityRequested, setAccessibilityRequested] = useState(false);
-  const [checkingPermissions, setCheckingPermissions] = useState<Set<string>>(new Set());
   const [remoteServers, setRemoteServers] = useState<SavedConnection[]>([]);
   const [activeRemoteServerId, setActiveRemoteServerId] = useState<string | null>(null);
   const [isLoadingRemoteServers, setIsLoadingRemoteServers] = useState(false);
@@ -344,26 +349,6 @@ export function useOnboardingDesktop({
     setSourceType(nextSourceType);
   };
 
-  const checkSinglePermission = async (type: "microphone" | "accessibility") => {
-    setCheckingPermissions((prev) => new Set(prev).add(type));
-
-    try {
-      if (type === "microphone") {
-        await checkMicPermission();
-      } else {
-        await checkAccessPermission();
-      }
-    } catch (error) {
-      log.error(`Failed to check ${type} permission:`, error);
-    } finally {
-      setCheckingPermissions((prev) => {
-        const next = new Set(prev);
-        next.delete(type);
-        return next;
-      });
-    }
-  };
-
   const requestPermission = async (type: "microphone" | "accessibility") => {
     setIsRequestingPermission(type);
     try {
@@ -425,9 +410,9 @@ export function useOnboardingDesktop({
     }
   };
 
-  const switchToLocalReadiness = () => {
-    confirmSource("local");
-  };
+  // A selection still on its way to the backend would land after a change of
+  // source, so Back and Continue wait for it.
+  const [selectingRemote, setSelectingRemote] = useState(false);
 
   const selectRemoteServer = async (serverId: string) => {
     const server = remoteServers.find((candidate) => candidate.id === serverId);
@@ -436,7 +421,12 @@ export function useOnboardingDesktop({
       return;
     }
 
-    await invoke("set_active_remote_server", { serverId });
+    setSelectingRemote(true);
+    try {
+      await invoke("set_active_remote_server", { serverId });
+    } finally {
+      setSelectingRemote(false);
+    }
     setActiveRemoteServerId(serverId);
     confirmSource("remote");
     toast.success("Remote Voicetypr selected");
@@ -458,10 +448,13 @@ export function useOnboardingDesktop({
       ),
     );
     setActiveRemoteServerId(server.id);
-    void invoke("set_active_remote_server", { serverId: server.id }).catch((error) => {
-      log.error("[OnboardingDesktop] Failed to activate remote server:", error);
-      toast.error("Remote Voicetypr was added, but could not be selected");
-    });
+    setSelectingRemote(true);
+    void invoke("set_active_remote_server", { serverId: server.id })
+      .catch((error) => {
+        log.error("[OnboardingDesktop] Failed to activate remote server:", error);
+        toast.error("Remote Voicetypr was added, but could not be selected");
+      })
+      .finally(() => setSelectingRemote(false));
     confirmSource("remote");
     void loadRemoteServers();
   };
@@ -575,7 +568,7 @@ export function useOnboardingDesktop({
     await updateSettings({ transcription_acceleration: checked ? "auto" : "cpu" });
   };
 
-  const completeOnboarding = async () => {
+  const completeOnboarding = async (open?: ScreenId) => {
     setIsSavingCompletion(true);
     onCompletionStart?.();
     try {
@@ -595,7 +588,8 @@ export function useOnboardingDesktop({
         // choices themselves have already been persisted successfully.
         log.error("Failed to record onboarding completion:", analyticsError);
       }
-      onComplete();
+      localStorage.removeItem(REACHED_BUY);
+      onComplete(open);
     } catch (error) {
       onCompletionError?.();
       log.error("Failed to complete onboarding:", error);
@@ -645,9 +639,6 @@ export function useOnboardingDesktop({
     setCurrentStep(after("polish"));
   };
 
-  // Reached from the first try: the engine step's Continue goes straight back there.
-  const [sourceFromTry, setSourceFromTry] = useState(false);
-
   const handleNext = async () => {
     try {
 
@@ -658,8 +649,7 @@ export function useOnboardingDesktop({
           else startPreparing();
         }
         await leaveSource();
-        setCurrentStep(sourceFromTry ? "try" : after("engine"));
-        setSourceFromTry(false);
+        setCurrentStep(after("engine"));
         return;
       }
 
@@ -691,8 +681,7 @@ export function useOnboardingDesktop({
         toast.error("Couldn’t switch where dictation runs. Try again.");
         return;
       }
-      setCurrentStep(sourceFromTry ? "try" : before("source"));
-      setSourceFromTry(false);
+      setCurrentStep(before("source"));
       return;
     }
     setCurrentStep(before(currentStep));
@@ -704,7 +693,7 @@ export function useOnboardingDesktop({
       case "engine":
         return !preparation.savingLanguage;
       case "permissions":
-        return !isMacOS || accessibilitySkipped || permissions.accessibility.status === "granted";
+        return !isMacOS || permissions.microphone.status === "granted";
       case "shortcut":
         return !isEditingHotkey;
       default:
@@ -712,7 +701,7 @@ export function useOnboardingDesktop({
     }
   };
 
-  const nextDisabled = !canProceed();
+  const nextDisabled = selectingRemote || !canProceed();
 
   return {
     currentStep,
@@ -723,21 +712,12 @@ export function useOnboardingDesktop({
     preparation,
     sourceReady,
     confirmSource,
-    dots,
-    // A step outside the dots (re-entered later) shows the dot of the step before it.
-    dotIndex: Math.max(0, dots.filter((step) => steps.indexOf(step) <= steps.indexOf(currentStep)).length - 1),
     after,
-    chooseSourceFromTry: () => {
-      setSourceFromTry(true);
-      setCurrentStep("source");
+    /** The fork after the result: the tour, or straight on. */
+    leaveFork: (deeper: boolean) => {
+      setWantsTour(deeper);
+      setCurrentStep(deeper ? "tour" : walk("tour", 1));
     },
-    // Skip saves nothing, so the screens go back to what is saved.
-    skipSetup: () => {
-      setHoldToTalk(settings?.recording_mode === "push_to_talk");
-      setCurrentStep(after("shortcut"));
-    },
-    /** The fork after the result. The deeper steps are not built yet, so both ways go on. */
-    leaveFork: () => setCurrentStep(after("fork")),
     /** From Buy: the name and email page that starts the trial. */
     chooseTrial: () => {
       setWantsTrial(true);
@@ -746,15 +726,15 @@ export function useOnboardingDesktop({
     handleBack,
     handleNext,
     nextDisabled,
+    selectingRemote,
     permissions,
-    checkingPermissions,
     isRequestingPermission,
-    checkSinglePermission,
     requestPermission,
     ensureMicrophone,
     local: {
       localModelNames,
       recommendedModel: preparation.bestMatch,
+      preparing: preparation.name,
       language: preparation.language,
       models,
       downloadProgress,
@@ -803,9 +783,7 @@ export function useOnboardingDesktop({
       isLoadingRemoteServers,
       showAddRemoteModal,
       selectedDiscoveredServer,
-      onLoadRemoteServers: () => {
-        void loadRemoteServers();
-      },
+      onLoadRemoteServers: loadRemoteServers,
       onOpenAddServer: () => {
         setSelectedDiscoveredServer(null);
         setShowAddRemoteModal(true);
@@ -816,7 +794,6 @@ export function useOnboardingDesktop({
       onSelectRemote: (serverId: string) => {
         void selectRemoteServer(serverId);
       },
-      onSwitchToLocal: switchToLocalReadiness,
       onServerAdded: handleRemoteServerAdded,
       onAddModalOpenChange: (open: boolean) => {
         setShowAddRemoteModal(open);
@@ -840,8 +817,6 @@ export function useOnboardingDesktop({
       setHotkey("");
     },
     onHoldToTalkChange: setHoldToTalk,
-    accessibilitySkipped,
-    skipAccessibility: () => setAccessibilitySkipped(true),
     saveHotkeySettings,
     telemetryOptIn,
     consentRequired,

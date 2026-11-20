@@ -1,19 +1,18 @@
-import { EmptyState, LoadingState } from "@/components/onboarding/OnboardingChrome";
 import { failureReason } from "@/components/onboarding/OfflinePreparationStatus";
 import { supportsSpokenLanguage } from "@/components/onboarding/useOfflinePreparation";
-import { SettingsPaneCard } from "@/components/settings/settings-ui";
-import { Button } from "@/components/settings/SettingsButton";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Radio, Tag } from "@/components/onboarding/Frame";
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { cn } from "@/lib/utils";
+import { isMacOS } from "@/lib/platform";
 import { isLocalModel, type ModelInfo, type TranscriptionAcceleration } from "@/types";
-import { CircleCheck } from "lucide-react";
+import { Download } from "lucide-react";
 
 export interface ReadinessLocalPanelProps {
   localModelNames: string[];
   recommendedModel: string | undefined;
-  /** The spoken language: "Most accurate" and "Fastest" rank only the models that support it. */
+  /** The model being prepared for this computer, while it downloads. */
+  preparing: string | null | undefined;
+  /** The spoken language: models that don't support it say so. */
   language: string;
   models: Record<string, ModelInfo>;
   downloadProgress: Record<string, number>;
@@ -31,24 +30,28 @@ export interface ReadinessLocalPanelProps {
   onGpuToggle: (checked: boolean) => void;
 }
 
-/** What a model is good for, in the app's own terms: its scores, size and languages. */
-function strengths(model: ModelInfo, others: ModelInfo[], language: string) {
-  const fits = others.filter((other) => supportsSpokenLanguage(other, language));
-  const ranked = supportsSpokenLanguage(model, language);
-  const best = (score: (m: ModelInfo) => number) => ranked && fits.every((other) => score(model) >= score(other));
-  const words = [
-    best((m) => m.accuracy_score ?? 0) ? "Most accurate" : null,
-    best((m) => m.speed_score ?? 0) ? "Fastest" : null,
-    others.every((other) => (model.size ?? 0) <= (other.size ?? 0)) ? "Smallest" : null,
-    (model.supported_languages?.length ?? 0) > 1 ? "Many languages" : /\.en$/i.test(model.name) ? "English only" : null,
-  ].filter(Boolean);
-  return words.join(" · ");
-}
+/** The frames' words for each shipped model. */
+const ABOUT: Record<string, string> = {
+  "Parakeet V3": "Many languages",
+  "Parakeet Unified (English)": "English, live words",
+  "Nemotron 3.5": "Many languages, live words",
+  "Parakeet V2 (English)": "English",
+  "Large v3 Turbo": "Many languages",
+  "Large v3": "Many languages, largest",
+  "Small (English)": "English",
+  "Base (English)": "English, smallest",
+};
 
-/** The on-device models, recommended first, each with its download as the control. */
+const size = (bytes: number | undefined) => {
+  const mb = (bytes ?? 0) / (1024 * 1024);
+  return mb >= 1000 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+};
+
+/** 04 Choose a model: every on-device model, recommended first, its download as the control. */
 export function ReadinessLocalPanel({
   localModelNames,
   recommendedModel,
+  preparing,
   language,
   models,
   downloadProgress,
@@ -56,103 +59,97 @@ export function ReadinessLocalPanel({
   downloadErrors,
   currentModel,
   isLoading,
-  hasDownloadedLocalModel,
   localReady,
   transcriptionAcceleration,
   onSelectLocal,
-  onCancelDownload,
   isModelReady,
   onGpuToggle,
 }: ReadinessLocalPanelProps) {
   const names = [
     ...localModelNames.filter((name) => name === recommendedModel),
     ...localModelNames.filter((name) => name !== recommendedModel),
-  ].filter((name) => models[name]);
-  const list = names.map((name) => models[name]).filter(isLocalModel);
+  ].filter((name) => models[name] && isLocalModel(models[name]) && !(isMacOS && models[name].display_name === "Small (English)"));
   return (
-    <div className="flex flex-col gap-3">
-      <SettingsPaneCard className="!px-[18px] !py-1">
+    <div className="flex flex-col gap-3 self-stretch">
+      <div role="radiogroup" aria-label="Model" className="flex flex-col overflow-hidden rounded-[14px] border border-border bg-card">
         {names.map((name) => {
           const model = models[name];
           const ready = isModelReady(name);
-          const inUse = ready && currentModel === name;
           const error = ready ? undefined : downloadErrors[name];
           const verifying = !error && verifyingModels.has(name);
           const progress = error ? undefined : downloadProgress[name];
+          const on = localReady ? currentModel === name : name === preparing;
+          const about = ABOUT[model.display_name] ??
+            ((model.supported_languages?.length ?? 0) > 1 ? "Many languages" : "English");
           return (
-            <div key={name} className="flex flex-col gap-2 border-b border-border py-3.5 last:border-0">
-              <div className="flex items-center gap-3">
-                <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                  <span className="flex items-center gap-2 text-sm font-semibold">
-                    {model.display_name}
-                    {name === recommendedModel ? (
-                      <Badge variant="secondary" className="bg-sage-bg text-sage">Recommended</Badge>
-                    ) : null}
+            <div key={name} className={cn("flex flex-col border-b border-border px-[18px] last:border-b-0", on && "bg-sage-bg")}>
+              <div className="flex h-[52px] items-center gap-3.5">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  aria-label={model.display_name}
+                  onClick={() => onSelectLocal(name)}
+                  className="flex min-w-0 flex-1 items-center gap-3.5 text-left"
+                >
+                  <Radio on={on} />
+                  <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <span className="truncate text-[15px] font-semibold text-foreground">{model.display_name}</span>
+                    {name === recommendedModel ? <Tag>Recommended</Tag> : null}
+                    <span className="truncate text-sm text-muted-foreground">
+                      {supportsSpokenLanguage(model, language) ? about : `${about} · not your language`}
+                    </span>
                   </span>
-                  <span className="text-[13px] text-muted-foreground">
-                    {[strengths(model, list, language), `${Math.round((model.size ?? 0) / (1024 * 1024))} MB`].filter(Boolean).join(" · ")}
-                  </span>
-                </div>
-                {inUse ? (
-                  <span className="flex items-center gap-1.5 text-[13px] font-medium text-sage">
-                    <CircleCheck className="size-4" />In use
-                  </span>
-                ) : ready ? (
-                  <span className="flex items-center gap-3 text-[13px] text-muted-foreground">
-                    Downloaded
-                    <Button variant="outline" size="sm" aria-label={`Use ${model.display_name}`} onClick={() => onSelectLocal(name)}>Use</Button>
-                  </span>
-                ) : verifying ? (
-                  <span className="text-[13px] text-muted-foreground">Checking…</span>
-                ) : progress !== undefined ? (
-                  <span className="flex items-center gap-3 text-[13px] tabular-nums text-muted-foreground">
-                    <span>{Math.round(progress)}%</span>
-                    <Button variant="ghost" size="sm" aria-label={`Cancel downloading ${model.display_name}`} onClick={() => onCancelDownload(name)}>Cancel</Button>
-                  </span>
-                ) : (
-                  <Button size="sm" variant={name === recommendedModel ? "default" : "outline"} aria-label={`${error ? "Retry" : "Download"} ${model.display_name}`} onClick={() => onSelectLocal(name)}>
-                    {error ? "Retry" : "Download"}
-                  </Button>
-                )}
+                </button>
+                <span className="text-sm text-muted-foreground tabular-nums">{size(model.size)}</span>
+                <span className="flex w-[116px] items-center justify-end gap-2">
+                  {ready ? (
+                    <span className="text-[13.5px] text-muted-foreground">{currentModel === name ? "In use" : "Downloaded"}</span>
+                  ) : progress !== undefined || verifying ? (
+                    <>
+                      <span
+                        role="progressbar"
+                        aria-label={`Downloading ${model.display_name}`}
+                        aria-valuenow={verifying ? 100 : Math.round(progress ?? 0)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className={cn("relative h-1.5 w-16 overflow-hidden rounded-[3px] bg-border", verifying && "animate-pulse")}
+                      >
+                        <span className="absolute inset-y-0 left-0 rounded-[3px] bg-sage" style={{ width: `${verifying ? 100 : Math.round(progress ?? 0)}%` }} />
+                      </span>
+                      <span className="text-[13.5px] text-muted-foreground tabular-nums">{verifying ? "100%" : `${Math.round(progress ?? 0)}%`}</span>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label={`${error ? "Retry" : "Download"} ${model.display_name}`}
+                      onClick={() => onSelectLocal(name)}
+                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[13.5px] font-medium text-foreground hover:bg-accent"
+                    >
+                      <Download aria-hidden="true" className="size-3.5" />
+                      {error ? "Retry" : "Download"}
+                    </button>
+                  )}
+                </span>
               </div>
-              {progress !== undefined || verifying ? (
-                <Progress
-                  value={verifying ? 100 : progress ?? null}
-                  aria-label={`Downloading ${model.display_name}`}
-                  className={cn("[&_[data-slot=progress-indicator]]:bg-sage [&_[data-slot=progress-track]]:h-2", verifying && "animate-pulse")}
-                />
-              ) : null}
-              {error ? <p role="alert" className="text-[13px] text-destructive">The download stopped. {failureReason(error)}</p> : null}
+              {error ? <p role="alert" className="pb-3 text-[13px] text-destructive">The download stopped. {failureReason(error)}</p> : null}
             </div>
           );
         })}
-        {isLoading && localModelNames.length === 0 && <LoadingState label="Loading local models" />}
-        {!isLoading && localModelNames.length === 0 && (
-          <EmptyState
-            title="No local models available"
-            description="Choose Cloud or Another computer to continue without a local model."
-          />
-        )}
-        {hasDownloadedLocalModel && !localReady && !names.some((name) => downloadProgress[name] !== undefined) && (
-          <p className="pb-3 text-[13px] text-muted-foreground">Pick a downloaded model to use it.</p>
-        )}
-      </SettingsPaneCard>
+        {isLoading && names.length === 0 ? <p className="px-[18px] py-4 text-sm text-muted-foreground">Loading local models…</p> : null}
+        {!isLoading && names.length === 0 ? (
+          <p className="px-[18px] py-4 text-sm text-muted-foreground">No local models available. Go back to choose Cloud or Another computer.</p>
+        ) : null}
+      </div>
       {models[currentModel ?? ""]?.gpu_controls_available === true && (
-        <SettingsPaneCard className="!p-[18px]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">Use GPU acceleration</p>
-              <p className="text-xs text-muted-foreground">
-                Recommended — uses your graphics card for faster transcription.
-              </p>
-            </div>
-            <Switch
-              checked={(transcriptionAcceleration ?? "auto") !== "cpu"}
-              onCheckedChange={onGpuToggle}
-              aria-label="Use GPU acceleration"
-            />
-          </div>
-        </SettingsPaneCard>
+        <label className="flex items-center justify-between gap-3 rounded-[14px] border border-border bg-card px-[18px] py-3">
+          <span className="text-sm font-medium">Use GPU acceleration</span>
+          <Switch
+            checked={(transcriptionAcceleration ?? "auto") !== "cpu"}
+            onCheckedChange={onGpuToggle}
+            aria-label="Use GPU acceleration"
+          />
+        </label>
       )}
     </div>
   );

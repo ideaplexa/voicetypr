@@ -3,6 +3,7 @@ import type { SavedConnection } from "@/components/RemoteServerCard";
 import type { useModelManagement } from "@/hooks/useModelManagement";
 import { ValidationPresets } from "@/lib/keyboard-normalizer";
 import { isMacOS } from "@/lib/platform";
+import type { ScreenId } from "@/components/navigation";
 import type { LicenseStatus, TrialStartError } from "@/types";
 
 export type Step =
@@ -16,6 +17,7 @@ export type Step =
   | "try"
   | "result"
   | "fork"
+  | "tour"
   | "buy"
   | "trial"
   | "done";
@@ -25,9 +27,12 @@ export interface OnboardingDesktopProps {
   previewStep?: Step;
   onCompletionStart?: () => void;
   onCompletionError?: () => void;
-  onComplete: () => void;
+  /** Opens the app, on the section the tour remembered when there is one. */
+  onComplete: (open?: ScreenId) => void;
   /** The licence as last checked; null when the check has not answered. */
   licenseStatus?: LicenseStatus | null;
+  /** The latest licence check failed, so the status may be stale. */
+  licenseCheckFailed?: boolean;
   onStartTrial?: (name: string, email: string) => Promise<TrialStartError | null>;
   /** Resolves to a message the user can act on, or null once the key is active. */
   onActivateLicense?: (key: string) => Promise<string | null>;

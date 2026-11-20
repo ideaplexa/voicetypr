@@ -215,7 +215,7 @@ describe("LicenseContext", () => {
     await waitFor(() => expect(screen.getByTestId("license-loading").textContent).toBe("false"));
   });
   it.each([
-    ["Invalid license key", "That key isn’t right. Check it against your receipt email and paste it again."],
+    ["Invalid license key", "That key didn’t work. Check it against your receipt email."],
     ["License is already activated on another device", "This key is already in use on another Mac. Deactivate it there first, or write to support@voicetypr.com."],
     ["Maximum number of devices reached", "This key is on as many devices as it covers. Free one up in Manage license, or write to support@voicetypr.com."],
   ])("explains a failed activation (%s) in plain words to the key window, without a toast", async (raw, friendly) => {

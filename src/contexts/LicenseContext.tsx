@@ -30,9 +30,11 @@ const TRIAL_START_ERRORS: readonly TrialStartError[] = [
 interface LicenseContextValue {
   status: LicenseStatus | null;
   isLoading: boolean;
+  /** The last status check failed; the status shown may be stale. */
+  checkFailed: boolean;
   checkStatus: () => Promise<void>;
   revalidateLicense: () => Promise<void>;
-  startTrial: (name: string, email: string) => Promise<TrialStartError | null>;
+  startTrial: (name: string, email: string, options?: { quiet?: boolean }) => Promise<TrialStartError | null>;
   restoreLicense: () => Promise<void>;
   /** Resolves to the error in plain words, or null once the key is active. */
   activateLicense: (key: string, options?: { quiet?: boolean }) => Promise<string | null>;
@@ -76,7 +78,7 @@ const getFriendlyLicenseError = (action: "activate" | "restore", rawMessage?: st
   }
 
   if (lower.includes("invalid license key")) {
-    return "That key isn’t right. Check it against your receipt email and paste it again.";
+    return "That key didn’t work. Check it against your receipt email.";
   }
 
   if (action === "restore" && lower.includes("no license found")) {
@@ -99,6 +101,7 @@ const openPurchasePage = async () => {
 export function LicenseProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [checkFailed, setCheckFailed] = useState(false);
   const latestCheckStatusId = useRef(0);
 
   const checkStatus = useCallback(async () => {
@@ -123,8 +126,10 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
         verification_state: licenseStatus.verification_state,
       });
       setStatus(licenseStatus);
+      setCheckFailed(false);
     } catch (error) {
       if (checkId !== latestCheckStatusId.current) return;
+      setCheckFailed(true);
 
       if (error instanceof Error && error.message === "License status check timed out") {
         toast.error("License status check timed out. Please try again.");
@@ -170,13 +175,13 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const startTrial = useCallback(async (name: string, email: string): Promise<TrialStartError | null> => {
+  const startTrial = useCallback(async (name: string, email: string, options?: { quiet?: boolean }): Promise<TrialStartError | null> => {
     const checkId = ++latestCheckStatusId.current;
     try {
       setIsLoading(true);
       const licenseStatus = await invoke<LicenseStatus>("start_trial", { name, email, noticeVersion: TRIAL_NOTICE_VERSION });
       if (checkId === latestCheckStatusId.current) setStatus(licenseStatus);
-      if (licenseStatus.status === "trial") toast.success("Your free trial has started");
+      if (licenseStatus.status === "trial" && !options?.quiet) toast.success("Your free trial has started");
       return licenseStatus.status === "trial" || licenseStatus.status === "licensed" ? null : "trial_failed";
     } catch (error: unknown) {
       const code = TRIAL_START_ERRORS.find((known) => known === error) ?? "trial_failed";
@@ -205,7 +210,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     try {
       const licenseStatus = await invoke<LicenseStatus>("activate_license", { licenseKey: key });
       setStatus(licenseStatus);
-      toast.success("License activated successfully");
+      if (!options?.quiet) toast.success("License activated successfully");
       return null;
     } catch (error: unknown) {
       const friendly = getFriendlyLicenseError("activate", getErrorMessage(error));
@@ -241,6 +246,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       isLoading,
+      checkFailed,
       checkStatus,
       revalidateLicense,
       startTrial,
@@ -252,6 +258,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     [
       status,
       isLoading,
+      checkFailed,
       checkStatus,
       revalidateLicense,
       startTrial,
