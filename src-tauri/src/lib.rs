@@ -642,6 +642,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
             recording::onboarding_try::discard_leftovers(app.handle());
             recording::file_jobs::initialize_temp_dir(&app.config().identifier);
+            if let Ok(store) = app.store("settings") {
+                ai::builtin::default_on_for_fresh_install(&store);
+            }
             app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
             log::info!("🚀 App setup START - version: {}", app_version);
@@ -1386,6 +1389,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_ai_settings,
             get_ai_settings_for_provider,
             ai::starting_style::polish_can_run,
+            ai::starting_style::polish_status,
             cache_ai_api_key,
             validate_ai_api_key,
             set_openai_config,

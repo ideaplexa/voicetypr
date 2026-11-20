@@ -1,6 +1,6 @@
 import type { Step } from "@/components/onboarding/onboardingTypes";
 import { createUsageFixture } from "@/ui-preview/usageFixture";
-import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type LicenseStatus, type ModelInfo, type TranscriptionHistory } from "@/types";
+import { DEFAULT_PILL_INDICATOR_MODE, type AppSettings, type BuiltinPolishAvailability, type LicenseStatus, type ModelInfo, type PolishStatus, type TranscriptionHistory } from "@/types";
 import type { WritingSettings } from "@/types/writing";
 import type { ShortcutActionDefinition, ShortcutSettings } from "@/types/shortcuts";
 import type { AiProvider, AIProviderModel } from "@/types/providers";
@@ -21,6 +21,11 @@ export type PreviewOptions = {
   onboardingCase?: OnboardingPreviewCase;
   /** `?license=none`: a device whose free trial has not been started. */
   trialNotStarted?: boolean;
+  /**
+   * `?polish=`: built-in Polish switched `off`, or what Voicetypr's server says about this device
+   * (`no_access`, `not_entitled`, `unreachable`). Default: on and confirmed.
+   */
+  polish?: "off" | BuiltinPolishAvailability;
   /** A new person: press-to-toggle, no Polish provider, empty Dictionary, sharing off. */
   fresh?: boolean;
   /** First-week day shown on Home (1-7). */
@@ -241,6 +246,7 @@ export function createFixtures(options: PreviewOptions) {
     speech_language: "en",
     theme: options.theme,
     onboarding_completed: !options.onboarding,
+    builtin_polish_enabled: options.polish !== "off",
     check_updates_automatically: false,
     recording_mode: options.onboarding || options.fresh ? "toggle" : "push_to_talk",
     selected_microphone:
@@ -311,6 +317,15 @@ export function createFixtures(options: PreviewOptions) {
     { id: "anthropic", name: "Anthropic", status: "production", requires_api_key: true },
     { id: "gemini", name: "Gemini", status: "production", requires_api_key: true },
   ];
+  const ownProvider = !options.fresh && !options.onboarding;
+  const builtinAvailability: BuiltinPolishAvailability = ownProvider ? "own_provider" : options.polish && options.polish !== "off" ? options.polish : "ready";
+  const previewPolish: PolishStatus = {
+    will_run: ownProvider || (options.polish !== "off" && builtinAvailability === "ready"),
+    own_provider_ready: ownProvider,
+    own_provider_enabled: ownProvider,
+    builtin_enabled: options.polish !== "off",
+    builtin: builtinAvailability,
+  };
   const aiSettings: AISettings = {
     enabled: !options.fresh && (!options.onboarding || options.onboardingCase === "polished"),
     provider: "openai",
@@ -396,7 +411,8 @@ export function createFixtures(options: PreviewOptions) {
     get_effective_primary_shortcut: effectivePrimaryShortcut,
     list_shortcut_actions: shortcutActions,
     get_ai_settings: aiSettings,
-    polish_can_run: !options.onboarding || options.onboardingCase === "polished",
+    polish_status: previewPolish,
+    polish_can_run: previewPolish.will_run,
     get_ai_settings_for_provider: aiSettings,
     list_ai_providers: providers,
     get_enhancement_options: enhancement,
@@ -418,7 +434,10 @@ export function createFixtures(options: PreviewOptions) {
     get_current_recording_state: { state: "idle" },
     get_onboarding_try: { kind: "tries", left: 10 },
     start_onboarding_try: { id: "preview", left: 9 },
-    stop_onboarding_try: { heard: "um so let's move the the sync to thursday no wait friday at three and uh i'll send the notes before" },
+    stop_onboarding_try: {
+      heard: "um so let's move the the sync to thursday no wait friday at three and uh i'll send the notes before",
+      cleaned: options.polish && options.polish !== "ready" ? null : "Let’s move the sync to Friday at 3, and I’ll send the notes before.",
+    },
     arm_onboarding_try: null,
     cli_tool_status: {
       installed: true,

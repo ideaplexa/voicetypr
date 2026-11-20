@@ -16,7 +16,7 @@ import { homeStatus } from "@/lib/home-readiness";
 import { homeNeeds, homeTips, type NeedRow, type TipRow } from "@/lib/home-needs";
 import { isMacOS } from "@/lib/platform";
 import { shortcutKeyCaps } from "@/lib/shortcut-key-caps";
-import { presetDisplayLabel, type AISettings, type EnhancementOptions } from "@/types/ai";
+import { presetDisplayLabel, type EnhancementOptions } from "@/types/ai";
 import { useWritingSettings } from "@/state/writingSettings";
 import type { ScreenId, SettingsPane } from "@/components/navigation";
 import type { SourceFilter } from "@/components/sections/models/types";
@@ -32,7 +32,7 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   const trigger = useActiveTrigger(settings);
   const polishReady = usePolishCanRun();
   const remoteLabel = useActiveRemoteLabel(readiness.remoteSelected);
-  const [polish, setPolish] = useState<{ label: string; on: boolean | null }>({ label: "Off", on: null });
+  const [polishStyle, setPolishStyle] = useState("");
   const { kept, refresh: refreshKept } = useKeptRecordings();
   const update = useUpdateStatus();
   const writing = useWritingSettings((state) => state.settings);
@@ -50,12 +50,18 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
 
   useEffect(() => {
     let active = true;
-    void Promise.all([invoke<AISettings>("get_ai_settings"), invoke<EnhancementOptions>("get_enhancement_options")]).then(([ai, options]) => {
-      if (active) setPolish({ on: ai.enabled, label: ai.enabled ? presetDisplayLabel(options.preset).replace(" Dictation", "") : "Off" });
-    }).catch(() => { if (active) setPolish({ label: "Off", on: null }); });
+    void invoke<EnhancementOptions>("get_enhancement_options").then((options) => {
+      if (active) setPolishStyle(presetDisplayLabel(options.preset).replace(" Dictation", ""));
+    }).catch(() => {});
     return () => { active = false; };
   }, []);
   useEffect(() => { void loadWriting(); }, [loadWriting]);
+  // The gate dictation uses decides: built-in Polish waiting on the server is neither on nor off.
+  const polish = {
+    on: polishReady === null || polishReady === "waiting" ? null : polishReady === "works",
+    label: polishReady === null ? "Checking…" : polishReady === "waiting" ? "Not available yet" : "Off",
+  };
+  if (polish.on && polishStyle) polish.label = polishStyle;
 
   const needs = homeNeeds({ kept, updateVersion: update.install === "restart_pending" ? update.restartVersion : (update.available?.version ?? null), updateInstall: update.install, status, accessibilityMissing: isMacOS && readiness.hasAccessibilityPermission === false });
   const dictionaryEmpty = writingLoaded ? writing.custom_words.length + writing.replacements.length + writing.snippets.length === 0 : null;

@@ -10,17 +10,18 @@ export type DictationPhase = "idle" | "starting" | "listening" | "transcribing";
 export interface FirstDictation {
   /** What the engine returned: no library rules or Polish ran on it. */
   heard: string;
-  /** The same text: Polish does not run on the First try yet. */
+  /** What built-in Polish made of it, or the same text when Polish didn't run. */
   typed: string;
-  polished: false;
+  polished: boolean;
   words: number;
 }
 
 /** Whether this device may try dictation before a trial or license. */
 export type TryAllowance = { kind: "access" } | { kind: "tries"; left: number } | { kind: "usedUp" };
 
-export function readFirstDictation(heard: string): FirstDictation {
-  return { heard, typed: heard, polished: false, words: heard.split(/\s+/).filter(Boolean).length };
+export function readFirstDictation(heard: string, cleaned?: string | null): FirstDictation {
+  const typed = cleaned?.trim() || heard;
+  return { heard, typed, polished: Boolean(cleaned?.trim()), words: typed.split(/\s+/).filter(Boolean).length };
 }
 
 /**
@@ -63,10 +64,10 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
     session.current.id = null;
     move("transcribing");
     try {
-      const { heard } = await invoke<{ heard: string }>("stop_onboarding_try", { id });
+      const { heard, cleaned } = await invoke<{ heard: string; cleaned?: string | null }>("stop_onboarding_try", { id });
       if (epoch !== session.current.epoch) return;
       move("idle");
-      if (heard) onResultRef.current(readFirstDictation(heard));
+      if (heard) onResultRef.current(readFirstDictation(heard, cleaned));
       else toast.error("Voicetypr didn’t hear any words. Try again.");
     } catch (error) {
       if (epoch !== session.current.epoch) return;

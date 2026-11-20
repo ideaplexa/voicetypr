@@ -1,6 +1,6 @@
 import { ProviderSetupDialog } from "@/components/polish/ProviderSetupDialog";
 import { useSettings } from "@/contexts/SettingsContext";
-import { EnhancementsHeader } from "@/components/polish/EnhancementsHeader";
+import { EnhancementsHeader, type PolishOutcome } from "@/components/polish/EnhancementsHeader";
 import { EnhancementSettingsPanel } from "@/components/polish/EnhancementSettingsPanel";
 import { EnhancementsProviderModals } from "@/components/polish/EnhancementsProviderModals";
 import { useAiProviderSettings, type ProviderTab } from "@/components/polish/useAiProviderSettings";
@@ -17,12 +17,17 @@ import { useCallback, useEffect, useState } from "react";
 import { useReadinessState } from "@/contexts/ReadinessContext";
 import { KeepWordsSetting } from "@/components/polish/KeepWordsSetting";
 import { PolishContextSetting } from "@/components/polish/PolishContextSetting";
+import { BuiltInPolishSetting, builtinPolishView } from "@/components/polish/BuiltInPolishSetting";
+import { OwnProviderSetting } from "@/components/polish/OwnProviderSetting";
+import { usePolishStatus } from "@/components/polish/usePolishStatus";
+import { useLicense } from "@/contexts/LicenseContext";
 import { SettingsPage } from "@/components/settings/settings-ui";
 import { SectionIntro } from "@/components/discovery/SectionIntro";
 import { SpokenPunctuationField } from "@/components/polish/SpokenPunctuationField";
 import { VoiceCommandsField } from "@/components/polish/VoiceCommandsField";
 export function EnhancementsSection() {
   const readiness = useReadinessState();
+  const { status: licenseStatus } = useLicense();
   const { settings, updateSettings } = useSettings();
   const [providerSearch, setProviderSearch] = useState("");
   const [providerSetupOpen, setProviderSetupOpen] = useState(false);
@@ -105,6 +110,14 @@ export function EnhancementsSection() {
     (aiSettings.model || isAgentCliProvider(aiSettings.provider)) &&
     (isUsingCustomProvider || providerApiKeys[aiSettings.provider]),
   );
+  const builtinChosen = settings?.builtin_polish_enabled === true;
+  const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${hasSelectedModel}:${aiSettings.enabled}:${builtinChosen}`);
+  const builtinPolishActive = builtinPolishView(polishStatus?.builtin ?? null, builtinChosen).checked;
+  // The gate dictation uses, as Home and Capabilities read it.
+  const polishOutcome: PolishOutcome | null = !polishStatus ? null
+    : polishStatus.will_run ? "on"
+    : !polishStatus.own_provider_ready && polishStatus.builtin_enabled ? "waiting"
+    : "off";
   const showAiModelReselectionNotice =
     aiModelNeedsReselection && aiSettings.enabled && !aiSettings.model;
   const effectiveFinalTextLanguage =
@@ -152,17 +165,10 @@ export function EnhancementsSection() {
   return (
     <div className="h-full min-h-0 min-w-0 flex flex-col overflow-x-hidden">
       <SettingsPage className="gap-[18px]">
-      <EnhancementsHeader
-        hasSelectedModel={hasSelectedModel}
-        activeProviderName={activeProviderName}
-        activeModelName={activeModelName}
-        polishEnabled={aiSettings.enabled}
-        onToggleEnabled={handleToggleEnabled}
-        onOpenProviderSetup={openProviderSetup}
-      />
+      <EnhancementsHeader outcome={polishOutcome} />
       <SectionIntro
         art="polish"
-        line={!settingsLoaded || hasSelectedModel ? "Pick a default style, and give any app its own." : "Polish needs an AI provider below: a key, or a tool you already have like Claude Code."}
+        line={!settingsLoaded || hasSelectedModel || builtinChosen ? "Pick a default style, and give any app its own." : "Polish needs an AI provider below: a key, or a tool you already have like Claude Code."}
       />
       <VoiceCommandsField
         enabled={writingSettings.editing_commands}
@@ -175,6 +181,12 @@ export function EnhancementsSection() {
         onChange={(spoken_punctuation) => handleWritingSettingsChange({ spoken_punctuation })}
       />
 
+      <BuiltInPolishSetting chosen={settings?.builtin_polish_enabled === true}
+        availability={polishStatus?.builtin ?? null}
+        onCheckedChange={(checked) => void updateSettings({ builtin_polish_enabled: checked })} />
+      <OwnProviderSetting enabled={aiSettings.enabled} hasSelectedModel={hasSelectedModel}
+        providerName={activeProviderName}
+        onCheckedChange={handleToggleEnabled} onOpenProviderSetup={openProviderSetup} />
       <KeepWordsSetting checked={settings?.polish_keep_words ?? false}
         onCheckedChange={(checked) => void updateSettings({ polish_keep_words: checked })} />
       <PolishContextSetting checked={settings?.polish_context_enabled ?? true}
@@ -184,7 +196,8 @@ export function EnhancementsSection() {
             preset={enhancementOptions.preset}
             finalTextLanguage={effectiveFinalTextLanguage}
             writingSettings={writingSettings}
-            aiFormattingEnabled={aiSettings.enabled}
+            aiFormattingEnabled={aiSettings.enabled || builtinPolishActive}
+            translationAvailable={aiSettings.enabled && hasSelectedModel}
             writingSettingsDisabled={!settingsLoaded}
             onPresetChange={(preset) => void persistEnhancementOptions({ preset })}
             onFinalTextLanguageChange={handleFinalTextLanguageChange}

@@ -17,6 +17,7 @@ export type Step =
   | "try"
   | "result"
   | "fork"
+  | "use"
   | "tour"
   | "buy"
   | "trial"
@@ -41,13 +42,6 @@ export interface OnboardingDesktopProps {
   onOpenPricing?: () => Promise<void>;
   modelManagement: ReturnType<typeof useModelManagement>;
 }
-
-/**
- * Whether new users get Polish without their own key. Undecided by the founder;
- * nothing backs it yet, so the first sentence shows the engine's own text unless
- * this user has Polish on.
- */
-export const NEW_USERS_GET_POLISH = false;
 
 export type SourceType = "local" | "cloud" | "remote";
 export type PermissionStatus = "checking" | "granted" | "not_determined" | "denied" | "restricted" | "error";

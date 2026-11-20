@@ -13,6 +13,9 @@ const mock = vi.hoisted(() => ({
   shortcutBindings: [] as Array<{ id: string; action: string; shortcut: string; trigger: string; enabled: boolean; allow_risky_combo: boolean; trigger_kind: string; modifier: { modifier: string; side: string } }>,
   mac: true,
   polishOn: true,
+  builtinConfirmed: false,
+  builtinOn: false,
+  statusPending: false,
   kept: [] as KeptRecording[],
   update: { available: null as null | { version: string }, checking: false, install: "idle" as "idle" | "prompting" | "installing" | "restart_pending", restartVersion: null as string | null },
   words: 3,
@@ -29,7 +32,7 @@ vi.mock("@/state/writingSettings", () => ({ useWritingSettings: (select: (state:
 vi.mock("@/contexts/ModelManagementContext", () => ({ useDownloadProgress: (select?: (p: Record<string, number>) => unknown) => select ? select(mock.downloadProgress) : mock.downloadProgress }));
 vi.mock("./overview/useActiveRemoteLabel", () => ({ useActiveRemoteLabel: () => null }));
 vi.mock("@/lib/platform", () => ({ get isMacOS() { return mock.mac; } }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "get_ai_settings" ? { enabled: mock.polishOn } : command === "retry_kept_dictation" ? undefined : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "polish_status" ? mock.statusPending ? new Promise(() => {}) : { will_run: mock.polishOn || mock.builtinConfirmed, own_provider_ready: mock.polishOn, own_provider_enabled: mock.polishOn, builtin_enabled: mock.builtinOn, builtin: mock.polishOn ? "own_provider" : mock.builtinConfirmed ? "ready" : "unreachable" } : command === "get_ai_settings" ? { enabled: mock.polishOn } : command === "retry_kept_dictation" ? undefined : command === "get_effective_primary_shortcut" ? (() => { const native = mock.settings.hotkey ? null : mock.shortcutBindings.find((binding) => binding.enabled && (binding.action === "hold_to_record" || binding.action === "toggle_recording")); return { binding: native ?? null, hotkey: mock.settings.hotkey || (native ? null : "CommandOrControl+Shift+Space"), mode: native?.action === "hold_to_record" || (!native && mock.settings.recording_mode === "push_to_talk") ? "hold" : "toggle" }; })() : { preset: "CleanDictation" }) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 beforeEach(() => {
@@ -39,6 +42,9 @@ beforeEach(() => {
   mock.shortcutBindings = [];
   mock.mac = true;
   mock.polishOn = true;
+  mock.builtinConfirmed = false;
+  mock.builtinOn = false;
+  mock.statusPending = false;
   mock.kept = [];
   mock.update = { available: null, checking: false, install: "idle", restartVersion: null };
   mock.words = 3;
@@ -249,6 +255,28 @@ describe("Home", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /PolishClean/ })).toBeInTheDocument());
     expect(screen.queryByText("Turn on Polish")).not.toBeInTheDocument();
     expect(screen.queryByText("Teach it your words")).not.toBeInTheDocument();
+  });
+
+  it("shows Polish on for built-in Polish that Voicetypr's server confirmed, with no own provider", async () => {
+    mock.polishOn = false; mock.builtinOn = true; mock.builtinConfirmed = true; mock.words = 0;
+    render(<OverviewTab />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /PolishClean/ })).toBeInTheDocument());
+    expect(screen.queryByText("Turn on Polish")).not.toBeInTheDocument();
+  });
+
+  it("never says Polish is off or suggests turning it on before Voicetypr knows whether it will run", async () => {
+    mock.polishOn = false; mock.statusPending = true; mock.words = 0;
+    render(<OverviewTab />);
+    expect(await screen.findByRole("button", { name: /PolishChecking…/ })).toBeInTheDocument();
+    expect(screen.queryByText("Turn on Polish")).not.toBeInTheDocument();
+  });
+
+  it("shows built-in Polish the server hasn't confirmed as not available yet, never off, and offers no Turn on Polish tip", async () => {
+    mock.polishOn = false; mock.builtinOn = true; mock.words = 0;
+    render(<OverviewTab />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /PolishNot available yet/ })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /PolishOff/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Turn on Polish")).not.toBeInTheDocument();
   });
 
   it("hides a tip's section when only one applies", async () => {
