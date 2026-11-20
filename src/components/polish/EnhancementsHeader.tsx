@@ -22,9 +22,11 @@ export function EnhancementsHeader({ outcome }: {
     <PageHeader title="Polish" description="AI cleans up fillers, false starts and punctuation. Your words stay yours."
       action={<>
         <InfoButton label="Polish guide" onClick={() => setGuideOpen(true)} />
-        <span role="status" className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium", outcome ? OUTCOME[outcome].chip : "invisible")}
-          style={outcome === "on" ? { color: "var(--ready-text)" } : undefined}>
-          {outcome && <><span aria-hidden className={cn("size-1.5 rounded-full", OUTCOME[outcome].dot)} />{OUTCOME[outcome].label}</>}
+        <span role="status">
+          {outcome && <span className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium", OUTCOME[outcome].chip)}
+            style={outcome === "on" ? { color: "var(--ready-text)" } : undefined}>
+            <span aria-hidden className={cn("size-1.5 rounded-full", OUTCOME[outcome].dot)} />{OUTCOME[outcome].label}
+          </span>}
         </span>
       </>} />
     <Dialog open={guideOpen} onOpenChange={setGuideOpen}>

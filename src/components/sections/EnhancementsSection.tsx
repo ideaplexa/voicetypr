@@ -185,7 +185,7 @@ export function EnhancementsSection() {
         availability={polishStatus?.builtin ?? null}
         onCheckedChange={(checked) => void updateSettings({ builtin_polish_enabled: checked })} />
       <OwnProviderSetting enabled={aiSettings.enabled} hasSelectedModel={hasSelectedModel}
-        providerName={activeProviderName} modelName={activeModelName}
+        providerName={activeProviderName}
         onCheckedChange={handleToggleEnabled} onOpenProviderSetup={openProviderSetup} />
       <KeepWordsSetting checked={settings?.polish_keep_words ?? false}
         onCheckedChange={(checked) => void updateSettings({ polish_keep_words: checked })} />

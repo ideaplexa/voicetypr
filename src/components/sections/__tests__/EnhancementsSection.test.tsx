@@ -691,6 +691,17 @@ describe("EnhancementsSection", () => {
     expect(screen.getByText("You get")).toBeInTheDocument();
   });
 
+  it("puts the own-provider switch right under built-in Polish and opens provider setup from it when none is set up", async () => {
+    renderWithProviders();
+    const ownProvider = await screen.findByRole("switch", { name: "Clean up with my own AI provider" });
+    const builtin = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
+    expect(builtin.compareDocumentPosition(ownProvider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("No provider set up yet: turn this on to choose one.")).toBeInTheDocument();
+    await userEvent.setup().click(ownProvider);
+    expect(await screen.findByRole("tab", { name: "Cloud API" })).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("update_ai_settings", expect.anything());
+  });
+
   it("shows cloud and local setup tabs when Polish is unconfigured", async () => {
     renderWithProviders();
     expect(
