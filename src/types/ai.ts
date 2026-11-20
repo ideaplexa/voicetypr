@@ -83,6 +83,8 @@ export interface AISettings {
   /** Combined CLI preferences and ai_native_fast_mode_by_provider (native default false). */
   fastModeByProvider: Record<string, boolean>;
   aiModelNeedsReselection?: boolean;
+  /** The backend gate dictation uses before it runs Polish. */
+  polishReady?: boolean;
 }
 
 export interface AIModel {

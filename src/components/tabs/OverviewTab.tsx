@@ -22,11 +22,15 @@ import type { ScreenId, SettingsPane } from "@/components/navigation";
 import type { SourceFilter } from "@/components/sections/models/types";
 import { useActiveRemoteLabel } from "./overview/useActiveRemoteLabel";
 import { MoreFromVoicetypr, NeedsYou } from "./overview/NeedsAndTips";
+import { FirstWeekCard } from "./overview/FirstWeekCard";
+import { firstWeekActive } from "@/lib/first-week";
+import { usePolishCanRun } from "@/lib/polish-ready";
 
 export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilterChange }: { onNavigate?: (section: ScreenId) => void; onNavigateSettingsPane?: (pane: SettingsPane) => void; onSourceFilterChange?: (source: SourceFilter) => void }) {
   const readiness = useReadiness();
   const { settings } = useSettings();
   const trigger = useActiveTrigger(settings);
+  const polishReady = usePolishCanRun();
   const remoteLabel = useActiveRemoteLabel(readiness.remoteSelected);
   const [polish, setPolish] = useState<{ label: string; on: boolean | null }>({ label: "Off", on: null });
   const { kept, refresh: refreshKept } = useKeptRecordings();
@@ -54,7 +58,8 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   useEffect(() => { void loadWriting(); }, [loadWriting]);
 
   const needs = homeNeeds({ kept, updateVersion: update.install === "restart_pending" ? update.restartVersion : (update.available?.version ?? null), updateInstall: update.install, status, accessibilityMissing: isMacOS && readiness.hasAccessibilityPermission === false });
-  const tips = homeTips({ polishOn: polish.on, dictionaryEmpty: writingLoaded ? writing.custom_words.length + writing.replacements.length + writing.snippets.length === 0 : null });
+  const dictionaryEmpty = writingLoaded ? writing.custom_words.length + writing.replacements.length + writing.snippets.length === 0 : null;
+  const tips = homeTips({ polishOn: polish.on, dictionaryEmpty });
 
   const goToStatus = () => { if (status.pane) onNavigateSettingsPane?.(status.pane); else if (status.screen) { if (status.source) onSourceFilterChange?.(status.source); onNavigate?.(status.screen); } };
   const act = (row: NeedRow) => {
@@ -85,6 +90,8 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
       <div className="pt-2 flex flex-wrap gap-2">{chips.map(({ label, value, screen, icon: Icon }) => <button key={label} type="button" onClick={() => onNavigate?.(screen)} className="inline-flex max-w-full items-center gap-[7px] rounded-[9px] bg-muted px-[11px] py-[7px] text-xs leading-[normal] text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /><span className="text-muted-foreground">{label}</span><strong className="truncate font-medium">{value}</strong></button>)}</div>
     </section>
     <NeedsYou rows={needs} onAct={act} />
-    <MoreFromVoicetypr tips={tips} onOpen={openTip} />
+    {firstWeekActive(settings?.first_week)
+      ? <FirstWeekCard sourceReady={status.ready} polishOn={polish.on} polishReady={polishReady} dictionaryEmpty={dictionaryEmpty} holdToTalk={settings ? trigger.mode === "push_to_talk" : null} shortcut={caps} onNavigate={onNavigate} onNavigateSettingsPane={onNavigateSettingsPane} />
+      : <MoreFromVoicetypr tips={tips} onOpen={openTip} />}
   </SettingsPage>;
 }
