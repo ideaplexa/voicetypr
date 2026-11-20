@@ -377,6 +377,9 @@ pub struct AISettings {
     pub fast_mode_by_provider: HashMap<String, bool>,
     #[serde(rename = "aiModelNeedsReselection")]
     pub ai_model_needs_reselection: bool,
+    /// The same gate dictation uses before it runs Polish.
+    #[serde(rename = "polishReady", default)]
+    pub polish_ready: bool,
 }
 
 // Validation pattern for providers
@@ -448,6 +451,7 @@ pub async fn get_ai_settings(app: tauri::AppHandle) -> Result<AISettings, String
         reasoning_by_provider,
         fast_mode_by_provider,
         ai_model_needs_reselection,
+        polish_ready: has_ai_model_and_key(&app)?,
     })
 }
 
@@ -511,6 +515,7 @@ pub async fn get_ai_settings_for_provider(
         reasoning_by_provider,
         fast_mode_by_provider,
         ai_model_needs_reselection,
+        polish_ready: has_ai_model_and_key(&app)?,
     })
 }
 

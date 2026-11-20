@@ -39,7 +39,7 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const collapsed = state === "collapsed";
   const license = licenseState(status, status?.trial_days_left ?? -1);
   const destination = resolveScreen(activeSection);
-  const current = destination.screen;
+  const current = destination.screen === "capabilities" ? "help" : destination.screen;
 
   return (
     <SidebarPrimitive

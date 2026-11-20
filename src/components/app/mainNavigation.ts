@@ -35,6 +35,7 @@ const screenIds = new Set<string>([
   ...footerNavScreens.map(({ id }) => id),
   ...Object.keys(screenAliases),
   "license",
+  "capabilities",
 ]);
 export function routeMainNavigation(
   destination: MainNavigate,
