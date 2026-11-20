@@ -56,6 +56,38 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+/// A host without an active license or trial refuses transcription (403).
+pub const HOST_LICENSE_REQUIRED: &str = "host_license_required";
+/// The host's license check failed, is pending or needs online verification.
+pub const HOST_LICENSE_UNVERIFIED: &str = "host_license_unverified";
+
+/// The host serves transcription on the hotkey's license decision.
+pub(crate) fn host_license_refusal(
+    state: crate::commands::audio::RecordingLicenseState,
+) -> Option<&'static str> {
+    use crate::commands::audio::RecordingLicenseState as State;
+    match state {
+        State::Ready => None,
+        State::Blocked => Some(HOST_LICENSE_REQUIRED),
+        State::Loading | State::CheckFailed | State::VerificationRequired => {
+            Some(HOST_LICENSE_UNVERIFIED)
+        }
+    }
+}
+
+/// What a client shows when the host refuses on its license.
+pub fn host_license_refusal_message(code: &str) -> Option<&'static str> {
+    match code {
+        HOST_LICENSE_REQUIRED => {
+            Some("The other computer's Voicetypr has no active license or trial.")
+        }
+        HOST_LICENSE_UNVERIFIED => Some(
+            "The other computer's Voicetypr could not check its license. Open Voicetypr on that computer, check Settings → License, then try again.",
+        ),
+        _ => None,
+    }
+}
+
 /// Safe metadata for a shareable local transcription model exposed over remote control.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShareableRemoteModelInfo {

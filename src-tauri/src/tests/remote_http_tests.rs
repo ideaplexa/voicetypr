@@ -36,6 +36,12 @@ struct TestContext {
 }
 
 impl ServerContext for TestContext {
+    fn license_cache(
+        &self,
+    ) -> std::sync::Arc<tokio::sync::RwLock<crate::commands::license::RuntimeLicenseCache>> {
+        crate::remote::http::licensed_host_cache()
+    }
+
     fn get_model_name(&self) -> String {
         self.model_name.clone()
     }
@@ -286,6 +292,12 @@ struct FailingContext {
 }
 
 impl ServerContext for FailingContext {
+    fn license_cache(
+        &self,
+    ) -> std::sync::Arc<tokio::sync::RwLock<crate::commands::license::RuntimeLicenseCache>> {
+        crate::remote::http::licensed_host_cache()
+    }
+
     fn get_model_name(&self) -> String {
         self.model_name.clone()
     }
