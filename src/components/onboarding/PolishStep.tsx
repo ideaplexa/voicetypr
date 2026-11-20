@@ -27,7 +27,8 @@ export function PolishStep({
   onNext: () => void;
 }) {
   const ownReady = status?.own_provider_ready === true;
-  const builtin = builtinPolishView(status?.builtin === "first_try" ? "ready" : status?.builtin ?? null, builtinChosen);
+  // While the server is still being asked, show the saved choice: it is what the First try reads.
+  const builtin = builtinPolishView(!status || status.builtin === "first_try" ? "ready" : status.builtin, builtinChosen);
   const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
   const note = ownReady
     ? on

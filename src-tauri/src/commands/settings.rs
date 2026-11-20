@@ -1047,7 +1047,11 @@ pub async fn save_settings(
         if let Some(port) = settings.sharing_port {
             remote_settings.server_config.port = port;
         }
-        save_remote_settings(&app, &remote_settings)?;
+        // Leave nothing half-applied in memory, such as the built-in Polish switch.
+        if let Err(error) = save_remote_settings(&app, &remote_settings) {
+            let _ = store.reload();
+            return Err(error);
+        }
     }
 
     // Recording persistence settings

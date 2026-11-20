@@ -644,7 +644,8 @@ export function useOnboardingDesktop({
     { applyNow, keepForOwnProvider }: { applyNow: boolean; keepForOwnProvider: boolean },
   ) => {
     if (style && applyNow) await invoke("update_enhancement_options", { options: { preset: style } });
-    if (!style || !applyNow || keepForOwnProvider) await updateSettings({ starting_polish_style: style });
+    // No pick keeps whatever is saved, so passing through again never erases an earlier pick.
+    if (style && (!applyNow || keepForOwnProvider)) await updateSettings({ starting_polish_style: style });
     setCurrentStep(after("use"));
   };
 

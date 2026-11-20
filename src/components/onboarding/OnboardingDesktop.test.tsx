@@ -1774,6 +1774,19 @@ describe("OnboardingDesktop", () => {
       expect(toggle).toHaveAttribute("aria-disabled", "true");
     });
 
+    it("shows the saved choice while Voicetypr's server is still being asked, never an off it can't change", async () => {
+      const base = invokeMock.getMockImplementation();
+      invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>
+        command === "polish_status" ? new Promise(() => undefined) : base?.(command, ...rest),
+      );
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: { status: "none" } });
+      await reachPolish(user);
+      const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeEnabled();
+    });
+
     it("offers the switch before any trial, on the First try's own allowance", async () => {
       polishStatus = { ...BUILTIN_READY, builtin: "first_try" };
       const user = userEvent.setup();
@@ -1883,7 +1896,8 @@ describe("OnboardingDesktop", () => {
       await reachUse(user);
       await user.click(screen.getByRole("button", { name: /^continue$/i }));
       await reachTourStart();
-      expect(updateSettingsMock).toHaveBeenCalledWith({ starting_polish_style: null });
+      expect(updateSettingsMock).not.toHaveBeenCalledWith(expect.objectContaining({ starting_polish_style: expect.anything() }));
+      expect(updateSettingsMock).not.toHaveBeenCalledWith({ starting_polish_style: null });
       expect(invokeMock).not.toHaveBeenCalledWith("update_enhancement_options", expect.anything());
     });
 
