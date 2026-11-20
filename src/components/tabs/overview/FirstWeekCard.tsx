@@ -100,7 +100,7 @@ export function FirstWeekCard({ sourceReady, polishOn, polishReady, dictionaryEm
     if (!next) return;
     saving.current = true;
     void saveProgress(next)
-      .catch((error: unknown) => log.warn("Couldn't save first-week progress", error))
+      .catch(() => log.warn("Couldn't save first-week progress"))
       .finally(() => { saving.current = false; });
   }, [progress, today, saveProgress]);
 
@@ -125,7 +125,7 @@ export function FirstWeekCard({ sourceReady, polishOn, polishReady, dictionaryEm
   if (!id || !progress) return null;
   const copy = firstWeekCopy(id, isMacOS && readiness.hasAccessibilityPermission === false, polishReady);
 
-  const retire = () => saveProgress(retireFirstWeekCard(progress, id)).catch((error: unknown) => log.warn("Couldn't save first-week progress", error));
+  const retire = () => saveProgress(retireFirstWeekCard(progress, id)).catch(() => log.warn("Couldn't save first-week progress"));
   // Turning a feature on only retires the card once the change actually stuck; the helpers report their own errors.
   const turnOn = async (): Promise<boolean> => {
     switch (id) {

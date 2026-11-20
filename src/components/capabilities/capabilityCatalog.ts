@@ -46,7 +46,7 @@ export function capabilityGroups(streams: boolean, polishReady: boolean): { titl
       items: [
         { id: "on_device", art: "model", title: "On-device models", line: "Private and offline, from about 150 MB to 3.1 GB.", badge: "Download", target: { screen: "transcription", label: "Open Transcription" } },
         { id: "cloud", art: "cloud", title: "Cloud, with your key", line: "Soniox, Deepgram, OpenAI, Groq or Cohere; your audio goes to that provider.", badge: "Needs a key", target: { screen: "transcription", label: "Open Transcription" } },
-        { id: "remote", art: "share", title: "Another computer", line: "Send your audio to a stronger Voicetypr on your network.", badge: "Needs a second computer", target: { screen: "transcription", label: "Open Transcription" } },
+        { id: "remote", art: "remote", title: "Another computer", line: "Send your audio to a stronger Voicetypr on your network.", badge: "Needs a second computer", target: { screen: "transcription", label: "Open Transcription" } },
         { id: "share", art: "share", title: `Share this ${computer}`, line: "Let your other computers on a trusted network use this one as their engine.", badge: "Needs a second computer", target: { pane: "network", label: "Open Network sharing" } },
       ],
     },

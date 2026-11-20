@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ChartNoAxesColumnIncreasing, ChevronRight, CirclePause, Download, FileMusic, Laptop, Monitor } from "lucide-react";
+import { ChartNoAxesColumnIncreasing, ChevronRight, Download, Network, Share2, Upload } from "lucide-react";
 import { PillPreview } from "@/components/discovery/PillPreview";
 import { cn } from "@/lib/utils";
 import { isMacOS } from "@/lib/platform";
@@ -24,7 +24,7 @@ function Tile({ icon: Icon }: { icon: LucideIcon }) {
   return <span className="flex size-11 items-center justify-center rounded-[11px] bg-card text-sage shadow-[0_0_0_1px_var(--border)]"><Icon className="size-[22px]" strokeWidth={1.75} /></span>;
 }
 
-export type DiscoveryArtKind = "hold" | "dictionary" | "suggestion" | "polish" | "voice_commands" | "realtime" | "pill" | "retry" | "tray" | "media" | "file" | "share" | "history" | "insights" | "model" | "cloud" | "terminal";
+export type DiscoveryArtKind = "hold" | "dictionary" | "suggestion" | "polish" | "voice_commands" | "realtime" | "pill" | "retry" | "tray" | "media" | "file" | "share" | "remote" | "history" | "insights" | "model" | "cloud" | "terminal";
 
 /** Small pictures of each feature as the app really shows it: the real pill (PillPreview) only where the feature is dictating, otherwise a small slice of the feature's own row, menu or control, or its own icon. Decorative only. */
 export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArtKind; shortcut?: string[]; className?: string }) {
@@ -78,13 +78,19 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
       </Panel>;
       break;
     case "media":
-      content = <Tile icon={CirclePause} />;
+      content = <Panel className="flex-row items-center justify-between gap-2">
+        <span className="font-medium">Pause media during recording</span>
+        <span className="flex h-3.5 w-6 shrink-0 items-center justify-end rounded-full bg-sage px-0.5"><i className="size-2.5 rounded-full bg-white" /></span>
+      </Panel>;
       break;
     case "file":
-      content = <><Tile icon={FileMusic} /><Chip>Transcribe a file…</Chip></>;
+      content = <><Tile icon={Upload} /><Chip>Transcribe a file…</Chip></>;
       break;
     case "share":
-      content = <span className="flex items-center gap-1.5"><Tile icon={Laptop} /><span className="w-5 border-t-2 border-dashed border-sage" /><Tile icon={Monitor} /></span>;
+      content = <Tile icon={Share2} />;
+      break;
+    case "remote":
+      content = <Tile icon={Network} />;
       break;
     case "history":
       content = <Panel className="gap-0.5 py-1">
@@ -109,7 +115,7 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
       </Panel>;
       break;
     case "terminal":
-      content = <span className="w-[min(160px,90%)] rounded-[7px] bg-[#121316] px-2 py-1.5 text-left font-mono text-[9.5px] leading-[1.35] text-white/90"><span className="text-[#8FD1A8]">$</span> voicetypr transcribe --file call.m4a --json</span>;
+      content = <span className="w-[min(160px,90%)] rounded-[7px] bg-[#121316] px-2 py-1.5 text-left font-mono text-[9.5px] leading-[1.35] text-white/90"><span className="text-[#8FD1A8]">{isMacOS ? "$" : "PS>"}</span> {isMacOS ? "" : "cmd /c "}voicetypr transcribe --file call.m4a --json</span>;
       break;
   }
   return <div aria-hidden className={cn("relative flex h-24 w-[150px] shrink-0 flex-col items-center justify-center gap-2.5 overflow-hidden rounded-[14px] bg-sage-bg", className)}>{content}</div>;
