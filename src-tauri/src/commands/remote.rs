@@ -162,10 +162,16 @@ pub struct SharingStatusView {
     pub password_configured: bool,
     pub binding_results: Vec<BindingResult>,
     pub allow_model_control: bool,
+    /// Set when this host refuses transcription on its license.
+    pub host_license_refusal: Option<&'static str>,
 }
 
 impl SharingStatusView {
-    fn from_parts(status: SharingStatus, allow_model_control: bool) -> Self {
+    fn from_parts(
+        status: SharingStatus,
+        allow_model_control: bool,
+        host_license_refusal: Option<&'static str>,
+    ) -> Self {
         Self {
             enabled: status.enabled,
             port: status.port,
@@ -175,6 +181,7 @@ impl SharingStatusView {
             password_configured: status.password_configured,
             binding_results: status.binding_results,
             allow_model_control,
+            host_license_refusal,
         }
     }
 }
@@ -374,6 +381,7 @@ pub async fn stop_sharing(
 pub async fn get_sharing_status(
     server_manager: State<'_, AsyncMutex<RemoteServerManager>>,
     remote_settings: State<'_, AsyncMutex<RemoteSettings>>,
+    app_state: State<'_, crate::AppState>,
 ) -> Result<SharingStatusView, String> {
     let status = {
         let manager = server_manager.lock().await;
@@ -383,7 +391,14 @@ pub async fn get_sharing_status(
         let settings = remote_settings.lock().await;
         settings.server_config.allow_model_control
     };
-    Ok(SharingStatusView::from_parts(status, allow_model_control))
+    let license =
+        crate::license::recording_readiness::wait_for_recording_license(&app_state.license_cache)
+            .await;
+    Ok(SharingStatusView::from_parts(
+        status,
+        allow_model_control,
+        crate::remote::server::host_license_refusal(license),
+    ))
 }
 
 /// Persist host opt-in for remote model control without restarting sharing.

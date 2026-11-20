@@ -341,11 +341,17 @@ pub fn maybe_run_from_env_with_context(
         let app_handle = app.handle().clone();
         crate::recording::file_jobs::startup(app_handle.path().app_data_dir()?).await;
         warm_ai_key_cache(&app_handle).await?;
-        if !measurement {
-            let _ = check_license_status(app_handle.clone()).await;
-        }
+        let license_check = if measurement {
+            None
+        } else {
+            crate::license::trial_clock::observe(&app_handle);
+            Some(check_license_status(app_handle.clone()).await)
+        };
 
         let outcome: Result<(), Box<dyn Error>> = async {
+            if let Some(check) = &license_check {
+                cli_transcription_gate(&command, check)?;
+            }
             match command {
                 CliCommand::Hotkey(_) => {
                     unreachable!("headless hotkey route returned before setup")
@@ -587,7 +593,6 @@ async fn run_transcribe(
     if !args.file.exists() {
         return Err(format!("Audio file not found: {}", args.file.display()).into());
     }
-    require_license(app).await?;
     let payload = if let Some(server) = args.server.as_deref() {
         let password = resolve_password(args.password.clone(), args.password_stdin)?;
         transcribe_via_remote(app, &args.file, server, password).await?
@@ -616,13 +621,22 @@ async fn run_transcribe(
     Ok(())
 }
 
-/// The CLI takes the hotkey's licence decision. A check that failed is
-/// reported as a failed check, never as an ended trial.
-async fn require_license(app: &tauri::AppHandle) -> Result<(), String> {
-    crate::license::trial_clock::observe(app);
-    cli_license_decision(&check_license_status(app.clone()).await).map_err(str::to_owned)
+/// Every command that turns audio into text needs this device's license or
+/// trial, whether it transcribes here or on another computer (`--server`).
+fn cli_transcription_gate(
+    command: &CliCommand,
+    check: &Result<crate::license::LicenseStatus, String>,
+) -> Result<(), &'static str> {
+    match command {
+        CliCommand::Transcribe(_) | CliCommand::Record(_) | CliCommand::StreamBench(_) => {
+            cli_license_decision(check)
+        }
+        _ => Ok(()),
+    }
 }
 
+/// The CLI takes the hotkey's licence decision. A check that failed is
+/// reported as a failed check, never as an ended trial.
 fn cli_license_decision(
     check: &Result<crate::license::LicenseStatus, String>,
 ) -> Result<(), &'static str> {
@@ -682,7 +696,6 @@ async fn run_record(app: &tauri::AppHandle, args: RecordArgs) -> Result<(), Box<
         );
     }
 
-    require_license(app).await?;
     let settings = get_settings(app.clone()).await?;
     let recordings_dir = crate::recording::file_jobs::cli_directory(&app.path().app_data_dir()?)?;
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
@@ -814,7 +827,6 @@ async fn run_stream_bench(
     if !args.file.exists() {
         return Err(format!("Audio file not found: {}", args.file.display()).into());
     }
-    require_license(app).await?;
 
     let settings = get_settings(app.clone()).await?;
     let model = args
@@ -1194,6 +1206,56 @@ mod tests {
         status.verification_expires_at = Some(chrono::Utc::now() - chrono::Duration::minutes(1));
         let refusal = cli_license_decision(&Ok(status)).unwrap_err();
         assert!(refusal.starts_with("Voicetypr needs to verify your license online."));
+    }
+
+    #[test]
+    fn every_transcribing_command_needs_this_devices_license_even_with_a_server() {
+        use crate::license::LicenseState;
+        for args in [
+            &[
+                "voicetypr",
+                "transcribe",
+                "--file",
+                "a.wav",
+                "--server",
+                "studio.local:47842",
+            ][..],
+            &["voicetypr", "transcribe", "--file", "a.wav"],
+            &[
+                "voicetypr",
+                "record",
+                "--until-silence",
+                "--server",
+                "studio.local:47842",
+            ],
+            &["voicetypr", "record", "--until-silence"],
+            &["voicetypr", "stream-bench", "--file", "a.wav"],
+        ] {
+            let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+            for status in [LicenseState::Expired, LicenseState::None] {
+                let refusal = cli_transcription_gate(&command, &Ok(license(status))).unwrap_err();
+                assert!(
+                    refusal.starts_with("No active license or trial."),
+                    "{args:?}"
+                );
+            }
+            let failed = cli_transcription_gate(&command, &Err("timed out".into())).unwrap_err();
+            assert!(failed.starts_with("Could not check your Voicetypr license"));
+            for status in [LicenseState::Trial, LicenseState::Licensed] {
+                assert_eq!(
+                    cli_transcription_gate(&command, &Ok(license(status))),
+                    Ok(()),
+                    "{args:?}"
+                );
+            }
+        }
+        for args in [&["voicetypr", "status"][..], &["voicetypr", "models"]] {
+            let command = Cli::try_parse_from(args).unwrap().command.unwrap();
+            assert_eq!(
+                cli_transcription_gate(&command, &Ok(license(LicenseState::Expired))),
+                Ok(())
+            );
+        }
     }
 
     #[test]

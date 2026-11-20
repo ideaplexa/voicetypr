@@ -1,6 +1,7 @@
 //! Only an active trial or a license turns speech into text. The desktop
-//! recording gate lives in `recording/island.rs`; these cover the CLI and a
-//! computer sharing its engine on the network.
+//! recording gate lives in `recording/island.rs`, the CLI's in `cli.rs` and
+//! the network host's in `remote/http.rs`. This file holds onboarding's
+//! First try allowance, the one exception.
 #[cfg(test)]
 use crate::commands::audio::recording_license_state;
 use crate::commands::audio::RecordingLicenseState;
@@ -10,29 +11,10 @@ use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
 use crate::license::LicenseStatus;
 use tauri::{AppHandle, Manager};
 
-pub(crate) const NO_ACCESS: &str =
-    "Voicetypr needs an active trial or license to transcribe. Start your free trial or add a license key in the app.";
-
 #[cfg(test)]
 fn status_allows(status: LicenseStatus) -> bool {
     recording_license_state(&RuntimeLicenseCache::Ready(CachedLicense::new(status)))
         == RecordingLicenseState::Ready
-}
-
-/// Whether this computer may transcribe audio another computer sent it.
-/// Waits like the desktop gate while a license check is running.
-pub(crate) fn require_for_sharing(app: &AppHandle) -> Result<(), String> {
-    crate::license::trial_clock::observe(app);
-    let cache = app.state::<crate::AppState>().license_cache.clone();
-    let state = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(crate::license::recording_readiness::wait_for_recording_license(&cache))
-    });
-    if state == RecordingLicenseState::Ready {
-        Ok(())
-    } else {
-        Err(NO_ACCESS.to_string())
-    }
 }
 
 /// Onboarding's First try is the one way to hear the engine before a trial or
@@ -160,6 +142,24 @@ mod tests {
         assert_eq!(allowance(false, Some(10)), TryAllowance::UsedUp);
         assert_eq!(allowance(false, Some(40)), TryAllowance::UsedUp);
         assert_eq!(allowance(true, Some(40)), TryAllowance::Access);
+    }
+
+    /// Tries left open the setup window's First try and nothing else: the
+    /// hotkey, file jobs, kept retries and History re-transcribe
+    /// (`validate_recording_license`), the CLI (`cli_license_decision`) and
+    /// the network host (`host_license_refusal`) all read the license cache,
+    /// which knows nothing of tries.
+    #[test]
+    fn tries_left_open_only_the_first_try() {
+        assert_eq!(allowance(false, Some(0)), TryAllowance::Tries { left: 10 });
+        let unlicensed = recording_license_state(&RuntimeLicenseCache::Ready(CachedLicense::new(
+            status(LicenseState::None),
+        )));
+        assert_eq!(unlicensed, RecordingLicenseState::Blocked);
+        assert_eq!(
+            crate::remote::server::host_license_refusal(unlicensed),
+            Some(crate::remote::server::HOST_LICENSE_REQUIRED)
+        );
     }
 
     #[test]

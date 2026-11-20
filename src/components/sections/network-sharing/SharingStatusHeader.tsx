@@ -1,11 +1,20 @@
 import { Switch } from "@/components/settings/SettingsSwitch";
 import { AlertTriangle, Network } from "lucide-react";
 import { SettingsPaneRow } from "@/components/settings/settings-ui";
+import type { HostLicenseRefusal } from "./types";
+
+const HOST_LICENSE_NOTICE: Record<HostLicenseRefusal, string> = {
+  host_license_required:
+    "Paused: this computer has no active license or trial, so other computers can't transcribe here.",
+  host_license_unverified:
+    "Paused: Voicetypr couldn't check this computer's license, so other computers can't transcribe here. Check Settings → License.",
+};
 
 interface SharingStatusHeaderProps {
   pane?: boolean;
   enabled: boolean;
   loading: boolean;
+  hostLicenseRefusal?: HostLicenseRefusal | null;
   activeRemoteServer: string | null;
   hasShareableModel: boolean;
   currentSelectionShareable: boolean;
@@ -17,12 +26,16 @@ export function SharingStatusHeader({
   pane = false,
   enabled,
   loading,
+  hostLicenseRefusal,
   activeRemoteServer,
   hasShareableModel,
   currentSelectionShareable,
   modelDisplayName,
   onToggleSharing,
 }: SharingStatusHeaderProps) {
+  const licenseNotice = hostLicenseRefusal ? HOST_LICENSE_NOTICE[hostLicenseRefusal] : null;
+  const cannotStart =
+    !!activeRemoteServer || !hasShareableModel || !currentSelectionShareable || !!licenseNotice;
   if (pane)
     return (
       <>
@@ -35,14 +48,16 @@ export function SharingStatusHeader({
               aria-label="Share this Voicetypr"
               checked={enabled}
               onCheckedChange={onToggleSharing}
-              disabled={
-                loading ||
-                (!enabled &&
-                  (!!activeRemoteServer || !hasShareableModel || !currentSelectionShareable))
-              }
+              disabled={loading || (!enabled && cannotStart)}
             />
           }
         />
+        {licenseNotice ? (
+          <p role="status" className="inline-flex items-center gap-2 pb-3 text-xs text-foreground">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warn" />
+            {licenseNotice}
+          </p>
+        ) : null}
         {!enabled && !hasShareableModel ? (
           <p className="pb-3 text-xs text-muted-foreground">
             Remote sharing requires a downloaded Whisper or Parakeet model on this device.
@@ -79,14 +94,22 @@ export function SharingStatusHeader({
             id="network-sharing"
             checked={enabled}
             onCheckedChange={onToggleSharing}
-            disabled={
-              loading ||
-              (!enabled &&
-                (!!activeRemoteServer || !hasShareableModel || !currentSelectionShareable))
-            }
+            disabled={loading || (!enabled && cannotStart)}
           />
         </div>
       </div>
+
+      {licenseNotice && (
+        <div className="px-4 py-3">
+          <div
+            role="status"
+            className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20"
+          >
+            <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-amber-600 dark:text-amber-500">{licenseNotice}</p>
+          </div>
+        </div>
+      )}
 
       {!hasShareableModel && !enabled && (
         <div className="px-4 py-3">

@@ -133,6 +133,33 @@ describe("NetworkSharingCard", () => {
     expect(await screen.findByText("Incoming connections are allowed.")).toBeInTheDocument();
   });
 
+  it("does not present sharing as working while this host has no license or trial", async () => {
+    let status = sharingStatus({ host_license_refusal: "host_license_required" });
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_settings") return Promise.resolve({ current_model: "large-v3-turbo" });
+      if (command === "get_sharing_status") return Promise.resolve(status);
+      if (command === "get_local_ips") return Promise.resolve([]);
+      if (command === "get_model_status") return Promise.resolve({ models: [shareableModel()] });
+      if (command === "get_active_remote_server") return Promise.resolve(null);
+      if (command === "get_firewall_status")
+        return Promise.resolve({ may_be_blocked: false, firewall_enabled: false, app_allowed: true });
+      return Promise.resolve(null);
+    });
+    const view = renderWithProviders(<NetworkSharingCard pane />);
+    expect(
+      await screen.findByText(
+        "Paused: this computer has no active license or trial, so other computers can't transcribe here.",
+      ),
+    ).toBeInTheDocument();
+    view.unmount();
+
+    status = sharingStatus({ enabled: false, host_license_refusal: "host_license_unverified" });
+    renderWithProviders(<NetworkSharingCard />);
+    const notice = await screen.findByText(/couldn't check this computer's license/);
+    expect(notice.textContent).not.toMatch(/trial/);
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-disabled", "true");
+  });
+
   describe("when no model is downloaded", () => {
     beforeEach(() => {
       mockInvoke.mockImplementation((command: string) => {
