@@ -423,7 +423,10 @@ export function createFixtures(options: PreviewOptions) {
     get_current_recording_state: { state: "idle" },
     get_onboarding_try: { kind: "tries", left: 10 },
     start_onboarding_try: { id: "preview", left: 9 },
-    stop_onboarding_try: { heard: "um so let's move the the sync to thursday no wait friday at three and uh i'll send the notes before" },
+    stop_onboarding_try: {
+      heard: "um so let's move the the sync to thursday no wait friday at three and uh i'll send the notes before",
+      cleaned: options.polish === "off" ? null : "Let’s move the sync to Friday at 3, and I’ll send the notes before.",
+    },
     arm_onboarding_try: null,
     cli_tool_status: {
       installed: true,

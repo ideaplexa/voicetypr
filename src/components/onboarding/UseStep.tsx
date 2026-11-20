@@ -28,7 +28,7 @@ export function UseStep({
   const use = USES.find((item) => item.id === picked);
 
   return (
-    <section className="flex w-[640px] flex-col items-center gap-[34px]">
+    <section className="flex w-[640px] flex-col items-center gap-[30px]">
       <FrameHeading title="What will you mostly dictate?" line="Polish starts in a style that fits. You can change it any time." />
       <div role="group" aria-label="What you mostly dictate" className="grid grid-cols-3 gap-3 self-stretch">
         {USES.map((item) => {

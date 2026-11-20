@@ -41,7 +41,7 @@ export function PolishStep({
   const NoteIcon = on ? ShieldCheck : Type;
 
   return (
-    <section className="flex w-[560px] flex-col items-center gap-[34px]">
+    <section className="flex w-[540px] flex-col items-center gap-[30px]">
       <FrameHeading
         title="Let AI tidy your words"
         line="Polish is AI clean-up. It runs on Voicetypr’s server, so you need no AI key or account of your own."
@@ -60,10 +60,11 @@ export function PolishStep({
               checked={builtin.checked}
               disabled={builtin.disabled || saving}
               onCheckedChange={onBuiltinChange}
+              className="data-[size=default]:h-[26px] data-[size=default]:w-11 [&_[data-slot=switch-thumb]]:size-[22px] [&_[data-slot=switch-thumb][data-checked]]:translate-x-[18px]"
             />
           )}
         </div>
-        <div className="flex items-start gap-3 bg-secondary px-[22px] py-4">
+        <div className="flex items-start gap-3 bg-secondary py-4 pr-4 pl-[22px]">
           <NoteIcon aria-hidden="true" className="mt-0.5 size-[15px] shrink-0 text-muted-foreground" />
           <p role="status" className="text-[15px] leading-[1.4] text-muted-foreground">{note}</p>
         </div>
