@@ -1,42 +1,31 @@
 import { InfoButton, PageHeader } from "@/components/settings/settings-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Switch } from "@/components/settings/SettingsSwitch";
+import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 /** What the next dictation gets: polished, not yet (built-in Polish waits for the server), or not polished. */
 export type PolishOutcome = "on" | "waiting" | "off";
 
-const OUTCOME_LABEL: Record<PolishOutcome, string> = {
-  on: "Polish is on",
-  waiting: "Polish isn’t available yet",
-  off: "Polish is off",
+const OUTCOME: Record<PolishOutcome, { label: string; chip: string; dot: string }> = {
+  on: { label: "Polish is on", chip: "bg-sage-bg text-sage", dot: "bg-sage" },
+  waiting: { label: "Polish isn’t available yet", chip: "bg-warn-bg text-warn", dot: "bg-warn" },
+  off: { label: "Polish is off", chip: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
 };
 
-export function EnhancementsHeader({
-  hasSelectedModel, outcome, polishEnabled, onToggleEnabled, onOpenProviderSetup,
-}: {
-  hasSelectedModel: boolean;
-  activeProviderName: string;
-  activeModelName: string;
+/** The page title with a status only: the switches that decide it are rows on the page. */
+export function EnhancementsHeader({ outcome }: {
   /** null while built-in Polish is still being asked about. */
   outcome: PolishOutcome | null;
-  /** The user's own AI provider switch. */
-  polishEnabled: boolean;
-  onToggleEnabled: (enabled: boolean) => void;
-  onOpenProviderSetup: () => void;
 }) {
   const [guideOpen, setGuideOpen] = useState(false);
   return <>
     <PageHeader title="Polish" description="AI cleans up fillers, false starts and punctuation. Your words stay yours."
       action={<>
         <InfoButton label="Polish guide" onClick={() => setGuideOpen(true)} />
-        <div className="flex flex-col items-end gap-1.5">
-          <label htmlFor="polish-enabled" className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2 text-[13px] font-medium text-muted-foreground">
-            Your AI provider
-            <Switch id="polish-enabled" checked={polishEnabled} onCheckedChange={hasSelectedModel ? onToggleEnabled : onOpenProviderSetup} />
-          </label>
-          <span role="status" className="text-[13px] font-medium text-foreground">{outcome ? OUTCOME_LABEL[outcome] : ""}</span>
-        </div>
+        <span role="status" className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-[3px] text-[11.5px] leading-[normal] font-medium", outcome ? OUTCOME[outcome].chip : "invisible")}
+          style={outcome === "on" ? { color: "var(--ready-text)" } : undefined}>
+          {outcome && <><span aria-hidden className={cn("size-1.5 rounded-full", OUTCOME[outcome].dot)} />{OUTCOME[outcome].label}</>}
+        </span>
       </>} />
     <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
       <DialogContent className="sm:max-w-lg">

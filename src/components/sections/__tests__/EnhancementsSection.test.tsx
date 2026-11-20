@@ -540,8 +540,10 @@ describe("EnhancementsSection", () => {
       withSettings({ builtin_polish_enabled: chosen });
       builtinAvailability = availability;
       renderWithProviders();
-      expect(await screen.findByText(label)).toBeInTheDocument();
-      expect(screen.getByRole("switch", { name: "Your AI provider" })).not.toBeChecked();
+      const status = await screen.findByText(label);
+      expect(status.closest("header")?.querySelector("[role=switch]")).toBeNull();
+      expect(screen.getByRole("switch", { name: "Clean up with my own AI provider" })).not.toBeChecked();
+      expect(screen.getByText("No provider set up yet: turn this on to choose one.")).toBeInTheDocument();
     });
   });
 
@@ -696,7 +698,7 @@ describe("EnhancementsSection", () => {
         name: "Choose provider and model",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Your AI provider" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Clean up with my own AI provider" })).toBeInTheDocument();
 
     const providersPanel = await getProviderSetupPanel();
     expect(
@@ -1114,7 +1116,7 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     await waitFor(() => {
-      const polishSwitch = screen.getByRole("switch", { name: "Your AI provider" });
+      const polishSwitch = screen.getByRole("switch", { name: "Clean up with my own AI provider" });
       const providerSummary = screen.getByRole("button", {
         name: "Choose provider and model",
       });
@@ -1142,7 +1144,7 @@ describe("EnhancementsSection", () => {
     renderWithProviders();
 
     await waitFor(() => {
-      const polishSwitch = screen.getByRole("switch", { name: "Your AI provider" });
+      const polishSwitch = screen.getByRole("switch", { name: "Clean up with my own AI provider" });
       expect(polishSwitch).not.toHaveAttribute("aria-disabled", "true");
     });
   });
@@ -1290,7 +1292,7 @@ describe("EnhancementsSection", () => {
     const user = userEvent.setup();
     renderWithProviders();
 
-    const aiToggle = await screen.findByRole("switch", { name: /your ai provider/i });
+    const aiToggle = await screen.findByRole("switch", { name: /clean up with my own ai provider/i });
     await waitFor(() => expect(aiToggle).toBeEnabled());
     await user.click(aiToggle);
 
@@ -1318,7 +1320,7 @@ describe("EnhancementsSection", () => {
     const user = userEvent.setup();
     renderWithProviders();
 
-    const aiToggle = await screen.findByRole("switch", { name: /your ai provider/i });
+    const aiToggle = await screen.findByRole("switch", { name: /clean up with my own ai provider/i });
     await waitFor(() => expect(aiToggle).toBeEnabled());
     enhancementOptionsResponse = { preset };
     await user.click(aiToggle);
