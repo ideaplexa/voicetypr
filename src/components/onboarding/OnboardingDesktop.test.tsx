@@ -1283,6 +1283,24 @@ describe("OnboardingDesktop", () => {
     expect(screen.queryByText("Example of Polish")).not.toBeInTheDocument();
   });
 
+  it("offers a click to talk on macOS when Accessibility was skipped", async () => {
+    permissionState.accessibility = false;
+    try {
+      tryCommands();
+      const user = userEvent.setup();
+      renderOnboarding({ licenseStatus: { status: "none" } });
+      await reachTry(user);
+      await user.click(await screen.findByRole("button", { name: "Or click here to talk" }));
+      expect(await screen.findByText("Listening…")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Or click here to talk" }));
+      expect(await screen.findByRole("heading", { name: "That’s you, word for word" })).toBeInTheDocument();
+      expect(screen.getByText("um so Friday at three")).toBeInTheDocument();
+      neverRecords();
+    } finally {
+      permissionState.accessibility = true;
+    }
+  });
+
   it("says Polish didn’t run on the try even when Polish is on", async () => {
     const base = invokeMock.getMockImplementation();
     invokeMock.mockImplementation((command: string, ...rest: unknown[]) =>

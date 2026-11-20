@@ -271,6 +271,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
               onRetry: () => { if (preparation.name) local.onDownload(preparation.name); },
             } : null}
             microphone={permissions.microphone.status}
+            clickToTalk={isMacOS && permissions.accessibility.status !== "granted"}
             onAllowMicrophone={flow.ensureMicrophone}
             onResult={(result) => {
               setFirstTry(result);

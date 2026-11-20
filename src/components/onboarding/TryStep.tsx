@@ -1,4 +1,4 @@
-import { FrameHeading, FrameKeys, PrimaryButton, SecondaryButton } from "@/components/onboarding/Frame";
+import { FrameHeading, FrameKeys, PrimaryButton, QuietButton, SecondaryButton } from "@/components/onboarding/Frame";
 import type { PermissionStatus } from "@/components/onboarding/onboardingTypes";
 import { useFirstDictation, type FirstDictation } from "@/components/onboarding/useFirstDictation";
 import { isMacOS } from "@/lib/platform";
@@ -24,6 +24,7 @@ export function TryStep({
   engineReady,
   download,
   microphone,
+  clickToTalk,
   onAllowMicrophone,
   onResult,
   onSkip,
@@ -34,6 +35,8 @@ export function TryStep({
   /** Set while the on-device model is not ready. */
   download: TryDownload | null;
   microphone: PermissionStatus;
+  /** macOS without Accessibility: the shortcut can't reach the app, so the note offers a click. */
+  clickToTalk: boolean;
   onAllowMicrophone: () => Promise<boolean>;
   onResult: (result: FirstDictation) => void;
   /** Moves on without a dictation of their own. */
@@ -41,7 +44,7 @@ export function TryStep({
 }) {
   const [waited, setWaited] = useState(!engineReady);
   if (!engineReady && !waited) setWaited(true);
-  const { listening, working, allowance } = useFirstDictation(engineReady && !waited, holdToTalk, onResult);
+  const { listening, working, allowance, start, stop } = useFirstDictation(engineReady && !waited, holdToTalk, onResult);
   const micOff = microphone === "denied" || microphone === "restricted";
 
   if (waited) {
@@ -126,6 +129,19 @@ export function TryStep({
           </p>
         </div>
       </div>
+      {clickToTalk ? (
+        holdToTalk ? (
+          <QuietButton
+            onPointerDown={() => void start()}
+            onPointerUp={() => void stop()}
+            onPointerLeave={() => { if (listening) void stop(); }}
+          >
+            Or press and hold here
+          </QuietButton>
+        ) : (
+          <QuietButton onClick={() => void (listening ? stop() : start())}>Or click here to talk</QuietButton>
+        )
+      ) : null}
       {/* The live pill (PillPreview from #174) goes in this slot. */}
       <div aria-hidden="true" className="h-[44px] w-[307px]" />
     </section>

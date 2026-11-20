@@ -135,5 +135,5 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
   const listening = phase === "listening" || phase === "starting";
   const working = phase === "transcribing";
 
-  return { phase, listening, working, allowance };
+  return { listening, working, allowance, start, stop };
 }
