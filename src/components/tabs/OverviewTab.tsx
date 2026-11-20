@@ -57,7 +57,9 @@ export function OverviewTab({ onNavigate, onNavigateSettingsPane, onSourceFilter
   }, []);
   useEffect(() => { void loadWriting(); }, [loadWriting]);
   // Built-in Polish confirmed by Voicetypr's server counts as on, as the user's own provider does.
-  const polish = { on: polishReady === "works" ? true : ownPolish.on, label: "Off" };
+  // Built-in Polish that is on but not confirmed yet is neither on nor off: it starts once the server answers.
+  const waiting = polishReady === "waiting" && !ownPolish.on;
+  const polish = { on: polishReady === "works" ? true : waiting ? null : ownPolish.on, label: waiting ? "Not available yet" : "Off" };
   if (polish.on && ownPolish.style) polish.label = ownPolish.style;
 
   const needs = homeNeeds({ kept, updateVersion: update.install === "restart_pending" ? update.restartVersion : (update.available?.version ?? null), updateInstall: update.install, status, accessibilityMissing: isMacOS && readiness.hasAccessibilityPermission === false });
