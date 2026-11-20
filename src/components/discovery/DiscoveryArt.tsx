@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import trayIcon from "../../../src-tauri/icons/tray-light.png";
-import { ArrowLeft, ArrowRight, AudioLines, ChartNoAxesColumnIncreasing, ChevronRight, Download, FileAudio, Laptop, Monitor, Network, RotateCcw, Share2, Upload, Wifi } from "lucide-react";
-import { appColour } from "@/pill/app-icon";
+import { ArrowLeft, ArrowRight, Bot, ChartNoAxesColumnIncreasing, ChevronRight, Download, FileAudio, Laptop, MessageSquare, Monitor, Network, Share2, SquareTerminal, Upload, Wifi } from "lucide-react";
 import { PillPreview } from "@/components/discovery/PillPreview";
 import { cn } from "@/lib/utils";
 import { isMacOS } from "@/lib/platform";
@@ -168,9 +167,9 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
       break;
     case "tour_styles":
       content = <span className={cn(tourCard, "flex w-[380px] flex-col overflow-hidden")}>
-        {[["Messages", "Messages and email"], ["ChatGPT", "Prompts for AI"], [mac("Ghostty", "Windows Terminal"), "Code and tech notes"]].map(([app, style]) => (
+        {([[MessageSquare, "Slack", "Message"], [Bot, "ChatGPT", "Clean"], [SquareTerminal, mac("Terminal", "Windows Terminal"), "Code"]] as const).map(([Icon, app, style]) => (
           <span key={app} className="flex h-[52px] items-center gap-3 border-b border-border px-4 last:border-b-0">
-            <span className="flex size-6 items-center justify-center text-[12px] font-semibold text-white" style={{ borderRadius: isMacOS ? 6 : 5, background: appColour(app) }}>{app[0]}</span>
+            <Icon className="size-6 text-foreground" strokeWidth={1.75} />
             <span className="min-w-0 flex-1 text-left text-[15px] font-medium text-foreground">{app}</span>
             <span className="rounded-full bg-sage-bg px-[9px] py-[3px] text-[12.5px] font-semibold text-sage">{style}</span>
           </span>
@@ -179,17 +178,12 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
       break;
     case "tour_history":
       content = <span className={cn(tourCard, "flex w-[400px] flex-col overflow-hidden text-left text-[14.5px] text-foreground")}>
-        {[["14:32", "Let’s move the sync to Friday at 3…"], ["14:05", "Bryan, the deck is ready for review…"]].map(([time, text]) => (
-          <span key={time} className="flex h-[46px] items-center gap-3 border-b border-border px-4">
+        {[["14:32", "Let’s move the sync to Friday at 3…"], ["14:05", "Bryan, the deck is ready for review…"], ["13:48", "Remind me to send the invoice tomorrow…"]].map(([time, text]) => (
+          <span key={time} className="flex h-[46px] items-center gap-3 border-b border-border px-4 last:border-b-0">
             <span className="font-mono text-[13px] text-text-3">{time}</span>
             {text}
           </span>
         ))}
-        <span className="flex h-[54px] items-center gap-3 bg-warn-bg px-4">
-          <AudioLines className="size-[17px] text-warn" />
-          <span className="min-w-0 flex-1">Couldn’t transcribe · audio kept</span>
-          <span className="flex h-11 items-center gap-2 rounded-[10px] bg-card px-[22px] text-[15px] font-semibold shadow-[0_0_0_0.5px_var(--border)]"><RotateCcw className="size-4" />Retry</span>
-        </span>
       </span>;
       break;
     case "tour_tray":
@@ -200,7 +194,7 @@ export function DiscoveryArt({ kind, shortcut, className }: { kind: DiscoveryArt
           14:32
         </span>
         <span className="flex w-[250px] flex-col rounded-[10px] bg-card p-[5px] text-left text-[13px] text-foreground shadow-[0_0_0_0.5px_var(--border),0_6px_18px_rgba(0,0,0,.12)]">
-          {[mac("Start Dictation", "Start dictation"), mac("Retry Last Dictation", "Retry last dictation"), "Polish: On", "Engine: Parakeet V3", "Open Voicetypr"].map((item, index) => (
+          {[mac("Start Dictation", "Start dictation"), mac("Retry Last Dictation", "Retry last dictation"), "Polish: Clean", "Engine: Parakeet V3", "Open Voicetypr"].map((item, index) => (
             <span key={item} className={cn("flex items-center justify-between rounded-md px-2.5 py-[5px]", index === 0 && "bg-sage text-sage-foreground")}>
               {item}
               {index === 2 || index === 3 ? <ChevronRight className="size-3 text-text-3" /> : null}

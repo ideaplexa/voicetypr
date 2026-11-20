@@ -37,14 +37,14 @@ export const TOUR: { title: string; line: string; open: string; section: ScreenI
   },
   {
     title: "A different style for each app",
-    line: "Polish can write one way in Messages and another in your AI chat or terminal. Pick a style per app.",
+    line: "Polish can write one way in Slack and another in your AI chat or terminal. Pick a style per app.",
     open: "Polish",
     section: "polish",
     art: "tour_styles",
   },
   {
     title: `Everything you said, on this ${machine}`,
-    line: "Search, edit, copy or export it in History. If a take can’t be transcribed, retry it while its audio is kept.",
+    line: `Search, edit, copy or export it in History. If a take can’t be transcribed, Voicetypr keeps the audio so you can retry it from Home or the ${isMacOS ? "menu bar" : "system tray"}.`,
     open: "History",
     section: "history",
     art: "tour_history",
