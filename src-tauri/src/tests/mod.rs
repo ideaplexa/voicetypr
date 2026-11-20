@@ -44,6 +44,9 @@ mod remote_settings_tests;
 mod remote_http_tests;
 
 #[cfg(test)]
+mod remote_host_license_tests;
+
+#[cfg(test)]
 mod remote_lifecycle_tests;
 
 #[cfg(test)]

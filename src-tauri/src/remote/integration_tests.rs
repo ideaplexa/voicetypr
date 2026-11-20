@@ -220,7 +220,9 @@ mod tests {
         };
 
         // Create real transcription context wrapped in Arc<Mutex>
-        let context = Arc::new(RwLock::new(RealTranscriptionContext::new(config)));
+        let context = Arc::new(RwLock::new(
+            RealTranscriptionContext::new(config).licensed_for_tests(),
+        ));
 
         // Start server
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -341,7 +343,9 @@ mod tests {
             model_path,
         };
 
-        let context = Arc::new(RwLock::new(RealTranscriptionContext::new(config)));
+        let context = Arc::new(RwLock::new(
+            RealTranscriptionContext::new(config).licensed_for_tests(),
+        ));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let (addr_tx, addr_rx) = tokio::sync::oneshot::channel();
 
@@ -442,7 +446,9 @@ mod tests {
             model_path,
         };
 
-        let context = Arc::new(RwLock::new(RealTranscriptionContext::new(config)));
+        let context = Arc::new(RwLock::new(
+            RealTranscriptionContext::new(config).licensed_for_tests(),
+        ));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let (addr_tx, addr_rx) = tokio::sync::oneshot::channel();
 
@@ -578,7 +584,9 @@ mod tests {
             model_path,
         };
 
-        let context = Arc::new(RwLock::new(RealTranscriptionContext::new(config)));
+        let context = Arc::new(RwLock::new(
+            RealTranscriptionContext::new(config).licensed_for_tests(),
+        ));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let (addr_tx, addr_rx) = tokio::sync::oneshot::channel();
 
@@ -674,7 +682,9 @@ mod tests {
         };
 
         // Create separate transcription contexts to avoid serializing local and remote work
-        let remote_context = Arc::new(RwLock::new(RealTranscriptionContext::new(config.clone())));
+        let remote_context = Arc::new(RwLock::new(
+            RealTranscriptionContext::new(config.clone()).licensed_for_tests(),
+        ));
         let local_context = RealTranscriptionContext::new(config);
 
         // Start HTTP server for remote requests
@@ -843,7 +853,9 @@ mod tests {
             model_path,
         };
 
-        let context = Arc::new(RwLock::new(RealTranscriptionContext::new(config)));
+        let context = Arc::new(RwLock::new(
+            RealTranscriptionContext::new(config).licensed_for_tests(),
+        ));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let (addr_tx, addr_rx) = tokio::sync::oneshot::channel();
 

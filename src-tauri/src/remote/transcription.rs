@@ -114,6 +114,22 @@ pub struct RealTranscriptionContext {
     cache: Arc<StdMutex<TranscriberCache>>,
     /// AppHandle for accessing Parakeet manager (optional, needed for parakeet engine)
     app_handle: Option<AppHandle>,
+    /// The hotkey's license cache; a context without the app refuses transcription.
+    license_cache: LicenseCacheHandle,
+}
+
+type LicenseCacheHandle = Arc<tokio::sync::RwLock<crate::commands::license::RuntimeLicenseCache>>;
+
+fn license_cache_for(app_handle: Option<&AppHandle>) -> LicenseCacheHandle {
+    use tauri::Manager;
+    app_handle
+        .and_then(|app| app.try_state::<crate::AppState>())
+        .map(|state| state.license_cache.clone())
+        .unwrap_or_else(|| {
+            Arc::new(tokio::sync::RwLock::new(
+                crate::commands::license::RuntimeLicenseCache::Failed,
+            ))
+        })
 }
 
 impl RealTranscriptionContext {
@@ -134,6 +150,7 @@ impl RealTranscriptionContext {
             password,
             shared_state,
             cache: Arc::new(StdMutex::new(TranscriberCache::new())),
+            license_cache: license_cache_for(app_handle.as_ref()),
             app_handle,
         }
     }
@@ -150,7 +167,15 @@ impl RealTranscriptionContext {
             shared_state,
             cache: Arc::new(StdMutex::new(TranscriberCache::new())),
             app_handle: None,
+            license_cache: license_cache_for(None),
         }
+    }
+
+    /// Serve as a licensed host in tests that exercise the real engines.
+    #[cfg(test)]
+    pub fn licensed_for_tests(mut self) -> Self {
+        self.license_cache = crate::remote::http::licensed_host_cache();
+        self
     }
 
     /// Update the model being served
@@ -228,6 +253,10 @@ impl ServerContext for RealTranscriptionContext {
 
     fn get_password(&self) -> Option<String> {
         self.password.clone()
+    }
+
+    fn license_cache(&self) -> LicenseCacheHandle {
+        self.license_cache.clone()
     }
 
     fn get_engine(&self) -> String {

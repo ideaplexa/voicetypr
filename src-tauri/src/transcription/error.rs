@@ -73,7 +73,7 @@ pub fn from_remote_client_error(
     use RemoteClientError as E;
 
     let code = match err {
-        E::AuthFailed { .. } => TranscriptionErrorCode::Unauthorized,
+        E::AuthFailed { .. } | E::HostLicense { .. } => TranscriptionErrorCode::Unauthorized,
         E::Timeout { .. } => TranscriptionErrorCode::Timeout,
         // Per the shared error contract, every remaining remote-client failure
         // (connect, HTTP status, response decode/schema, request build, task
@@ -86,8 +86,11 @@ pub fn from_remote_client_error(
         | E::JoinFailed { .. } => TranscriptionErrorCode::TransportFailed,
     };
 
-    TranscriptionError::new(code, source, user_message_for_code(code))
-        .with_detail(remote_detail(err))
+    let message = match err {
+        E::HostLicense { message, .. } => message,
+        _ => user_message_for_code(code),
+    };
+    TranscriptionError::new(code, source, message).with_detail(remote_detail(err))
 }
 
 pub(crate) fn from_stt_error(err: &SttError, source: TranscriptionSource) -> TranscriptionError {

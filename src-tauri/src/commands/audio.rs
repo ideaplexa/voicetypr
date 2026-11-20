@@ -1682,7 +1682,9 @@ fn transcription_failure_class(failure: &TranscriptionFailure) -> String {
             }
         }
         TranscriptionFailure::Remote(err) => match err {
-            RemoteClientError::AuthFailed { .. } => "remote_auth",
+            RemoteClientError::AuthFailed { .. } | RemoteClientError::HostLicense { .. } => {
+                "remote_auth"
+            }
             RemoteClientError::Timeout { .. } => "remote_timeout",
             RemoteClientError::ConnectFailed { .. } => "remote_connect",
             RemoteClientError::HttpStatus { .. } => "remote_http",
@@ -1752,6 +1754,7 @@ impl TranscriptionFailure {
 fn remote_client_error_kind(error: &RemoteClientError) -> &'static str {
     match error {
         RemoteClientError::AuthFailed { .. } => "remote_auth_failed",
+        RemoteClientError::HostLicense { .. } => "remote_host_license",
         RemoteClientError::Timeout { .. } => "remote_timeout",
         RemoteClientError::ConnectFailed { .. } => "remote_connect_failed",
         RemoteClientError::HttpStatus { .. } => "remote_http_status",
