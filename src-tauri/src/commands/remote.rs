@@ -379,6 +379,7 @@ pub async fn stop_sharing(
 /// Get the current sharing status
 #[tauri::command]
 pub async fn get_sharing_status(
+    app: AppHandle,
     server_manager: State<'_, AsyncMutex<RemoteServerManager>>,
     remote_settings: State<'_, AsyncMutex<RemoteSettings>>,
     app_state: State<'_, crate::AppState>,
@@ -391,6 +392,9 @@ pub async fn get_sharing_status(
         let settings = remote_settings.lock().await;
         settings.server_config.allow_model_control
     };
+    let observe_app = app.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::license::trial_clock::observe(&observe_app))
+        .await;
     let license =
         crate::license::recording_readiness::wait_for_recording_license(&app_state.license_cache)
             .await;

@@ -144,13 +144,12 @@ mod tests {
         assert_eq!(allowance(true, Some(40)), TryAllowance::Access);
     }
 
-    /// Tries left open the setup window's First try and nothing else: the
-    /// hotkey, file jobs, kept retries and History re-transcribe
-    /// (`validate_recording_license`), the CLI (`cli_license_decision`) and
-    /// the network host (`host_license_refusal`) all read the license cache,
-    /// which knows nothing of tries.
+    /// An unlicensed device with every try left still reads as Blocked in the
+    /// license cache, the state the hotkey, file jobs, kept retries, History
+    /// re-transcribe, the CLI and the network host decide on; tries are never
+    /// part of that decision.
     #[test]
-    fn tries_left_open_only_the_first_try() {
+    fn tries_left_leave_the_license_state_blocked() {
         assert_eq!(allowance(false, Some(0)), TryAllowance::Tries { left: 10 });
         let unlicensed = recording_license_state(&RuntimeLicenseCache::Ready(CachedLicense::new(
             status(LicenseState::None),

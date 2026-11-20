@@ -259,10 +259,9 @@ impl ServerContext for RealTranscriptionContext {
         self.license_cache.clone()
     }
 
-    fn observe_trial_clock(&self) {
-        if let Some(app) = &self.app_handle {
-            crate::license::trial_clock::observe(app);
-        }
+    fn trial_clock_observer(&self) -> Option<Box<dyn FnOnce() + Send + 'static>> {
+        let app = self.app_handle.clone()?;
+        Some(Box::new(move || crate::license::trial_clock::observe(&app)))
     }
 
     fn get_engine(&self) -> String {
