@@ -14,6 +14,7 @@ import {
 
 export type MainScreenId =
   | "home"
+  | "capabilities"
   | "history"
   | "insights"
   | "transcription"

@@ -8,6 +8,7 @@ import type { AccelerationStatus } from "@/types/acceleration";
 import type { DistributionInfo } from "@/types/distribution";
 import type { SharingStatus, FirewallStatus } from "@/components/sections/network-sharing/types";
 import type { EffectivePrimaryShortcut } from "@/lib/primary-shortcut";
+import { localDate } from "@/lib/first-week";
 
 export type PreviewOptions = {
   theme: "light" | "dark";
@@ -17,6 +18,11 @@ export type PreviewOptions = {
   onboarding?: 1 | 2 | 3;
   /** `?license=none`: a device whose free trial has not been started. */
   trialNotStarted?: boolean;
+  /** A new person: press-to-toggle, no Polish provider, empty Dictionary, sharing off. */
+  fresh?: boolean;
+  /** First-week day shown on Home (1-7). */
+  day?: number;
+  sharingOff?: boolean;
 };
 
 const demoText = [
@@ -250,7 +256,7 @@ export function createFixtures(options: PreviewOptions) {
     theme: options.theme,
     onboarding_completed: !options.onboarding,
     check_updates_automatically: false,
-    recording_mode: "push_to_talk",
+    recording_mode: options.fresh ? "toggle" : "push_to_talk",
     selected_microphone:
       options.platform === "macos" ? "MacBook Pro Microphone" : "Built-in Microphone",
     auto_paste_transcription: true,
@@ -260,9 +266,10 @@ export function createFixtures(options: PreviewOptions) {
     pill_indicator_mode: DEFAULT_PILL_INDICATOR_MODE,
     pill_indicator_style: "full",
     pill_indicator_position: "bottom-center",
-    transcription_mode: "live_preview",
+    transcription_mode: options.fresh ? "regular" : "live_preview",
     update_channel: "beta",
     save_recordings: true,
+    first_week: { day: options.day ?? 8, last_seen: localDate(new Date()), dismissed: [] },
   };
   const onboardingModels = options.onboarding
     ? demoModels.map((model) => {
@@ -306,7 +313,7 @@ export function createFixtures(options: PreviewOptions) {
   const effectivePrimaryShortcut: EffectivePrimaryShortcut = {
     hotkey,
     binding: null,
-    mode: "hold",
+    mode: options.fresh ? "toggle" : "hold",
   };
   const providers: AiProvider[] = [
     { id: "openai", name: "OpenAI", status: "production", requires_api_key: true },
@@ -314,7 +321,7 @@ export function createFixtures(options: PreviewOptions) {
     { id: "gemini", name: "Gemini", status: "production", requires_api_key: true },
   ];
   const aiSettings: AISettings = {
-    enabled: true,
+    enabled: !options.fresh,
     provider: "openai",
     model: "gpt-6-luna",
     hasApiKey: true,
@@ -355,9 +362,10 @@ export function createFixtures(options: PreviewOptions) {
     may_be_blocked: false,
   };
   const history = options.empty ? [] : demoHistory;
-  const writing = options.empty
+  const writing = options.empty || options.fresh
     ? { ...demoWriting, custom_words: [], replacements: [], snippets: [] }
     : demoWriting;
+  if (options.fresh || options.sharingOff) sharing.enabled = false;
   const responses: Record<string, unknown> = {
     "plugin:app|version": "2.1.0-beta.3",
     "plugin:log|log": null,
@@ -436,7 +444,7 @@ export function createFixtures(options: PreviewOptions) {
     get_active_stream_capabilities: {
       active_engine: "parakeet",
       capabilities: {
-        supports_streaming: false,
+        supports_streaming: options.day === 5,
         supports_committed_prefix: false,
         supports_tentative_tail: false,
         supports_endpointing: false,

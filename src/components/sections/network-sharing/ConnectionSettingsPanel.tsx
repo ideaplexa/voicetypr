@@ -53,7 +53,7 @@ export function ConnectionSettingsPanel({
       <>
         <SettingsPaneRow
           title="Password"
-          description="Required to connect."
+          description={passwordConfigured ? "Required to connect." : "No password set. Anyone who can reach this computer can connect."}
           control={
             editingPassword ? (
               <div className="flex items-center gap-2">
