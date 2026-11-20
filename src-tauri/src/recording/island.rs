@@ -34,6 +34,7 @@ pub enum BlockedKind {
     LicenseCheckFailed,
     LicenseVerifyRequired,
     TrialEnded,
+    TrialNotStarted,
     NoEngine,
     CloudKeyMissing,
     CloudKeyRejected,
@@ -399,11 +400,29 @@ pub async fn validate_recording_license(app: &AppHandle) -> Result<(), String> {
         }
         RecordingLicenseState::Blocked => {
             log::warn!("Recording blocked: no active license or trial");
+            let trial_not_started = matches!(
+                &*app_state.license_cache.read().await,
+                crate::commands::license::RuntimeLicenseCache::Ready(cached)
+                    if cached.status.status == crate::license::LicenseState::None
+            );
+            let (kind, title, message) = if trial_not_started {
+                (
+                    BlockedKind::TrialNotStarted,
+                    "Start your free trial",
+                    "Start your free trial here to dictate. If you already purchased a license, enter your key instead.",
+                )
+            } else {
+                (
+                    BlockedKind::TrialEnded,
+                    "License Required",
+                    "No active license or trial was found. If you already purchased a license, re-enter your existing key here to activate it again.",
+                )
+            };
 
             blocked(
                 app,
                 current_recording_generation(),
-                BlockedKind::TrialEnded,
+                kind,
                 IslandAction::OpenLicense,
             );
 
@@ -411,8 +430,8 @@ pub async fn validate_recording_license(app: &AppHandle) -> Result<(), String> {
                 app,
                 "license-required",
                 serde_json::json!({
-                    "title": "License Required",
-                    "message": "No active license or trial was found. If you already purchased a license, re-enter your existing key here to activate it again.",
+                    "title": title,
+                    "message": message,
                     "action": "restore"
                 }),
             );

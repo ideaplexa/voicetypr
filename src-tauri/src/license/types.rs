@@ -49,6 +49,7 @@ pub struct TrialCheckResponse {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TrialData {
+    pub started: bool,
     pub is_expired: bool,
     pub days_left: Option<i32>,
     pub expires_at: Option<String>,

@@ -44,6 +44,7 @@ Changes since 2.1.0-beta.7. Betas 8 and 9 were never published, so everything be
 * **writing:** add opt-in offline spoken punctuation in English, German, French, Spanish, Italian, Portuguese, Dutch and Polish, with a command reference in Polish settings
 * **ai:** bring stable native Polish fixes into beta: reasoning effort and optional Fast mode, OpenAI Responses, complete-output guards, and stable native model recommendations; existing beta CLI defaults are unchanged
 * **ai:** harden Claude Code, pi, and oh-my-pi subscription-based Polish with isolated, deadline-bounded processes; add curated/discovered model selection in Advanced settings
+* **license:** the free trial now starts when you choose Start free trial (last setup step, or License), not on first launch
 
 ### Improvements
 

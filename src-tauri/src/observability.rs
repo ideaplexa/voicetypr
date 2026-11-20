@@ -127,6 +127,7 @@ pub const BLOCKED: &[&str] = &[
     "license_check_failed",
     "license_verify_required",
     "trial_ended",
+    "trial_not_started",
     "no_engine",
     "cloud_key_missing",
     "cloud_key_rejected",

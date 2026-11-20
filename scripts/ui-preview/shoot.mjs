@@ -80,7 +80,7 @@ try {
     for (const theme of ["light", "dark"]) {
       for (const state of ["rest", "start", "peek", "peek-nomic", "pick-polish", "pick-engine", "pick-mic", "pick-language", "start-pick",
         ...["peek", "peek-nomic", "pick-polish", "pick-engine", "pick-mic", "pick-language", "start-pick"].map(kind=>`top-anchor-${kind}`), "listening", "listening-amber", "listening-no-badge", "live", "transcribing", "polishing", "pasted", "copied", "no_permission", "error", "too_short", "nospeech", "esc-hint", "top-anchor-live", "stack3", "morph-end", "pasted-original", "finishing",
-        ...["trial_ended","license_check_failed","license_verify_required","no_engine","cloud_key_missing","cloud_key_rejected","soniox_storage_full","mic_permission_denied","mic_missing","mic_busy","accessibility_off","starting_up"].map(kind=>`blocked-${kind}`),
+        ...["trial_ended","trial_not_started","license_check_failed","license_verify_required","no_engine","cloud_key_missing","cloud_key_rejected","soniox_storage_full","mic_permission_denied","mic_missing","mic_busy","accessibility_off","starting_up"].map(kind=>`blocked-${kind}`),
         ...["cloud_failed","network_offline","model_missing","remote_offline","integrity","no_speech","mic_dropped_empty"].map(kind=>`recovery-${kind}`),
         ...["mic_dropped","mic_silent","translate_failed","model_fallback","gpu_fallback",...['timeout','rate_limited','network','guard','error'].map(reason=>`polish_skipped-${reason}`)].map(kind=>`note-${kind}`)]) {
         const name = `pill-${state}`;

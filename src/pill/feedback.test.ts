@@ -7,7 +7,7 @@ import { pillHarness } from '@/pill/test-harness';
 const platform=vi.hoisted(()=>({mac:true}));
 vi.mock('@/lib/platform',()=>({get isMacOS(){return platform.mac;}}));
 const blocked: Record<BlockedKind,[IslandAction,string,string]> = {
-  trial_ended:['open_license','Trial ended','Activate'],license_check_failed:['recheck_license',"Couldn't verify your license",'Recheck'],license_verify_required:['recheck_license',"Couldn't verify your license",'Recheck'],
+  trial_ended:['open_license','Trial ended','Activate'],trial_not_started:['open_license','Start your free trial','Open'],license_check_failed:['recheck_license',"Couldn't verify your license",'Recheck'],license_verify_required:['recheck_license',"Couldn't verify your license",'Recheck'],
   no_engine:['open_models','No voice engine set up','Set up'],cloud_key_missing:['open_cloud_keys','Cloud key missing','Fix key'],cloud_key_rejected:['open_cloud_keys','Cloud key rejected','Fix key'],soniox_storage_full:['open_storage','Soniox storage is full','Clean up'],
   mic_permission_denied:['open_mic_settings','Microphone access is off','Open System Settings'],mic_missing:['choose_mic','No microphone','Choose mic'],mic_busy:['choose_mic','Mic in use by another app','Choose mic'],accessibility_off:['open_accessibility','Allow Accessibility to paste automatically','Open System Settings'],starting_up:['open_models','Getting ready…',''],
 };
