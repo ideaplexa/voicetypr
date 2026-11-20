@@ -1373,6 +1373,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::original::copy_last_original,
             commands::dictionary_suggestions::update_transcription_text,
             commands::dictionary_suggestions::list_dictionary_suggestions,
+            commands::first_week::set_first_week_progress,
             commands::dictionary_suggestions::set_dictionary_suggestion_status,
             get_ai_settings,
             get_ai_settings_for_provider,

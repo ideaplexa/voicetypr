@@ -28,6 +28,9 @@ const DictionarySection = lazy(() =>
 const ModelsTab = lazy(() =>
   import("@/components/tabs/ModelsTab").then((m) => ({ default: m.ModelsTab })),
 );
+const CapabilitiesTab = lazy(() =>
+  import("@/components/tabs/CapabilitiesTab").then((m) => ({ default: m.CapabilitiesTab })),
+);
 const RecordingTab = lazy(() =>
   import("@/components/tabs/RecordingTab").then((m) => ({ default: m.RecordingTab })),
 );
@@ -138,6 +141,9 @@ export function TabContainer({
         />
       );
       break;
+    case "capabilities":
+      content = <CapabilitiesTab onNavigate={navigate} onNavigateSettingsPane={openPane} />;
+      break;
     case "insights":
       content = <InsightsTab />;
       break;
@@ -154,7 +160,7 @@ export function TabContainer({
       content = <RecordingTab />;
       break;
     case "help":
-      content = <ReportProblemSection onNavigateSettingsPane={openPane} />;
+      content = <ReportProblemSection onNavigateSettingsPane={openPane} onOpenCapabilities={() => navigate("capabilities")} />;
       break;
     default:
       content = (

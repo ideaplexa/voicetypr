@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { createLogger } from "@/lib/logger";
 import { isMacOS, isWindows } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { SharingIntro, SharingNeeds } from "./network-sharing/SharingIntro";
 
 const log = createLogger("network");
 
@@ -39,6 +40,7 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
   if (pane)
     return (
       <div className="flex flex-col gap-3">
+        <SharingIntro />
         <SettingsPaneCard>
           <SharingStatusHeader
             pane
@@ -57,7 +59,7 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
             <>
               <SettingsPaneRow
                 title="Address"
-                description="Give this to your other computer."
+                description="On the other computer, open Transcription → Another computer. If this one doesn't appear there, add this address."
                 control={
                   <BindingResultsList
                     pane
@@ -96,6 +98,13 @@ export function NetworkSharingCard({ pane = false }: { pane?: boolean } = {}) {
             </>
           ) : null}
         </SettingsPaneCard>
+        {sharing.status.enabled ? null : (
+          <SharingNeeds
+            activeRemoteServer={!!sharing.activeRemoteServer}
+            hasShareableModel={sharing.hasShareableModel}
+            currentSelectionShareable={sharing.currentSelectionShareable}
+          />
+        )}
         {sharing.status.enabled ? (
           <SettingsPaneCard title="Status">
             <SettingsPaneRow
