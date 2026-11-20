@@ -26,6 +26,7 @@ fn handle_toggle_mode(app: &tauri::AppHandle, app_state: &AppState, event_state:
         return;
     }
     if super::onboarding_try::claim_hotkey(app, KeyPhase::Pressed) {
+        claim_toggle_window(app_state);
         return;
     }
 
@@ -177,6 +178,9 @@ fn handle_ptt_mode(
     event_state: KeyPhase,
 ) {
     if super::onboarding_try::claim_hotkey(app, event_state) {
+        if matches!(event_state, KeyPhase::Pressed) {
+            claim_toggle_window(app_state);
+        }
         return;
     }
     if app_state.pointer_recording.load(Ordering::SeqCst)

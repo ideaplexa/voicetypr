@@ -17,6 +17,9 @@ pub async fn toggle_recording(
             log::info!("Toggle: in-app hotkey ignored; this press was already handled");
             return Ok(ToggleRoute::NoChange);
         }
+        if crate::recording::onboarding_try::claim_hotkey(&app, keytrigger::KeyPhase::Pressed) {
+            return Ok(ToggleRoute::NoChange);
+        }
         log::info!("Toggle: in-app hotkey fallback");
     }
     crate::recording::toggle::toggle_recording(app, source).await
