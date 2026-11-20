@@ -1,8 +1,12 @@
 //! Only an active trial or a license turns speech into text. The desktop
 //! recording gate lives in `recording/island.rs`; these cover the CLI and a
 //! computer sharing its engine on the network.
-use crate::commands::audio::{recording_license_state, RecordingLicenseState};
+#[cfg(test)]
+use crate::commands::audio::recording_license_state;
+use crate::commands::audio::RecordingLicenseState;
+#[cfg(test)]
 use crate::commands::license::{CachedLicense, RuntimeLicenseCache};
+#[cfg(test)]
 use crate::license::LicenseStatus;
 use tauri::{AppHandle, Manager};
 
