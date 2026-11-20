@@ -92,7 +92,7 @@ describe("LicenseContext", () => {
     );
 
     expect(await screen.findByText("Couldn’t load license status")).toBeInTheDocument();
-    expect(screen.queryByText("Trial Expired")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trial ended")).not.toBeInTheDocument();
     expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Enter license key"), {
       target: { value: SECRET_KEY },

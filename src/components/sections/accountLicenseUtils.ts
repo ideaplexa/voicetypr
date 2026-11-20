@@ -28,7 +28,7 @@ export function formatLicenseStatus(status: LicenseStatus | null, isLoading: boo
           : "Trial expires today"
         : "Trial";
     case "expired":
-      return "Trial Expired";
+      return "Trial ended";
     case "none":
       return "No License";
     default:

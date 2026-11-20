@@ -50,7 +50,7 @@ describe("AccountSection license verification", () => {
     });
   });
 
-  it("keeps Pro active and offers revalidation instead of showing Trial Expired", () => {
+  it("keeps Pro active and offers revalidation instead of showing Trial ended", () => {
     render(<AccountSection />);
 
     expect(screen.getByText("Voicetypr Pro · lifetime")).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe("AccountSection license verification", () => {
     expect(screen.getByRole("heading", { name: "License" })).toBeInTheDocument();
     expect(screen.queryByText("Reset app / start over")).not.toBeInTheDocument();
     expect(screen.queryByText("pro", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByText("Trial Expired")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trial ended")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Recheck" }));
     expect(revalidateLicense).toHaveBeenCalledTimes(1);

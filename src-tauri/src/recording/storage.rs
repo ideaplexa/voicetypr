@@ -235,7 +235,6 @@ struct Counts {
 /// timestamp/UUID names remain intentional saves (History can be deleted).
 fn sweep(
     data: &Path,
-    legacy_recovery: Option<&Path>,
     history: Option<&HashSet<String>>,
     protected: &HashSet<PathBuf>,
     active: &HashSet<PathBuf>,
@@ -263,14 +262,12 @@ fn sweep(
         }
         let _ = std::fs::remove_dir(dir);
     }
-    for dir in std::iter::once(data.join("recovery")).chain(legacy_recovery.map(Path::to_owned)) {
-        for path in entries(&dir) {
-            if recovery_name(&path)
-                && !protected.contains(&path)
-                && old_enough(&path, now, ORPHAN_AGE)
-            {
-                counts.orphans += usize::from(std::fs::remove_file(path).is_ok());
-            }
+    // Recovery audio in the shared OS temp folder (older builds) cannot be
+    // told apart from another build's, so only our own folder is swept.
+    for path in entries(&data.join("recovery")) {
+        if recovery_name(&path) && !protected.contains(&path) && old_enough(&path, now, ORPHAN_AGE)
+        {
+            counts.orphans += usize::from(std::fs::remove_file(path).is_ok());
         }
     }
     for path in entries(&data.join("recordings")) {
@@ -308,7 +305,6 @@ fn maintenance(app: &AppHandle) {
     let Ok(data) = app.path().app_data_dir() else {
         return;
     };
-    let legacy = app.path().temp_dir().ok().map(|p| p.join("kept-dictation"));
     let retention = app
         .store("settings")
         .ok()
@@ -330,7 +326,6 @@ fn maintenance(app: &AppHandle) {
         let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
         let mut counts = sweep(
             &data,
-            legacy.as_deref(),
             history.as_ref(),
             protected,
             &active.keys().cloned().collect(),
@@ -339,7 +334,7 @@ fn maintenance(app: &AppHandle) {
         );
         counts.orphans += super::file_jobs::sweep(
             &data,
-            &std::env::temp_dir(),
+            &super::file_jobs::temp_dir(),
             protected,
             SystemTime::now(),
             false,
@@ -372,24 +367,24 @@ pub fn schedule_maintenance(app: AppHandle) {
 /// Reset removes both opted-in saves and ephemeral audio. Clearing History
 /// alone is not consent to delete intentionally saved recordings.
 /// Detached writers remain protected until their finalizer releases ownership.
+/// `temp` is this build's own temporary audio folder; the shared OS temp
+/// folder around it is never touched.
 pub(crate) struct AudioResetPlan {
     data: PathBuf,
-    legacy: PathBuf,
     temp: PathBuf,
 }
 
 impl AudioResetPlan {
-    pub(crate) fn new(data: PathBuf, legacy: PathBuf, temp: PathBuf) -> Self {
-        Self { data, legacy, temp }
+    pub(crate) fn new(data: PathBuf, temp: PathBuf) -> Self {
+        Self { data, temp }
     }
 
     pub(crate) fn preflight(&self, identifier: &str) -> Result<(), &'static str> {
         let base = self.data.parent().ok_or("Audio storage unavailable")?;
         validate_audio_roots(&self.data, identifier, base)?;
-        crate::utils::reset_directory::validate_file_sweep_root(&self.temp, &self.temp)?;
         crate::utils::reset_directory::validate_file_sweep_root(
-            &self.legacy,
-            self.legacy.parent().ok_or("Audio storage unavailable")?,
+            &self.temp,
+            self.temp.parent().ok_or("Audio storage unavailable")?,
         )
     }
 }
@@ -399,17 +394,15 @@ pub(crate) async fn clear_audio(app: &AppHandle, plan: AudioResetPlan) -> Result
     // owned by the capture finalizer and is removed once it is safe.
     let _ = crate::commands::audio::cancel_recording(app.clone()).await;
     super::kept::clear()?;
-    let AudioResetPlan { data, legacy, temp } = plan;
+    let AudioResetPlan { data, temp } = plan;
     let identifier = app.config().identifier.clone();
     let base = data
         .parent()
         .ok_or("Audio storage unavailable")?
         .to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || {
-        clear_storage(&data, Some(legacy), &identifier, &base, &temp)
-    })
-    .await
-    .map_err(|_| "Could not clear audio storage")?
+    tauri::async_runtime::spawn_blocking(move || clear_storage(&data, &identifier, &base, &temp))
+        .await
+        .map_err(|_| "Could not clear audio storage")?
 }
 
 fn capture_directory_candidate(metadata: &std::fs::Metadata) -> bool {
@@ -453,13 +446,7 @@ fn validate_audio_roots(data: &Path, identifier: &str, base: &Path) -> Result<()
     Ok(())
 }
 
-fn clear_storage(
-    data: &Path,
-    legacy: Option<PathBuf>,
-    identifier: &str,
-    base: &Path,
-    temp: &Path,
-) -> Result<(), String> {
+fn clear_storage(data: &Path, identifier: &str, base: &Path, temp: &Path) -> Result<(), String> {
     use crate::utils::reset_directory;
     // Validate even the nonrecursive sweep's roots before it can follow an
     // app-data alias into unrelated storage.
@@ -474,11 +461,6 @@ fn clear_storage(
         data.join("failed-recordings"),
     ] {
         failed |= reset_directory::remove(&dir, identifier, base).is_err();
-    }
-    // Legacy OS temp is not identifier-scoped (and dev/prod share it).
-    // Never recursively delete it; remove only recognized recovery files.
-    if let Some(legacy) = legacy {
-        failed |= clear_legacy_recovery(&legacy).is_err();
     }
     match std::fs::read_dir(data.join("captures")) {
         Ok(dirs) => {
@@ -514,35 +496,6 @@ fn clear_storage(
     }
     if failed {
         Err("Could not clear audio storage".into())
-    } else {
-        Ok(())
-    }
-}
-
-fn clear_legacy_recovery(dir: &Path) -> Result<(), &'static str> {
-    match std::fs::symlink_metadata(dir) {
-        Ok(metadata) if !metadata.is_dir() || metadata.is_symlink() => {
-            return Err("Could not clear audio storage");
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(_) => return Err("Could not clear audio storage"),
-    }
-    let mut failed = false;
-    for entry in std::fs::read_dir(dir).map_err(|_| "Could not clear audio storage")? {
-        match entry {
-            Ok(entry) if recovery_name(&entry.path()) => {
-                // remove_file unlinks symlinks rather than following them.
-                if let Err(error) = std::fs::remove_file(entry.path()) {
-                    failed |= error.kind() != std::io::ErrorKind::NotFound;
-                }
-            }
-            Ok(_) => {}
-            Err(_) => failed = true,
-        }
-    }
-    if failed {
-        Err("Could not clear audio storage")
     } else {
         Ok(())
     }

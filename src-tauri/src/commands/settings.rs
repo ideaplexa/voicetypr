@@ -1663,7 +1663,16 @@ pub async fn set_audio_device(app: AppHandle, device_name: Option<String>) -> Re
         .map_err(|e| format!("Failed to acquire recorder lock: {}", e))?
         .is_recording();
     if recording {
+        // The take is cancelled (stop rules unchanged); say so instead of
+        // leaving the island on a capture that no longer exists.
+        let generation = crate::commands::audio::current_recording_generation();
+        log::info!("Cancelling the current take because the microphone changed");
         crate::commands::audio::cancel_recording(app.clone()).await?;
+        crate::commands::island_notice::notice_at(
+            &app,
+            crate::commands::island_notice::NoticeKind::RecordingFailed,
+            generation,
+        );
     }
 
     // Update the selected microphone

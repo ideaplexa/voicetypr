@@ -1,6 +1,6 @@
 //! A pre-ready event is a candidate, not proof that its UI is still live.
 use crate::{recording::island::BlockedKind, RecordingState};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 
 type Event = (&'static str, Value);
@@ -8,7 +8,10 @@ type Event = (&'static str, Value);
 pub(super) fn produces_ui(event: &str) -> bool {
     !matches!(
         event,
-        "island-notice-clear" | "dictation-note-withdraw" | "kept-dictation-expired"
+        "island-notice-clear"
+            | "dictation-note-withdraw"
+            | "kept-dictation-expired"
+            | "paste-retire"
     )
 }
 
@@ -77,6 +80,11 @@ pub(super) fn revalidate(
                 .as_u64()
                 .is_some_and(|queued_generation| queued_generation != generation)
             {
+                // A newer take owns the island, but a successful paste still
+                // retires an older Copied card without showing its own result.
+                if event == "paste-outcome" && payload["outcome"] == "pasted" {
+                    replay.push(("paste-retire", json!({"generation": payload["generation"]})));
+                }
                 continue;
             }
             if event == "dictation-blocked" && payload["kind"] != blocked {

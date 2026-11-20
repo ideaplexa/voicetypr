@@ -9,20 +9,10 @@ use tauri::{AppHandle, Manager};
 pub(crate) const NO_ACCESS: &str =
     "Voicetypr needs an active trial or license to transcribe. Start your free trial or add a license key in the app.";
 
+#[cfg(test)]
 fn status_allows(status: LicenseStatus) -> bool {
     recording_license_state(&RuntimeLicenseCache::Ready(CachedLicense::new(status)))
         == RecordingLicenseState::Ready
-}
-
-/// Checks the license now; a failed check never grants access.
-pub(crate) async fn require_for_cli(app: &AppHandle) -> Result<(), String> {
-    crate::license::trial_clock::observe(app);
-    let status = crate::commands::license::check_license_status(app.clone()).await?;
-    if status_allows(status) {
-        Ok(())
-    } else {
-        Err(NO_ACCESS.to_string())
-    }
 }
 
 /// Whether this computer may transcribe audio another computer sent it.

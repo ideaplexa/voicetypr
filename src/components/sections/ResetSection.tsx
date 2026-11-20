@@ -27,9 +27,20 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
     }
   };
 
+  const restartAfterReset = async () => {
+    try {
+      await relaunch();
+    } catch (error) {
+      log.error("Failed to restart after reset:", error);
+      toast.error("Reset finished, but Voicetypr couldn't restart. Quit and reopen it.", {
+        duration: Infinity,
+      });
+    }
+  };
+
   const handleResetAppData = async () => {
     const confirmed = await ask(
-      "This action cannot be undone. This will permanently delete all your Voicetypr data except your license and API keys.\n\nThe app will restart after reset.\n\nAre you absolutely sure?",
+      "This can't be undone. It permanently deletes your settings, history, recordings and downloaded models. Your license and API keys are kept.\n\nVoicetypr restarts when the reset is done.\n\nAre you sure?",
       {
         title: "Reset App Data",
         okLabel: "Reset Everything",
@@ -53,7 +64,7 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
         const restartOnce = () => {
           if (restartRequested) return;
           restartRequested = true;
-          void relaunch();
+          void restartAfterReset();
         };
         toast.warning(
           "Reset finished. macOS permissions couldn't be reset; you can remove Voicetypr under System Settings → Privacy & Security.",
@@ -66,7 +77,7 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
       } else {
         toast.success("App data reset successfully. Restarting...");
         setTimeout(() => {
-          void relaunch();
+          void restartAfterReset();
         }, 1000);
       }
     } catch (error) {
@@ -90,7 +101,7 @@ export function ResetSection({ pane = false }: { pane?: boolean } = {}) {
         />
         <SettingsPaneRow
           title="Reset app"
-          description="Clears settings and history. Keeps your license and API keys."
+          description="Clears settings, history and downloaded models, then restarts. Keeps your license and API keys."
           control={
             <Button
               variant="destructive"

@@ -58,6 +58,17 @@ fn windows_directories_to_clear(local_data: &Path) -> [(PathBuf, &'static str); 
     [(local_data.join("logs"), "Application logs")]
 }
 
+const CACHE_DIRECTORY: &str = "Cache directory";
+
+/// On Windows the cache root is also the local data root, which holds the
+/// running window's WebView2 profile; Windows refuses to delete it, and the
+/// failed delete used to abort the reset after the logs were already gone.
+/// The profile's contents are cleared through WebView2 instead.
+#[cfg(target_os = "windows")]
+const LIVE_CACHE_CHILD: Option<&str> = Some("EBWebView");
+#[cfg(not(target_os = "windows"))]
+const LIVE_CACHE_CHILD: Option<&str> = None;
+
 fn clear_directory(
     path: &Path,
     item: &str,
@@ -66,7 +77,11 @@ fn clear_directory(
     errors: &mut Vec<String>,
     cleared_items: &mut Vec<String>,
 ) {
-    match reset_directory::remove(path, identifier, base) {
+    let result = match LIVE_CACHE_CHILD.filter(|_| item == CACHE_DIRECTORY) {
+        Some(keep) => reset_directory::remove_contents_except(path, identifier, base, keep),
+        None => reset_directory::remove(path, identifier, base),
+    };
+    match result {
         Ok(true) => cleared_items.push(item.to_string()),
         Ok(false) => {}
         Err(error) => errors.push(format!("Failed to clear {item}: {error}")),
@@ -137,7 +152,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
         .into_iter()
         .map(|(path, item)| (path, item, data_base.clone()))
         .collect();
-    directories.push((cache, "Cache directory", cache_base));
+    directories.push((cache, CACHE_DIRECTORY, cache_base));
     #[cfg(target_os = "macos")]
     for (path, item) in macos_directories_to_clear(&home, &identifier) {
         let base = path
@@ -164,14 +179,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     };
     #[cfg(not(target_os = "windows"))]
     let shared_roles = Vec::new();
-    let audio = AudioResetPlan::new(
-        data,
-        app.path()
-            .temp_dir()
-            .map_err(|_| "Audio temporary storage unavailable")?
-            .join("kept-dictation"),
-        std::env::temp_dir(),
-    );
+    let audio = AudioResetPlan::new(data, crate::recording::file_jobs::temp_dir());
     // Validate every deletion target, audio root and role footprint before ANY
     // mutation (including cancellation of active audio). Keep the checked plan
     // rather than resolving storage paths again after clearing has begun.
@@ -203,6 +211,7 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     for (name, item) in [
         ("settings", "Settings store"),
         ("transcriptions", "Transcriptions store"),
+        ("dictionary_suggestions", "Dictionary suggestions"),
     ] {
         match app.store(name) {
             Ok(store) => {
@@ -266,6 +275,12 @@ pub async fn reset_app_data(app: AppHandle) -> Result<ResetResult, String> {
     }
     #[cfg(target_os = "windows")]
     {
+        // Web storage of the live WebView2 profile kept above.
+        if let Some(main) = app.get_webview_window("main") {
+            if main.clear_all_browsing_data().is_err() {
+                log::warn!("Could not clear WebView2 browsing data during reset");
+            }
+        }
         // Registry settings are app data, not an OS permission grant.
         let key = format!("HKCU\\Software\\{identifier}");
         match reset_system_command("reg", &["delete", &key, "/f"]).await {
@@ -369,15 +384,16 @@ mod tests {
                 "captures/live/recording.wav"
             }),
             external.join("recording.wav"),
-            os_temp.join("kept-dictation/.tmp-recovery.wav"),
-            os_temp.join(format!("voicetypr-audio-{}.wav", uuid::Uuid::new_v4())),
+            os_temp
+                .join(identifier)
+                .join(format!("voicetypr-audio-{}.wav", uuid::Uuid::new_v4())),
         ];
         for path in &audio_files {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, b"keep audio").unwrap();
         }
-        let invalid = if invalid == "legacy" {
-            let path = os_temp.join("kept-dictation");
+        let invalid = if invalid == "temp" {
+            let path = os_temp.join(identifier);
             std::fs::remove_file(&audio_files[3]).unwrap();
             std::fs::remove_dir(&path).unwrap();
             path
@@ -399,11 +415,7 @@ mod tests {
             "Cache directory",
             cache.parent().unwrap().into(),
         ));
-        let audio = AudioResetPlan::new(
-            data.clone(),
-            os_temp.join("kept-dictation"),
-            os_temp.clone(),
-        );
+        let audio = AudioResetPlan::new(data.clone(), os_temp.join(identifier));
         let result = preflight_reset(&[data, cache], identifier, &[], &directories, &audio);
         assert!(result.is_err());
         for (store, path, original, name) in stores {
@@ -411,10 +423,8 @@ mod tests {
             assert_eq!(std::fs::read(path).unwrap(), original);
         }
         for path in audio_files {
-            // Legacy fixture was replaced by the invalid root itself.
-            if path == os_temp.join("kept-dictation/.tmp-recovery.wav")
-                && invalid == os_temp.join("kept-dictation")
-            {
+            // The temp fixture was replaced by the invalid root itself.
+            if invalid == os_temp.join(identifier) && path.parent() == Some(invalid.as_path()) {
                 continue;
             }
             assert_eq!(std::fs::read(path).unwrap(), b"keep audio");
@@ -436,7 +446,7 @@ mod tests {
             "captures",
             "cli-recordings",
             "captures/abandoned",
-            "legacy",
+            "temp",
         ] {
             assert_preflight_preserves_stores_and_audio(path, true);
         }
@@ -459,7 +469,7 @@ mod tests {
             .map(|(path, item)| (path, item, data.parent().unwrap().into()))
             .collect();
         let os_temp = temp.path().join("temp");
-        let audio = AudioResetPlan::new(data.clone(), os_temp.join("kept-dictation"), os_temp);
+        let audio = AudioResetPlan::new(data.clone(), os_temp.join(identifier));
         assert!(preflight_reset(&[data], identifier, &[], &directories, &audio).is_ok());
     }
 

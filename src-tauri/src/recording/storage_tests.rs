@@ -135,7 +135,6 @@ fn sweep_removes_only_old_orphans_and_keeps_fresh_active_and_unrelated_files() {
     write_aged(&fresh, now, Duration::from_secs(599));
     let counts = sweep(
         data.path(),
-        None,
         Some(&HashSet::new()),
         &HashSet::new(),
         &HashSet::from([active.parent().unwrap().to_owned()]),
@@ -169,7 +168,6 @@ fn saving_on_history_and_unreferenced_saved_recordings_survive_orphan_sweep() {
     let refs = names.into_iter().map(str::to_owned).collect();
     let counts = sweep(
         data.path(),
-        None,
         Some(&refs),
         &HashSet::new(),
         &HashSet::new(),
@@ -196,7 +194,6 @@ fn unreadable_history_keeps_legacy_captures_conservatively() {
     sweep(
         data.path(),
         None,
-        None,
         &HashSet::new(),
         &HashSet::new(),
         Some(30),
@@ -219,7 +216,6 @@ fn long_running_file_uploads_are_not_mistaken_for_orphan_captures() {
         super::super::kept::with_protected_paths(|protected| {
             sweep(
                 data.path(),
-                None,
                 Some(&HashSet::new()),
                 protected,
                 &HashSet::new(),
@@ -265,7 +261,6 @@ fn upload_orphans_require_at_least_twenty_four_hours_and_a_valid_name() {
     write_aged(&unrelated, now, Duration::from_secs(86400 * 40));
     let counts = sweep(
         data.path(),
-        None,
         None,
         &HashSet::new(),
         &HashSet::new(),
@@ -315,7 +310,6 @@ fn real_decoder_scratch_names_use_capture_or_file_job_age_as_appropriate() {
     let counts = super::super::kept::with_protected_paths(|protected| {
         sweep(
             data.path(),
-            None,
             Some(&HashSet::new()),
             protected,
             &HashSet::new(),
@@ -349,7 +343,6 @@ fn overlapping_history_retries_protect_original_wav_until_last_completion() {
         super::super::kept::with_protected_paths(|protected| {
             sweep(
                 data.path(),
-                None,
                 Some(&refs),
                 protected,
                 &HashSet::new(),
@@ -387,7 +380,6 @@ fn history_retry_error_releases_source_and_registration_precedes_first_await() {
         assert!(!protected.contains(&source));
         sweep(
             data.path(),
-            None,
             Some(&HashSet::new()),
             protected,
             &HashSet::new(),
@@ -426,7 +418,6 @@ async fn cancelled_history_retry_releases_its_original_saved_source() {
         super::super::kept::with_protected_paths(|protected| {
             sweep(
                 data.path(),
-                None,
                 Some(&HashSet::new()),
                 protected,
                 &HashSet::new(),
@@ -472,7 +463,6 @@ async fn cancelled_take_defers_cleanup_until_detached_decoder_releases_its_scrat
         let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
         sweep(
             data.path(),
-            None,
             Some(&HashSet::new()),
             protected,
             &active.keys().cloned().collect(),
@@ -502,7 +492,6 @@ fn startup_sweep_applies_configured_retention_including_history_references() {
     let refs = HashSet::from([expired.file_name().unwrap().to_str().unwrap().to_owned()]);
     let keep_forever = sweep(
         data.path(),
-        None,
         Some(&refs),
         &HashSet::new(),
         &HashSet::new(),
@@ -513,7 +502,6 @@ fn startup_sweep_applies_configured_retention_including_history_references() {
     assert!(expired.exists());
     let bounded = sweep(
         data.path(),
-        None,
         Some(&refs),
         &HashSet::new(),
         &HashSet::new(),
@@ -530,7 +518,7 @@ fn startup_sweep_applies_configured_retention_including_history_references() {
 #[test]
 fn recovery_sweep_preserves_kept_clips_and_retry_leases_but_removes_crash_orphans() {
     let data = tempfile::tempdir().unwrap();
-    let legacy = tempfile::tempdir().unwrap();
+    let shared_temp = tempfile::tempdir().unwrap();
     let now = SystemTime::now();
     let stale = data
         .path()
@@ -541,23 +529,28 @@ fn recovery_sweep_preserves_kept_clips_and_retry_leases_but_removes_crash_orphan
         .join("recovery")
         .join(format!("{}.wav", uuid::Uuid::new_v4()));
     let lease = data.path().join("recovery/.tmplease.wav");
-    let crashed_legacy = legacy.path().join(format!("{}.wav", uuid::Uuid::new_v4()));
+    let other_build = shared_temp
+        .path()
+        .join("kept-dictation")
+        .join(format!("{}.wav", uuid::Uuid::new_v4()));
     let unrelated = data.path().join("recovery/personal.wav");
-    for p in [&stale, &kept, &lease, &crashed_legacy, &unrelated] {
+    for p in [&stale, &kept, &lease, &other_build, &unrelated] {
         write_aged(p, now, ORPHAN_AGE + Duration::from_secs(1));
     }
     let counts = sweep(
         data.path(),
-        Some(legacy.path()),
         Some(&HashSet::new()),
         &HashSet::from([kept.clone(), lease.clone()]),
         &HashSet::new(),
         None,
         now,
     );
-    assert_eq!(counts.orphans, 2);
+    assert_eq!(counts.orphans, 1);
     assert!(!stale.exists());
-    assert!(!crashed_legacy.exists());
+    assert!(
+        other_build.exists(),
+        "another build's recovery audio is not ours"
+    );
     assert!(kept.exists());
     assert!(lease.exists());
     assert!(unrelated.exists());
@@ -582,7 +575,6 @@ async fn detached_writer_is_protected_until_header_is_finalized() {
         let active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
         sweep(
             data.path(),
-            None,
             Some(&HashSet::new()),
             &HashSet::new(),
             &active.keys().cloned().collect(),
@@ -599,18 +591,21 @@ async fn detached_writer_is_protected_until_header_is_finalized() {
 async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer() {
     let temp = tempfile::tempdir().unwrap();
     let data = temp.path().join("com.ideaplexa.voicetypr.dev");
-    let legacy = tempfile::tempdir().unwrap();
+    let shared_temp = tempfile::tempdir().unwrap();
+    let own_temp = shared_temp.path().join("com.ideaplexa.voicetypr.dev");
     let files = CaptureFiles::create(&data).unwrap();
     let active = files.audio_path();
     let abandoned = capture_path(&data, "recording.wav");
     let saved = data.join("recordings/saved.wav");
     let recovery = data.join("recovery/kept.wav");
-    let old_recovery = legacy.path().join(format!("{}.wav", uuid::Uuid::new_v4()));
-    let temp_audio = temp
+    let other_build_recovery = shared_temp
+        .path()
+        .join("kept-dictation")
+        .join(format!("{}.wav", uuid::Uuid::new_v4()));
+    let other_build_audio = shared_temp
         .path()
         .join(format!("voicetypr-audio-{}.wav", uuid::Uuid::new_v4()));
-    let unrelated = legacy.path().join("other-app.wav");
-    std::fs::write(&unrelated, b"unrelated").unwrap();
+    let temp_audio = own_temp.join(format!("voicetypr-audio-{}.wav", uuid::Uuid::new_v4()));
     let upload = data
         .join("recordings")
         .join(format!("upload-normalized-{}.wav", uuid::Uuid::new_v4()));
@@ -621,7 +616,8 @@ async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer()
         &abandoned,
         &saved,
         &recovery,
-        &old_recovery,
+        &other_build_recovery,
+        &other_build_audio,
         &temp_audio,
         &upload,
         &scratch,
@@ -629,21 +625,20 @@ async fn reset_clears_saved_capture_and_recovery_storage_but_not_active_writer()
     ] {
         write_aged(p, SystemTime::now(), Duration::ZERO);
     }
-    clear_storage(
-        &data,
-        Some(legacy.path().to_owned()),
-        "com.ideaplexa.voicetypr.dev",
-        temp.path(),
-        temp.path(),
-    )
-    .unwrap();
+    clear_storage(&data, "com.ideaplexa.voicetypr.dev", temp.path(), &own_temp).unwrap();
     assert!(active.exists());
-    assert!(unrelated.exists());
+    assert!(
+        other_build_recovery.exists(),
+        "never another build's recovery audio"
+    );
+    assert!(
+        other_build_audio.exists(),
+        "never another build's temporary audio"
+    );
     for p in [
         &abandoned,
         &saved,
         &recovery,
-        &old_recovery,
         &temp_audio,
         &upload,
         &scratch,
@@ -671,13 +666,9 @@ fn reset_allows_and_removes_ds_store_and_other_regular_capture_files() {
     for path in &files {
         write_aged(path, SystemTime::now(), Duration::ZERO);
     }
-    let plan = AudioResetPlan::new(
-        data.clone(),
-        temp.path().join("kept-dictation"),
-        temp.path().to_owned(),
-    );
+    let plan = AudioResetPlan::new(data.clone(), temp.path().join("temp"));
     assert_eq!(plan.preflight(identifier), Ok(()));
-    clear_storage(&data, None, identifier, temp.path(), temp.path()).unwrap();
+    clear_storage(&data, identifier, temp.path(), &temp.path().join("temp")).unwrap();
     for path in files {
         assert!(!path.exists(), "reset must clear regular files and audio");
     }
@@ -694,13 +685,9 @@ fn reset_rejects_capture_file_symlinks_without_touching_the_target() {
     std::fs::create_dir_all(data.join("captures")).unwrap();
     let link = data.join("captures/.DS_Store");
     std::os::unix::fs::symlink(&external, &link).unwrap();
-    let plan = AudioResetPlan::new(
-        data.clone(),
-        temp.path().join("kept-dictation"),
-        temp.path().to_owned(),
-    );
+    let plan = AudioResetPlan::new(data.clone(), temp.path().join("temp"));
     assert!(plan.preflight(identifier).is_err());
-    assert!(clear_storage(&data, None, identifier, temp.path(), temp.path()).is_err());
+    assert!(clear_storage(&data, identifier, temp.path(), &temp.path().join("temp")).is_err());
     assert!(std::fs::symlink_metadata(link).unwrap().is_symlink());
     assert_eq!(std::fs::read(external).unwrap(), b"unrelated");
 }
@@ -716,7 +703,6 @@ fn cli_capture_has_no_short_orphan_age_gate_in_either_desktop_sweep() {
     write_aged(&path, now, ORPHAN_AGE + Duration::from_secs(1));
     sweep(
         data.path(),
-        None,
         Some(&HashSet::new()),
         &HashSet::new(),
         &HashSet::new(),
@@ -748,7 +734,6 @@ fn reset_reports_cli_and_capture_deletion_failures_and_keeps_clearing_other_stor
         assert_eq!(
             clear_storage(
                 &data,
-                None,
                 "com.ideaplexa.voicetypr.dev",
                 temp.path(),
                 temp.path()
@@ -763,7 +748,6 @@ fn reset_reports_cli_and_capture_deletion_failures_and_keeps_clearing_other_stor
         std::fs::remove_dir(blocked).unwrap();
         clear_storage(
             &data,
-            None,
             "com.ideaplexa.voicetypr.dev",
             temp.path(),
             temp.path(),
@@ -782,7 +766,6 @@ fn reset_reports_unreadable_storage_roots() {
         assert_eq!(
             clear_storage(
                 &data,
-                None,
                 "com.ideaplexa.voicetypr.dev",
                 temp.path(),
                 temp.path()
@@ -799,7 +782,6 @@ fn reset_refuses_user_wide_audio_root_before_touching_files() {
     write_aged(&path, SystemTime::now(), Duration::ZERO);
     assert!(clear_storage(
         temp.path(),
-        None,
         "com.ideaplexa.voicetypr.dev",
         temp.path(),
         temp.path()
@@ -823,7 +805,6 @@ fn reset_does_not_follow_audio_storage_aliases() {
         std::os::unix::fs::symlink(&external, &link).unwrap();
         assert!(clear_storage(
             &data,
-            None,
             "com.ideaplexa.voicetypr.dev",
             temp.path(),
             temp.path()
@@ -837,7 +818,6 @@ fn reset_does_not_follow_audio_storage_aliases() {
     std::os::unix::fs::symlink(&external, &link).unwrap();
     assert!(clear_storage(
         &data,
-        None,
         "com.ideaplexa.voicetypr.dev",
         temp.path(),
         temp.path()
@@ -862,7 +842,6 @@ fn sweep_does_not_follow_symlinks_outside_capture_storage() {
     std::os::unix::fs::symlink(external.path(), &link).unwrap();
     sweep(
         data.path(),
-        None,
         Some(&HashSet::new()),
         &HashSet::new(),
         &HashSet::new(),
@@ -884,7 +863,6 @@ fn normal_retention_never_sweeps_durable_failures_even_when_unprotected() {
     write_aged(&failure, now, Duration::from_secs(6 * 86400));
     sweep(
         data.path(),
-        None,
         Some(&HashSet::new()),
         &HashSet::new(),
         &HashSet::new(),

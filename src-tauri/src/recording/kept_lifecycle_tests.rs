@@ -207,6 +207,14 @@ async fn cancel_case(escape: bool) {
         }
         assert_eq!(state.get_current_state(), RecordingState::Transcribing);
         crate::commands::pill_feedback::with_queue_for_test(|queued| queued.clear());
+        let states = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = states.clone();
+        let state_listener = app.listen("recording-state-changed", move |event| {
+            let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap();
+            seen.lock()
+                .unwrap()
+                .push(payload["state"].as_str().unwrap_or_default().to_owned());
+        });
         if escape {
             let idle = Arc::new(tokio::sync::Notify::new());
             let signal = idle.clone();
@@ -220,6 +228,7 @@ async fn cancel_case(escape: bool) {
                 &state,
                 app,
                 keytrigger::KeyPhase::Pressed,
+                super::super::escape_handler::EscapeSource::Hook,
             )
             .await;
             assert_eq!(state.get_current_state(), RecordingState::Transcribing);
@@ -230,6 +239,7 @@ async fn cancel_case(escape: bool) {
                 &state,
                 app,
                 keytrigger::KeyPhase::Pressed,
+                super::super::escape_handler::EscapeSource::Hook,
             )
             .await;
             tokio::time::timeout(Duration::from_secs(3), idle.notified())
@@ -246,6 +256,12 @@ async fn cancel_case(escape: bool) {
             Err("Retry discarded".into())
         );
         assert_eq!(state.get_current_state(), RecordingState::Idle);
+        app.unlisten(state_listener);
+        assert!(
+            !states.lock().unwrap().iter().any(|s| s == "error"),
+            "a user cancel is not an error: {:?}",
+            states.lock().unwrap()
+        );
         assert!(!state
             .esc_pressed_once
             .load(std::sync::atomic::Ordering::SeqCst));
@@ -503,6 +519,7 @@ fn late_cancel_after_retry_failure_keeps_the_new_failed_card_and_audio() {
                 &app.state::<AppState>(),
                 app,
                 keytrigger::KeyPhase::Pressed,
+                super::super::escape_handler::EscapeSource::Hook,
             )
             .await;
             assert_eq!(std::fs::read(&fixture.path).unwrap(), fixture.wav);
