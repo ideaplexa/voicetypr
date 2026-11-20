@@ -253,10 +253,8 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
         );
         break;
       case "try": {
-        const skip = () => {
-          setFirstTry(null);
-          goTo("fork");
-        };
+        // A try the user already made stays theirs: Buy shows their own words.
+        const skip = () => goTo("fork");
         frame.right = <QuietNext onClick={skip}>Skip for now</QuietNext>;
         frame.body = (
           <TryStep

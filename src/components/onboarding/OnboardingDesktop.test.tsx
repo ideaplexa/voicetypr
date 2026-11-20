@@ -1284,6 +1284,31 @@ describe("OnboardingDesktop", () => {
     expect(screen.queryByText("Example of Polish")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["Skip for now", { kind: "tries", left: 9 }],
+    ["the used-up screen's Continue", { kind: "usedUp" }],
+  ])("keeps the user's own words on Buy after a try, then %s and the deeper path", async (_, later) => {
+    tryCommands();
+    const user = userEvent.setup();
+    renderOnboarding({ licenseStatus: { status: "none" } });
+    await reachTry(user);
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("arm_onboarding_try", { armed: true }));
+    emit("onboarding-try-key", true);
+    await screen.findByText("Listening…");
+    emit("onboarding-try-key", true);
+    await screen.findByRole("heading", { name: "That’s you, word for word" });
+    tryCommands(later);
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await screen.findByRole("heading", { name: later.kind === "usedUp" ? "Your first tries are used up" : "Try it for real" });
+    await user.click(screen.getByRole("button", { name: later.kind === "usedUp" ? /^continue$/i : /skip for now/i }));
+    await user.click(await screen.findByRole("button", { name: /^set your style and see what else it does/i }));
+    await user.click(await screen.findByRole("button", { name: "Skip the tour" }));
+    expect(await screen.findByRole("heading", { name: "Keep talking like that, everywhere" })).toBeInTheDocument();
+    expect(screen.getByText("You said it. Voicetypr typed it.")).toBeInTheDocument();
+    expect(screen.getByText("um so Friday at three")).toBeInTheDocument();
+    expect(screen.queryByText("Example of Polish")).not.toBeInTheDocument();
+  });
+
   it("offers a click to talk on macOS when Accessibility was skipped", async () => {
     permissionState.accessibility = false;
     try {
