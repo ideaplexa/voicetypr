@@ -25,7 +25,8 @@ export type Step =
 export interface OnboardingDesktopProps {
   /** Screenshot fixtures only; production onboarding always starts at the promise. */
   previewStep?: Step;
-  onCompletionStart?: () => void;
+  /** Completion is about to be published; `open` is the screen to show after it. */
+  onCompletionStart?: (open?: ScreenId) => void;
   onCompletionError?: () => void;
   /** Opens the app, on the section the tour remembered when there is one. */
   onComplete: (open?: ScreenId) => void;

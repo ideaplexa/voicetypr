@@ -1271,6 +1271,7 @@ describe("OnboardingDesktop", () => {
     expect(await screen.findByRole("heading", { name: "That’s you, word for word" })).toBeInTheDocument();
     expect(screen.getByText("You said")).toBeInTheDocument();
     expect(screen.getByText("um so Friday at three")).toBeInTheDocument();
+    expect(screen.getByText("· 5 words")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("arm_onboarding_try", { armed: false });
     neverRecords();
@@ -1656,6 +1657,16 @@ describe("OnboardingDesktop", () => {
       await user.click(await screen.findByRole("button", { name: /^set your style and see what else it does/i }));
       await screen.findByRole("heading", { name: "Fix a word once" });
     };
+
+    it("opens the capabilities page from Done's See what Voicetypr can do", async () => {
+      const user = userEvent.setup();
+      renderOnboarding();
+      await reachTour(user);
+      await user.click(screen.getByRole("button", { name: "Skip the tour" }));
+      await screen.findByRole("heading", { name: "Welcome back" });
+      await user.click(screen.getByRole("button", { name: "See what Voicetypr can do" }));
+      await waitFor(() => expect(onCompleteMock).toHaveBeenCalledWith("capabilities"));
+    });
 
     it("opens the section the tour remembered once setup is done", async () => {
       const user = userEvent.setup();
