@@ -178,6 +178,16 @@ export interface AppSettings {
   // Shared local formatting stage (applies with Polish off)
   transcript_paragraphs?: boolean; // default true: paragraph breaks on long takes
   transcript_remove_fillers?: boolean; // default false: drop English um/uh and stutters
+  // First-week cards on Home: day 0 is not started, 8 is finished (commands/first_week.rs)
+  first_week?: FirstWeekProgress;
+}
+
+/** Home's first-week progress, counted in days the app was opened, separate from the trial clock. */
+export interface FirstWeekProgress {
+  day: number;
+  /** Local date (YYYY-MM-DD) the day last advanced. */
+  last_seen: string | null;
+  dismissed: string[];
 }
 
 /** Writing-step outcome attached to a history row (mirrors the backend `writing` metadata blob). */

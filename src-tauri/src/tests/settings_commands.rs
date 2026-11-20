@@ -127,6 +127,7 @@ mod tests {
             transcript_paragraphs: true,
             transcript_remove_fillers: false,
             update_channel: "stable".to_string(),
+            first_week: Default::default(),
         };
 
         // Test serialization
@@ -226,6 +227,7 @@ mod tests {
             transcript_paragraphs: true,
             transcript_remove_fillers: false,
             update_channel: "beta".to_string(),
+            first_week: Default::default(),
         };
 
         let cloned = settings.clone();
@@ -998,6 +1000,7 @@ mod tests {
             transcript_paragraphs: true,
             transcript_remove_fillers: false,
             update_channel: "beta".to_string(),
+            first_week: Default::default(),
         };
 
         let json = serde_json::to_string(&original).unwrap();
