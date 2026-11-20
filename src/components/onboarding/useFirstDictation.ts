@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+const ESCAPE_AGAIN_MS = 2000;
+
 export type DictationPhase = "idle" | "starting" | "listening" | "transcribing";
 
 export interface FirstDictation {
@@ -35,7 +37,7 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
     setAllowance(allowed);
   }, []);
   // `epoch` changes on blur and unmount, so a late reply from an ended try is ignored.
-  const session = useRef({ id: null as string | null, stopQueued: false, phase: "idle" as DictationPhase, epoch: 0 });
+  const session = useRef({ id: null as string | null, stopQueued: false, cancelQueued: false, phase: "idle" as DictationPhase, epoch: 0, attempt: 0 });
   const onResultRef = useRef(onResult);
   useEffect(() => {
     onResultRef.current = onResult;
@@ -48,6 +50,7 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
     session.current.epoch++;
     session.current.id = null;
     session.current.stopQueued = false;
+    session.current.cancelQueued = false;
     move("idle");
   }, [move]);
 
@@ -77,10 +80,17 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
     if (session.current.phase !== "idle" || usedUp.current) return;
     const { epoch } = session.current;
     session.current.stopQueued = false;
+    session.current.cancelQueued = false;
+    session.current.attempt++;
     move("starting");
     try {
       const started = await invoke<{ id: string; left: number | null }>("start_onboarding_try");
-      if (epoch !== session.current.epoch) return;
+      // A try this window no longer wants is thrown away, not left recording.
+      if (epoch !== session.current.epoch || session.current.cancelQueued) {
+        if (epoch === session.current.epoch) end();
+        void invoke("cancel_onboarding_try", { id: started.id }).catch(() => undefined);
+        return;
+      }
       session.current.id = started.id;
       keepAllowance(started.left === null ? { kind: "access" } : { kind: "tries", left: started.left });
       move("listening");
@@ -93,7 +103,7 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
       keepAllowance(allowed);
       if (allowed?.kind !== "usedUp") toast.error(typeof error === "string" ? error : "Could not start dictation. Try again.");
     }
-  }, [move, stop, keepAllowance]);
+  }, [move, stop, keepAllowance, end]);
 
   useEffect(() => {
     if (!active) return;
@@ -106,8 +116,7 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
         if (disposed) return;
         const current = session.current.phase;
         if (pressed && current === "idle") void start();
-        // The in-app fallback (Windows, focused window) sends presses only, so a
-        // second press also ends a hold.
+        // A second press also ends a hold.
         else if (pressed) void stop();
         else if (!pressed && holdToTalk) void stop();
       }),
@@ -123,10 +132,33 @@ export function useFirstDictation(active: boolean, holdToTalk: boolean, onResult
     const blur = () => {
       if (session.current.phase !== "idle") end();
     };
+    // Esc twice within two seconds throws the try away, as it cancels a dictation.
+    // A try still starting is cancelled once its start returns, so the start
+    // cannot slip past the cancel.
+    let lastEscape = { at: 0, attempt: -1 };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.repeat || session.current.phase === "idle") return;
+      const now = Date.now();
+      const { attempt } = session.current;
+      if (lastEscape.attempt !== attempt || now - lastEscape.at > ESCAPE_AGAIN_MS) {
+        lastEscape = { at: now, attempt };
+        return;
+      }
+      lastEscape = { at: 0, attempt: -1 };
+      if (session.current.phase === "starting") {
+        session.current.cancelQueued = true;
+        return;
+      }
+      const { id } = session.current;
+      end();
+      void invoke("cancel_onboarding_try", { id }).catch(() => undefined);
+    };
     window.addEventListener("blur", blur);
+    window.addEventListener("keydown", escape, true);
     return () => {
       disposed = true;
       window.removeEventListener("blur", blur);
+      window.removeEventListener("keydown", escape, true);
       end();
       void invoke("arm_onboarding_try", { armed: false }).catch(() => undefined);
       for (const subscription of subscriptions) void subscription.then((unlisten) => unlisten()).catch(() => undefined);

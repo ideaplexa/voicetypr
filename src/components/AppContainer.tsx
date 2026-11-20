@@ -104,7 +104,7 @@ export function AppContainer() {
   // The destination is set before completion is published, so Home never shows first.
   const markOnboardingCompletionStarted = (open?: ScreenId) => {
     hasCompletedOnboardingRef.current = true;
-    if (open) setActiveSection(open);
+    setActiveSection(open ?? "home");
   };
 
   const clearOnboardingCompletionMarker = () => {

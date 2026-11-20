@@ -230,6 +230,19 @@ pub fn arm_onboarding_try(window: WebviewWindow, armed: bool) {
     }
 }
 
+/// Throws a try away: Esc Esc in the setup window, or a start the window no
+/// longer wants. Only that try ends, so a newer one keeps going.
+#[tauri::command]
+pub fn cancel_onboarding_try(window: WebviewWindow, id: Option<String>) {
+    if window.label() != "main" {
+        return;
+    }
+    match id.as_deref().and_then(parse_id) {
+        Some(id) => discard(id),
+        None => cancel(),
+    }
+}
+
 #[tauri::command]
 pub async fn get_onboarding_try(app: AppHandle) -> access::TryAllowance {
     access::try_allowance(&app).await

@@ -55,7 +55,7 @@ export function Frame({
         </button>
       ) : null}
       {right ? <div className="absolute right-[22px] bottom-[21px]">{right}</div> : null}
-      {footer ? <div className="absolute inset-x-0 bottom-[33px] flex justify-center">{footer}</div> : null}
+      {footer ? <div className="pointer-events-none absolute inset-x-0 bottom-[33px] flex justify-center *:pointer-events-auto">{footer}</div> : null}
     </div>
   );
 }
