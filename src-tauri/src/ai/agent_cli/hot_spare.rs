@@ -14,6 +14,7 @@ static HOT_SPARE_SETTINGS_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn invalidate_hot_spare() {
     HOT_SPARE_SETTINGS_EPOCH.fetch_add(1, Ordering::SeqCst);
+    warm_session::invalidate();
     CLAUDE_SPARE.invalidate();
 }
 
@@ -23,14 +24,21 @@ pub(crate) fn hot_spare_generation() -> u64 {
 
 /// Prepare only the selected, enabled provider's complete request configuration.
 pub(crate) async fn warm_hot_spare_if_current(request: &AiPolishRequest, generation: u64) {
+    if !cfg!(target_os = "macos") { return; }
+    if !warm_session::selected(&request.provider_id, &request.model_id) { return; }
     let spare_generation = CLAUDE_SPARE.generation();
     if generation != hot_spare_generation() {
+        return;
+    }
+    if request.provider_id == PROVIDER_PI {
+        warm_session::prepare(request, generation).await;
         return;
     }
     if request.provider_id != PROVIDER_CLAUDE_CODE {
         invalidate_hot_spare();
         return;
     }
+    let Some(_serial) = warm_session::admission().await else { return; };
     let Some(binary_path) = resolve_binary(CLAUDE_CODE_SPEC.binary).await else {
         invalidate_hot_spare();
         return;
@@ -81,6 +89,8 @@ struct Prepared {
     stderr: Option<BoundedReadTask>,
     cwd: Option<TempDir>,
     prompt_files: Option<TempDir>,
+    #[cfg(target_os = "macos")]
+    _memory_prompt: Option<memory_prompt::MemoryPrompt>,
 }
 
 impl HotSpare {
@@ -216,10 +226,17 @@ impl Prepared {
         }
         stream_argv.extend(["--input-format", "stream-json", "--verbose"].map(str::to_string));
         let cwd = TempDir::new().map_err(|error| map_process_failure(ProcessFailure::Io(error)))?;
-        let prompt_files = private_input::private_directory()?;
-        let stream_argv =
-            private_input::private_argv(&CLAUDE_CODE_SPEC, &stream_argv, prompt_files.path())?;
         let mut command = Command::new(binary_path);
+        #[cfg(target_os = "macos")]
+        let memory_prompt = if let Some(index) = stream_argv.iter().position(|arg| arg == "--system-prompt") {
+            let prompt = stream_argv.get(index + 1).ok_or_else(bad_response)?.clone();
+            stream_argv.drain(index..=index + 1);
+            Some(memory_prompt::MemoryPrompt::attach(&mut command, &prompt, "--system-prompt-file")?)
+        } else { None };
+        #[cfg(not(target_os = "macos"))]
+        let prompt_files = private_input::private_directory()?;
+        #[cfg(not(target_os = "macos"))]
+        let stream_argv = private_input::private_argv(&CLAUDE_CODE_SPEC, &stream_argv, prompt_files.path())?;
         command.args(&stream_argv);
         apply_claude_effort_env(&mut command, &CLAUDE_CODE_SPEC, argv);
         command.current_dir(cwd.path());
@@ -236,6 +253,8 @@ impl Prepared {
         apply_no_window(&mut command);
         #[cfg(test)]
         private_input::assert_no_canaries(&command);
+        #[cfg(target_os = "macos")]
+        if let Some(prompt) = &memory_prompt { drop(prompt.feed()); }
         let child = ProcessGroupGuard::new(
             command
                 .group_spawn()
@@ -250,7 +269,12 @@ impl Prepared {
             stdout: None,
             stderr: None,
             cwd: Some(cwd),
+            #[cfg(not(target_os = "macos"))]
             prompt_files: Some(prompt_files),
+            #[cfg(target_os = "macos")]
+            prompt_files: None,
+            #[cfg(target_os = "macos")]
+            _memory_prompt: memory_prompt,
         };
         let child = spare.child.as_mut().unwrap();
         let stdout = child.inner().stdout.take().ok_or_else(bad_response)?;

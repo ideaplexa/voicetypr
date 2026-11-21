@@ -1,7 +1,7 @@
-//! Request orchestration, including one-shot warm consumption and cold fallback.
+//! Request orchestration: selected warm owner, isolated cold spawn, raw fallback.
 use super::*;
 
-/// Each invocation consumes a fresh child; a Claude spare is never reused.
+/// Agent calls share only an isolated selected-provider transport, never a conversation.
 #[derive(Clone, Default)]
 pub struct AgentCliRuntime;
 
@@ -84,14 +84,10 @@ impl AgentCliRuntime {
         // At most half of the remaining outer budget is spent on the warm
         // attempt, leaving the rest for a cold process if it fails.
         let remaining = deadline.saturating_duration_since(Instant::now());
-        let hot_result = if spec.provider_id == PROVIDER_CLAUDE_CODE {
-            CLAUDE_SPARE
-                .take_and_run_with_budget(&binary_path, &argv, &input_text, remaining / 2)
-                .await
-        } else {
-            invalidate_hot_spare();
-            None
-        };
+        let hot_result = warm_session::run(
+            spec.provider_id, &request.model_id, &binary_path, &argv,
+            &input_text, &help, remaining / 2,
+        ).await;
         let mut result = match hot_result {
             Some(Ok(text)) => Ok(text),
             Some(Err(_)) | None => {
@@ -121,6 +117,9 @@ impl AgentCliRuntime {
             .is_err_and(model_cache::is_model_or_auth_failure)
         {
             model_cache::invalidate(&request.provider_id);
+        }
+        if result.is_ok() {
+            warm_session::replenish(spec.provider_id, &request.model_id, &binary_path, &argv, &help);
         }
         log::info!(
             "agent_cli_stage_timing provider={} stage=model_invocation duration_ms={} outcome={}",

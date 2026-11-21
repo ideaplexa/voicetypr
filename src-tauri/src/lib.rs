@@ -640,6 +640,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let exit_code = builder
         .setup(move |app| {
             ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+            ai::agent_cli::warm_session::initialize(app.handle().clone());
             recording::file_jobs::initialize_temp_dir(&app.config().identifier);
             app.manage(commands::usage_stats::UsageStatsCache::default());
             let setup_start = Instant::now();
@@ -1544,6 +1545,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 crate::commands::audio::cleanup_media_pause_on_exit();
                 recording::kept::cleanup();
                 crate::commands::ai_lifecycle::cancel_recording();
+                ai::agent_cli::warm_session::shutdown();
                 product_analytics::shutdown();
                 #[cfg(windows)]
                 vad_quit.finish_restart(app_handle);
