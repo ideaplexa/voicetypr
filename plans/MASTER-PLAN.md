@@ -177,6 +177,18 @@ new ones into the set regularly.
 | 1.4 | Human judgement for ambiguous Polish results; automatic checks only for hard failures | A second person can reproduce a verdict |
 | 1.5 | Opt-in recording donation: separate consent, off by default, own storage, preview before sending, delete any time | Founder decision first |
 
+Status of 1.3 (2026-11-14, branch `feat/scoreboard-harness`): the recognition
+half runs. `scripts/perf-harness.mjs --pairs engine:model,...` scores each
+engine on a labelled set (word error rate, share of clips with every word
+right, p50/p95 of the CLI's own timings) and prints the table; the command for
+the founder set is in that set's README. Checked on the M4 Pro with the
+packaged beta.9 candidate: 60 clips × Whisper Large v3 Turbo and Parakeet V2 in
+2 minutes, plus Soniox and Deepgram on two public clips. Not a score yet: no
+clip has a reviewed reference. Not built: the Polish half (needs `ideal_text`
+from 1.1), hard-word accuracy (needs the hard words marked per clip),
+stop → text as the app measures it (the CLI times recognition only), and the
+Windows run.
+
 ## Phase 2 — Clean core, CLI-first
 
 Goal: one dictation pipeline that the desktop app, the CLI, tests on any OS and

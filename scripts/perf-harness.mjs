@@ -6,7 +6,9 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 const args = parseArgs(process.argv.slice(2));
 const corpusDir = args.corpus ? resolve(args.corpus) : null;
 if (!corpusDir) {
-  fail("Usage: node scripts/perf-harness.mjs --corpus <dir> --engines whisper --models <csv> [--bin <path>] [--reps 5]");
+  fail(
+    "Usage: node scripts/perf-harness.mjs --corpus <dir> (--pairs <engine:model,...> | --engines whisper --models <csv>) [--bin <path>] [--reps 5] [--out <dir>]",
+  );
 }
 
 const manifestPath = join(corpusDir, "manifest.jsonl");
@@ -16,10 +18,9 @@ const bin = resolve(args.bin || join("src-tauri", "target", "debug", "voicetypr"
 const reps = Number.parseInt(args.reps || "5", 10);
 if (!Number.isInteger(reps) || reps < 1) fail("--reps must be a positive integer");
 
-const engines = csv(args.engines || "whisper");
-const models = csv(args.models || "");
-if (engines.length === 0) fail("--engines must contain at least one engine");
-if (models.length === 0) fail("--models must contain at least one model");
+// --pairs runs exactly the listed engine:model pairs; --engines/--models runs
+// every engine with every model, which only suits a single engine.
+const combos = args.pairs ? parsePairs(args.pairs) : crossProduct(args.engines, args.models);
 
 const outDir = resolve(args.out || process.cwd());
 mkdirSync(outDir, { recursive: true });
@@ -29,40 +30,25 @@ const corpusType = readCorpusType(corpusDir);
 const results = [];
 const skipped = [];
 
-for (const engine of engines.toSorted()) {
-  for (const model of models.toSorted()) {
-    let comboSkipped = null;
-    for (const item of manifest) {
-      for (let rep = 1; rep <= reps; rep += 1) {
-        if (comboSkipped) break;
-        const run = runCli({ bin, engine, model, item });
-        if (run.skipped) {
-          comboSkipped = run.reason;
-          skipped.push({
-            engine,
-            model,
-            bucket: "ALL",
-            lang: "ALL",
-            status: "SKIPPED",
-            reason: run.reason,
-          });
-          break;
-        }
-        if (run.error) {
-          results.push({
-            engine,
-            model,
-            bucket: item.bucket,
-            lang: item.lang,
-            file: item.file,
-            rep,
-            status: "ERROR",
-            error: run.error,
-          });
-          continue;
-        }
-        const hypothesis = run.payload.text || "";
-        const werValue = wer(item.reference, hypothesis);
+for (const { engine, model } of combos) {
+  let comboSkipped = null;
+  for (const item of manifest) {
+    for (let rep = 1; rep <= reps; rep += 1) {
+      if (comboSkipped) break;
+      const run = runCli({ bin, engine, model, item });
+      if (run.skipped) {
+        comboSkipped = run.reason;
+        skipped.push({
+          engine,
+          model,
+          bucket: "ALL",
+          lang: "ALL",
+          status: "SKIPPED",
+          reason: run.reason,
+        });
+        break;
+      }
+      if (run.error) {
         results.push({
           engine,
           model,
@@ -70,16 +56,29 @@ for (const engine of engines.toSorted()) {
           lang: item.lang,
           file: item.file,
           rep,
-          status: "OK",
-          text: hypothesis,
-          reference: item.reference,
-          wer: werValue,
-          last_word_present: lastWordPresent(item.reference, hypothesis),
-          timings_ms: extractTimings(run.payload),
+          status: "ERROR",
+          error: run.error,
         });
+        continue;
       }
-      if (comboSkipped) break;
+      const hypothesis = stripSpeakerLabels(run.payload.text || "");
+      const werValue = wer(item.reference, hypothesis);
+      results.push({
+        engine,
+        model,
+        bucket: item.bucket,
+        lang: item.lang,
+        file: item.file,
+        rep,
+        status: "OK",
+        text: hypothesis,
+        reference: item.reference,
+        wer: werValue,
+        last_word_present: lastWordPresent(item.reference, hypothesis),
+        timings_ms: extractTimings(run.payload),
+      });
     }
+    if (comboSkipped) break;
   }
 }
 
@@ -87,8 +86,35 @@ const report = buildReport({ corpusType, corpusDir, bin, reps, results, skipped 
 writeFileSync(join(outDir, "perf-report.json"), `${JSON.stringify(report, null, 2)}\n`);
 writeFileSync(join(outDir, "perf-report.md"), renderMarkdown(report));
 
+console.log(renderMarkdown(report));
 console.log(`Wrote ${join(outDir, "perf-report.json")}`);
 console.log(`Wrote ${join(outDir, "perf-report.md")}`);
+
+function parsePairs(value) {
+  const pairs = csv(value).map((pair) => {
+    const separator = pair.indexOf(":");
+    const engine = pair.slice(0, separator).trim();
+    const model = pair.slice(separator + 1).trim();
+    if (separator < 1 || model.length === 0) fail(`--pairs entry must be engine:model, got: ${pair}`);
+    return { engine, model };
+  });
+  if (pairs.length === 0) fail("--pairs must contain at least one engine:model");
+  return pairs.toSorted(compareRows);
+}
+
+function crossProduct(enginesArg, modelsArg) {
+  const engines = csv(enginesArg || "whisper");
+  const models = csv(modelsArg || "");
+  if (engines.length === 0) fail("--engines must contain at least one engine");
+  if (models.length === 0) fail("--models must contain at least one model");
+  return engines.toSorted().flatMap((engine) => models.toSorted().map((model) => ({ engine, model })));
+}
+
+// Cloud file transcription labels speakers ("Speaker 1: ..."); the label is
+// formatting, not recognized speech, so it must not count as word errors.
+function stripSpeakerLabels(text) {
+  return text.replace(/^Speaker \d+: /gm, "");
+}
 
 function parseArgs(argv) {
   const parsed = {};
@@ -298,6 +324,7 @@ function werByLanguage(rows) {
         lang,
         n: group.length,
         wer: avg(group.map((row) => row.wer)),
+        exact_rate: avg(group.map((row) => (row.wer === 0 ? 1 : 0))),
         last_word_pass_rate: avg(group.map((row) => (row.last_word_present ? 1 : 0))),
       };
     })
@@ -328,13 +355,15 @@ function renderMarkdown(report) {
   lines.push("");
 
   lines.push("## WER By Language", "");
-  lines.push("| engine | model | lang | n | WER | last-word pass |");
-  lines.push("|---|---|---|---:|---:|---:|");
+  lines.push("| engine | model | lang | n | WER | exact | last-word pass |");
+  lines.push("|---|---|---|---:|---:|---:|---:|");
   for (const row of report.wer_by_language) {
-    lines.push(`| ${row.engine} | ${row.model} | ${row.lang} | ${row.n} | ${fmt(row.wer)} | ${fmt(row.last_word_pass_rate)} |`);
+    lines.push(
+      `| ${row.engine} | ${row.model} | ${row.lang} | ${row.n} | ${fmt(row.wer)} | ${fmt(row.exact_rate)} | ${fmt(row.last_word_pass_rate)} |`,
+    );
   }
   for (const row of report.skipped) {
-    lines.push(`| ${row.engine} | ${row.model} | ${row.lang} | 0 | SKIPPED | ${escapePipe(row.reason)} |`);
+    lines.push(`| ${row.engine} | ${row.model} | ${row.lang} | 0 | SKIPPED |  | ${escapePipe(row.reason)} |`);
   }
   lines.push("");
 
