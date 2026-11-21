@@ -224,6 +224,8 @@ impl ParakeetManager {
             ParakeetModelKind::TdtV3 => "v3",
             ParakeetModelKind::UnifiedEnglish640 => "unified_640",
             ParakeetModelKind::NemotronMultilingual1120 => "nemotron_multilingual_1120",
+            ParakeetModelKind::Phonon2 => "phonon2",
+            ParakeetModelKind::Phonon25 => "phonon25",
         }
     }
 

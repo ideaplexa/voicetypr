@@ -295,11 +295,15 @@ struct WarmedResponse: Encodable {
 enum SupportedModelVersion: String, CaseIterable {
     case v2
     case v3
+    case phonon2
+    case phonon25
 
     var asrVersion: AsrModelVersion {
         switch self {
         case .v2: return .v2
         case .v3: return .v3
+        case .phonon2: return .phonon2
+        case .phonon25: return .phonon25
         }
     }
 
@@ -307,6 +311,8 @@ enum SupportedModelVersion: String, CaseIterable {
         switch self {
         case .v2: return "parakeet-tdt-0.6b-v2"
         case .v3: return "parakeet-tdt-0.6b-v3"
+        case .phonon2: return "phonon-2"
+        case .phonon25: return "phonon-2.5"
         }
     }
 
@@ -3129,6 +3135,10 @@ struct ParakeetSidecar {
             return .v2
         case "v3":
             return .v3
+        case "phonon2":
+            return .phonon2
+        case "phonon25":
+            return .phonon25
         default:
             return nil
         }

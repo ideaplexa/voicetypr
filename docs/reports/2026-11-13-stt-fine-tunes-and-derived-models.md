@@ -198,3 +198,24 @@ The following are **proposed acceptance thresholds**, not existing benchmarks or
 - **MMS and unverified “commercially usable” conversions:** a permissive runtime or community conversion does not erase a non-commercial upstream model licence. [MMS](https://huggingface.co/facebook/mms-1b-all), [SenseVoice upstream terms](https://huggingface.co/FunAudioLLM/SenseVoiceSmall).
 
 **What I would try first:** spend the first evaluation on **Fluid Speech Pro in our exact Core ML and Windows ONNX paths**. It offers a real weight-level accuracy lead without introducing an entirely new model family. Run **Mozilla Bengali and Tara Hinglish** next because they address specific speakers rather than duplicate English choices. Keep **Unified and Nemotron visible in the baseline**: the worktree already contains them. Do not claim a speech-model upgrade solves Polish's 1.5–3-second delay; measure raw-ASR and cleanup latency independently. These are recommendations grounded in the [current code](../../src-tauri/src/parakeet/models.rs#L101-L242), [Fluid conversion contracts](https://huggingface.co/FluidVoice-Labs/fluid-speech-pro-onnx), [Mozilla evaluation](https://huggingface.co/mozilla-ai/whisper-large-v3-turbo-bn) and [Tara mixed-code protocol](https://huggingface.co/Trelis/tara), not observed app benchmarks.
+
+## Addendum, 14 November: Phonon and Bark, tried in our Mac sidecar
+
+The research above missed two Parakeet V3 derivatives. Both were then checked first-hand on branch `b9/phonon`.
+
+- **Bark 3.0 (Conway Research):** the [model card](https://huggingface.co/ConwayResearch/Underdog-Bark-3.0) says CC BY-NC 4.0, commercial use by separate licence. Not added.
+- **Phonon-2 (English) and Phonon-2.5 (25 languages), Fermion Research, CC-BY-4.0:** added to the sidecar and catalogue. This needs FluidAudio 0.18.3 (was 0.17.4) and macOS 15.
+
+Measured on an M4 Pro with the built sidecar, 654 private English dictations (8.66 hours), no human references:
+
+| Model | Download on disk | First load after download | Median / p95 time for 5 to 30 s clips | Word disagreement with Whisper Turbo (mean) | Empty outputs |
+|---|---|---|---|---|---|
+| Parakeet V2 (current) | 443 MB | already present | 0.08 / 0.24 s | 13.1% | 0 |
+| Phonon-2 | 361 MB | 219 s including download | 0.11 / 0.17 s | 17.7% | 0 |
+| Phonon-2.5 | 277 MB | 45 s including download | 0.24 / 0.83 s | 15.3% | 2 |
+
+Disagreement between engines is not accuracy. Read with that limit: nothing here shows Phonon recognising this speaker better than Parakeet V2, and the Core ML downloads are 277 to 361 MB, not the 156 to 164 MB of the original packed weights.
+
+The FluidAudio upgrade alone changes Parakeet V2 output on 101 of 654 clips (215 of 57,066 words; 86 of those clips are longer than 30 seconds). Old and new are equally close to Whisper on those clips.
+
+Not run: the desktop app itself (download, select and dictate through the UI), macOS 14, Parakeet V3, Unified or Nemotron on the new FluidAudio.

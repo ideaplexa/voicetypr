@@ -359,6 +359,9 @@ pub fn engine_short_name(model: &str, engine: &str) -> String {
     if model.starts_with("nemotron") {
         return "Nemotron".into();
     }
+    if model.starts_with("phonon") {
+        return "Phonon".into();
+    }
     if model.starts_with("parakeet-unified") {
         return "Parakeet Unified".into();
     }
