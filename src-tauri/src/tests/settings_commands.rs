@@ -305,6 +305,14 @@ mod tests {
             normalize_speech_language_for_model("parakeet", "parakeet-tdt-0.6b-v3", "fr"),
             "fr"
         );
+        assert_eq!(
+            normalize_speech_language_for_model("parakeet", "nemotron-multilingual-1120ms", "sw"),
+            "en"
+        );
+        assert_eq!(
+            normalize_speech_language_for_model("parakeet", "nemotron-multilingual-1120ms", "pl"),
+            "pl"
+        );
     }
 
     #[test]

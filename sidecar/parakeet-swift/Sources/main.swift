@@ -1388,6 +1388,9 @@ enum DecodeAheadV2Harness {
         check("decode_ahead_language_hint_forwarding", DecodeAheadAsrSession.languageHint(for: "de")?.rawValue == "de"
             && DecodeAheadAsrSession.languageHint(for: nil) == nil)
 
+        let norwegianHint = await ParakeetSidecar.nemotronLanguageHint("no")
+        check("nemotron_norwegian_uses_bokmal_prompt", norwegianHint == "nb-NO")
+
         var acrossSlide = DecodeAheadPlanner()
         let start = ("▁Start", 5.0, 5.5)
         let center = ("▁Center", 9.0, 9.5)
@@ -1848,6 +1851,7 @@ struct ParakeetSidecar {
         case "ms": return "ms-MY"
         case "mt": return "mt-MT"
         case "ne": return "ne-NP"
+        case "no": return "nb-NO"
         case "si": return "si-LK"
         case "so": return "so-SO"
         case "sw": return "sw-KE"

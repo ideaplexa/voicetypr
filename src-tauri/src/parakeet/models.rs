@@ -202,14 +202,12 @@ pub static AVAILABLE_MODELS: Lazy<Vec<ParakeetModelDefinition>> = Lazy::new(|| {
             repo_id: "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
             cache_subdir: "nemotron-multilingual/multilingual/1120ms",
             description: "Native multilingual streaming with language detection",
-            // Bare codes that both Voicetypr's selector and the pinned 1120ms
-            // bundle's metadata.json prompt_dictionary can represent.
+            // The 32 locales NVIDIA's model card lists as transcribing out of the
+            // box (transcription-ready and broad-coverage tiers), as bare codes.
+            // Adaptation-ready locales need fine-tuning and are left out.
             languages: &[
-                "en", "af", "am", "ar", "az", "bg", "bn", "cs", "da", "de", "el", "es", "et", "fa",
-                "fi", "fr", "gu", "ha", "haw", "he", "hi", "hr", "hu", "hy", "id", "it", "ja",
-                "ka", "km", "kn", "ko", "ln", "lt", "lv", "mi", "ml", "mr", "ms", "mt", "ne", "nl",
-                "nn", "no", "pl", "pt", "ro", "ru", "si", "sk", "sl", "so", "sv", "sw", "ta", "te",
-                "tg", "th", "tr", "uk", "ur", "uz", "vi", "yo", "zh",
+                "en", "ar", "bg", "cs", "da", "de", "es", "et", "fi", "fr", "hi", "hr", "hu", "it",
+                "ja", "ko", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sv", "tr", "uk", "vi", "zh",
             ],
             recommended: true,
             speed_score: 8,
@@ -305,7 +303,12 @@ mod tests {
             ParakeetModelKind::NemotronMultilingual1120
         );
         assert_eq!(multilingual.languages.first(), Some(&"en"));
+        assert_eq!(multilingual.languages.len(), 28);
         assert!(multilingual.languages.contains(&"ja"));
         assert!(multilingual.languages.contains(&"vi"));
+        assert!(multilingual.languages.contains(&"no"));
+        for undocumented in ["af", "he", "th", "nn", "sw"] {
+            assert!(!multilingual.languages.contains(&undocumented));
+        }
     }
 }

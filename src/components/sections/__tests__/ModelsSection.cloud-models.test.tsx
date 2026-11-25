@@ -39,12 +39,26 @@ const openai: CloudModelInfo = {
   kind: "cloud",
   requires_setup: false,
   underlying_model: "gpt-transcribe",
+  available_models: [{ id: "gpt-transcribe", display_name: "GPT Transcribe" }],
+};
+
+const groq: CloudModelInfo = {
+  name: "groq",
+  display_name: "Groq",
+  size: 0,
+  url: "",
+  sha256: "",
+  downloaded: true,
+  speed_score: 9,
+  accuracy_score: 8,
+  recommended: false,
+  engine: "groq",
+  kind: "cloud",
+  requires_setup: false,
+  underlying_model: "whisper-large-v3-turbo",
   available_models: [
-    { id: "gpt-transcribe", display_name: "GPT Transcribe" },
-    {
-      id: "gpt-4o-mini-transcribe",
-      display_name: "GPT-4o mini Transcribe",
-    },
+    { id: "whisper-large-v3-turbo", display_name: "Whisper Large v3 Turbo" },
+    { id: "whisper-large-v3", display_name: "Whisper Large v3" },
   ],
 };
 
@@ -279,12 +293,21 @@ describe("Transcription source cards", () => {
   });
 
   it("shows curated model labels and a picker only when a provider has choices", () => {
-    renderModels();
+    renderModels({
+      models: [
+        ["openai", openai],
+        ["soniox", soniox],
+        ["groq", groq],
+      ],
+    });
     expect(screen.getByText("GPT Transcribe · Key added")).toBeInTheDocument();
     expect(screen.getByText("Soniox v6 · Key added")).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "OpenAI transcription model" }),
+      screen.getByRole("combobox", { name: "Groq transcription model" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "OpenAI transcription model" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", { name: "Soniox transcription model" }),
     ).not.toBeInTheDocument();
@@ -326,16 +349,21 @@ describe("Transcription source cards", () => {
 
   it("persists and activates a selected curated model", async () => {
     const user = userEvent.setup();
-    const props = renderModels();
-    await user.click(screen.getByRole("combobox", { name: "OpenAI transcription model" }));
-    await user.click(await screen.findByRole("option", { name: "GPT-4o mini Transcribe" }));
+    const props = renderModels({
+      models: [
+        ["openai", openai],
+        ["groq", groq],
+      ],
+    });
+    await user.click(screen.getByRole("combobox", { name: "Groq transcription model" }));
+    await user.click(await screen.findByRole("option", { name: "Whisper Large v3" }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("set_cloud_stt_model", {
-        providerId: "openai",
-        modelId: "gpt-4o-mini-transcribe",
+        providerId: "groq",
+        modelId: "whisper-large-v3",
       }),
     );
     expect(props.refreshModels).toHaveBeenCalled();
-    expect(props.onSelect).toHaveBeenCalledWith("openai");
+    expect(props.onSelect).toHaveBeenCalledWith("groq");
   });
 });

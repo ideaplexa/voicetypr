@@ -26,8 +26,9 @@ pub(super) fn is_nova3(model: &str) -> bool {
     model.eq_ignore_ascii_case("nova-3") || model.to_lowercase().starts_with("nova-3-")
 }
 
-/// Build the repeatable query params for a `/v1/listen` request. The model and
-/// `smart_format=true` are always present; `paragraphs`, `diarize` and
+/// Build the repeatable query params for a `/v1/listen` request. The model,
+/// `smart_format=true` and `mip_opt_out=true` (keeps the audio out of
+/// Deepgram's Model Improvement Program) are always present; `paragraphs`, `diarize` and
 /// `language` are added when requested. Vocabulary `keyterm` params are
 /// appended (one per term, in order) only for Nova-3 model ids.
 fn build_listen_params(
@@ -40,6 +41,7 @@ fn build_listen_params(
     let mut params: Vec<(&'static str, String)> = vec![
         ("model", model.to_string()),
         ("smart_format", "true".to_string()),
+        ("mip_opt_out", "true".to_string()),
     ];
     if paragraphs {
         params.push(("paragraphs", "true".to_string()));
@@ -332,7 +334,7 @@ mod tests {
         assert!(!requests[0].body.is_empty());
         assert_eq!(
             requests[0].url.query(),
-            Some("model=nova-3&smart_format=true&language=en")
+            Some("model=nova-3&smart_format=true&mip_opt_out=true&language=en")
         );
     }
 
@@ -482,7 +484,7 @@ mod tests {
         let requests = server.received_requests().await.unwrap();
         assert_eq!(
             requests[0].url.query(),
-            Some("model=nova-3&smart_format=true&paragraphs=true&language=en")
+            Some("model=nova-3&smart_format=true&mip_opt_out=true&paragraphs=true&language=en")
         );
     }
 
