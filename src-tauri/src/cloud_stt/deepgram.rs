@@ -553,6 +553,10 @@ mod tests {
             .url
             .query_pairs()
             .any(|(k, _)| k.as_ref() == "paragraphs"));
+        assert!(request
+            .url
+            .query_pairs()
+            .any(|(k, v)| k.as_ref() == "mip_opt_out" && v.as_ref() == "true"));
     }
 
     #[tokio::test]

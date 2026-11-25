@@ -358,7 +358,13 @@ impl RealTranscriptionContext {
                 &temp_path,
                 &model_name,
                 &job,
-                spoken_language.map(str::to_string),
+                spoken_language.map(|language| {
+                    crate::commands::settings::normalize_speech_language_for_model(
+                        "parakeet",
+                        &model_name,
+                        language,
+                    )
+                }),
                 translate_to_english,
             )?,
             _ => {

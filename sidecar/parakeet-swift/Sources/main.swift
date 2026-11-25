@@ -1390,6 +1390,8 @@ enum DecodeAheadV2Harness {
 
         let norwegianHint = await ParakeetSidecar.nemotronLanguageHint("no")
         check("nemotron_norwegian_uses_bokmal_prompt", norwegianHint == "nb-NO")
+        let detectedNorwegian = await ParakeetSidecar.voiceTyprLanguageCode("nb-NO")
+        check("nemotron_bokmal_tag_reports_norwegian", detectedNorwegian == "no")
 
         var acrossSlide = DecodeAheadPlanner()
         let start = ("▁Start", 5.0, 5.5)
@@ -1877,7 +1879,8 @@ struct ParakeetSidecar {
               ).first else {
             return nil
         }
-        return bareCode.lowercased()
+        let code = bareCode.lowercased()
+        return code == "nb" ? "no" : code
     }
 
     static func nativeModelDirectory(for model: SupportedModel) -> URL {
