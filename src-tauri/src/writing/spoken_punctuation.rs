@@ -13,7 +13,9 @@
 //! "dos puntos") convert only after the language's prefix ("command colon").
 //! A command right after an article stays a word ("a new line of products").
 //! The prefix forces any command; the escape word ("literal period") keeps the
-//! next command as a word.
+//! next command as a word. A comma the recognizer writes next to a converted
+//! bracket, quote or joining symbol is a pause, not punctuation, and goes; the
+//! comma word keeps one.
 //!
 //! Command names follow the Dragon, Microsoft and Apple dictation lists for
 //! each language; typography follows each language's main reference (Duden,
@@ -32,17 +34,20 @@ enum Placement {
     /// `, ; : ? ! . …` attach to the previous word, replacing a mark the
     /// recognizer put next to the command; one space follows.
     AfterWord,
-    /// `% *` attach to the previous word; surrounding marks stay.
+    /// `% *` attach to the previous word; a recognizer comma before goes.
     Suffix,
     /// Line or paragraph break; the next word starts the new line.
     Break,
-    /// `( [ { „ “ « ¿ ¡ # §` attach to the next word.
+    /// `( [ { „ “ « ¿ ¡ # §` attach to the next word. A recognizer comma
+    /// before goes, except before `¿ ¡` where Spanish needs one.
     Opening,
-    /// `) ] } “ ” »` attach to the previous word.
+    /// `) ] } “ ” »` attach to the previous word. A recognizer comma on either
+    /// side goes; a sentence end after stays.
     Closing,
     /// `– — & + - =` stand alone with one space on each side.
     Spaced,
-    /// `- / \ — –` join the neighbouring words without spaces.
+    /// `- / \ — –` join the neighbouring words without spaces; recognizer
+    /// commas on either side go.
     Joining,
 }
 
@@ -199,7 +204,12 @@ const GERMAN: Language = Language {
         comma(&["Komma", "Beistrich"]),
         phrase_end(&["Punkt"]),
         always(&["Satzendpunkt"], ".", AfterWord),
-        always(&["Strichpunkt", "Semikolon"], ";", AfterWord),
+        // "Strich Punkt" and "Strich-Punkt" are how a customer's Whisper wrote "Strichpunkt".
+        always(
+            &["Strichpunkt", "Strich Punkt", "Strich-Punkt", "Semikolon"],
+            ";",
+            AfterWord,
+        ),
         always(&["Doppelpunkt"], ":", AfterWord),
         always(&["Fragezeichen"], "?", AfterWord),
         always(
@@ -237,12 +247,21 @@ const GERMAN: Language = Language {
             "“",
             Closing,
         ),
-        always(&["Klammer auf"], "(", Opening),
-        always(&["Klammer zu"], ")", Closing),
-        always(&["eckige Klammer auf"], "[", Opening),
-        always(&["eckige Klammer zu"], "]", Closing),
-        always(&["geschweifte Klammer auf"], "{", Opening),
-        always(&["geschweifte Klammer zu"], "}", Closing),
+        // "Glammer" is how a customer's Whisper heard an Austrian "Klammer".
+        always(&["Klammer auf", "Glammer auf"], "(", Opening),
+        always(&["Klammer zu", "Glammer zu"], ")", Closing),
+        always(&["eckige Klammer auf", "eckige Glammer auf"], "[", Opening),
+        always(&["eckige Klammer zu", "eckige Glammer zu"], "]", Closing),
+        always(
+            &["geschweifte Klammer auf", "geschweifte Glammer auf"],
+            "{",
+            Opening,
+        ),
+        always(
+            &["geschweifte Klammer zu", "geschweifte Glammer zu"],
+            "}",
+            Closing,
+        ),
         always(&["Gedankenstrich"], "–", Spaced),
         always(&["Bindestrich"], "-", Joining),
         always(
@@ -806,6 +825,11 @@ const LANGUAGES: &[Language] = &[
     ENGLISH, GERMAN, FRENCH, SPANISH, ITALIAN, PORTUGUESE, DUTCH, POLISH,
 ];
 
+/// One spoken word a recognizer wrote as two ("Strichpunkt"). A comma between
+/// the halves is a real pause, and an article before them belongs to the first
+/// word alone ("einen Strich Punkt").
+const SPLIT_WORDS: &[&str] = &["Strich Punkt"];
+
 /// Marks a recognizer adds on its own around a spoken command word.
 const ENGINE_MARKS: &[char] = &[',', '.', ';', ':', '!', '?'];
 /// Marks that cannot sensibly precede a mark or break the user dictated.
@@ -855,7 +879,11 @@ fn build_matcher(language: &'static Language) -> Matcher {
                 .map(regex::escape)
                 .collect::<Vec<_>>()
                 // Whisper puts commas inside spoken phrases: "open, quote".
-                .join(r"(?:\s*,\s*|\s+)")
+                .join(if SPLIT_WORDS.contains(phrase) {
+                    r"\s+"
+                } else {
+                    r"(?:\s*,\s*|\s+)"
+                })
         })
         .collect::<Vec<_>>()
         .join("|");
@@ -933,6 +961,16 @@ fn trim_trailing_spaces(out: &mut String) {
     out.truncate(kept);
 }
 
+/// Remove spaces and one mark from `marks` before a symbol when the mark came
+/// from the transcript at or after `copied_from`, not from a converted command.
+fn drop_recognizer_mark(out: &mut String, marks: &[char], copied_from: usize) {
+    trim_trailing_spaces(out);
+    if out.len() > copied_from && out.ends_with(marks) {
+        out.pop();
+        trim_trailing_spaces(out);
+    }
+}
+
 /// Remove spaces and one recognizer-added mark from `marks` before a symbol.
 fn drop_preceding_mark(out: &mut String, marks: &[char]) {
     trim_trailing_spaces(out);
@@ -967,7 +1005,14 @@ fn push_space_before_next_word(out: &mut String, text: &str, pos: usize) {
 }
 
 /// Write `command` to `out` and return where copying the transcript resumes.
-fn render(out: &mut String, text: &str, after: usize, command: &Command) -> usize {
+/// `out` from `copied_from` on was copied from the transcript.
+fn render(
+    out: &mut String,
+    text: &str,
+    after: usize,
+    command: &Command,
+    copied_from: usize,
+) -> usize {
     match command.placement {
         Placement::AfterWord => {
             // Whisper often ends a sentence on the pause before a spoken
@@ -979,7 +1024,7 @@ fn render(out: &mut String, text: &str, after: usize, command: &Command) -> usiz
             pos
         }
         Placement::Suffix => {
-            trim_trailing_spaces(out);
+            drop_recognizer_mark(out, &[','], copied_from);
             out.push_str(command.symbol);
             let pos = skip_spaces(text, after);
             push_space_before_next_word(out, text, pos);
@@ -999,15 +1044,19 @@ fn render(out: &mut String, text: &str, after: usize, command: &Command) -> usiz
             skip_following_mark(text, after, ENGINE_MARKS)
         }
         Placement::Opening => {
-            trim_trailing_spaces(out);
+            if command.symbol.starts_with(['¿', '¡']) {
+                trim_trailing_spaces(out);
+            } else {
+                drop_recognizer_mark(out, &[','], copied_from);
+            }
             push_space_before_symbol(out);
             out.push_str(command.symbol);
             skip_following_mark(text, after, CLAUSE_AND_PERIOD_MARKS)
         }
         Placement::Closing => {
-            drop_preceding_mark(out, CLAUSE_MARKS);
+            drop_recognizer_mark(out, CLAUSE_MARKS, copied_from);
             out.push_str(command.symbol);
-            let pos = skip_spaces(text, after);
+            let pos = skip_following_mark(text, after, &[',']);
             push_space_before_next_word(out, text, pos);
             pos
         }
@@ -1020,9 +1069,9 @@ fn render(out: &mut String, text: &str, after: usize, command: &Command) -> usiz
             pos
         }
         Placement::Joining => {
-            trim_trailing_spaces(out);
+            drop_recognizer_mark(out, &[','], copied_from);
             out.push_str(command.symbol);
-            skip_spaces(text, after)
+            skip_following_mark(text, after, &[','])
         }
     }
 }
@@ -1123,14 +1172,27 @@ pub(crate) fn apply_spoken_punctuation(
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
     let mut changed = false;
-    for found in matcher.regex.find_iter(text) {
-        if found.start() < cursor || !is_whole_word(text, found.start(), found.end()) {
+    let mut search = 0usize;
+    while let Some(found) = matcher.regex.find_at(text, search) {
+        if !is_whole_word(text, found.start(), found.end()) {
+            // A phrase inside a longer word ("Querstrich Punkt") must not hide
+            // a command that starts later in it.
+            search = found.start()
+                + text[found.start()..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+            continue;
+        }
+        search = found.end();
+        if found.start() < cursor {
             continue;
         }
         let Some(command) = matcher.command(found.as_str()) else {
             continue;
         };
         let before = &text[cursor..found.start()];
+        let copied_from = out.len();
         match preceding_word(before, matcher.language) {
             Preceding::Escape(start) => {
                 out.push_str(&before[..start]);
@@ -1140,7 +1202,23 @@ pub(crate) fn apply_spoken_punctuation(
                 continue;
             }
             Preceding::Prefix(start) => out.push_str(&before[..start]),
-            Preceding::Article => continue,
+            Preceding::Article => {
+                let matched = normalize_phrase(found.as_str());
+                if SPLIT_WORDS
+                    .iter()
+                    .any(|split| normalize_phrase(split) == matched)
+                {
+                    if let Some((space, ch)) = found
+                        .as_str()
+                        .char_indices()
+                        .rev()
+                        .find(|(_, ch)| ch.is_whitespace())
+                    {
+                        search = found.start() + space + ch.len_utf8();
+                    }
+                }
+                continue;
+            }
             Preceding::Other => {
                 if !triggers(command, matcher, text, found.start(), found.end()) {
                     continue;
@@ -1148,7 +1226,8 @@ pub(crate) fn apply_spoken_punctuation(
                 out.push_str(before);
             }
         }
-        cursor = render(&mut out, text, found.end(), command);
+        cursor = render(&mut out, text, found.end(), command, copied_from);
+        search = search.max(cursor);
         changed = true;
     }
     if !changed {
@@ -1214,3 +1293,7 @@ pub fn spoken_punctuation_reference() -> Vec<SpokenPunctuationLanguage> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "spoken_punctuation_tests.rs"]
+mod tests;
