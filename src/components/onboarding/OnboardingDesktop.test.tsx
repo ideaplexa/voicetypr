@@ -1787,7 +1787,7 @@ describe("OnboardingDesktop", () => {
       expect(screen.queryByRole("heading", { name: "What will you mostly dictate?" })).not.toBeInTheDocument();
       await user.click(toggle);
       // The same saved setting Settings → Polish writes, which the next dictation reads.
-      expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false });
+      expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false }, { publishAfterSave: true });
       expect(await screen.findByRole("status")).toHaveTextContent("No AI cleanup. Your Dictionary and voice commands still apply.");
     });
 
@@ -1797,12 +1797,12 @@ describe("OnboardingDesktop", () => {
       renderOnboarding();
       await reachPolish(user);
       expect(screen.getByRole("switch", { name: "Clean up what I say" })).not.toBeChecked();
-      expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: true });
+      expect(updateSettingsMock).not.toHaveBeenCalledWith({ builtin_polish_enabled: true }, { publishAfterSave: true });
     });
 
     it.each([
       ["not_entitled", "Not available on this device: built-in Polish needs a trial started with your email, or a license."],
-      ["unreachable", "Voicetypr’s server can’t take Polish right now (offline or busy), so nothing is sent and you get exactly what you said."],
+      ["unreachable", "Voicetypr’s server can’t take Polish right now (offline or busy), so nothing is sent and you get your transcript without AI cleanup."],
     ])("shows the saved choice, says why it can't run and lets it be turned off when the server says %s", async (builtin, line) => {
       polishStatus = { ...BUILTIN_READY, builtin };
       const user = userEvent.setup();
@@ -1813,7 +1813,7 @@ describe("OnboardingDesktop", () => {
       expect(toggle).toBeChecked();
       expect(toggle).toBeEnabled();
       await user.click(toggle);
-      expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false });
+      expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false }, { publishAfterSave: true });
     });
 
     it("shows the saved choice while Voicetypr's server is still being asked, never an off it can't change", async () => {

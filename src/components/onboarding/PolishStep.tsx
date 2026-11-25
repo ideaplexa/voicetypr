@@ -27,8 +27,8 @@ export function PolishStep({
   onNext: () => void;
 }) {
   const ownReady = status?.own_provider_ready === true;
-  // While the server is still being asked, show the saved choice: it is what the First try reads.
-  const builtin = builtinPolishView(!status || status.builtin === "first_try" ? "ready" : status.builtin, builtinChosen);
+  // The First try runs on its own onboarding allowance, so here it counts as ready.
+  const builtin = builtinPolishView(status ? (status.builtin === "first_try" ? "ready" : status.builtin) : null, builtinChosen);
   const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
   const note = ownReady
     ? on
@@ -39,7 +39,7 @@ export function PolishStep({
       : on
         ? "Your words go to Voicetypr’s server to be cleaned, then straight back. Nothing is kept."
         : "No AI cleanup. Your Dictionary and voice commands still apply. Turn it on any time in Settings → Polish.";
-  const NoteIcon = on ? ShieldCheck : Type;
+  const NoteIcon = ownReady ? (on ? ShieldCheck : Type) : builtin.active ? ShieldCheck : Type;
 
   return (
     <section className="flex w-[540px] flex-col items-center gap-[30px]">

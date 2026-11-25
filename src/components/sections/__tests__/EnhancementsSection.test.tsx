@@ -511,11 +511,17 @@ describe("EnhancementsSection", () => {
     it("explains it needs a trial or a license once the trial has ended", async () => {
       licenseState.value = { status: "expired" };
       builtinAvailability = "no_access";
+      enhancementOptionsResponse = { preset: "PersonalDictation" };
       withSettings({ builtin_polish_enabled: true });
       renderWithProviders();
       expect(await screen.findByText("Works during your trial or with a license.")).toBeInTheDocument();
       expect(screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" })).toBeChecked();
       expect(screen.getByText("Polish isn’t available yet")).toBeInTheDocument();
+      const styles = await screen.findByRole("group", { name: "Default style" });
+      await waitFor(() => expect(within(styles).getAllByRole("button", { pressed: true })).toHaveLength(1));
+      const aiStyles = within(styles).getAllByRole("button", { pressed: false });
+      expect(aiStyles.length).toBeGreaterThan(0);
+      for (const style of aiStyles) expect(style).toBeDisabled();
     });
 
     it("shows the saved choice and can always be switched off when Voicetypr's server refuses this device or can't be reached", async () => {

@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { ProviderSetupDialog } from "@/components/polish/ProviderSetupDialog";
 import { useSettings } from "@/contexts/SettingsContext";
 import { EnhancementsHeader, type PolishOutcome } from "@/components/polish/EnhancementsHeader";
@@ -183,7 +184,8 @@ export function EnhancementsSection() {
 
       <BuiltInPolishSetting chosen={settings?.builtin_polish_enabled === true}
         availability={polishStatus?.builtin ?? null}
-        onCheckedChange={(checked) => void updateSettings({ builtin_polish_enabled: checked })} />
+        onCheckedChange={(checked) => void Promise.resolve(updateSettings({ builtin_polish_enabled: checked }, { publishAfterSave: true }))
+          .catch(() => { toast.error("Couldn’t save the Polish switch. Try again."); })} />
       <OwnProviderSetting enabled={aiSettings.enabled} hasSelectedModel={hasSelectedModel}
         providerName={activeProviderName}
         onCheckedChange={handleToggleEnabled} onOpenProviderSetup={openProviderSetup} />

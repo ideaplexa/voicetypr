@@ -242,7 +242,7 @@ export const OnboardingDesktop = function OnboardingDesktop(props: OnboardingDes
           <PolishStep
             status={polishStatus}
             builtinChosen={builtinChosen}
-            onBuiltinChange={(on) => void run(() => Promise.resolve(updateSettings({ builtin_polish_enabled: on }))
+            onBuiltinChange={(on) => void run(() => Promise.resolve(updateSettings({ builtin_polish_enabled: on }, { publishAfterSave: true }))
               .catch(() => { toast.error("Couldn’t save the Polish switch. Try again."); }))}
             saving={busy}
             ownProviderLater={remembered === "polish"}

@@ -15,7 +15,7 @@ export function builtinPolishView(availability: BuiltinPolishAvailability | null
     : availability === "not_entitled"
       ? "Not available on this device: built-in Polish needs a trial started with your email, or a license."
     : availability === "unreachable"
-      ? "Voicetypr’s server can’t take Polish right now (offline or busy), so nothing is sent and you get exactly what you said."
+      ? "Voicetypr’s server can’t take Polish right now (offline or busy), so nothing is sent and you get your transcript without AI cleanup."
     : "On: used because you haven’t connected your own provider.";
   return { checked: chosen, active: chosen && availability === "ready", status };
 }

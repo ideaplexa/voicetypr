@@ -468,11 +468,22 @@ async fn send_while_on<R: tauri::Runtime, T>(
     send: impl std::future::Future<Output = Result<T, AiProviderError>>,
 ) -> Result<T, AiProviderError> {
     // The CLI runs in its own process with the settings it loaded at start, so it
-    // reads the saved switch from disk again; an unreadable file counts as off.
+    // reads the saved file itself: only a saved `true` sends, anything else is off.
     let cli = app.try_state::<CliProcess>().is_some();
+    let saved_on = || {
+        app.path()
+            .app_data_dir()
+            .ok()
+            .and_then(|dir| std::fs::read(dir.join("settings")).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|saved| saved.get(SETTING_KEY) == Some(&serde_json::Value::Bool(true)))
+    };
     let switch_on = || {
+        if cli {
+            return saved_on();
+        }
         app.store("settings")
-            .map(|store| (!cli || store.reload().is_ok()) && setting_on(&store))
+            .map(|store| setting_on(&store))
             .unwrap_or(false)
     };
     if !switch_on() {
@@ -1057,6 +1068,68 @@ mod tests {
 
         let on = send_while_on(app.handle(), async { true }, send()).await;
         assert_eq!(on.unwrap().text, CLEANED);
+    }
+
+    #[tokio::test]
+    async fn the_cli_sends_only_while_the_saved_file_says_on() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish"))
+            .respond_with(cleaned_reply())
+            .expect(0)
+            .mount(&server)
+            .await;
+        let (client, uri, polish_request) = (reqwest::Client::new(), server.uri(), request());
+        for saved in [
+            Some(r#"{"builtin_polish_enabled":false}"#),
+            Some("{}"),
+            Some("not json"),
+            None,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let cli = mock_app(dir.path());
+            cli.manage(CliProcess);
+            let cli_store = cli.store("settings").unwrap();
+            cli_store.save().unwrap();
+            assert!(setting_on(&cli_store), "the CLI loaded the switch as on");
+            let file = dir.path().join("settings");
+            let sent = send_while_on(
+                cli.handle(),
+                async {
+                    match saved {
+                        Some(contents) => std::fs::write(&file, contents).unwrap(),
+                        None => std::fs::remove_file(&file).unwrap(),
+                    }
+                    true
+                },
+                post(&client, &uri, "polish", &polish_request),
+            )
+            .await;
+            assert!(
+                matches!(sent, Err(AiProviderError::Canceled)),
+                "{saved:?} sent text"
+            );
+        }
+
+        let on_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish"))
+            .respond_with(cleaned_reply())
+            .expect(1)
+            .mount(&on_server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let cli = mock_app(dir.path());
+        cli.manage(CliProcess);
+        cli.store("settings").unwrap().save().unwrap();
+        let on_uri = on_server.uri();
+        let sent = send_while_on(
+            cli.handle(),
+            async { true },
+            post(&client, &on_uri, "polish", &polish_request),
+        )
+        .await;
+        assert_eq!(sent.unwrap().text, CLEANED);
     }
 
     #[tokio::test]
