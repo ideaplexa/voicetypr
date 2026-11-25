@@ -803,6 +803,13 @@ pub async fn save_settings(
     settings: Settings,
     update_channel_explicit: Option<bool>,
 ) -> Result<(), String> {
+    // Switching built-in Polish off takes effect before any other save or check
+    // runs, so a dictation that ends meanwhile sends nothing.
+    if settings.builtin_polish_enabled == Some(false) {
+        if let Ok(store) = app.store("settings") {
+            store.set(crate::ai::builtin::SETTING_KEY, json!(false));
+        }
+    }
     let _save_guard = SETTINGS_SAVE_LOCK.lock().await;
     let store = app.store("settings").map_err(|e| e.to_string())?;
 
