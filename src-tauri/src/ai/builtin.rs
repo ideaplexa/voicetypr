@@ -456,6 +456,9 @@ pub(crate) struct FirstTryIdentity<'a> {
 /// Cleans onboarding's First try for the setup window alone: nothing is pasted
 /// or saved. `still_current` is the try's own gate; once it closes, nothing is
 /// sent and no text comes back. None means the try shows the engine's text.
+/// Marks the CLI's own app, whose settings store is a copy loaded at start.
+pub(crate) struct CliProcess;
+
 /// Text goes out only while the switch is on and after the server confirmed this
 /// device: the switch is read before asking and again right before sending, so
 /// switching it off while the server is asked still sends nothing.
@@ -464,9 +467,12 @@ async fn send_while_on<R: tauri::Runtime, T>(
     confirmed: impl std::future::Future<Output = bool>,
     send: impl std::future::Future<Output = Result<T, AiProviderError>>,
 ) -> Result<T, AiProviderError> {
+    // The CLI runs in its own process with the settings it loaded at start, so it
+    // reads the saved switch from disk again; an unreadable file counts as off.
+    let cli = app.try_state::<CliProcess>().is_some();
     let switch_on = || {
         app.store("settings")
-            .map(|store| setting_on(&store))
+            .map(|store| (!cli || store.reload().is_ok()) && setting_on(&store))
             .unwrap_or(false)
     };
     if !switch_on() {
@@ -1051,6 +1057,46 @@ mod tests {
 
         let on = send_while_on(app.handle(), async { true }, send()).await;
         assert_eq!(on.unwrap().text, CLEANED);
+    }
+
+    #[tokio::test]
+    async fn the_cli_reads_the_switch_the_app_saved_since_it_started() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish"))
+            .respond_with(cleaned_reply())
+            .expect(0)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let cli = mock_app(dir.path());
+        cli.manage(CliProcess);
+        let cli_store = cli.store("settings").unwrap();
+        cli_store.save().unwrap();
+        assert!(setting_on(&cli_store), "the CLI loaded the switch as on");
+
+        let desktop = mock_app(dir.path());
+        let desktop_store = desktop.store("settings").unwrap();
+        desktop_store.set(SETTING_KEY, serde_json::json!(false));
+        desktop_store.save().unwrap();
+
+        let (client, uri, polish_request) = (reqwest::Client::new(), server.uri(), request());
+        let sent = send_while_on(
+            cli.handle(),
+            async { true },
+            post(&client, &uri, "polish", &polish_request),
+        )
+        .await;
+        assert!(matches!(sent, Err(AiProviderError::Canceled)));
+
+        std::fs::write(dir.path().join("settings"), "not json").unwrap();
+        let unreadable = send_while_on(
+            cli.handle(),
+            async { true },
+            post(&client, &uri, "polish", &polish_request),
+        )
+        .await;
+        assert!(matches!(unreadable, Err(AiProviderError::Canceled)));
     }
 
     #[tokio::test]

@@ -34,7 +34,7 @@ export function PolishStep({
     ? on
       ? "Polish is on and set up with your own AI provider."
       : `Polish is set up with your own AI provider but off. Turn it on in Settings → Polish, or from Voicetypr’s ${isMacOS ? "menu bar" : "tray"} menu.`
-    : builtin.disabled
+    : on && !builtin.active
       ? builtin.status
       : on
         ? "Your words go to Voicetypr’s server to be cleaned, then straight back. Nothing is kept."
@@ -59,7 +59,7 @@ export function PolishStep({
             <Switch
               id="onboarding-builtin-polish"
               checked={builtin.checked}
-              disabled={builtin.disabled || saving}
+              disabled={saving}
               onCheckedChange={onBuiltinChange}
               className="data-[size=default]:h-[26px] data-[size=default]:w-11 [&_[data-slot=switch-thumb]]:size-[22px] [&_[data-slot=switch-thumb][data-checked]]:translate-x-[18px]"
             />

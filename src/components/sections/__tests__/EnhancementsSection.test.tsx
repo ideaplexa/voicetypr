@@ -514,17 +514,26 @@ describe("EnhancementsSection", () => {
       withSettings({ builtin_polish_enabled: true });
       renderWithProviders();
       expect(await screen.findByText("Works during your trial or with a license.")).toBeInTheDocument();
-      expect(screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" })).not.toBeChecked();
+      expect(screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" })).toBeChecked();
+      expect(screen.getByText("Polish isn’t available yet")).toBeInTheDocument();
     });
 
-    it("never reads as on when Voicetypr's server refuses this device or can't be reached", async () => {
+    it("shows the saved choice and can always be switched off when Voicetypr's server refuses this device or can't be reached", async () => {
       withSettings({ builtin_polish_enabled: true });
       builtinAvailability = "unreachable";
+      const user = userEvent.setup();
       const { unmount } = renderWithProviders();
       expect(await screen.findByText(/server can’t take Polish right now/)).toBeInTheDocument();
       const toggle = screen.getByRole("switch", { name: "Clean up on Voicetypr’s server" });
-      expect(toggle).not.toBeChecked();
-      expect(toggle).toHaveAttribute("aria-disabled", "true");
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeEnabled();
+      await user.click(toggle);
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith(
+          "save_settings",
+          expect.objectContaining({ settings: expect.objectContaining({ builtin_polish_enabled: false }) }),
+        ),
+      );
       unmount();
       builtinAvailability = "not_entitled";
       renderWithProviders();

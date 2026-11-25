@@ -1803,15 +1803,17 @@ describe("OnboardingDesktop", () => {
     it.each([
       ["not_entitled", "Not available on this device: built-in Polish needs a trial started with your email, or a license."],
       ["unreachable", "Voicetypr’s server can’t take Polish right now (offline or busy), so nothing is sent and you get exactly what you said."],
-    ])("never shows built-in Polish as on when the server says %s", async (builtin, line) => {
+    ])("shows the saved choice, says why it can't run and lets it be turned off when the server says %s", async (builtin, line) => {
       polishStatus = { ...BUILTIN_READY, builtin };
       const user = userEvent.setup();
       renderOnboarding();
       await reachPolish(user);
       expect(await screen.findByText(line)).toBeInTheDocument();
       const toggle = screen.getByRole("switch", { name: "Clean up what I say" });
-      expect(toggle).not.toBeChecked();
-      expect(toggle).toHaveAttribute("aria-disabled", "true");
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeEnabled();
+      await user.click(toggle);
+      expect(updateSettingsMock).toHaveBeenCalledWith({ builtin_polish_enabled: false });
     });
 
     it("shows the saved choice while Voicetypr's server is still being asked, never an off it can't change", async () => {

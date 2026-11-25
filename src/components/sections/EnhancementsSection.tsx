@@ -112,7 +112,7 @@ export function EnhancementsSection() {
   );
   const builtinChosen = settings?.builtin_polish_enabled === true;
   const { status: polishStatus } = usePolishStatus(`${licenseStatus?.status}:${hasSelectedModel}:${aiSettings.enabled}:${builtinChosen}`);
-  const builtinPolishActive = builtinPolishView(polishStatus?.builtin ?? null, builtinChosen).checked;
+  const builtinPolishActive = builtinPolishView(polishStatus?.builtin ?? null, builtinChosen).active;
   // The gate dictation uses, as Home and Capabilities read it.
   const polishOutcome: PolishOutcome | null = !polishStatus ? null
     : polishStatus.will_run ? "on"
