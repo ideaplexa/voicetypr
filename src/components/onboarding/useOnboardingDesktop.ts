@@ -27,7 +27,7 @@ import type {
 } from "@/types/shortcuts";
 import { isCloudModel, isLocalModel, type ModelInfo } from "@/types";
 import { useOfflinePreparation } from "@/components/onboarding/useOfflinePreparation";
-import type { StartingPolishStyle } from "@/components/onboarding/PolishStep";
+import type { StartingPolishStyle } from "@/components/onboarding/UseStep";
 
 // Matches the backend default (FALLBACK_PRIMARY in commands/shortcuts.rs).
 const defaultHotkey = () => (isMacOS ? "Alt+Space" : "Control+Space");
@@ -88,6 +88,7 @@ export function useOnboardingDesktop({
   // email only after "Start 7-day trial". A step that no longer applies is skipped.
   const [wantsTrial, setWantsTrial] = useState(false);
   const [wantsTour, setWantsTour] = useState(false);
+  const [wantsUse, setWantsUse] = useState(false);
   const steps: Step[] = [
     "promise",
     "source",
@@ -99,6 +100,7 @@ export function useOnboardingDesktop({
     "try",
     "result",
     "fork",
+    "use",
     "tour",
     "buy",
     "trial",
@@ -106,7 +108,7 @@ export function useOnboardingDesktop({
   ];
   const paid = (step: Step) => step === "buy" || step === "trial";
   const skipped = (step: Step) =>
-    (paid(step) && !needsTrial) || (step === "trial" && !wantsTrial) || (step === "tour" && !wantsTour);
+    (paid(step) && !needsTrial) || (step === "trial" && !wantsTrial) || (step === "tour" && !wantsTour) || (step === "use" && !wantsUse);
   const walk = (from: Step, by: 1 | -1): Step => {
     for (let i = steps.indexOf(from) + by; i >= 0 && i < steps.length; i += by) {
       if (!skipped(steps[i])) return steps[i];
@@ -633,10 +635,18 @@ export function useOnboardingDesktop({
     if (currentStep === "engine" && sourceType === "local" && sourceRestored) startPreparingRef.current();
   }, [currentStep, sourceType, sourceRestored, preparation.recommended]);
 
-  const chooseStartingStyle = async (style: StartingPolishStyle | null, polishOn: boolean) => {
-    if (style && polishOn) await invoke("update_enhancement_options", { options: { preset: style } });
-    else await updateSettings({ starting_polish_style: style });
-    setCurrentStep(after("polish"));
+  /**
+   * `applyNow`: Polish can run here, so the pick becomes the style of the very next dictation.
+   * `keepForOwnProvider`: also keep it as the style a provider of the user's own starts in.
+   */
+  const chooseStartingStyle = async (
+    style: StartingPolishStyle | null,
+    { applyNow, keepForOwnProvider }: { applyNow: boolean; keepForOwnProvider: boolean },
+  ) => {
+    if (style && applyNow) await invoke("update_enhancement_options", { options: { preset: style } });
+    // No pick keeps whatever is saved, so passing through again never erases an earlier pick.
+    if (style && (!applyNow || keepForOwnProvider)) await updateSettings({ starting_polish_style: style });
+    setCurrentStep(after("use"));
   };
 
   const handleNext = async () => {
@@ -684,6 +694,7 @@ export function useOnboardingDesktop({
       setCurrentStep(before("source"));
       return;
     }
+    if (currentStep === "use") setWantsUse(false);
     setCurrentStep(before(currentStep));
   };
 
@@ -713,10 +724,11 @@ export function useOnboardingDesktop({
     sourceReady,
     confirmSource,
     after,
-    /** The fork after the result: the tour, or straight on. */
-    leaveFork: (deeper: boolean) => {
+    /** The fork after the result: the deeper path (10a first when Polish is on, then the tour), or straight on. */
+    leaveFork: (deeper: boolean, withStyle: boolean) => {
       setWantsTour(deeper);
-      setCurrentStep(deeper ? "tour" : walk("tour", 1));
+      setWantsUse(deeper && withStyle);
+      setCurrentStep(!deeper ? walk("tour", 1) : withStyle ? "use" : "tour");
     },
     /** From Buy: the name and email page that starts the trial. */
     chooseTrial: () => {

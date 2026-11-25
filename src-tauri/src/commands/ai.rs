@@ -1020,10 +1020,12 @@ pub async fn get_enhancement_options_for_ai_enabled(
     ai_enabled: bool,
 ) -> Result<EnhancementOptions, String> {
     let store = app.store("settings").map_err(|e| e.to_string())?;
+    let has_model_and_key = has_ai_model_and_key(&app)?;
+    let builtin_polish = crate::ai::builtin::active(&app, has_model_and_key);
     let stored_options = store.get("enhancement_options");
     let options = crate::ai::prompts::enhancement_options_for_ai_enabled(
         stored_options.as_ref(),
-        ai_enabled,
+        ai_enabled || builtin_polish,
     )?;
 
     let settings = load_writing_settings(&app)?;
@@ -1034,7 +1036,8 @@ pub async fn get_enhancement_options_for_ai_enabled(
         None,
         crate::writing::PipelineAiState {
             stored_ai_enabled: ai_enabled,
-            has_model_and_key: has_ai_model_and_key(&app)?,
+            has_model_and_key,
+            builtin_polish,
         },
     );
 

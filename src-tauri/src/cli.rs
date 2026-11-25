@@ -504,6 +504,7 @@ async fn build_cli_app(
         .build(context)?;
 
     crate::ai::agent_cli::initialize_private_input(app.path().app_local_data_dir()?);
+    app.manage(crate::ai::builtin::CliProcess);
     crate::recording::file_jobs::initialize_temp_dir(&app.config().identifier);
 
     #[cfg(target_os = "windows")]

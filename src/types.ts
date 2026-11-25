@@ -123,6 +123,7 @@ export interface ActiveStreamCapabilities {
 export interface AppSettings {
   polish_keep_words?: boolean;
   polish_context_enabled?: boolean; // default true; surrounding text is captured only with Polish on
+  builtin_polish_enabled?: boolean | null; // Voicetypr's server Polish; null until decided, which counts as off
   hotkey: string;
   current_model: string;
   speech_language: string;
@@ -227,6 +228,18 @@ export interface TranscriptionHistory {
   source_recording_id?: string; // For re-transcriptions, references original transcription
   status?: "completed" | "in_progress" | "failed";
   writing?: TranscriptionWritingMeta;
+}
+
+/** Whether built-in Polish would clean the next dictation if its switch is on (`polish_status`). */
+export type BuiltinPolishAvailability = "own_provider" | "no_access" | "first_try" | "ready" | "not_entitled" | "unreachable";
+
+/** Where Polish stands for the next dictation, from the same settings dictation reads. */
+export interface PolishStatus {
+  will_run: boolean;
+  own_provider_ready: boolean;
+  own_provider_enabled: boolean;
+  builtin_enabled: boolean;
+  builtin: BuiltinPolishAvailability;
 }
 
 export interface LicenseStatus {

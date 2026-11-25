@@ -13,6 +13,8 @@ interface EnhancementSettingsProps {
   finalTextLanguage: string;
   writingSettings: WritingSettings;
   aiFormattingEnabled: boolean;
+  /** Polish can translate; false while only Voicetypr's built-in Polish is available. Defaults to aiFormattingEnabled. */
+  translationAvailable?: boolean;
   providerContent: ReactNode;
   onPresetChange: (value: EnhancementPreset) => void;
   onFinalTextLanguageChange: (value: string) => void;
@@ -31,8 +33,8 @@ const modes: { value: EnhancementPreset; label: string; example: string }[] = [
 ];
 
 export function EnhancementSettings({
-  preset, finalTextLanguage, writingSettings, aiFormattingEnabled, providerContent,
-  onPresetChange, onFinalTextLanguageChange, onWritingSettingsChange,
+  preset, finalTextLanguage, writingSettings, aiFormattingEnabled, translationAvailable = aiFormattingEnabled,
+  providerContent, onPresetChange, onFinalTextLanguageChange, onWritingSettingsChange,
   disabled = false, writingSettingsDisabled = disabled,
 }: EnhancementSettingsProps) {
   const rules = writingSettings.app_formatting_rules;
@@ -112,7 +114,9 @@ export function EnhancementSettings({
             onClick={() => onFinalTextLanguageChange(usingSpecificLanguage ? finalTextLanguage : "en")}>Specific language</Button>
         </div>} />
       {usingSpecificLanguage ? <div className="mt-3"><LanguageSelection value={finalTextLanguage} onValueChange={onFinalTextLanguageChange} className="w-full md:w-64" /></div> : null}
-      {!aiFormattingEnabled && finalTextLanguage !== "same_as_transcript" ? <p className="mt-2 text-xs text-muted-foreground">Turn on Polish to use a different final text language.</p> : null}
+      {!translationAvailable && finalTextLanguage !== "same_as_transcript" ? <p className="mt-2 text-xs text-muted-foreground">{aiFormattingEnabled
+        ? "Voicetypr’s built-in Polish keeps the transcript language. Connect your own AI provider to use a different final text language."
+        : "Turn on Polish to use a different final text language."}</p> : null}
     </SettingsCard>
   </div>;
 }

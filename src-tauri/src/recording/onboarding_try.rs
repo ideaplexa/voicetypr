@@ -89,6 +89,8 @@ pub struct TryStarted {
 pub struct TryText {
     /// The engine's text, before library rules or Polish.
     heard: String,
+    /// What built-in Polish made of it, when the switch is on and it ran.
+    cleaned: Option<String>,
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Session>> {
@@ -432,7 +434,12 @@ pub async fn stop_onboarding_try(
     if !may_reply(&app, epoch) {
         return Err(GONE.to_string());
     }
-    Ok(TryText { heard })
+    let cleaned =
+        crate::ai::builtin::polish_first_try(&app, &heard, || may_reply(&app, epoch)).await;
+    if !may_reply(&app, epoch) {
+        return Err(GONE.to_string());
+    }
+    Ok(TryText { heard, cleaned })
 }
 
 async fn transcribe(app: &AppHandle, path: &Path) -> Result<String, String> {

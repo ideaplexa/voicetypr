@@ -85,6 +85,7 @@ mod tests {
         let settings = Settings {
             polish_keep_words: false,
             polish_context_enabled: false,
+            builtin_polish_enabled: None,
             telemetry_enabled: true,
             hotkey: "CommandOrControl+A".to_string(),
             current_model: "base".to_string(),
@@ -185,6 +186,7 @@ mod tests {
         let settings = Settings {
             polish_keep_words: false,
             polish_context_enabled: true,
+            builtin_polish_enabled: Some(false),
             telemetry_enabled: true,
             hotkey: "CommandOrControl+B".to_string(),
             current_model: "tiny".to_string(),
@@ -958,6 +960,7 @@ mod tests {
         let original = Settings {
             polish_keep_words: false,
             polish_context_enabled: false,
+            builtin_polish_enabled: Some(true),
             telemetry_enabled: true,
             hotkey: "CommandOrControl+Alt+V".to_string(),
             current_model: "large-v3".to_string(),
@@ -1012,6 +1015,7 @@ mod tests {
             original.polish_context_enabled
         );
         assert_eq!(restored.current_model, original.current_model);
+        assert_eq!(restored.builtin_polish_enabled, Some(true));
         assert_eq!(restored.current_model_engine, original.current_model_engine);
         assert_eq!(restored.speech_language, original.speech_language);
         assert_eq!(restored.transcription_task, original.transcription_task);

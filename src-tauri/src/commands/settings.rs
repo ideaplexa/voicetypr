@@ -98,6 +98,10 @@ pub struct Settings {
     pub polish_keep_words: bool,
     #[serde(default = "default_true")]
     pub polish_context_enabled: bool,
+    /// Built-in Polish through Voicetypr's server; `None` until the user or
+    /// the first run decides, which counts as off.
+    #[serde(default)]
+    pub builtin_polish_enabled: Option<bool>,
     // Settings disclosure mode. Post-cutover this is always "recommended".
     #[serde(default = "default_settings_mode")]
     pub settings_mode: String,
@@ -184,6 +188,7 @@ impl Default for Settings {
             theme: "system".to_string(),
             polish_keep_words: false,
             polish_context_enabled: true,
+            builtin_polish_enabled: None,
             settings_mode: default_settings_mode(),
             transcription_cleanup_days: None, // None means keep forever
             pill_position: None,              // No saved position initially
@@ -551,6 +556,9 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
             false,
         ),
         polish_context_enabled: settings_store::load_polish_context(&store),
+        builtin_polish_enabled: store
+            .get(crate::ai::builtin::SETTING_KEY)
+            .and_then(|value| value.as_bool()),
         hotkey: store
             .get("hotkey")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -795,6 +803,13 @@ pub async fn save_settings(
     settings: Settings,
     update_channel_explicit: Option<bool>,
 ) -> Result<(), String> {
+    // Switching built-in Polish off takes effect before any other save or check
+    // runs, so a dictation that ends meanwhile sends nothing.
+    if settings.builtin_polish_enabled == Some(false) {
+        if let Ok(store) = app.store("settings") {
+            store.set(crate::ai::builtin::SETTING_KEY, json!(false));
+        }
+    }
     let _save_guard = SETTINGS_SAVE_LOCK.lock().await;
     let store = app.store("settings").map_err(|e| e.to_string())?;
 
@@ -996,6 +1011,9 @@ pub async fn save_settings(
     );
     store.set("polish_keep_words", json!(settings.polish_keep_words));
     settings_store::save_polish_context(&store, settings.polish_context_enabled);
+    if let Some(enabled) = settings.builtin_polish_enabled {
+        store.set(crate::ai::builtin::SETTING_KEY, json!(enabled));
+    }
     store.set("whisper_speed_mode", json!(settings.whisper_speed_mode));
     store.set("transcription_mode", json!(&normalized_transcription_mode));
     store.set(
@@ -1041,7 +1059,11 @@ pub async fn save_settings(
         if let Some(port) = settings.sharing_port {
             remote_settings.server_config.port = port;
         }
-        save_remote_settings(&app, &remote_settings)?;
+        // Leave nothing half-applied in memory, such as the built-in Polish switch.
+        if let Err(error) = save_remote_settings(&app, &remote_settings) {
+            let _ = store.reload();
+            return Err(error);
+        }
     }
 
     // Recording persistence settings

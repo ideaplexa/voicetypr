@@ -1,124 +1,82 @@
-import { Button } from "@/components/settings/SettingsButton";
-import { Card } from "@/components/ui/card";
-import type { FirstDictation } from "@/components/onboarding/useFirstDictation";
+import { FrameHeading, PrimaryButton, QuietButton } from "@/components/onboarding/Frame";
+import { builtinPolishView } from "@/components/polish/BuiltInPolishSetting";
+import { Switch } from "@/components/settings/SettingsSwitch";
 import { isMacOS } from "@/lib/platform";
-import { cn } from "@/lib/utils";
-import type { AppSettings } from "@/types";
-import { Check, Sparkles } from "lucide-react";
-import { useState } from "react";
+import type { PolishStatus } from "@/types";
+import { Check, Settings2, ShieldCheck, Sparkles, Type } from "lucide-react";
 
-export type StartingPolishStyle = NonNullable<AppSettings["starting_polish_style"]>;
-
-const USES: { id: string; label: string; style: StartingPolishStyle; name: string; detail?: string }[] = [
-  { id: "messages", label: "Messages and email", style: "Message", name: "Message", detail: "tidy sentences in your own wording" },
-  { id: "ai", label: "Prompts for AI", style: "CleanDictation", name: "Clean" },
-  { id: "code", label: "Code and tech notes", style: "Code", name: "Code" },
-  { id: "docs", label: "Notes and documents", style: "Writing", name: "Writing", detail: "for longer text" },
-  { id: "clinical", label: "Medical or legal work", style: "CleanDictation", name: "Clean" },
-  { id: "mix", label: "A bit of everything", style: "CleanDictation", name: "Clean", detail: "the default" },
-];
-
-const EXAMPLE = {
-  heard: "um, so let’s move the sync to Thursday, no wait, Friday at three, and I’ll send the notes before",
-  typed: "Let’s move the sync to Friday at 3, and I’ll send the notes before.",
-};
-
-/** What Polish is, whether it can run here, and the style it starts in. */
+/** 07 Let AI tidy your words (07b off): one switch, shared with Settings → Polish. */
 export function PolishStep({
-  canRun,
-  enabled,
-  firstTry,
+  status,
+  builtinChosen,
+  onBuiltinChange,
   saving,
-  onBack,
-  onChoose,
+  ownProviderLater,
+  onOwnProvider,
+  onNext,
 }: {
-  /** The app's own gate: an AI provider with a model and key is set up. */
-  canRun: boolean;
-  enabled: boolean;
-  /** The user's first dictation, when Polish cleaned it. */
-  firstTry: FirstDictation | null;
+  /** `polish_status`, the gate dictation uses; null while it is being asked. */
+  status: PolishStatus | null;
+  /** The saved built-in Polish choice, shared with Settings → Polish. */
+  builtinChosen: boolean;
+  onBuiltinChange: (on: boolean) => void;
   saving: boolean;
-  onBack: () => void;
-  /** null when the user skips; today's default stays. */
-  onChoose: (style: StartingPolishStyle | null) => void;
+  /** Settings → Polish opens once setup is done. */
+  ownProviderLater: boolean;
+  onOwnProvider: () => void;
+  onNext: () => void;
 }) {
-  const [picked, setPicked] = useState<string | null>(null);
-  const use = USES.find((item) => item.id === picked);
-  const style = use ? `the ${use.name} style${use.detail ? `, ${use.detail}` : ""}` : "";
-  const own = firstTry?.polished ? firstTry : null;
-  const pair = own ?? EXAMPLE;
-  const on = canRun && enabled;
+  const ownReady = status?.own_provider_ready === true;
+  // The First try runs on its own onboarding allowance, so here it counts as ready.
+  const builtin = builtinPolishView(status ? (status.builtin === "first_try" ? "ready" : status.builtin) : null, builtinChosen);
+  const on = ownReady ? status?.own_provider_enabled === true : builtin.checked;
+  const note = ownReady
+    ? on
+      ? "Polish is on and set up with your own AI provider."
+      : `Polish is set up with your own AI provider but off. Turn it on in Settings → Polish, or from Voicetypr’s ${isMacOS ? "menu bar" : "tray"} menu.`
+    : on && !builtin.active
+      ? builtin.status
+      : on
+        ? "Your words go to Voicetypr’s server to be cleaned, then straight back. Nothing is kept."
+        : "No AI cleanup. Your Dictionary and voice commands still apply. Turn it on any time in Settings → Polish.";
+  const NoteIcon = ownReady ? (on ? ShieldCheck : Type) : builtin.active ? ShieldCheck : Type;
 
   return (
-    <section className="flex w-full flex-col items-center gap-[18px]">
-      <h2 className="text-center text-[26px] leading-[normal] font-semibold tracking-[-0.5px]">
-        Polish tidies what you say
-      </h2>
-      <p className="max-w-[520px] text-center text-sm text-muted-foreground">
-        It removes filler words and false starts, follows your corrections and fixes punctuation, in the style
-        you choose.
-      </p>
-      <div className="grid w-full gap-3 sm:grid-cols-2">
-        <Card className="gap-2 px-[18px] py-4">
-          <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            {own ? "You said" : "Example · you say"}
+    <section className="flex w-[540px] flex-col items-center gap-[30px]">
+      <FrameHeading
+        title="Let AI tidy your words"
+        line="Polish is AI clean-up. It runs on Voicetypr’s server, so you need no AI key or account of your own."
+      />
+      <div className="flex flex-col self-stretch overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex items-center gap-3.5 px-[22px] py-5">
+          <span className="flex size-[38px] shrink-0 items-center justify-center rounded-[9px] bg-sage-bg text-sage">
+            <Sparkles aria-hidden="true" className="size-[19px]" />
           </span>
-          <p className="text-[15px] leading-[22px] text-muted-foreground">{pair.heard}</p>
-        </Card>
-        <Card className="gap-2 px-[18px] py-4 outline-[1.5px] outline-sage -outline-offset-1">
-          <span className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            {own ? "Polish typed" : "With Polish"}
-          </span>
-          <p className="text-[15px] leading-[22px]">{pair.typed}</p>
-        </Card>
-      </div>
-      {/* VOIC-14: the built-in provider's on/off switch and its "your text goes to Voicetypr's server" line go in this card. */}
-      <Card className="w-full flex-row items-start gap-3 px-4 py-3 text-left">
-        <Sparkles className={cn("mt-0.5 size-4 shrink-0", on ? "text-sage" : "text-muted-foreground")} />
-        <p className="text-sm">
-          {on ? (
-            <><span className="font-semibold">Polish is on</span> and set up with your AI provider.</>
-          ) : canRun ? (
-            <><span className="font-semibold">Polish is set up but off.</span> Turn it on in Settings → Polish, or from Voicetypr’s {isMacOS ? "menu bar" : "tray"} menu.</>
-          ) : (
-            <>
-              <span className="font-semibold">Polish isn’t on yet.</span> It needs an AI provider. After setup, open
-              Settings → Polish and add your key or connect a provider; until then you get exactly what you said.
-            </>
+          <label htmlFor="onboarding-builtin-polish" className="flex-1 text-[17px] leading-[1.2] font-semibold text-foreground">
+            Clean up what I say
+          </label>
+          {ownReady ? null : (
+            <Switch
+              id="onboarding-builtin-polish"
+              checked={builtin.checked}
+              disabled={saving}
+              onCheckedChange={onBuiltinChange}
+              className="data-[size=default]:h-[26px] data-[size=default]:w-11 [&_[data-slot=switch-thumb]]:size-[22px] [&_[data-slot=switch-thumb][data-checked]]:translate-x-[18px]"
+            />
           )}
-        </p>
-      </Card>
-      <h3 className="mt-1 text-center text-base font-semibold">What will you mostly dictate?</h3>
-      <div role="group" aria-label="What you mostly dictate" className="grid w-full gap-2.5 sm:grid-cols-3">
-        {USES.map((item) => {
-          const checked = item.id === picked;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              aria-pressed={checked}
-              onClick={() => setPicked(item.id)}
-              className={cn(
-                "flex items-center justify-between rounded-2xl bg-card px-4 py-3 text-left text-[13px] font-medium ring-1 ring-foreground/10 transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                checked && "ring-[1.5px] ring-sage",
-              )}
-            >
-              {item.label}
-              <Check className={cn("size-4 shrink-0 text-sage", !checked && "invisible")} />
-            </button>
-          );
-        })}
+        </div>
+        <div className="flex items-start gap-3 bg-secondary py-4 pr-4 pl-[22px]">
+          <NoteIcon aria-hidden="true" className="mt-0.5 size-[15px] shrink-0 text-muted-foreground" />
+          <p role="status" className="text-[15px] leading-[1.4] text-muted-foreground">{note}</p>
+        </div>
       </div>
-      <p role="status" className="min-h-5 text-center text-[13px] text-muted-foreground">
-        {use
-          ? on ? `Polish will use ${style}.` : `When Polish is on, it starts in ${style}.`
-          : "Optional. It sets the style Polish starts in; you can change it any time in Settings."}
-      </p>
-      <div className="flex flex-wrap justify-center gap-[10px]">
-        <Button variant="outline" disabled={saving} onClick={onBack}>Back</Button>
-        <Button variant="ghost" disabled={saving} onClick={() => onChoose(null)}>Skip</Button>
-        <Button disabled={!use || saving} onClick={() => use && onChoose(use.style)}>Continue</Button>
-      </div>
+      {ownReady ? null : (
+        <QuietButton className="text-[15px] text-sage hover:text-sage" aria-pressed={ownProviderLater} onClick={onOwnProvider}>
+          {ownProviderLater ? <Check aria-hidden="true" className="size-[15px]" /> : <Settings2 aria-hidden="true" className="size-[15px]" />}
+          {ownProviderLater ? "Settings → Polish opens after setup" : "Use my own AI provider"}
+        </QuietButton>
+      )}
+      <PrimaryButton disabled={saving} onClick={onNext}>Continue</PrimaryButton>
     </section>
   );
 }

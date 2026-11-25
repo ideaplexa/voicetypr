@@ -26,7 +26,7 @@ vi.mock("@/hooks/useTauriEvent", () => ({ useTauriEvent: () => undefined }));
 
 import { FirstWeekCard } from "./FirstWeekCard";
 
-const renderCard = (onNavigate = vi.fn()) => render(<FirstWeekCard sourceReady polishOn={false} polishReady={false} dictionaryEmpty holdToTalk={false} shortcut={["⌥", "Space"]} onNavigate={onNavigate} />);
+const renderCard = (onNavigate = vi.fn()) => render(<FirstWeekCard sourceReady polishOn={false} polishReady="needs_provider" dictionaryEmpty holdToTalk={false} shortcut={["⌥", "Space"]} onNavigate={onNavigate} />);
 const savedProgress = () => mock.invoke.mock.calls.filter(([command]) => command === "set_first_week_progress").map(([, args]) => (args as { progress: FirstWeekProgress }).progress);
 
 describe("FirstWeekCard on Home", () => {
