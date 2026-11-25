@@ -400,18 +400,12 @@ pub(crate) async fn polish(
         biased;
         _ = cancellation.cancelled() => Err(AiProviderError::Canceled),
         result = async {
-            let switch_on = app
-                .store("settings")
-                .map(|store| setting_on(&store))
-                .unwrap_or(false);
-            if !switch_on {
-                return Err(AiProviderError::Canceled);
-            }
-            // Text goes out only after the server has confirmed this device's entitlement.
-            if availability(app, false).await != Availability::Ready {
-                return Err(AiProviderError::ServiceUnavailable);
-            }
-            let result = post(client(), &base_url, "polish", &request).await;
+            let result = send_while_on(
+                app,
+                async { availability(app, false).await == Availability::Ready },
+                post(client(), &base_url, "polish", &request),
+            )
+            .await;
             if matches!(result, Err(AiProviderError::ServiceUnavailable)) {
                 forget_confirmation();
             }
@@ -462,6 +456,31 @@ pub(crate) struct FirstTryIdentity<'a> {
 /// Cleans onboarding's First try for the setup window alone: nothing is pasted
 /// or saved. `still_current` is the try's own gate; once it closes, nothing is
 /// sent and no text comes back. None means the try shows the engine's text.
+/// Text goes out only while the switch is on and after the server confirmed this
+/// device: the switch is read before asking and again right before sending, so
+/// switching it off while the server is asked still sends nothing.
+async fn send_while_on<R: tauri::Runtime, T>(
+    app: &tauri::AppHandle<R>,
+    confirmed: impl std::future::Future<Output = bool>,
+    send: impl std::future::Future<Output = Result<T, AiProviderError>>,
+) -> Result<T, AiProviderError> {
+    let switch_on = || {
+        app.store("settings")
+            .map(|store| setting_on(&store))
+            .unwrap_or(false)
+    };
+    if !switch_on() {
+        return Err(AiProviderError::Canceled);
+    }
+    if !confirmed.await {
+        return Err(AiProviderError::ServiceUnavailable);
+    }
+    if !switch_on() {
+        return Err(AiProviderError::Canceled);
+    }
+    send.await
+}
+
 pub(crate) async fn polish_first_try(
     app: &AppHandle,
     text: &str,
@@ -985,6 +1004,53 @@ mod tests {
             language: Some("en".to_string()),
             keep_words: false,
         }
+    }
+
+    #[tokio::test]
+    async fn switching_built_in_polish_off_before_the_text_goes_out_sends_nothing() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/polish"))
+            .respond_with(cleaned_reply())
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = mock_app(dir.path());
+        let client = reqwest::Client::new();
+        let (uri, polish_request) = (server.uri(), request());
+        let send = || post(&client, &uri, "polish", &polish_request);
+
+        let switched_off_while_asking = send_while_on(
+            app.handle(),
+            async {
+                app.store("settings")
+                    .unwrap()
+                    .set(SETTING_KEY, serde_json::json!(false));
+                true
+            },
+            send(),
+        )
+        .await;
+        assert!(matches!(
+            switched_off_while_asking,
+            Err(AiProviderError::Canceled)
+        ));
+
+        let already_off = send_while_on(app.handle(), async { true }, send()).await;
+        assert!(matches!(already_off, Err(AiProviderError::Canceled)));
+
+        app.store("settings")
+            .unwrap()
+            .set(SETTING_KEY, serde_json::json!(true));
+        let not_confirmed = send_while_on(app.handle(), async { false }, send()).await;
+        assert!(matches!(
+            not_confirmed,
+            Err(AiProviderError::ServiceUnavailable)
+        ));
+
+        let on = send_while_on(app.handle(), async { true }, send()).await;
+        assert_eq!(on.unwrap().text, CLEANED);
     }
 
     #[tokio::test]
