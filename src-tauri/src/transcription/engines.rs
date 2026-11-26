@@ -572,7 +572,7 @@ mod tests {
             },
             ActiveEngineSelection::Cloud {
                 provider: crate::cloud_stt::CloudProvider::Openai,
-                model_name: "gpt-4o-mini-transcribe".to_string(),
+                model_name: "gpt-transcribe".to_string(),
             },
             ActiveEngineSelection::Remote {
                 server_id: "server".to_string(),

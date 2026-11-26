@@ -1388,6 +1388,11 @@ enum DecodeAheadV2Harness {
         check("decode_ahead_language_hint_forwarding", DecodeAheadAsrSession.languageHint(for: "de")?.rawValue == "de"
             && DecodeAheadAsrSession.languageHint(for: nil) == nil)
 
+        let norwegianHint = await ParakeetSidecar.nemotronLanguageHint("no")
+        check("nemotron_norwegian_uses_bokmal_prompt", norwegianHint == "nb-NO")
+        let detectedNorwegian = await ParakeetSidecar.voiceTyprLanguageCode("nb-NO")
+        check("nemotron_bokmal_tag_reports_norwegian", detectedNorwegian == "no")
+
         var acrossSlide = DecodeAheadPlanner()
         let start = ("▁Start", 5.0, 5.5)
         let center = ("▁Center", 9.0, 9.5)
@@ -1848,6 +1853,7 @@ struct ParakeetSidecar {
         case "ms": return "ms-MY"
         case "mt": return "mt-MT"
         case "ne": return "ne-NP"
+        case "no": return "nb-NO"
         case "si": return "si-LK"
         case "so": return "so-SO"
         case "sw": return "sw-KE"
@@ -1873,7 +1879,8 @@ struct ParakeetSidecar {
               ).first else {
             return nil
         }
-        return bareCode.lowercased()
+        let code = bareCode.lowercased()
+        return code == "nb" ? "no" : code
     }
 
     static func nativeModelDirectory(for model: SupportedModel) -> URL {

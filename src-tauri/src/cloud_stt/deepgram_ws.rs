@@ -189,6 +189,7 @@ fn build_listen_url(config: &DeepgramStreamConfig) -> Result<reqwest::Url, SttEr
         q.append_pair("channels", &config.channels.to_string());
         q.append_pair("interim_results", "true");
         q.append_pair("smart_format", "true");
+        q.append_pair("mip_opt_out", "true");
         if is_nova3(&config.model) {
             for term in &config.keyterms {
                 q.append_pair("keyterm", term);
@@ -420,6 +421,7 @@ mod tests {
         assert_eq!(key_of("channels").as_deref(), Some("1"));
         assert_eq!(key_of("interim_results").as_deref(), Some("true"));
         assert_eq!(key_of("smart_format").as_deref(), Some("true"));
+        assert_eq!(key_of("mip_opt_out").as_deref(), Some("true"));
 
         // Language omitted when empty/None.
         assert!(key_of("language").is_none());

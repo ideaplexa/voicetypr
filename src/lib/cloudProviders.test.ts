@@ -3,17 +3,17 @@ import { resolveCloudModelLabel } from "./cloudProviders";
 
 describe("resolveCloudModelLabel", () => {
   const availableModels = [
-    { id: "gpt-transcribe", display_name: "GPT Transcribe" },
-    { id: "gpt-4o-mini-transcribe", display_name: "GPT-4o mini Transcribe" },
+    { id: "whisper-large-v3-turbo", display_name: "Whisper Large v3 Turbo" },
+    { id: "whisper-large-v3", display_name: "Whisper Large v3" },
   ];
 
   it("returns the friendly label for the selected API model", () => {
     expect(
       resolveCloudModelLabel({
-        underlying_model: "gpt-4o-mini-transcribe",
+        underlying_model: "whisper-large-v3",
         available_models: availableModels,
       }),
-    ).toBe("GPT-4o mini Transcribe");
+    ).toBe("Whisper Large v3");
   });
 
   it("falls back to the curated default instead of exposing an unknown API id", () => {
@@ -22,7 +22,7 @@ describe("resolveCloudModelLabel", () => {
         underlying_model: "unknown-api-model",
         available_models: availableModels,
       }),
-    ).toBe("GPT Transcribe");
+    ).toBe("Whisper Large v3 Turbo");
   });
 
   it("returns undefined when the backend provides no curated options", () => {

@@ -72,16 +72,10 @@ const SONIOX_MODELS: &[CloudSttModel] = &[CloudSttModel {
     display_name: "Soniox v6",
 }];
 
-const OPENAI_MODELS: &[CloudSttModel] = &[
-    CloudSttModel {
-        id: "gpt-transcribe",
-        display_name: "GPT Transcribe",
-    },
-    CloudSttModel {
-        id: "gpt-4o-mini-transcribe",
-        display_name: "GPT-4o mini Transcribe",
-    },
-];
+const OPENAI_MODELS: &[CloudSttModel] = &[CloudSttModel {
+    id: "gpt-transcribe",
+    display_name: "GPT Transcribe",
+}];
 
 const GROQ_MODELS: &[CloudSttModel] = &[
     CloudSttModel {
@@ -545,10 +539,7 @@ mod tests {
                 .iter()
                 .map(|m| (m.id, m.display_name))
                 .collect::<Vec<_>>(),
-            vec![
-                ("gpt-transcribe", "GPT Transcribe"),
-                ("gpt-4o-mini-transcribe", "GPT-4o mini Transcribe"),
-            ]
+            vec![("gpt-transcribe", "GPT Transcribe")]
         );
         assert_eq!(
             CloudProvider::Groq
@@ -588,10 +579,8 @@ mod tests {
             Some("gpt-transcribe")
         );
         assert_eq!(
-            CloudProvider::Openai
-                .model_by_id("gpt-4o-mini-transcribe")
-                .map(|m| m.id),
-            Some("gpt-4o-mini-transcribe")
+            CloudProvider::Openai.model_by_id("gpt-4o-mini-transcribe"),
+            None
         );
         assert_eq!(CloudProvider::Openai.model_by_id("GPT-transcribe"), None);
         assert_eq!(CloudProvider::Openai.model_by_id("gpt-4o-transcribe"), None);
@@ -618,11 +607,11 @@ mod tests {
         );
         assert_eq!(
             openai.resolve_model_id(Some("gpt-4o-mini-transcribe")),
-            "gpt-4o-mini-transcribe"
+            "gpt-transcribe"
         );
         assert_eq!(
             openai.resolve_model_id(Some("  gpt-4o-mini-transcribe  ")),
-            "gpt-4o-mini-transcribe"
+            "gpt-transcribe"
         );
         assert_eq!(
             CloudProvider::Groq.resolve_model_id(Some("whisper-large-v3")),
