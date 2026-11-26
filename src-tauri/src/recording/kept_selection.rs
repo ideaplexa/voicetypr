@@ -209,20 +209,20 @@ mod tests {
     async fn saved_cloud_retry_reaches_executor_with_the_original_api_model() {
         use crate::cloud_stt::CloudProvider;
         use crate::transcription::executor::execute_cloud_attempt;
-        let provider = CloudProvider::Openai;
+        let provider = CloudProvider::Groq;
         let original = provider.available_models()[0].id;
         let changed = provider.available_models()[1].id;
         let previous = RetrySelection {
-            model: provider.execution_model_id("openai", || original).into(),
-            engine: Some("openai".into()),
+            model: provider.execution_model_id("groq", || original).into(),
+            engine: Some("groq".into()),
         };
         // Cross the same durable metadata boundary used by a restart.
         let previous: RetrySelection =
             serde_json::from_slice(&serde_json::to_vec(&previous).unwrap()).unwrap();
         let selected = RetrySelection::resolve(
             &Settings {
-                current_model: "openai".into(),
-                current_model_engine: "openai".into(),
+                current_model: "groq".into(),
+                current_model_engine: "groq".into(),
                 ..Default::default()
             },
             RecoveryKind::CloudFailed,
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(failed.unwrap_err(), original);
         let ordinary = execute_cloud_attempt(
             provider,
-            "openai",
+            "groq",
             || changed,
             |sent_model| async move { Err::<(), _>(sent_model) },
         )
