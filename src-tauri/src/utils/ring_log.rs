@@ -95,8 +95,8 @@ pub fn redact_local_paths(message: &str) -> String {
 /// can hold spaces, parentheses or a file name and no pattern can find its
 /// end: everything from the first path-like token to the end of its line
 /// becomes `[PATH_REDACTED]`. A path-like token starts with `/`, `~/`, `./`,
-/// `../`, `\\\\`, a drive letter or a URL scheme, or contains `/` or `\\` next to
-/// a letter. Counts such as `1/3` and sizes such as `~500MB` are kept.
+/// `../`, `\\\\`, a drive letter or a URL scheme, or contains `/` or `\\` and a
+/// letter. Counts such as `1/3` and sizes such as `~500MB` are kept.
 pub fn redact_all_paths(message: &str) -> String {
     message
         .split('\n')
