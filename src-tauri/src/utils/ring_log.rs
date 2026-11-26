@@ -91,6 +91,30 @@ pub fn redact_local_paths(message: &str) -> String {
     out
 }
 
+/// Stricter than the shared log scrubber, for text that comes from native
+/// code or third-party errors: every absolute path, every home-relative path
+/// (`~/…`) and every relative path or URL becomes `[PATH_REDACTED]`.
+pub fn redact_all_paths(message: &str) -> String {
+    let message = redact_local_paths(message);
+    let mut out = String::with_capacity(message.len());
+    for (i, token) in message.split(' ').enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        let core = token.trim_matches(|c: char| "\"'()[]{}<>,;:.!?`".contains(c));
+        let is_path = core != "[PATH_REDACTED]"
+            && (core.starts_with('~')
+                || ((core.contains('/') || core.contains('\\'))
+                    && core.chars().any(|c| c.is_ascii_alphabetic())));
+        if is_path && !core.is_empty() {
+            out.push_str(&token.replacen(core, "[PATH_REDACTED]", 1));
+        } else {
+            out.push_str(token);
+        }
+    }
+    out
+}
+
 const MAX_ENTRIES: usize = 1000;
 const MAX_TOTAL_BYTES: usize = 256 * 1024;
 
@@ -191,6 +215,32 @@ pub fn snapshot_joined(max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_error_text_keeps_no_path_of_any_kind() {
+        for (line, expected) in [
+            (
+                "Audio file not found: /Users/maya/Library/Caches/rec 1.wav",
+                "Audio file not found: [PATH_REDACTED]",
+            ),
+            (
+                "Vocabulary missing at ~/Library/Application Support/FluidAudio/vocab.json.",
+                "Vocabulary missing at [PATH_REDACTED] [PATH_REDACTED].",
+            ),
+            (
+                "Failed to download parakeet-tdt/encoder.mlmodelc (404)",
+                "Failed to download [PATH_REDACTED] (404)",
+            ),
+            (
+                "could not read 'clips\\take.wav': denied",
+                "could not read '[PATH_REDACTED]': denied",
+            ),
+            ("downloading 1/3", "downloading 1/3"),
+            ("load failed: invalidModel", "load failed: invalidModel"),
+        ] {
+            assert_eq!(redact_all_paths(line), expected);
+        }
+    }
 
     #[test]
     fn paths_outside_home_never_reach_a_sink() {

@@ -2066,7 +2066,7 @@ struct ParakeetSidecar {
             return
         }
         guard FileManager.default.fileExists(atPath: audioPath) else {
-            sendError("file_not_found", message: "Audio file not found: \(audioPath)", encoder: encoder)
+            sendError("file_not_found", message: "Audio file not found", encoder: encoder)
             return
         }
 
@@ -3032,7 +3032,7 @@ struct ParakeetSidecar {
 
         guard FileManager.default.fileExists(atPath: audioPath) else {
             log("❌ Audio file not found")
-            sendError("file_not_found", message: "Audio file not found: \(audioPath)", encoder: encoder)
+            sendError("file_not_found", message: "Audio file not found", encoder: encoder)
             return
         }
 

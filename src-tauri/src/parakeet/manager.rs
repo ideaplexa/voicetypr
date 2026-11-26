@@ -389,10 +389,7 @@ impl ParakeetManager {
             let complete = model_files_complete(&fluid_audio_model_path, definition);
 
             if complete {
-                trace!(
-                    "Found complete FluidAudio model at: {:?}",
-                    fluid_audio_model_path
-                );
+                trace!("Found complete FluidAudio model for {}", definition.id);
             }
 
             complete

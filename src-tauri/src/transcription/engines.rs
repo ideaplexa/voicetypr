@@ -187,7 +187,8 @@ where
                     );
                     preserve_gpu_status = true;
                     log::warn!(
-                        "GPU sidecar failed, unloading sidecar before CPU fallback: {error}"
+                        "GPU sidecar failed, unloading sidecar before CPU fallback: {}",
+                        crate::utils::ring_log::redact_all_paths(&error.to_string())
                     );
                     gpu_client.abort_active_process().await;
                 }
