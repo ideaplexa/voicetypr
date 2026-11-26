@@ -916,9 +916,9 @@ impl ParakeetManager {
                 ParakeetResponse::Error { code, message, .. } => {
                     Err(ParakeetError::SidecarError { code, message })
                 }
-                other => Err(ParakeetError::SidecarError {
+                _ => Err(ParakeetError::SidecarError {
                     code: "unexpected_response".to_string(),
-                    message: format!("Unexpected response: {:?}", other),
+                    message: "Unexpected response from sidecar".to_string(),
                 }),
             };
             if result.is_ok() {

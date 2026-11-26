@@ -1968,7 +1968,7 @@ struct ParakeetSidecar {
                 } catch {
                     log("❌ Failed to load \(version.rawValue.uppercased()) from cache")
                     log("❌ Error type: \(type(of: error))")
-                    log("❌ Localized: \(error.localizedDescription)")
+                    log("❌ Error domain: \((error as NSError).domain) code: \((error as NSError).code)")
                     sendError("model_not_downloaded", message: "Parakeet \(version.rawValue.uppercased()) is not downloaded. Please download it first. Error: \(error.localizedDescription)", encoder: encoder)
                     return
                 }
@@ -1994,7 +1994,7 @@ struct ParakeetSidecar {
         } catch {
             log("❌ FATAL: Failed to load model \(version.rawValue.uppercased())")
             log("❌ Error type: \(type(of: error))")
-            log("❌ Localized: \(error.localizedDescription)")
+            log("❌ Error domain: \((error as NSError).domain) code: \((error as NSError).code)")
             sendError("model_load_error", message: "Failed to load model: \(error.localizedDescription)", encoder: encoder)
         }
         log("───────────────────────────────────────────────────────")
@@ -2174,7 +2174,7 @@ struct ParakeetSidecar {
         } catch {
             log("❌ CTC MODEL DOWNLOAD FAILED")
             log("❌ Error type: \(type(of: error))")
-            log("❌ Localized: \(error.localizedDescription)")
+            log("❌ Error domain: \((error as NSError).domain) code: \((error as NSError).code)")
             sendError("ctc_model_download_failed", message: "Failed to download CTC models: \(error.localizedDescription)", encoder: encoder)
         }
 
@@ -2297,8 +2297,8 @@ struct ParakeetSidecar {
             let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000.0)
             if warmed {
                 log("✅ Warmup complete in \(elapsedMs)ms")
-            } else if let error {
-                log("⚠️ Warmup skipped/failed after \(elapsedMs)ms: \(error)")
+            } else if error != nil {
+                log("⚠️ Warmup skipped/failed after \(elapsedMs)ms")
             }
             sendResponse(WarmedResponse(warmed: warmed, ms: elapsedMs, error: error), encoder: encoder)
         }
@@ -3052,7 +3052,7 @@ struct ParakeetSidecar {
         } catch {
             log("❌ DIARIZATION FAILED")
             log("❌ Error type: \(type(of: error))")
-            log("❌ Localized: \(error.localizedDescription)")
+            log("❌ Error domain: \((error as NSError).domain) code: \((error as NSError).code)")
             sendError("diarization_failed", message: "Diarization failed: \(error.localizedDescription)", encoder: encoder)
         }
 

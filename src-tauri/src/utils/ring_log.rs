@@ -91,28 +91,44 @@ pub fn redact_local_paths(message: &str) -> String {
     out
 }
 
-/// Stricter than the shared log scrubber, for text that comes from native
-/// code or third-party errors: every absolute path, every home-relative path
-/// (`~/…`) and every relative path or URL becomes `[PATH_REDACTED]`.
+/// For text that comes from native code or third-party errors, where a path
+/// can hold spaces, parentheses or a file name and no pattern can find its
+/// end: everything from the first path-like token to the end of its line
+/// becomes `[PATH_REDACTED]`. A path-like token starts with `/`, `~/`, `./`,
+/// `../`, `\\\\`, a drive letter or a URL scheme, or contains `/` or `\\` next to
+/// a letter. Counts such as `1/3` and sizes such as `~500MB` are kept.
 pub fn redact_all_paths(message: &str) -> String {
-    let message = redact_local_paths(message);
-    let mut out = String::with_capacity(message.len());
-    for (i, token) in message.split(' ').enumerate() {
-        if i > 0 {
-            out.push(' ');
-        }
-        let core = token.trim_matches(|c: char| "\"'()[]{}<>,;:.!?`".contains(c));
-        let is_path = core != "[PATH_REDACTED]"
-            && (core.starts_with('~')
-                || ((core.contains('/') || core.contains('\\'))
-                    && core.chars().any(|c| c.is_ascii_alphabetic())));
-        if is_path && !core.is_empty() {
-            out.push_str(&token.replacen(core, "[PATH_REDACTED]", 1));
-        } else {
-            out.push_str(token);
-        }
-    }
-    out
+    message
+        .split('\n')
+        .map(|line| {
+            let mut offset = 0;
+            for token in line.split(' ') {
+                let core = token.trim_start_matches(|c: char| "\"'([{<=`".contains(c));
+                let start = offset + (token.len() - core.len());
+                offset += token.len() + 1;
+                let bytes = core.as_bytes();
+                let drive = bytes.len() > 2
+                    && bytes[0].is_ascii_alphabetic()
+                    && bytes[1] == b':'
+                    && matches!(bytes[2], b'/' | b'\\');
+                let separated = (core.contains('/') || core.contains('\\'))
+                    && core.chars().any(|c| c.is_alphabetic());
+                if core.starts_with('/')
+                    || core.starts_with("~/")
+                    || core.starts_with("./")
+                    || core.starts_with("../")
+                    || core.starts_with("\\\\")
+                    || core.contains("://")
+                    || drive
+                    || separated
+                {
+                    return format!("{}[PATH_REDACTED]", &line[..start]);
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 const MAX_ENTRIES: usize = 1000;
@@ -224,18 +240,26 @@ mod tests {
                 "Audio file not found: [PATH_REDACTED]",
             ),
             (
-                "Vocabulary missing at ~/Library/Application Support/FluidAudio/vocab.json.",
-                "Vocabulary missing at [PATH_REDACTED] [PATH_REDACTED].",
+                "Vocabulary missing at ~/Library/Application Support/FluidAudio/Private meeting.wav. Please re-download",
+                "Vocabulary missing at [PATH_REDACTED]",
+            ),
+            ("open ./private meeting.wav failed", "open [PATH_REDACTED]"),
+            (
+                "C:\\Users\\maya\\Voice Notes\\Session (Private) Final.wav missing",
+                "[PATH_REDACTED]",
             ),
             (
                 "Failed to download parakeet-tdt/encoder.mlmodelc (404)",
-                "Failed to download [PATH_REDACTED] (404)",
+                "Failed to download [PATH_REDACTED]",
             ),
+            ("could not read 'clips\\take.wav': denied", "could not read '[PATH_REDACTED]"),
+            ("無効 録音/昨日 です", "無効 [PATH_REDACTED]"),
             (
-                "could not read 'clips\\take.wav': denied",
-                "could not read '[PATH_REDACTED]': denied",
+                "fetch file://server/share/Voice Notes.wav\nretrying",
+                "fetch [PATH_REDACTED]\nretrying",
             ),
             ("downloading 1/3", "downloading 1/3"),
+            ("This will download ~500MB", "This will download ~500MB"),
             ("load failed: invalidModel", "load failed: invalidModel"),
         ] {
             assert_eq!(redact_all_paths(line), expected);

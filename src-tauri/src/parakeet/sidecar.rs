@@ -188,20 +188,20 @@ fn parse_unscrubbed_response_line(raw: &str) -> Result<ParakeetResponse, Parakee
     }
 }
 
-fn log_parakeet_stderr(line: &str) {
-    let line = &redact_all_paths(line);
-    let lower = line.to_ascii_lowercase();
+fn log_parakeet_stderr(raw: &str) {
+    let lower = raw.to_ascii_lowercase();
     let looks_like_error = lower.contains("error")
         || lower.contains("fail")
         || lower.contains("rate limit")
         || lower.contains("huggingface")
-        || line.contains('❌');
-    if is_benign_coreml_shape_probe(line) {
+        || raw.contains('❌');
+    let line = &redact_all_paths(raw);
+    if is_benign_coreml_shape_probe(raw) {
         log::info!(
             "Parakeet sidecar: Core ML shape probe emitted a benign diagnostic; model loading continued"
         );
-    // The sidecar writes no recognized text to stderr and every path in a
-    // native or FluidAudio diagnostic is redacted above, so its diagnostics
+    // The sidecar writes no recognized text to stderr, and each line is cut at
+    // its first path-like token before it is logged, so its diagnostics
     // stay in the log: without them a Parakeet failure cannot be diagnosed.
     } else if looks_like_error {
         warn!("Parakeet sidecar: {}", line);
