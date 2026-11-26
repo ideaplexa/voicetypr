@@ -655,13 +655,8 @@ impl ParakeetManager {
             // Remove our tracking directory if it exists (from old Python implementation)
             let model_dir = self.model_dir(definition.id);
             if model_dir.exists() {
-                std::fs::remove_dir_all(&model_dir).map_err(|e| {
-                    format!(
-                        "Failed to delete old model directory {}: {}",
-                        model_dir.display(),
-                        e
-                    )
-                })?;
+                std::fs::remove_dir_all(&model_dir)
+                    .map_err(|e| format!("Failed to delete old model directory: {}", e.kind()))?;
             }
 
             Ok(())
@@ -1130,10 +1125,7 @@ impl ParakeetManager {
                 log_performance(
                     "PARAKEET_INFERENCE",
                     elapsed_ms,
-                    Some(&format!(
-                        "model={model_name}, audio_path={}",
-                        audio_path.display()
-                    )),
+                    Some(&format!("model={model_name}")),
                 );
             }
             result
