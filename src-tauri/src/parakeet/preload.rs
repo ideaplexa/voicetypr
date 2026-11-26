@@ -93,7 +93,7 @@ pub(crate) async fn startup_whisper(app_handle: AppHandle, current_model: String
                     log::warn!(
                         "Failed to preload model '{}': {}. App will continue without preloading.",
                         current_model,
-                        e
+                        crate::utils::ring_log::redact_all_paths(&e.to_string())
                     );
                 }
             }
@@ -132,11 +132,17 @@ pub(crate) fn selected_in_background(app_clone: AppHandle, model_name: String) {
                     Ok(None) => {
                         log::info!("Parakeet warmup skipped for '{}'", model_name)
                     }
-                    Err(e) => log::warn!("Failed to warm new Parakeet model: {}", e),
+                    Err(e) => log::warn!(
+                        "Failed to warm new Parakeet model: {}",
+                        crate::utils::ring_log::redact_all_paths(&e.to_string())
+                    ),
                 }
             }
             Ok(crate::parakeet::manager::PreloadOutcome::Superseded) => {}
-            Err(e) => log::warn!("Failed to preload new model: {}", e),
+            Err(e) => log::warn!(
+                "Failed to preload new model: {}",
+                crate::utils::ring_log::redact_all_paths(&e.to_string())
+            ),
         }
         #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
         let _ = app_clone.emit("parakeet-model-warmed", model_name);

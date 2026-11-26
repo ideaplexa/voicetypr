@@ -389,10 +389,7 @@ impl ParakeetManager {
             let complete = model_files_complete(&fluid_audio_model_path, definition);
 
             if complete {
-                trace!(
-                    "Found complete FluidAudio model at: {:?}",
-                    fluid_audio_model_path
-                );
+                trace!("Found complete FluidAudio model for {}", definition.id);
             }
 
             complete
@@ -655,13 +652,8 @@ impl ParakeetManager {
             // Remove our tracking directory if it exists (from old Python implementation)
             let model_dir = self.model_dir(definition.id);
             if model_dir.exists() {
-                std::fs::remove_dir_all(&model_dir).map_err(|e| {
-                    format!(
-                        "Failed to delete old model directory {}: {}",
-                        model_dir.display(),
-                        e
-                    )
-                })?;
+                std::fs::remove_dir_all(&model_dir)
+                    .map_err(|e| format!("Failed to delete old model directory: {}", e.kind()))?;
             }
 
             Ok(())
@@ -924,9 +916,9 @@ impl ParakeetManager {
                 ParakeetResponse::Error { code, message, .. } => {
                     Err(ParakeetError::SidecarError { code, message })
                 }
-                other => Err(ParakeetError::SidecarError {
+                _ => Err(ParakeetError::SidecarError {
                     code: "unexpected_response".to_string(),
-                    message: format!("Unexpected response: {:?}", other),
+                    message: "Unexpected response from sidecar".to_string(),
                 }),
             };
             if result.is_ok() {
@@ -1130,10 +1122,7 @@ impl ParakeetManager {
                 log_performance(
                     "PARAKEET_INFERENCE",
                     elapsed_ms,
-                    Some(&format!(
-                        "model={model_name}, audio_path={}",
-                        audio_path.display()
-                    )),
+                    Some(&format!("model={model_name}")),
                 );
             }
             result

@@ -4,6 +4,7 @@ use super::error::ParakeetError;
 use super::messages::{
     ParakeetCommand, ParakeetResponse, ParakeetStreamConfig, ParakeetStreamEngine,
 };
+use crate::utils::ring_log::redact_all_paths;
 use base64::{engine::general_purpose, Engine as _};
 use log::{debug, error, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -150,6 +151,26 @@ fn extract_json_payload(raw: &str) -> Option<&str> {
 }
 
 fn parse_response_line(raw: &str) -> Result<ParakeetResponse, ParakeetError> {
+    parse_unscrubbed_response_line(raw).map(|response| match response {
+        ParakeetResponse::Error {
+            code,
+            message,
+            details,
+        } => ParakeetResponse::Error {
+            code,
+            message: redact_all_paths(&message),
+            details,
+        },
+        ParakeetResponse::Warmed { warmed, ms, error } => ParakeetResponse::Warmed {
+            warmed,
+            ms,
+            error: error.as_deref().map(redact_all_paths),
+        },
+        other => other,
+    })
+}
+
+fn parse_unscrubbed_response_line(raw: &str) -> Result<ParakeetResponse, ParakeetError> {
     match serde_json::from_str::<ParakeetResponse>(raw) {
         Ok(response) => Ok(response),
         Err(_) => {
@@ -167,19 +188,20 @@ fn parse_response_line(raw: &str) -> Result<ParakeetResponse, ParakeetError> {
     }
 }
 
-fn log_parakeet_stderr(line: &str) {
-    let lower = line.to_ascii_lowercase();
+fn log_parakeet_stderr(raw: &str) {
+    let lower = raw.to_ascii_lowercase();
     let looks_like_error = lower.contains("error")
         || lower.contains("fail")
         || lower.contains("rate limit")
         || lower.contains("huggingface")
-        || line.contains('❌');
-    if is_benign_coreml_shape_probe(line) {
+        || raw.contains('❌');
+    let line = &redact_all_paths(raw);
+    if is_benign_coreml_shape_probe(raw) {
         log::info!(
             "Parakeet sidecar: Core ML shape probe emitted a benign diagnostic; model loading continued"
         );
-    // The sidecar no longer writes recognized text or paths to stderr, and the
-    // log sinks scrub home directories and URL credentials, so its diagnostics
+    // The sidecar writes no recognized text to stderr, and each line is cut at
+    // its first path-like token before it is logged, so its diagnostics
     // stay in the log: without them a Parakeet failure cannot be diagnosed.
     } else if looks_like_error {
         warn!("Parakeet sidecar: {}", line);
@@ -1389,6 +1411,25 @@ mod tests {
                 assert!((segments[0].start - 0.5).abs() < f32::EPSILON);
                 assert!((segments[0].end - 2.25).abs() < f32::EPSILON);
             }
+            other => panic!("unexpected response: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sidecar_errors_and_warmup_failures_carry_no_path() {
+        let raw = r#"{"type":"error","code":"file_not_found","message":"Audio file not found: /Users/maya/rec.wav"}"#;
+        match parse_response_line(raw).unwrap() {
+            ParakeetResponse::Error { message, .. } => {
+                assert_eq!(message, "Audio file not found: [PATH_REDACTED]")
+            }
+            other => panic!("unexpected response: {:?}", other),
+        }
+        let raw = r#"{"type":"warmed","warmed":false,"ms":0,"error":"couldn't be saved in ~/Library/Caches/warm.wav"}"#;
+        match parse_response_line(raw).unwrap() {
+            ParakeetResponse::Warmed { error, .. } => assert_eq!(
+                error.as_deref(),
+                Some("couldn't be saved in [PATH_REDACTED]")
+            ),
             other => panic!("unexpected response: {:?}", other),
         }
     }
